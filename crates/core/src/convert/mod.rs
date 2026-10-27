@@ -948,6 +948,7 @@ pub struct ConvertState {
   list_rule_pending: bool,
   /// Actual built-in item marker end, distinct from marker-like source text.
   empty_list_marker_end: usize,
+  /// `<li>` nesting level of the latest built-in item marker.
   empty_list_marker_depth: usize,
   list_tail_pending: bool,
   /// A tentative separator retractable while following wrappers are empty.

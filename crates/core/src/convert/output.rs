@@ -1128,7 +1128,7 @@ impl ConvertState {
         self.list_tail_pending = false;
         self.empty_list_marker_end = usize::MAX;
       } else {
-        self.flush_empty_list_tail();
+        self.flush_list_tail();
       }
     }
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
@@ -1334,7 +1334,7 @@ impl ConvertState {
       false,
     );
     self.settle_empty_text_pending(output_start, || false);
-    self.defer_empty_list_tail(tag_id);
+    self.defer_list_tail(tag_id);
   }
 
   #[inline(always)]
@@ -1372,7 +1372,7 @@ impl ConvertState {
         self.list_tail_pending = false;
         self.empty_list_marker_end = usize::MAX;
       } else {
-        self.flush_empty_list_tail();
+        self.flush_list_tail();
       }
     }
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
@@ -1754,7 +1754,7 @@ impl ConvertState {
       self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
       self.empty_list_marker_end = self.buffer.trim_end_matches(' ').len();
       self.empty_list_marker_scanned_to = self.empty_list_marker_end;
-      self.empty_list_marker_depth = self.stack[stack_len - 1].depth;
+      self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -2369,7 +2369,7 @@ impl ConvertState {
     }
 
     if !has_override {
-      self.defer_empty_list_tail(tag_id);
+      self.defer_list_tail(tag_id);
     }
 
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
@@ -2857,7 +2857,7 @@ impl ConvertState {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_empty_list_tail();
+      self.flush_list_tail();
     }
     if self.list_rule_pending {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
@@ -4323,28 +4323,30 @@ impl ConvertState {
     p
   }
 
-  fn defer_empty_list_tail(&mut self, tag_id: Option<u8>) {
+  fn defer_list_tail(&mut self, tag_id: Option<u8>) {
     if matches!(tag_id, Some(TAG_UL | TAG_OL))
       && !plain_text!(self)
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
       && !self.in_raw_html_block()
-      && self.empty_list_marker_end != usize::MAX
-      && self.empty_list_marker_depth > self.stack.len()
+      && self.empty_list_marker_depth > self.depth_map[TAG_LI as usize] as usize
     {
-      let end = self.empty_list_marker_end.min(self.buffer.len());
-      if self.buffer[end..]
-        .bytes()
-        .all(|byte| byte.is_ascii_whitespace())
-      {
-        self.list_tail_pending = true;
-      } else {
-        self.empty_list_marker_end = usize::MAX;
+      // Any item of this list, filled or empty, ends before the parent's text.
+      self.list_tail_pending = true;
+      self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
+      if self.empty_list_marker_end != usize::MAX {
+        let end = self.empty_list_marker_end.min(self.buffer.len());
+        if !self.buffer[end..]
+          .bytes()
+          .all(|byte| byte.is_ascii_whitespace())
+        {
+          self.empty_list_marker_end = usize::MAX;
+        }
       }
     }
   }
 
-  fn flush_empty_list_tail(&mut self) {
+  fn flush_list_tail(&mut self) {
     self.trim_trailing_spaces();
     self.list_tail_start = self.buffer.len();
     self.list_tail_scanned_to = self.list_tail_start;
@@ -5701,7 +5703,7 @@ mod tests {
       state.list_tail_pending = true;
       let before = state.buffer.len();
 
-      state.flush_empty_list_tail();
+      state.flush_list_tail();
 
       let written = state.buffer.len() - before;
       assert_eq!(written, expected_written, "cap={cap}, content={content:?}");

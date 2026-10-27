@@ -3384,6 +3384,72 @@ fn empty_nested_list_tail_stays_in_parent_item() {
 }
 
 #[test]
+fn filled_nested_list_tail_stays_in_parent_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li></li><li>a</li></ul>text</li></ul>",
+      "-\n  -\n  - a\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>text</li></ul>",
+      "-\n  - a\n\n  text",
+    ),
+    (
+      "<ul><li>lead<ul><li>a</li></ul>text</li></ul>",
+      "- lead\n  - a\n\n  text",
+    ),
+    (
+      "<ol><li><ol><li>a</li></ol>text</li></ol>",
+      "1.\n   1. a\n\n   text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><em>text</em></li></ul>",
+      "-\n  - a\n\n  *text*",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span>te</span><span>xt</span> more</li></ul>",
+      "-\n  - a\n\n  text more",
+    ),
+    (
+      "<ul><li><ul><li>a<ul><li>b</li></ul>c</li></ul>d</li></ul>",
+      "-\n  - a\n    - b\n\n    c\n\n  d",
+    ),
+    (
+      "<blockquote><ul><li><ul><li>a</li></ul>text</li></ul></blockquote>",
+      "> -\n>   - a\n>\n>   text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>t<ul></ul>u</li></ul>",
+      "-\n  - a\n\n  t u",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  - a\n- next",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>1. x</li></ul>",
+      "-\n  - a\n\n  1\\. x",
+    ),
+    (
+      "<ul><li><div><ul><li>a</li></ul></div><ul></ul>t</li></ul>",
+      "-\n  - a\n\n  t",
+    ),
+    (
+      "<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>",
+      "-\n  -\n- z",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn empty_nested_list_review_regressions() {
   for (id, html, expected, options) in [
     (
@@ -3542,13 +3608,13 @@ fn empty_nested_list_review_regressions() {
     (
       "F6-1",
       "<ul><li><ul><li>a<br>-</li></ul>text</li></ul>",
-      "-\n  - a  \n    - text",
+      "-\n  - a  \n    -\n\n  text",
       HtmlToMarkdownOptions::default(),
     ),
     (
       "F6-2",
       "<ul><li><ul><li>a<br>1.</li></ul>text</li></ul>",
-      "-\n  - a  \n    1. text",
+      "-\n  - a  \n    1.\n\n  text",
       HtmlToMarkdownOptions::default(),
     ),
     (

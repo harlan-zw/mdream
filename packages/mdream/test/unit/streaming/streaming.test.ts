@@ -6,6 +6,20 @@ const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
 const BYTE_PARITY_CASES = [
+  '<ul><li><ul><li></li><li>a</li></ul>text</li></ul>',
+  '<ul><li><ul><li>a</li></ul>text</li></ul>',
+  '<ul><li>lead<ul><li>a</li></ul>text</li></ul>',
+  '<ol><li><ol><li>a</li></ol>text</li></ol>',
+  '<ul><li><ul><li>a</li></ul><em>text</em></li></ul>',
+  '<ul><li><ul><li>a</li></ul><span>te</span><span>xt</span> more</li></ul>',
+  '<ul><li><ul><li>a<ul><li>b</li></ul>c</li></ul>d</li></ul>',
+  '<blockquote><ul><li><ul><li>a</li></ul>text</li></ul></blockquote>',
+  '<ul><li><ul><li>a</li></ul>t<ul></ul>u</li></ul>',
+  '<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>',
+  '<ul><li><ul><li>a</li></ul>1. x</li></ul>',
+  '<ul><li><ul><li>a<br></li></ul>text</li></ul>',
+  '<ul><li><div><ul><li>a</li></ul></div><ul></ul>t</li></ul>',
+  '<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>',
   '<ul><li>lead<br><ul><li></li></ul>text</li></ul>',
   '<ul><li>lead<br><ol><li></li></ol>text</li></ul>',
   '<ul><li>lead<br><ul><li></li></ul></li></ul>',

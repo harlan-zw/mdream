@@ -129,8 +129,9 @@ export interface MarkdownState {
   listRulePending?: string
   /** Last built-in item marker, retained until its emptiness is settled. */
   emptyListMarkerFragment?: number
+  /** `<li>` nesting level of the latest built-in item marker. */
   emptyListMarkerDepth?: number
-  /** A separate parent-paragraph boundary after an empty nested list. */
+  /** A separate parent-paragraph boundary after a nested list. */
   listTailPending?: boolean
   listTailStart?: number
   /** First fragment to recheck, including the last fragment a writer may append to. */
@@ -1944,12 +1945,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL)
       && state.listIndent && !insideRawHtmlRegion && !isInsideTableCell(state)
       && !handler?.literalExit && !element.pluginOutput?.length
-      && state.emptyListMarkerFragment !== undefined
-      && state.emptyListMarkerDepth! > element.depth) {
+      && state.emptyListMarkerDepth! > state.depthMap[TAG_LI]!) {
+      // Any item of this list, filled or empty, ends before the parent's text.
+      state.listTailPending = true
+      state.emptyListMarkerDepth = state.depthMap[TAG_LI]
       const marker = state.emptyListMarkerFragment
-      if (marker < buff.length && !hasNonWhitespaceFrom(buff, marker + 1))
-        state.listTailPending = true
-      else
+      if (marker !== undefined && (marker >= buff.length || hasNonWhitespaceFrom(buff, marker + 1)))
         state.emptyListMarkerFragment = undefined
     }
     // A hard break ends a line, while a following block also ends the
@@ -2458,7 +2459,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (!handler?.literalEnter && handlerOutput) {
           state.emptyListMarkerFragment = state.buffer.length - 1
           state.emptyListMarkerScanFrom = state.buffer.length
-          state.emptyListMarkerDepth = element.depth
+          state.emptyListMarkerDepth = state.depthMap[TAG_LI]
         }
       }
       else {
