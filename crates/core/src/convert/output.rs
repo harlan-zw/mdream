@@ -2461,6 +2461,16 @@ impl ConvertState {
     };
 
     if tag_id == Some(TAG_LI) && !plain_text!(self) {
+      // A hard break already ended the item. Its continuation indentation
+      // must not become a whitespace-only line before the following block.
+      if self.hard_break_end == self.buffer.len()
+        && !has_override
+        && self.depth_map[TAG_PRE as usize] == 0
+        && !self.in_table_cell()
+      {
+        self.trim_trailing_spaces();
+        self.hard_break_end = self.buffer.len();
+      }
       self.resolve_item_marker(true);
     }
 

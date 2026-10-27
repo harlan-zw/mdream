@@ -6126,3 +6126,23 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn scout9_list_tail_quote_spacing() {
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>",
+      "-\n  - a  \n\n  > q",
+    ),
+    (
+      "<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>",
+      "1.\n   - a  \n\n   > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}

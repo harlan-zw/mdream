@@ -3294,3 +3294,26 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn scout9_list_tail_quote_spacing_streaming() {
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>",
+      "-\n  - a  \n\n  > q",
+    ),
+    (
+      "<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>",
+      "1.\n   - a  \n\n   > q",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}

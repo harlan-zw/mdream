@@ -180,3 +180,19 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('- Active\n- Future')
   })
 })
+
+describe.each(engines)('scout9_list_tail_quote_spacing $name', (engineConfig) => {
+  it.each([
+    [
+      '<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>',
+      '-\n  - a  \n\n  > q',
+    ],
+    [
+      '<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>',
+      '1.\n   - a  \n\n   > q',
+    ],
+  ])('preserves structure: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
