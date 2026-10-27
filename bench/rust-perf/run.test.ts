@@ -46,3 +46,10 @@ it('records each revision output without rejecting an intentional change', () =>
   expect(same.hashes[0]).toBe(same.hashes[1])
   expect(outputVerification(base, { ...base, metadata: { title: 'page' } }).changed).toBe(true)
 })
+
+it('carries output changes into normalized and scaling measurements', () => {
+  const cases = [1, 2, 4].map(size => ({ id: `quote-${size}`, name: `quote ${size}`, operation: 'stream' as const, chunks: [], options: 'default' as const, format: 'markdown' as const, inputBytes: size * 1024, scaling: { group: 'quote', size } }))
+  const benches = [1, 2, 4].map(size => ({ id: `native-quote-${size}-cpu`, name: '', kind: 'time' as const, value: size, outputChanged: size === 2 }))
+  expect(normalizedCpuRows(cases, benches).map(row => row.outputChanged)).toEqual([false, true, false])
+  expect(scalingRows(cases, benches).map(row => row.outputChanged)).toEqual([true, true])
+})

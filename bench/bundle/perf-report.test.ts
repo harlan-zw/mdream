@@ -77,7 +77,7 @@ describe('performance report', () => {
   })
 })
 
- it('marks changed output while retaining the measurements and verdict', () => {
+it('marks changed output while retaining the measurements and verdict', () => {
   const row = { id: 'cpu', name: 'Page CPU', kind: 'time' as const, value: 100 }
   const report = renderPerfReport({ benches: [row] }, { benches: [{ ...row, value: 150, outputChanged: true }] })
   expect(report).toContain('Page CPU (output changed)')

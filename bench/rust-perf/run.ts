@@ -196,7 +196,9 @@ async function main() {
       const starts = results.map(result => result.benches.length)
       const observations = await Promise.all(runners.map(runner => runner.cpu.request(index, 'verify')))
       const output = outputVerification(observations[0], observations[1])
-      output.hashes.forEach((hash, side) => { verification[side]![fixture.id] = hash })
+      output.hashes.forEach((hash, side) => {
+        verification[side]![fixture.id] = hash
+      })
       for (const [side, runner] of runners.entries()) {
         assert.deepEqual(await runner.alloc.request(index, 'verify'), observations[side], `${fixture.id}: instrumented output differs`)
         const counts = await runner.alloc.request(index, 'alloc')
