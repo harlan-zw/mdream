@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { utf8Chunks } from './fixtures.ts'
-import { cpuRows, normalizedCpuRows, scalingRows, statistics } from './run.ts'
+import { cpuRows, normalizedCpuRows, outputVerification, scalingRows, statistics } from './run.ts'
 
 it('keeps multibyte characters intact across small transport chunks', () => {
   const source = 'A東京🙂éZ'
@@ -33,4 +33,16 @@ it('normalizes CPU cost by input bytes without creating another regression verdi
   expect(rows[0]?.value).toBe(6)
   expect(rows[0]?.samples).toEqual([4, 8])
   expect(rows[0]?.informational).toBe(true)
+})
+
+it('records each revision output without rejecting an intentional change', () => {
+  const base = { output: '- a\n- b', metadata: {} }
+  const head = { output: '- a\n\n* b', metadata: {} }
+  const changed = outputVerification(base, head)
+  expect(changed.changed).toBe(true)
+  expect(changed.hashes[0]).not.toBe(changed.hashes[1])
+  const same = outputVerification(base, { ...base })
+  expect(same.changed).toBe(false)
+  expect(same.hashes[0]).toBe(same.hashes[1])
+  expect(outputVerification(base, { ...base, metadata: { title: 'page' } }).changed).toBe(true)
 })

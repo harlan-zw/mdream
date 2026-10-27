@@ -7,7 +7,15 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 import { conversionOptions, workloads } from './fixtures.ts'
+
+export function outputVerification(base: unknown, head: unknown) {
+  return {
+    changed: !isDeepStrictEqual(base, head),
+    hashes: [base, head].map(output => createHash('sha256').update(JSON.stringify(output)).digest('hex')),
+  }
+}
 
 export function statistics(samples: number[]) {
   if (samples.length < 2 || samples.some(value => !Number.isFinite(value) || value <= 0))
@@ -147,7 +155,7 @@ export function scalingRows(cases: Workload[], benches: PerfBench[]): PerfBench[
       const smaller = benches.find(row => row.id === `${runtime}-${prior.id}-cpu`)
       if (!current || !smaller)
         return []
-      return [{ id: `${runtime}-${fixture.id}-scaling`, name: `${runtime} ${fixture.name} / ${prior.name} CPU`, kind: 'ratio' as const, value: current.value / smaller.value, informational: true }]
+      return [{ id: `${runtime}-${fixture.id}-scaling`, name: `${runtime} ${fixture.name} / ${prior.name} CPU`, kind: 'ratio' as const, value: current.value / smaller.value, informational: true, outputChanged: current.outputChanged || smaller.outputChanged }]
     })
   })
 }
@@ -180,14 +188,15 @@ async function main() {
     cpu: nativeRunner(resolve(dist, 'rust-perf/cpu'), manifest),
     alloc: nativeRunner(resolve(dist, 'rust-perf/alloc'), manifest),
   }))
-  const verification: Record<string, string> = {}
+  const verification: [Record<string, string>, Record<string, string>] = [{}, {}]
   try {
     const wasm = nativeOnly ? [] : await Promise.all([loadWasm(baseDist, 'base'), loadWasm(headDist, 'head')])
     for (const [index, fixture] of cases.entries()) {
       process.stderr.write(`Benchmark ${index + 1}/${cases.length}: ${fixture.id}\n`)
+      const starts = results.map(result => result.benches.length)
       const observations = await Promise.all(runners.map(runner => runner.cpu.request(index, 'verify')))
-      assert.deepEqual(observations[0], observations[1], `${fixture.id}: native output differs`)
-      verification[fixture.id] = createHash('sha256').update(JSON.stringify(observations[1])).digest('hex')
+      const output = outputVerification(observations[0], observations[1])
+      output.hashes.forEach((hash, side) => { verification[side]![fixture.id] = hash })
       for (const [side, runner] of runners.entries()) {
         assert.deepEqual(await runner.alloc.request(index, 'verify'), observations[side], `${fixture.id}: instrumented output differs`)
         const counts = await runner.alloc.request(index, 'alloc')
@@ -207,7 +216,6 @@ async function main() {
       rows.forEach((row, side) => results[side]!.benches.push(row))
       if (fixture.operation !== 'split' && wasm.length) {
         const wasmOutputs = wasm.map(runtime => wasmRun(runtime.glue, fixture, true))
-        assert.deepEqual(wasmOutputs[0], wasmOutputs[1], `${fixture.id}: WASM output differs`)
         for (const [side, observed] of wasmOutputs.entries()) {
           const output = typeof observed === 'string' ? observed : (observed as { output: string }).output
           assert.equal(output, (observations[side] as { output: string }).output, `${fixture.id}: native and WASM output differ`)
@@ -238,11 +246,17 @@ async function main() {
           results[side]!.benches.push({ id: `wasm-${fixture.id}-memory`, name: `WASM ${fixture.name} linear memory`, kind: 'alloc', value: fresh.memory.buffer.byteLength })
         }
       }
+      if (output.changed) {
+        results.forEach((result, side) => {
+          for (let row = starts[side]!; row < result.benches.length; row++)
+            result.benches[row]!.outputChanged = true
+        })
+      }
     }
     for (const [side, label] of ['base', 'pr'].entries()) {
       const result = results[side]!
       result.benches.push(...scalingRows(cases, result.benches), ...normalizedCpuRows(cases, result.benches))
-      writeFileSync(resolve(outputDir, `${label}-rust-perf.json`), JSON.stringify({ ...result, build: builds[side], cpu: allowedCpu, architecture: process.arch, fixtureDigest: createHash('sha256').update(serialized).digest('hex'), verification, cases: cases.map(({ id, inputBytes, options, format, scaling }) => ({ id, inputBytes, options, format, scaling })) }))
+      writeFileSync(resolve(outputDir, `${label}-rust-perf.json`), JSON.stringify({ ...result, build: builds[side], cpu: allowedCpu, architecture: process.arch, fixtureDigest: createHash('sha256').update(serialized).digest('hex'), verification: verification[side], cases: cases.map(({ id, inputBytes, options, format, scaling }) => ({ id, inputBytes, options, format, scaling })) }))
     }
     for (const runner of runners) {
       await runner.cpu.close()
