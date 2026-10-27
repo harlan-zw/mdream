@@ -3294,3 +3294,26 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn builtin_blockquote_alias_streams_as_div() {
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("blockquote".into(), TagOverrideConfig::alias("div"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<blockquote>x</blockquote><p>tail</p>",
+    "<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>",
+    "<blockquote>x</div>tail</blockquote><p>end</p>",
+    "<div>x</blockquote>tail</div><p>end</p>",
+    "<blockquote><p>a</p><p>b</p></blockquote>",
+    "<blockquote><div>x</div>tail</blockquote>",
+    "<ul><li><blockquote>x</blockquote></li></ul>",
+  ] {
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+}

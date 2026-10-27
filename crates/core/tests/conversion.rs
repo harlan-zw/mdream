@@ -6126,3 +6126,25 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn builtin_blockquote_alias_uses_div_semantics() {
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("blockquote".into(), TagOverrideConfig::alias("div"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("<blockquote>x</blockquote><p>tail</p>", "x\n\ntail"),
+    ("<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>", "x\n\ntail"),
+    ("<blockquote>x</div>tail</blockquote><p>end</p>", "xtail\n\nend"),
+    ("<div>x</blockquote>tail</div><p>end</p>", "xtail\n\nend"),
+    ("<blockquote><p>a</p><p>b</p></blockquote>", "a\n\nb"),
+    ("<blockquote><div>x</div>tail</blockquote>", "x\n\ntail"),
+    ("<ul><li><blockquote>x</blockquote></li></ul>", "- x"),
+  ] {
+    assert_eq!(html_to_markdown(html, opts.clone()), expected, "{html}");
+  }
+}

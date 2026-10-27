@@ -2036,21 +2036,14 @@ impl ConvertState {
         } else {
           Cow::Borrowed(tag_name_raw)
         };
-        let tag_id = if builtin_tag_id.is_some() {
-          builtin_tag_id
+        let alias_tag_id = self.alias_tag_id(tag_name.as_ref(), builtin_tag_id);
+        let tag_id = alias_tag_id.or(builtin_tag_id);
+        let is_builtin = builtin_tag_id.is_some() && alias_tag_id.is_none();
+        let tag_name = if alias_tag_id.is_some() && tag_name.bytes().any(|b| b.is_ascii_uppercase())
+        {
+          Cow::Owned(tag_name.to_ascii_lowercase())
         } else {
-          self
-            .options
-            .plugins
-            .as_ref()
-            .and_then(|p| p.tag_overrides.as_ref())
-            .and_then(|ovs| {
-              ovs
-                .iter()
-                .find(|(k, _)| k == tag_name.as_ref())
-                .map(|(_, v)| v)
-            })
-            .and_then(|ov| ov.alias_tag_id)
+          tag_name
         };
         i2 = tag_name_end;
 
@@ -2087,8 +2080,7 @@ impl ConvertState {
           }
         }
 
-        let result =
-          self.process_opening_tag(&tag_name, tag_id, builtin_tag_id.is_some(), chunk, i2);
+        let result = self.process_opening_tag(&tag_name, tag_id, is_builtin, chunk, i2);
         if result.skip {
           i = result.new_position;
         } else if result.complete {
