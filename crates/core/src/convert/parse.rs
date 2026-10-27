@@ -302,6 +302,23 @@ fn is_hidden(node: &ElementNode) -> bool {
 }
 
 impl ConvertState {
+  // Built-in aliases use the existing index; ordinary parsing does no key scan.
+  pub(crate) fn alias_tag_id(&self, name: &str, builtin: Option<u8>) -> Option<u8> {
+    if !self.has_tag_overrides {
+      return None;
+    }
+    let overrides = self.options.plugins.as_ref()?.tag_overrides.as_ref()?;
+    let config = if let Some(id) = builtin {
+      Self::override_by_id(Some(overrides), self.override_idx.as_deref(), id)
+    } else {
+      overrides
+        .iter()
+        .find(|(key, _)| key == name)
+        .map(|(_, config)| config)
+    };
+    config.and_then(|config| config.alias_tag_id)
+  }
+
   fn matches_overflow_tag(&self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool) -> bool {
     if is_builtin {
       self.overflow_tag_id == tag_id
@@ -1792,22 +1809,9 @@ impl ConvertState {
     // Closing tag may target an aliased custom element (e.g. </ex> where
     // tagOverrides: { ex: 'em' } opened a TAG_EM node). Resolve the alias
     // here so the close matches the open.
-    let tag_id = if builtin_tag_id.is_some() {
-      builtin_tag_id
-    } else {
-      self
-        .options
-        .plugins
-        .as_ref()
-        .and_then(|p| p.tag_overrides.as_ref())
-        .and_then(|ovs| {
-          ovs
-            .iter()
-            .find(|(k, _)| k == tag_name.as_ref())
-            .map(|(_, v)| v)
-        })
-        .and_then(|ov| ov.alias_tag_id)
-    };
+    let alias_tag_id = self.alias_tag_id(tag_name.as_ref(), builtin_tag_id);
+    let tag_id = alias_tag_id.or(builtin_tag_id);
+    let is_builtin = builtin_tag_id.is_some() && alias_tag_id.is_none();
 
     if self.overflow_opaque_depth > 0 {
       if self.overflow_raw_name.is_some() {
@@ -1836,8 +1840,7 @@ impl ConvertState {
         return true;
       }
       if self.overflow_raw_name.is_some() {
-        let closes_root =
-          self.matches_overflow_tag(tag_name.as_ref(), tag_id, builtin_tag_id.is_some());
+        let closes_root = self.matches_overflow_tag(tag_name.as_ref(), tag_id, is_builtin);
         self.overflow_raw_name = None;
         self.overflow_raw_excludes_text = false;
         if closes_root {
@@ -1846,7 +1849,7 @@ impl ConvertState {
         self.just_closed_tag = true;
         return true;
       }
-      if self.matches_overflow_tag(tag_name.as_ref(), tag_id, builtin_tag_id.is_some()) {
+      if self.matches_overflow_tag(tag_name.as_ref(), tag_id, is_builtin) {
         self.overflow_same_name_depth -= 1;
         if self.overflow_same_name_depth == 0 {
           self.clear_overflow();
@@ -1873,15 +1876,15 @@ impl ConvertState {
     // resolved tag id. This keeps `</other>` from closing an unknown custom
     // element and keeps aliased `</ex>` from closing an unrelated built-in.
     let close_name: &str = tag_name.as_ref();
-    let needs_name_match = builtin_tag_id.is_none();
+    let needs_name_match = !is_builtin;
     let matches = |node: &ElementNode| -> bool {
       if node.tag_id != tag_id {
         return false;
       }
-      if !needs_name_match {
-        return true;
+      if let Some(name) = node.custom_name() {
+        return name.eq_ignore_ascii_case(close_name);
       }
-      node.custom_name() == Some(close_name)
+      !needs_name_match
     };
 
     let mut matched = false;

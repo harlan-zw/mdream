@@ -2,6 +2,18 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('blockquotes $name', (engineConfig) => {
+  it.each([
+    ['<blockquote>x</blockquote><p>tail</p>', 'x\n\ntail'],
+    ['<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>', 'x\n\ntail'],
+    ['<blockquote>x</div>tail</blockquote><p>end</p>', 'xtail\n\nend'],
+    ['<div>x</blockquote>tail</div><p>end</p>', 'xtail\n\nend'],
+    ['<blockquote><p>a</p><p>b</p></blockquote>', 'a\n\nb'],
+    ['<blockquote><div>x</div>tail</blockquote>', 'x\n\ntail'],
+    ['<ul><li><blockquote>x</blockquote></li></ul>', '- x'],
+  ])('aliases a built-in blockquote to div: %s', (html, expected) => {
+    expect(engineConfig.engine.htmlToMarkdown(html, { plugins: { tagOverrides: { blockquote: 'div' } } })).toBe(expected)
+  })
+
   it('converts blockquotes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote>This is a quote</blockquote>'
