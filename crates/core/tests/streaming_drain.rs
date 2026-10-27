@@ -3319,3 +3319,19 @@ fn empty_quote_after_rule_streaming() {
     HtmlToMarkdownOptions::default(),
   );
 }
+
+#[test]
+fn pending_rule_quote_review_boundaries_at_every_split() {
+  for html in [
+    "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
+    "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+    "<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>",
+    "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+    "<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>",
+    "<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+    "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}

@@ -126,6 +126,7 @@ export interface MarkdownState {
   emptyItemFragment?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  listRuleAfterQuote?: boolean
 }
 
 interface CodeSpan {
@@ -1073,10 +1074,16 @@ function finalizeBlockquote(state: MarkdownState): void {
   // yielded and compacted the characters this decision used to read back.
   if (!content && frame.followsWhitespace) {
     state.listRulePending = frame.listRulePending
-    if (frame.listRulePending !== undefined && state.blockquotes.length > 0)
+    if (frame.listRulePending !== undefined) {
+      state.outputPositions?.replace(frame.fragment, buffer.length, [])
+      buffer.length = frame.fragment
+    }
+    if (frame.listRulePending !== undefined && !state.listRuleAfterQuote && state.blockquotes.length > 0)
       buffer.push('\n')
     return
   }
+  if (state.listRulePending !== undefined)
+    state.listRuleAfterQuote = true
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -1153,12 +1160,15 @@ function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputP
   if (newlineRunBefore(buffer, buffer.length) < 2)
     return
 
-  const last = buffer.at(-1)!
-  positions?.replace(buffer.length - 1, buffer.length, last.length === 1 ? [] : [last.slice(0, -1)])
+  let index = buffer.length - 1
+  while (!buffer[index]!.length)
+    index--
+  const last = buffer[index]!
+  positions?.replace(index, index + 1, last.length === 1 ? [] : [last.slice(0, -1)])
   if (last.length === 1)
-    buffer.pop()
+    buffer.splice(index, 1)
   else
-    buffer[buffer.length - 1] = last.slice(0, -1)
+    buffer[index] = last.slice(0, -1)
 }
 
 /**
@@ -1354,6 +1364,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     listIndent: '',
     listIndentWidths: [],
     blockquotes: [],
+    listRuleAfterQuote: false,
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
@@ -1773,12 +1784,34 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const opensQuote = opensVisibleElement
           && (node as ElementNode).tagId === TAG_BLOCKQUOTE
           && !node.tagHandler?.literalEnter
-        const separator = opensQuote
-          ? '\n'
-          : blockOpenPrefix(state.buffer, state.listRulePending)!
+          && !(node as ElementNode).pluginOutput?.length
+        let separator: string
+        if (opensQuote) {
+          const wanted = state.listRuleAfterQuote && state.blockquotes.length > 0 ? 2 : 1
+          trimTrailingSpaces(state.buffer)
+          const run = newlineRunBefore(state.buffer, state.buffer.length)
+          let excess = run - wanted
+          while (excess > 0) {
+            const index = state.buffer.length - 1
+            const value = state.buffer[index]!
+            const removed = Math.min(excess, value.length)
+            const retained = value.slice(0, value.length - removed)
+            state.outputPositions?.replace(index, index + 1, retained ? [retained] : [])
+            if (retained)
+              state.buffer[index] = retained
+            else
+              state.buffer.pop()
+            excess -= removed
+          }
+          separator = run >= wanted ? '' : wanted - run === 1 ? '\n' : '\n\n'
+        }
+        else {
+          separator = blockOpenPrefix(state.buffer, state.listRulePending) ?? ''
+        }
         if (opensQuote)
           quoteRulePending = state.listRulePending
-        state.buffer.push(separator)
+        if (separator)
+          state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined
       }

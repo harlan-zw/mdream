@@ -6189,3 +6189,43 @@ fn empty_quote_after_rule_restores_list_continuation() {
     "- ***\n\n  > q\n\n  tail"
   );
 }
+
+#[test]
+fn pending_rule_quote_review_boundaries() {
+  for (html, expected) in [
+    (
+      "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   tail",
+    ),
+    (
+      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  tail",
+    ),
+    (
+      "<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   tail",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q",
+    ),
+    (
+      "<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+      "- ***\n\n  > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}

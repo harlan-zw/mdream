@@ -654,9 +654,12 @@ impl ConvertState {
       || (content_end == frame.content_start && content_left_buffer)
     {
       self.list_rule_pending |= frame.list_rule_pending;
+      if frame.list_rule_pending && !content_left_buffer {
+        self.truncate_buffer(frame.content_start);
+      }
       // Nested quote entry collapses one separator newline; an empty rollback
       // must restore it before the rule's list continuation is flushed.
-      if frame.list_rule_pending && !self.blockquotes.is_empty() {
+      if frame.list_rule_pending && !self.list_rule_after_quote && !self.blockquotes.is_empty() {
         self.buffer.push('\n');
         self.last_content_cache_len = 1;
       }
@@ -785,6 +788,9 @@ impl ConvertState {
     self.shift_raw_html_scan(content_end, quoted_end);
     self.last_content_cache_len = quoted.len();
     self.blockquote_scratch = quoted;
+    if self.list_rule_pending {
+      self.list_rule_after_quote = true;
+    }
     // Quoting inserted a `> ` and a newline per line, so a line the scan had
     // already passed is no longer where the cache says the current one begins.
     self.invalidate_line_start();
@@ -2342,6 +2348,7 @@ impl ConvertState {
       && self.depth_map[TAG_LI as usize] > 0
     {
       self.list_rule_pending = true;
+      self.list_rule_after_quote = false;
     }
 
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
@@ -4231,7 +4238,26 @@ impl ConvertState {
 
   fn flush_list_rule(&mut self, opens_quote: bool) {
     let output = if opens_quote {
-      Cow::Borrowed("\n")
+      // The quote enter supplies one newline, and a nested quote removes one.
+      // A closed non-empty sibling still needs its paragraph boundary.
+      let wanted = 1 + usize::from(self.list_rule_after_quote && !self.blockquotes.is_empty());
+      self.trim_trailing_spaces();
+      let end = self.buffer.len();
+      let run = self
+        .buffer
+        .as_bytes()
+        .iter()
+        .rev()
+        .take_while(|&&byte| byte == b'\n')
+        .count();
+      if run > wanted {
+        self.truncate_buffer(end - run + wanted);
+      }
+      match wanted.saturating_sub(usize::from(self.trailing_new_lines())) {
+        0 => Cow::Borrowed(""),
+        1 => Cow::Borrowed("\n"),
+        _ => Cow::Borrowed("\n\n"),
+      }
     } else {
       self
         .block_open_prefix(&self.continuation_prefix())
