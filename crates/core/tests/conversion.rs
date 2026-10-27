@@ -6126,3 +6126,48 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn setext_equals_text_preserves_paragraphs() {
+  for (html, expected) in [
+    ("<p>aaaaa<br>===</p>", "aaaaa  \n\\==="),
+    (
+      "<p>aaaaa<br><span>=</span><span>==</span></p>",
+      "aaaaa  \n\\===",
+    ),
+    ("<p>aaaaa<br> <span></span>===</p>", "aaaaa  \n\\==="),
+    ("<p>aaaaa<br>=</p>", "aaaaa  \n\\="),
+    ("<p>aaaaa<br>==</p>", "aaaaa  \n\\=="),
+    ("<p>aaaaa<br><span></span></p>", "aaaaa"),
+    ("<p>a = b and x===y</p>", "a = b and x===y"),
+    ("<p>a<span>=</span><span>==</span>b</p>", "a===b"),
+    ("<p><code>===</code></p>", "`===`"),
+    ("<p></p>", ""),
+    (
+      "<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>",
+      "- aaaaa  \n  \\===",
+    ),
+    (
+      "<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>",
+      "- x\n  - aaaaa  \n    \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - aaaaa  \n      \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - aaaaa  \n        \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - aaaaa  \n          \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - x\n          - aaaaa  \n            \\===",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}

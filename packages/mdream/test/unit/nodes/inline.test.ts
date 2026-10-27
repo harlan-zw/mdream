@@ -240,3 +240,27 @@ describe.each(engines)('gfm inline code delimiters $name', (engineConfig) => {
     }
   })
 })
+
+describe.each(engines)('setext equals escaping $name', (engineConfig) => {
+  it.each([
+    ['<p>aaaaa<br>===</p>', 'aaaaa  \n\\==='],
+    ['<p>aaaaa<br><span>=</span><span>==</span></p>', 'aaaaa  \n\\==='],
+    ['<p>aaaaa<br> <span></span>===</p>', 'aaaaa  \n\\==='],
+    ['<p>aaaaa<br>=</p>', 'aaaaa  \n\\='],
+    ['<p>aaaaa<br>==</p>', 'aaaaa  \n\\=='],
+    ['<p>aaaaa<br><span></span></p>', 'aaaaa'],
+    ['<p>a = b and x===y</p>', 'a = b and x===y'],
+    ['<p>a<span>=</span><span>==</span>b</p>', 'a===b'],
+    ['<p><code>===</code></p>', '`===`'],
+    ['<p></p>', ''],
+    ['<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>', '- aaaaa  \n  \\==='],
+    ['<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>', '- x\n  - aaaaa  \n    \\==='],
+    ['<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>', '- x\n  - x\n    - aaaaa  \n      \\==='],
+    ['<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>', '- x\n  - x\n    - x\n      - aaaaa  \n        \\==='],
+    ['<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>', '- x\n  - x\n    - x\n      - x\n        - aaaaa  \n          \\==='],
+    ['<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>', '- x\n  - x\n    - x\n      - x\n        - x\n          - aaaaa  \n            \\==='],
+  ])('preserves paragraph text: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})

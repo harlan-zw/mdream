@@ -3294,3 +3294,53 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn streaming_setext_equals_text_preserves_paragraphs() {
+  for (html, expected) in [
+    ("<p>aaaaa<br>===</p>", "aaaaa  \n\\==="),
+    (
+      "<p>aaaaa<br><span>=</span><span>==</span></p>",
+      "aaaaa  \n\\===",
+    ),
+    ("<p>aaaaa<br> <span></span>===</p>", "aaaaa  \n\\==="),
+    ("<p>aaaaa<br>=</p>", "aaaaa  \n\\="),
+    ("<p>aaaaa<br>==</p>", "aaaaa  \n\\=="),
+    ("<p>aaaaa<br><span></span></p>", "aaaaa"),
+    ("<p>a = b and x===y</p>", "a = b and x===y"),
+    ("<p>a<span>=</span><span>==</span>b</p>", "a===b"),
+    ("<p><code>===</code></p>", "`===`"),
+    ("<p></p>", ""),
+    (
+      "<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>",
+      "- aaaaa  \n  \\===",
+    ),
+    (
+      "<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>",
+      "- x\n  - aaaaa  \n    \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - aaaaa  \n      \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - aaaaa  \n        \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - aaaaa  \n          \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - x\n          - aaaaa  \n            \\===",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}

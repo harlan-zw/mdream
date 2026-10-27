@@ -6,6 +6,23 @@ const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
 const BYTE_PARITY_CASES = [
+  '<p>aaaaa<br>===</p>',
+  '<p>aaaaa<br><span>=</span><span>==</span></p>',
+  '<p>aaaaa<br> <span></span>===</p>',
+  '<p>aaaaa<br>=</p>',
+  '<p>aaaaa<br>==</p>',
+  '<p>aaaaa<br><span></span></p>',
+  '<p>a = b and x===y</p>',
+  '<p>a<span>=</span><span>==</span>b</p>',
+  '<p><code>===</code></p>',
+  '<p></p>',
+  '<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>',
+  '<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>',
+  '<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>',
+  '<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>',
+  '<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>',
+  '<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>',
+
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',

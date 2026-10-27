@@ -3094,7 +3094,8 @@ impl ConvertState {
         } else if byte == b'-' || byte == b'+' {
           should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied())
             || (byte == b'-' && Self::is_thematic_break(&bytes[index..], byte));
-        } else if byte == b'>' {
+        } else if byte == b'>' || byte == b'=' {
+          // Guard a possible setext underline even when inline nodes split it.
           should_escape = true;
         }
       } else if !should_escape && ordered_digits > 0 && (byte == b'.' || byte == b')') {
@@ -3143,7 +3144,7 @@ impl ConvertState {
     // Text-side reject first: prose that cannot open a block skips the buffer
     // scan entirely, which is most text nodes.
     match text.as_bytes().first() {
-      Some(b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9') => {}
+      Some(b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9') => {}
       _ => return false,
     }
     let Some(mut indent) = self.markdown_line_indent() else {
@@ -3154,7 +3155,7 @@ impl ConvertState {
         indent += 1;
         continue;
       }
-      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'0'..=b'9');
+      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9');
     }
     false
   }
@@ -3456,12 +3457,13 @@ impl ConvertState {
   #[inline]
   fn markdown_line_indent(&self) -> Option<u8> {
     let bytes = self.buffer.as_bytes();
-    let mut spaces = 0u8;
+    let mut spaces = 0usize;
+    let structural_indent = self.list_indent.len();
     for (offset, &byte) in bytes.iter().enumerate().rev() {
       if byte == b'\n' {
-        return Some(spaces);
+        return Some(spaces.saturating_sub(structural_indent) as u8);
       }
-      if byte != b' ' || spaces == 3 {
+      if byte != b' ' || spaces == structural_indent + 3 {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
         return self.list_marker_line_start(bytes, offset + 1).then_some(0);
@@ -3475,7 +3477,7 @@ impl ConvertState {
         None
       }
     } else {
-      Some(spaces)
+      Some(spaces.saturating_sub(structural_indent) as u8)
     }
   }
 

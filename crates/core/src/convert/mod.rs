@@ -140,7 +140,7 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
   }
   t[b'\n' as usize] |= GFM_NEWLINE_BIT;
   t[b'\r' as usize] |= GFM_NEWLINE_BIT;
-  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let active = b"\\*_~`[]|><\n\r#-+=.) 0123456789";
   let mut i = 0usize;
   while i < active.len() {
     t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
