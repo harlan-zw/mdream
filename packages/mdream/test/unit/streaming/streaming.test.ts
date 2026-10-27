@@ -6,6 +6,12 @@ const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
 const BYTE_PARITY_CASES = [
+  '<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>',
+  '<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>',
+  '<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>',
+  '<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>',
+  '<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>',
+
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',

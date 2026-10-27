@@ -150,6 +150,7 @@ export interface BlockquoteFrame {
    * can flush the pre-quote context before the exit reads it.
    */
   followsWhitespace: boolean
+  listRulePending?: string
 }
 
 interface GfmLifecycleState {
@@ -1070,8 +1071,12 @@ function finalizeBlockquote(state: MarkdownState): void {
   // An empty quote whose start followed terminated output writes nothing.
   // The context is the enter-time snapshot: streaming may have already
   // yielded and compacted the characters this decision used to read back.
-  if (!content && frame.followsWhitespace)
+  if (!content && frame.followsWhitespace) {
+    state.listRulePending = frame.listRulePending
+    if (frame.listRulePending !== undefined && state.blockquotes.length > 0)
+      buffer.push('\n')
     return
+  }
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -1260,6 +1265,7 @@ function commitGfmAction(
   lifecycle: GfmLifecycleState,
   outputStart: number,
   owner: ElementNode,
+  listRulePending?: string,
 ): void {
   switch (action._tag) {
     case 'BlockquoteEnter': {
@@ -1268,6 +1274,7 @@ function commitGfmAction(
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
         fragment: state.buffer.length,
+        listRulePending,
         listIndent: state.listIndent,
         // Snapshot the pre-quote context now: streaming can flush these
         // characters before the quote's exit needs them. When the buffer is
@@ -1752,6 +1759,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
+    let quoteRulePending: string | undefined
     if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
@@ -1762,11 +1770,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (isVisibleText || opensVisibleElement) {
         // A quote's own enter writes the line break into the item and its
         // subtree is quoted once it completes, so the rule only ends its line.
-        const separator = opensVisibleElement
+        const opensQuote = opensVisibleElement
           && (node as ElementNode).tagId === TAG_BLOCKQUOTE
           && !node.tagHandler?.literalEnter
+        const separator = opensQuote
           ? '\n'
           : blockOpenPrefix(state.buffer, state.listRulePending)!
+        if (opensQuote)
+          quoteRulePending = state.listRulePending
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined
@@ -2232,7 +2243,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           }
         }
         if (gfmAction)
-          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
+          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element, quoteRulePending)
         updateListIndent(state, element, eventType)
         return
       }
@@ -2335,7 +2346,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (gfmAction)
-      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
+      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, quoteRulePending)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)

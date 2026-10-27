@@ -653,6 +653,13 @@ impl ConvertState {
     if content_end < frame.content_start
       || (content_end == frame.content_start && content_left_buffer)
     {
+      self.list_rule_pending |= frame.list_rule_pending;
+      // Nested quote entry collapses one separator newline; an empty rollback
+      // must restore it before the rule's list continuation is flushed.
+      if frame.list_rule_pending && !self.blockquotes.is_empty() {
+        self.buffer.push('\n');
+        self.last_content_cache_len = 1;
+      }
       return;
     }
     let content = &self.buffer[frame.content_start..content_end];
@@ -1358,8 +1365,11 @@ impl ConvertState {
       return;
     }
 
+    let quote_rule_pending = self.list_rule_pending
+      && !self.stack[stack_len - 1].excludes_text_nodes
+      && self.rule_break_opens_quote(stack_len - 1);
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule(self.rule_break_opens_quote(stack_len - 1));
+      self.flush_list_rule(quote_rule_pending);
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -1761,6 +1771,7 @@ impl ConvertState {
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
+        list_rule_pending: quote_rule_pending,
         list_indent: self.list_indent.clone(),
       });
     }
@@ -4219,19 +4230,17 @@ impl ConvertState {
   }
 
   fn flush_list_rule(&mut self, opens_quote: bool) {
-    let prefix = if opens_quote {
-      String::new()
+    let output = if opens_quote {
+      Cow::Borrowed("\n")
     } else {
-      self.continuation_prefix()
+      self
+        .block_open_prefix(&self.continuation_prefix())
+        .unwrap_or(Cow::Borrowed(""))
     };
-    let breaks = if opens_quote { "\n" } else { "\n\n" };
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
-      self.buffer.reserve(breaks.len() + prefix.len());
-      self.buffer.push_str(breaks);
-      self.buffer.push_str(&prefix);
-      self.last_content_cache_len = breaks.len() + prefix.len();
+      self.buffer.push_str(&output);
+      self.last_content_cache_len = output.len();
     } else {
-      let output = format!("{breaks}{prefix}");
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
     self.list_rule_pending = false;

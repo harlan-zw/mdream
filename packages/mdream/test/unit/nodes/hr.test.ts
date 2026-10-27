@@ -9,6 +9,19 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
     expect(markdown).toBe('Above\n\n---\n\nBelow')
   })
 
+  it('restores list continuation after an empty quote following a rule', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const cases: [string, string][] = [
+      ['<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>', '- ***\n\n  tail'],
+      ['<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>', '1. ***\n\n   tail'],
+      ['<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>', '-\n  - ***\n\n    tail'],
+      ['<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>', '> - ***\n>\n>   tail'],
+      ['<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>', '- ***\n\n  > q\n\n  tail'],
+    ]
+    for (const [html, expected] of cases)
+      expect(htmlToMarkdown(html, { engine }), html).toBe(expected)
+  })
+
   it('opens a quote after a rule in a list item on its own line', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const cases: [string, string][] = [

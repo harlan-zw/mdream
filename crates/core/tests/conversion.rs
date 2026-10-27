@@ -6165,3 +6165,27 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn empty_quote_after_rule_restores_list_continuation() {
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>"),
+    "- ***\n\n  tail"
+  );
+  assert_eq!(
+    convert("<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>"),
+    "1. ***\n\n   tail"
+  );
+  assert_eq!(
+    convert("<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>"),
+    "-\n  - ***\n\n    tail"
+  );
+  assert_eq!(
+    convert("<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>"),
+    "> - ***\n>\n>   tail"
+  );
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>"),
+    "- ***\n\n  > q\n\n  tail"
+  );
+}

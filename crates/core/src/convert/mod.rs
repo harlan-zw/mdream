@@ -265,6 +265,7 @@ struct FragmentLink {
 
 #[derive(Clone)]
 struct BlockquoteFrame {
+  list_rule_pending: bool,
   content_start: usize,
   list_indent: String,
 }
@@ -3403,6 +3404,7 @@ mod tests {
     state.buffer = format!("{}\n{}", "a".repeat(8192), "#".repeat(64));
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
+      list_rule_pending: false,
       list_indent: "  ".to_string(),
     });
     assert_eq!(state.trailing_heading_run(1 << 20), 64);

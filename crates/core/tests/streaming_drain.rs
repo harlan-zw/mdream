@@ -3295,3 +3295,27 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
     }
   }
 }
+
+#[test]
+fn empty_quote_after_rule_streaming() {
+  assert_stream_matches_every_split(
+    "<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+}
