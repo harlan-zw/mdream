@@ -4327,8 +4327,7 @@ impl ConvertState {
     self.list_tail_start = self.buffer.len();
     let prefix = self.continuation_prefix();
     let separator = format!("\n\n{prefix}");
-    self.push_code_span_content(&separator, true);
-    self.last_content_cache_len = separator.len();
+    self.last_content_cache_len = self.push_code_span_content(&separator, true);
     self.list_tail_pending = false;
   }
 
@@ -5660,6 +5659,39 @@ mod tests {
     state.emit_enter_element();
 
     assert_eq!(state.buffer, " `");
+  }
+
+  #[test]
+  fn empty_list_tail_cache_counts_only_written_capped_span_bytes() {
+    for (cap, content, expected_written) in [(1, "xx", 0), (1, "", 0), (8, "x", 4)] {
+      let mut state = drained_open_list_item();
+      state.options.max_node_bytes = cap;
+      state.stack.push(entering_node(TAG_LI, false));
+      let mut code = entering_node(TAG_CODE, true);
+      code.depth = 2;
+      state.stack.push(code);
+      state.emit_enter_element();
+      state.push_code_span_content(content, false);
+      if content == "xx" {
+        assert!(state.code_spans[0].exhausted);
+      }
+      state.list_tail_pending = true;
+      let before = state.buffer.len();
+
+      state.flush_empty_list_tail();
+
+      let written = state.buffer.len() - before;
+      assert_eq!(written, expected_written, "cap={cap}, content={content:?}");
+      assert_eq!(
+        state.last_content_cache_len, written,
+        "cache must describe actual buffer bytes"
+      );
+      assert_eq!(
+        state.list_tail_start, before,
+        "even a rejected separator keeps its cleanup boundary"
+      );
+      assert!(!state.list_tail_pending);
+    }
   }
 
   #[test]
