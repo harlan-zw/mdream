@@ -133,6 +133,9 @@ export interface MarkdownState {
   /** A separate parent-paragraph boundary after an empty nested list. */
   listTailPending?: boolean
   listTailStart?: number
+  /** First fragment to recheck, including the last fragment a writer may append to. */
+  listTailScanFrom?: number
+  emptyListMarkerScanFrom?: number
 }
 
 interface CodeSpan {
@@ -327,6 +330,10 @@ export function noteListTailRewrite(state: MarkdownState, fragment: number): voi
     state.emptyListMarkerFragment = undefined
   if (state.listTailStart !== undefined && fragment < state.listTailStart)
     state.listTailStart = undefined
+  if (state.listTailScanFrom !== undefined && fragment < state.listTailScanFrom)
+    state.listTailScanFrom = fragment
+  if (state.emptyListMarkerScanFrom !== undefined && fragment < state.emptyListMarkerScanFrom)
+    state.emptyListMarkerScanFrom = fragment
 }
 
 /**
@@ -1396,6 +1403,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     emptyListMarkerDepth: undefined,
     listTailPending: false,
     listTailStart: undefined,
+    listTailScanFrom: undefined,
+    emptyListMarkerScanFrom: undefined,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -1775,6 +1784,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   function flushListTail(): void {
     trimTrailingSpaces(state.buffer)
     state.listTailStart = state.buffer.length
+    state.listTailScanFrom = state.listTailStart
     state.buffer.push(`\n\n${state.listIndent}`)
     state.lastContentCache = state.buffer.at(-1)
     state.lastTextNode = undefined
@@ -2447,6 +2457,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         recordItemMarker(state, element.index)
         if (!handler?.literalEnter && handlerOutput) {
           state.emptyListMarkerFragment = state.buffer.length - 1
+          state.emptyListMarkerScanFrom = state.buffer.length
           state.emptyListMarkerDepth = element.depth
         }
       }
@@ -2622,11 +2633,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         unresolvedCaptionFragment = codeSpanFragment
       if (unresolvedCaptionFragment === -1 && !state.codeFence) {
         const marker = state.emptyListMarkerFragment
-        if (marker !== undefined && (marker >= state.buffer.length || hasNonWhitespaceFrom(state.buffer, marker + 1)))
-          state.emptyListMarkerFragment = undefined
+        if (marker !== undefined) {
+          if (marker >= state.buffer.length || hasNonWhitespaceFrom(state.buffer, Math.max(marker + 1, state.emptyListMarkerScanFrom ?? marker + 1)))
+            state.emptyListMarkerFragment = undefined
+          state.emptyListMarkerScanFrom = Math.max(marker + 1, state.buffer.length - 1)
+        }
         const start = state.listTailStart
-        if (start !== undefined && (start > state.buffer.length || hasNonWhitespaceFrom(state.buffer, start)))
-          state.listTailStart = undefined
+        if (start !== undefined) {
+          if (start > state.buffer.length || hasNonWhitespaceFrom(state.buffer, Math.max(start, state.listTailScanFrom ?? start)))
+            state.listTailStart = undefined
+          state.listTailScanFrom = Math.max(start, state.buffer.length - 1)
+        }
       }
       resolveItemMarker(state, false, unresolvedCaptionFragment)
     },

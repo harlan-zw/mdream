@@ -952,6 +952,10 @@ pub struct ConvertState {
   list_tail_pending: bool,
   /// A tentative separator retractable while following wrappers are empty.
   list_tail_start: usize,
+  list_tail_scanned_to: usize,
+  empty_list_marker_scanned_to: usize,
+  #[cfg(test)]
+  list_settlement_bytes_read: usize,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1202,6 +1206,10 @@ impl ConvertState {
       empty_list_marker_depth: 0,
       list_tail_pending: false,
       list_tail_start: usize::MAX,
+      list_tail_scanned_to: 0,
+      empty_list_marker_scanned_to: 0,
+      #[cfg(test)]
+      list_settlement_bytes_read: 0,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -2620,6 +2628,8 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    self.list_tail_scanned_to = self.list_tail_scanned_to.min(offset);
+    self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.min(offset);
     if self.empty_list_marker_end != usize::MAX && offset < self.empty_list_marker_end {
       self.empty_list_marker_end = usize::MAX;
     }
@@ -2646,6 +2656,8 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    self.list_tail_scanned_to = self.list_tail_scanned_to.saturating_sub(removed);
+    self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.saturating_sub(removed);
     if self.blockquote_line_scanned_to != 0 {
       self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
       self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);

@@ -2,7 +2,7 @@ import type { ParseState } from '../../src/parse'
 import type { MdreamOptions, TransformPlugin } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
-import { createMarkdownProcessor } from '../../src/markdown-processor'
+import { createMarkdownProcessor, noteListTailRewrite } from '../../src/markdown-processor'
 import { createMarkdownDrain } from '../../src/markdown-stream'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
 import { processPluginsForEvent } from '../../src/plugin-processor'
@@ -356,7 +356,24 @@ it.each([
   ['', '-\n  -\n- next'],
   ['text', '-\n  -\n\n  text\n- next'],
 ])('streams a pending empty list tail without allocating tail arrays: %s', (tail, expected) => {
-  const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
+  let settling = false
+  let reads = 0
+  const processor = createMarkdownProcessor({}, (context) => {
+    const settle = context.settleItemMarker
+    context.settleItemMarker = () => {
+      settling = true
+      settle()
+      settling = false
+    }
+    return createMarkdownDrain(context, false)
+  })
+  processor.state.buffer = new Proxy(processor.state.buffer, {
+    get(target, key, receiver) {
+      if (settling && typeof key === 'string' && key.length > 0 && key.charCodeAt(0) >= 48 && key.charCodeAt(0) <= 57)
+        reads++
+      return Reflect.get(target, key, receiver)
+    },
+  })
   const parseState: ParseState = { depthMap: processor.state.depthMap, depth: 0, resolvedPlugins: [], tagHandlers, plainText: false }
   const buffer = processor.state.buffer
   const originalSlice = buffer.slice
@@ -374,7 +391,7 @@ it.each([
     remaining = parseHtmlStream(remaining + character, parseState, processor.processEvent)
     markdown += processor.getMarkdownChunk()
   }
-  for (let index = 0; index < 64; index++) {
+  for (let index = 0; index < 256; index++) {
     remaining = parseHtmlStream(remaining + emptyChunk, parseState, processor.processEvent)
     markdown += processor.getMarkdownChunk()
   }
@@ -386,6 +403,75 @@ it.each([
   finalizeParse(remaining, parseState, processor.processEvent)
   markdown += processor.getMarkdownChunk(true)
   expect(markdown).toBe(expected)
-  expect(markdown).toBe(htmlToMarkdown(prefix + emptyChunk.repeat(64) + close))
+  expect(markdown).toBe(htmlToMarkdown(prefix + emptyChunk.repeat(256) + close))
   expect(tailArrayCopies).toBe(0)
+  expect(reads).toBeLessThan(256 * 20)
+})
+
+it.each([false, true])('bounds settlement reads as retained whitespace grows, visible=%s', (visible) => {
+  let settle = () => {}
+  const processor = createMarkdownProcessor({}, (context) => {
+    settle = context.settleItemMarker
+    return createMarkdownDrain(context, false)
+  })
+  let reads = 0
+  processor.state.buffer = new Proxy(['- ', '\n\n  '], {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && key.length > 0 && key.charCodeAt(0) >= 48 && key.charCodeAt(0) <= 57)
+        reads++
+      return Reflect.get(target, key, receiver)
+    },
+  })
+  processor.state.emptyListMarkerFragment = 0
+  processor.state.listTailStart = 1
+  for (let index = 0; index < 256; index++) {
+    processor.state.buffer.push('\n  ')
+    settle()
+  }
+  const scanned = reads
+  // A writer can append to the existing last fragment instead of pushing one.
+  if (visible)
+    processor.state.buffer[processor.state.buffer.length - 1] += 'x'
+  settle()
+  expect(processor.state.listTailStart).toBe(visible ? undefined : 1)
+  expect(processor.state.emptyListMarkerFragment).toBe(visible ? undefined : 0)
+  expect(scanned).toBeLessThan(256 * 8)
+})
+
+it.each(['rewrite', 'truncate', 'compact'])('rescans retained list tails after %s', (mutation) => {
+  let settle = () => {}
+  const processor = createMarkdownProcessor({}, (context) => {
+    settle = context.settleItemMarker
+    return createMarkdownDrain(context, false)
+  })
+  const state = processor.state
+  state.buffer.push('- ', '\n  ', ' ', ' ')
+  state.emptyListMarkerFragment = 0
+  state.listTailStart = 1
+  settle()
+  if (mutation === 'rewrite') {
+    noteListTailRewrite(state, 1)
+    state.buffer[1] = 'x'
+  }
+  else if (mutation === 'truncate') {
+    noteListTailRewrite(state, 2)
+    state.buffer.length = 2
+    state.buffer.push('x')
+  }
+  else {
+    noteListTailRewrite(state, 0)
+    state.buffer.splice(0, 1)
+    expect(state.listTailStart).toBeUndefined()
+    expect(state.emptyListMarkerFragment).toBeUndefined()
+    state.buffer.push('- ', '\n ', ' ')
+    state.emptyListMarkerFragment = state.buffer.length - 3
+    state.emptyListMarkerScanFrom = state.buffer.length - 2
+    state.listTailStart = state.buffer.length - 2
+    state.listTailScanFrom = state.listTailStart
+    settle()
+    state.buffer.push('x')
+  }
+  settle()
+  expect(state.listTailStart).toBeUndefined()
+  expect(state.emptyListMarkerFragment).toBeUndefined()
 })

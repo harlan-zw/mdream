@@ -1753,6 +1753,7 @@ impl ConvertState {
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
       self.empty_list_marker_end = self.buffer.trim_end_matches(' ').len();
+      self.empty_list_marker_scanned_to = self.empty_list_marker_end;
       self.empty_list_marker_depth = self.stack[stack_len - 1].depth;
     }
 
@@ -3329,6 +3330,22 @@ impl ConvertState {
     self.empty_item_len = self.buffer.len();
   }
 
+  /// Scan only bytes appended since the last settlement or buffer rewrite.
+  fn list_tail_has_visible(&mut self, start: usize, scanned_to: usize) -> bool {
+    if start > self.buffer.len() {
+      return true;
+    }
+    let bytes = &self.buffer.as_bytes()[start.max(scanned_to)..];
+    #[cfg(test)]
+    {
+      self.list_settlement_bytes_read += bytes
+        .iter()
+        .position(|&byte| !is_whitespace(byte))
+        .map_or(bytes.len(), |index| index + 1);
+    }
+    has_visible(bytes)
+  }
+
   /// Answer the guard between tokens, where the buffer reads the same whatever
   /// the chunking, once the item's first byte is final: settled content ends
   /// the buffer and no open construct can take it back. The exit would answer
@@ -3342,21 +3359,20 @@ impl ConvertState {
       && self.open_link_hold_floor().is_none()
       && self.first_tentative_caption_start().is_none()
     {
-      if self.empty_list_marker_end != usize::MAX
-        && self
-          .buffer
-          .get(self.empty_list_marker_end..)
-          .is_none_or(|tail| has_visible(tail.as_bytes()))
-      {
-        self.empty_list_marker_end = usize::MAX;
+      if self.empty_list_marker_end != usize::MAX {
+        if self.list_tail_has_visible(
+          self.empty_list_marker_end,
+          self.empty_list_marker_scanned_to,
+        ) {
+          self.empty_list_marker_end = usize::MAX;
+        }
+        self.empty_list_marker_scanned_to = self.buffer.len();
       }
-      if self.list_tail_start != usize::MAX
-        && self
-          .buffer
-          .get(self.list_tail_start..)
-          .is_none_or(|tail| has_visible(tail.as_bytes()))
-      {
-        self.list_tail_start = usize::MAX;
+      if self.list_tail_start != usize::MAX {
+        if self.list_tail_has_visible(self.list_tail_start, self.list_tail_scanned_to) {
+          self.list_tail_start = usize::MAX;
+        }
+        self.list_tail_scanned_to = self.buffer.len();
       }
     }
     if self.buffer.len() > self.empty_item_len
@@ -3451,6 +3467,12 @@ impl ConvertState {
 
   /// Move every cached offset at or past `at` one byte right, for a newline inserted at `at`.
   fn shift_offsets_at_or_after(&mut self, at: usize) {
+    if self.list_tail_scanned_to >= at {
+      self.list_tail_scanned_to += 1;
+    }
+    if self.empty_list_marker_scanned_to >= at {
+      self.empty_list_marker_scanned_to += 1;
+    }
     if self.empty_list_marker_end != usize::MAX && self.empty_list_marker_end >= at {
       self.empty_list_marker_end += 1;
     }
@@ -4325,6 +4347,7 @@ impl ConvertState {
   fn flush_empty_list_tail(&mut self) {
     self.trim_trailing_spaces();
     self.list_tail_start = self.buffer.len();
+    self.list_tail_scanned_to = self.list_tail_start;
     let prefix = self.continuation_prefix();
     let separator = format!("\n\n{prefix}");
     self.last_content_cache_len = self.push_code_span_content(&separator, true);
@@ -5691,6 +5714,110 @@ mod tests {
         "even a rejected separator keeps its cleanup boundary"
       );
       assert!(!state.list_tail_pending);
+    }
+  }
+
+  #[test]
+  fn empty_list_tail_settlement_reads_incrementally() {
+    for visible in [false, true] {
+      let mut state =
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      let prefix = "<ul><li><ul><li></li></ul>";
+      state.process_html(prefix);
+      let chunk = "<div></div><p></p><em></em><span> </span>";
+      for _ in 0..256 {
+        state.process_html(chunk);
+        state.settle_item_marker();
+      }
+      let reads = state.list_settlement_bytes_read;
+      let close = if visible {
+        "text</li><li>next</li></ul>"
+      } else {
+        "</li><li>next</li></ul>"
+      };
+      state.process_html(close);
+      assert_eq!(
+        state.get_markdown(),
+        if visible {
+          "-\n  -\n\n  text\n- next"
+        } else {
+          "-\n  -\n- next"
+        }
+      );
+      assert!(reads < 256 * 100, "settlement read {reads} bytes");
+    }
+  }
+
+  #[test]
+  fn growing_list_tail_settlement_has_linear_byte_reads() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.buffer.push_str("- \n\n  ");
+    state.empty_list_marker_end = 2;
+    state.list_tail_start = 2;
+    for _ in 0..256 {
+      state.buffer.push_str("\n  ");
+      state.settle_item_marker();
+    }
+    let reads = state.list_settlement_bytes_read;
+    state.buffer.push('x');
+    state.settle_item_marker();
+    assert_eq!(state.list_tail_start, usize::MAX);
+    assert_eq!(state.empty_list_marker_end, usize::MAX);
+    assert!(
+      reads <= 2 * state.buffer.len(),
+      "settlement read {reads} bytes"
+    );
+  }
+
+  #[test]
+  fn list_tail_cursors_follow_rewrites_truncation_drains_and_insertions() {
+    for mutation in 0..4 {
+      let mut state =
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      state.buffer.push_str("prefix- \n\n    ");
+      state.buffer.push_str(&" ".repeat(32));
+      state.empty_list_marker_end = 8;
+      state.list_tail_start = 8;
+      state.settle_item_marker();
+      match mutation {
+        0 => {
+          // Rewrite a previously scanned byte, including the final byte.
+          let end = state.buffer.len() - 1;
+          state.note_buffer_rewrite(end);
+          state.buffer.replace_range(end.., "x");
+        }
+        1 => {
+          state.truncate_buffer(10);
+          state.buffer.push('x');
+        }
+        2 => {
+          state.last_yielded_length = 6;
+          state.drain_streamed_prefix();
+          assert_eq!(state.list_tail_start, 2);
+          assert_eq!(state.list_tail_scanned_to, state.buffer.len());
+          state.buffer.push('x');
+        }
+        _ => {
+          state.note_buffer_rewrite(0);
+          state.buffer.insert(0, '\n');
+          state.shift_offsets_at_or_after(0);
+          // A fresh marker/tail after the earlier one was invalidated.
+          state.empty_list_marker_end = state.buffer.len();
+          state.empty_list_marker_scanned_to = state.buffer.len();
+          state.list_tail_start = state.buffer.len();
+          state.list_tail_scanned_to = state.buffer.len();
+          state.buffer.push(' ');
+          state.settle_item_marker();
+          state.buffer.push('x');
+        }
+      }
+      state.settle_item_marker();
+      assert_eq!(state.list_tail_start, usize::MAX, "mutation={mutation}");
+      assert_eq!(
+        state.empty_list_marker_end,
+        usize::MAX,
+        "mutation={mutation}"
+      );
     }
   }
 
