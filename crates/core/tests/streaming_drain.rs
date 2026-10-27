@@ -3364,3 +3364,40 @@ fn streaming_setext_equals_text_preserves_paragraphs() {
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
+
+#[test]
+fn streaming_setext_dash_text_preserves_paragraphs() {
+  for (html, expected) in [
+    ("<p>aaaaa<br>--</p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>-- </p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>--\t</p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>--<br>b</p>", "aaaaa  \n\\--  \nb"),
+    ("<p>aaaaa<br>-<span>-</span></p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>- -</p>", "aaaaa  \n\\- -"),
+    ("<p>aaaaa<br>-- -</p>", "aaaaa  \n\\-- -"),
+    ("<p>aaaaa<br>---</p>", "aaaaa  \n\\---"),
+    ("<ul><li>x<br>--</li></ul>", "- x  \n  \\--"),
+    (
+      "<ul><li>x<ul><li>y<br>--</li></ul></li></ul>",
+      "- x\n  - y  \n    \\--",
+    ),
+    ("<blockquote><p>x<br>--</p></blockquote>", "> x  \n> \\--"),
+    ("<p>aaaaa<br>-- a</p>", "aaaaa  \n-- a"),
+    ("<p>aaaaa<br>--a</p>", "aaaaa  \n--a"),
+    ("<p>aaaaa --</p>", "aaaaa --"),
+    ("<p>x<br><b>--</b></p>", "x  \n**--**"),
+  ] {
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default().with_wrap_width(20),
+    ] {
+      assert_eq!(
+        html_to_markdown(html, options.clone()),
+        expected,
+        "html={html:?}"
+      );
+      assert_stream_matches(html, options.clone());
+      assert_stream_matches_every_split(html, options);
+    }
+  }
+}

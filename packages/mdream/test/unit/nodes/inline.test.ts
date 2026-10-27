@@ -269,3 +269,31 @@ describe.each(engines)('setext equals escaping $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 })
+
+describe.each(engines)('setext dash escaping $name', (engineConfig) => {
+  it.each([
+    ['<p>aaaaa<br>--</p>', 'aaaaa  \n\\--'],
+    ['<p>aaaaa<br>-- </p>', 'aaaaa  \n\\--'],
+    ['<p>aaaaa<br>--\t</p>', 'aaaaa  \n\\--'],
+    ['<p>aaaaa<br>--<br>b</p>', 'aaaaa  \n\\--  \nb'],
+    ['<p>aaaaa<br>-<span>-</span></p>', 'aaaaa  \n\\--'],
+    ['<p>aaaaa<br>- -</p>', 'aaaaa  \n\\- -'],
+    ['<p>aaaaa<br>-- -</p>', 'aaaaa  \n\\-- -'],
+    ['<p>aaaaa<br>---</p>', 'aaaaa  \n\\---'],
+    ['<ul><li>x<br>--</li></ul>', '- x  \n  \\--'],
+    ['<ul><li>x<ul><li>y<br>--</li></ul></li></ul>', '- x\n  - y  \n    \\--'],
+    ['<blockquote><p>x<br>--</p></blockquote>', '> x  \n> \\--'],
+    ['<p>aaaaa<br>-- a</p>', 'aaaaa  \n-- a'],
+    ['<p>aaaaa<br>--a</p>', 'aaaaa  \n--a'],
+    ['<p>aaaaa --</p>', 'aaaaa --'],
+    ['<p>x<br><b>--</b></p>', 'x  \n**--**'],
+  ])('preserves paragraph text: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, wrapWidth: 20 })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine, wrapWidth: 20 }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+})

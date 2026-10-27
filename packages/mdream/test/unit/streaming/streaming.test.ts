@@ -27,6 +27,13 @@ const BYTE_PARITY_CASES = [
   '<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>',
   '<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>',
   '<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>',
+  '<p>aaaaa<br>--</p>',
+  '<p>aaaaa<br>-- </p>',
+  '<p>aaaaa<br>--<br>b</p>',
+  '<p>aaaaa<br>-- a</p>',
+  '<ul><li>x<br>--</li></ul>',
+  '<ul><li>x<ul><li>y<br>--</li></ul></li></ul>',
+  '<blockquote><p>x<br>--</p></blockquote>',
 
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',

@@ -3093,7 +3093,7 @@ impl ConvertState {
             end - index <= 6 && Self::is_markdown_marker_whitespace(bytes.get(end).copied());
         } else if byte == b'-' || byte == b'+' {
           should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied())
-            || (byte == b'-' && Self::is_thematic_break(&bytes[index..], byte));
+            || (byte == b'-' && Self::is_dash_line(&bytes[index..]));
         } else if byte == b'>' || byte == b'=' {
           // Guard a possible setext underline even when inline nodes split it.
           should_escape = true;
@@ -3412,19 +3412,19 @@ impl ConvertState {
     matches!(byte, None | Some(b' ' | b'\t' | b'\n' | b'\r'))
   }
 
+  /// A line of only `-` and blanks is a list marker, a thematic break, or a
+  /// setext underline, so its leading `-` always needs an escape.
   #[inline]
-  fn is_thematic_break(value: &[u8], marker: u8) -> bool {
-    let mut count = 0u8;
+  fn is_dash_line(value: &[u8]) -> bool {
     for &byte in value {
-      if byte == marker {
-        count = count.saturating_add(1);
-      } else if byte == b'\n' || byte == b'\r' {
+      if byte == b'\n' || byte == b'\r' {
         break;
-      } else if byte != b' ' && byte != b'\t' {
+      }
+      if byte != b'-' && byte != b' ' && byte != b'\t' {
         return false;
       }
     }
-    count >= 3
+    true
   }
 
   #[inline]

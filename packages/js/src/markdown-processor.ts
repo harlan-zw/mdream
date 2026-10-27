@@ -577,21 +577,19 @@ function canStartGfmAngleConstruct(code: number): boolean {
     || code === 63 // ?
 }
 
-function isThematicBreak(value: string, start: number, marker: number): boolean {
-  let count = 0
+/**
+ * A line of only `-` and blanks is a list marker, a thematic break, or a
+ * setext underline, so its leading `-` always needs an escape.
+ */
+function isDashLine(value: string, start: number): boolean {
   for (let index = start; index < value.length; index++) {
     const code = value.charCodeAt(index)
-    if (code === marker) {
-      count++
-    }
-    else if (code === 10 || code === 13) {
+    if (code === 10 || code === 13)
       break
-    }
-    else if (code !== 32 && code !== 9) {
+    if (code !== 45 && code !== 32 && code !== 9)
       return false
-    }
   }
-  return count >= 3
+  return true
 }
 
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
@@ -686,7 +684,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
       else if (code === 45 || code === 43) { // unordered list marker
         shouldEscape = index + 1 === value.length
           || isMarkdownMarkerWhitespace(value.charCodeAt(index + 1))
-          || (code === 45 && isThematicBreak(value, index, code))
+          || (code === 45 && isDashLine(value, index))
       }
       else if (code === 62 || code === 61) { // blockquote marker or possible setext underline
         shouldEscape = true
