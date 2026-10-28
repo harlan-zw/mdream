@@ -182,19 +182,24 @@ export function scalingRows(cases: Workload[], benches: PerfBench[]): PerfBench[
   })
 }
 
-async function main() {
-  const [baseDist, headDist, outputDir] = process.argv.slice(2)
-  if (!baseDist || !headDist || !outputDir)
-    throw new Error('Pass base dist, PR dist, and output directory.')
+function pinCpu() {
   // Separate processes must use the same CPU, including on heterogeneous runners.
   const allowedCpu = readFileSync('/proc/self/status', 'utf8').match(/^Cpus_allowed_list:\s*(\d+)/m)?.[1]
   if (!allowedCpu)
     throw new Error('Run this benchmark on Linux with a permitted CPU.')
   execFileSync('taskset', ['--pid', '--cpu-list', allowedCpu, String(process.pid)], { stdio: 'ignore' })
+  return allowedCpu
+}
+
+export async function main(args = process.argv.slice(2), dependencies = { nativeRunner, pinCpu, workloads }) {
+  const [baseDist, headDist, outputDir] = args
+  if (!baseDist || !headDist || !outputDir)
+    throw new Error('Pass base dist, PR dist, and output directory.')
+  const allowedCpu = dependencies.pinCpu()
   const samples = Number(process.env.RUST_PERF_SAMPLES || 12)
   if (!Number.isInteger(samples) || samples < 2)
     throw new Error('Sample count must be at least two.')
-  const cases = workloads(process.cwd(), process.argv.includes('--full')).filter(item => !process.env.RUST_PERF_FILTER || item.id.includes(process.env.RUST_PERF_FILTER))
+  const cases = dependencies.workloads(process.cwd(), args.includes('--full')).filter(item => !process.env.RUST_PERF_FILTER || item.id.includes(process.env.RUST_PERF_FILTER))
   if (!cases.length)
     throw new Error('No benchmark matches the filter.')
   mkdirSync(outputDir, { recursive: true })
@@ -203,12 +208,12 @@ async function main() {
   writeFileSync(manifest, serialized)
   const builds = [baseDist, headDist].map(dist => JSON.parse(readFileSync(resolve(dist, 'rust-perf/build.json'), 'utf8')))
   const results: [PerfRun, PerfRun] = [{ benches: [] }, { benches: [] }]
-  const nativeOnly = process.argv.includes('--native-only')
+  const nativeOnly = args.includes('--native-only')
   if (!nativeOnly && !globalThis.gc)
     throw new Error('Run WASM benchmarks with node --expose-gc.')
   const runners = [baseDist, headDist].map(dist => ({
-    cpu: nativeRunner(resolve(dist, 'rust-perf/cpu'), manifest),
-    alloc: nativeRunner(resolve(dist, 'rust-perf/alloc'), manifest),
+    cpu: dependencies.nativeRunner(resolve(dist, 'rust-perf/cpu'), manifest),
+    alloc: dependencies.nativeRunner(resolve(dist, 'rust-perf/alloc'), manifest),
   }))
   const verification: [Record<string, string>, Record<string, string>] = [{}, {}]
   try {

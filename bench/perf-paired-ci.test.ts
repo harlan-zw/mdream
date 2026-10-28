@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderPerfReport } from './bundle/perf-report.ts'
-import { countByteChunks, drainByteChunks, pairedOutputChanged, perfRun } from './perf-paired-ci.mjs'
+import { countByteChunks, drainByteChunks, pairedCase, pairedOutputChanged, perfRun } from './perf-paired-ci.mjs'
 
 const textChunks = ['<p>alpha</p>', '<p>beta</p>']
 const byteChunks = textChunks.map(chunk => new TextEncoder().encode(chunk))
@@ -85,4 +85,22 @@ it('retains paired measurements when the fixture output changes', () => {
   expect(head.benches.every(row => row.outputChanged)).toBe(true)
   expect(renderPerfReport(base, head)).toContain('Changed fixture (output changed)')
   expect(renderPerfReport(base, head)).toContain('20.00 ms')
+})
+
+it.each([false, true])('carries observed output changes through paired case assembly (%s)', (changed) => {
+  const baseFn = () => countByteChunks(streamGlue(['before'], true), byteChunks)
+  const prFn = () => countByteChunks(streamGlue([changed ? 'after!' : 'before'], true), byteChunks)
+  const entry = pairedCase(
+    () => drainByteChunks(streamGlue(['before'], true), byteChunks),
+    () => drainByteChunks(streamGlue([changed ? 'after!' : 'before'], true), byteChunks),
+    { descriptor: { id: 'caller', name: 'Caller fixture' }, baseFn, prFn, samples: 2, runs: 1 },
+  )
+  expect(entry.baseFn).toBe(baseFn)
+  expect(entry.prFn).toBe(prFn)
+  expect(entry.samples).toBe(2)
+  expect(entry.runs).toBe(1)
+  const base = perfRun({ cpu: [10, 10], wall: [20, 20] }, undefined, entry.descriptor)
+  const head = perfRun({ cpu: [20, 20], wall: [40, 40] }, undefined, entry.descriptor)
+  expect(head.benches.map(row => row.outputChanged)).toEqual([changed, changed])
+  expect(renderPerfReport(base, head).includes('Caller fixture (output changed)')).toBe(changed)
 })

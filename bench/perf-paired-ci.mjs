@@ -62,6 +62,10 @@ export function pairedOutputChanged(baseFn, prFn) {
   return base.length !== pr.length || !base.digest.equals(pr.digest)
 }
 
+export function pairedCase(baseOutput, prOutput, entry) {
+  return { ...entry, descriptor: { ...entry.descriptor, outputChanged: pairedOutputChanged(baseOutput, prOutput) } }
+}
+
 function forceGC() {
   globalThis.gc()
   globalThis.gc()
@@ -183,41 +187,38 @@ async function main() {
   const prGlue = await loadRust(prDist, 'paired-pr')
   const baseFn = () => drainByteChunks(baseGlue, chunks)
   const prFn = () => drainByteChunks(prGlue, chunks)
-  const wikiOutputChanged = pairedOutputChanged(baseFn, prFn)
 
-  const cases = [{
-    descriptor: { id: 'rust-ssr-wiki-bytes', name: 'Rust SSR stream (WASM) · wiki byte chunks at link boundaries', outputChanged: wikiOutputChanged },
+  const cases = [pairedCase(baseFn, prFn, {
+    descriptor: { id: 'rust-ssr-wiki-bytes', name: 'Rust SSR stream (WASM) · wiki byte chunks at link boundaries' },
     baseFn: () => countByteChunks(baseGlue, chunks),
     prFn: () => countByteChunks(prGlue, chunks),
     samples: 16,
     runs: 3,
-  }]
+  })]
   let consumed = 0
   const source = unicodeHtml()
   const outputDigest = value => ({ length: value.length, digest: createHash('sha256').update(value).digest() })
   for (const format of ['markdown', 'text', 'html']) {
     const baseConvert = () => baseGlue.htmlToMarkdown(source, { format })
     const prConvert = () => prGlue.htmlToMarkdown(source, { format })
-    const rustOutputChanged = pairedOutputChanged(() => outputDigest(baseConvert()), () => outputDigest(prConvert()))
-    cases.push({
-      descriptor: { id: `rust-unicode-${format}`, name: `Rust edge (WASM) · Unicode · ${format}`, outputChanged: rustOutputChanged },
+    cases.push(pairedCase(() => outputDigest(baseConvert()), () => outputDigest(prConvert()), {
+      descriptor: { id: `rust-unicode-${format}`, name: `Rust edge (WASM) · Unicode · ${format}` },
       baseFn: () => { consumed += baseConvert().length },
       prFn: () => { consumed += prConvert().length },
       samples: 8,
       runs: 4,
-    })
+    }))
     const entry = format === 'markdown' ? 'core' : format
     const loadJs = async dist => (await import(pathToFileURL(resolve(dist, `${entry}/fixtures/${entry}.mjs`)).href)).convert
     const baseJs = await loadJs(baseDist)
     const prJs = await loadJs(prDist)
-    const jsOutputChanged = pairedOutputChanged(() => outputDigest(baseJs(source)), () => outputDigest(prJs(source)))
-    cases.push({
-      descriptor: { id: `js-unicode-${format}`, name: `JS · Unicode · ${format}`, outputChanged: jsOutputChanged },
+    cases.push(pairedCase(() => outputDigest(baseJs(source)), () => outputDigest(prJs(source)), {
+      descriptor: { id: `js-unicode-${format}`, name: `JS · Unicode · ${format}` },
       baseFn: () => { consumed += baseJs(source).length },
       prFn: () => { consumed += prJs(source).length },
       samples: 8,
       runs: 4,
-    })
+    }))
   }
 
   const loadStream = async dist => (await import(pathToFileURL(resolve(dist, 'stream/fixtures/stream.mjs')).href)).convertStream
@@ -237,18 +238,17 @@ async function main() {
     const prQuote = () => observeJsStream(prStream, fixture.chunks(), { clock })
     const baseObserved = await baseQuote()
     const prObserved = await prQuote()
-    const outputChanged = pairedOutputChanged(() => baseObserved, () => prObserved)
     const id = `js-stream-quote-${bodyBytes / (1024 * 1024)}mib`
     const details = result => ({ id, bodyBytes: fixture.bodyBytes, inputChunks: result.inputChunks, firstOutput: result.firstOutput })
     observations.base.push(details(baseObserved))
     observations.pr.push(details(prObserved))
-    cases.push({
-      descriptor: { id, name: `JS stream · open quote · ${bodyBytes / (1024 * 1024)} MiB`, outputChanged },
+    cases.push(pairedCase(() => baseObserved, () => prObserved, {
+      descriptor: { id, name: `JS stream · open quote · ${bodyBytes / (1024 * 1024)} MiB` },
       baseFn: async () => { consumed += await countJsStream(baseStream, fixture.chunks(), { clock }) },
       prFn: async () => { consumed += await countJsStream(prStream, fixture.chunks(), { clock }) },
       samples: 4,
       runs: 1,
-    })
+    }))
   }
 
   const longLine = longLineFixture()
@@ -260,28 +260,26 @@ async function main() {
   const prLongLine = () => observeJsStream(prStream, longLine.chunks(), { clock })
   const baseLongObserved = await baseLongLine()
   const prLongObserved = await prLongLine()
-  const longOutputChanged = pairedOutputChanged(() => baseLongObserved, () => prLongObserved)
   const longLineId = 'js-stream-quote-longline-1mib'
   const longDetails = result => ({ id: longLineId, bodyBytes: longLine.bodyBytes, inputChunks: result.inputChunks, firstOutput: result.firstOutput })
   observations.base.push(longDetails(baseLongObserved))
   observations.pr.push(longDetails(prLongObserved))
-  cases.push({
-    descriptor: { id: longLineId, name: 'JS stream · quoted line without newlines · 1 MiB spans', outputChanged: longOutputChanged },
+  cases.push(pairedCase(() => baseLongObserved, () => prLongObserved, {
+    descriptor: { id: longLineId, name: 'JS stream · quoted line without newlines · 1 MiB spans' },
     baseFn: async () => { consumed += await countJsStream(baseStream, longLine.chunks(), { clock }) },
     prFn: async () => { consumed += await countJsStream(prStream, longLine.chunks(), { clock }) },
     samples: 4,
     runs: 1,
-  })
+  }))
   const baseRustLongLine = () => drainByteChunks(baseGlue, longLineBytes())
   const prRustLongLine = () => drainByteChunks(prGlue, longLineBytes())
-  const rustLongOutputChanged = pairedOutputChanged(baseRustLongLine, prRustLongLine)
-  cases.push({
-    descriptor: { id: 'rust-stream-quote-longline-1mib', name: 'Rust edge stream (WASM) · quoted line without newlines · 1 MiB spans', outputChanged: rustLongOutputChanged },
+  cases.push(pairedCase(baseRustLongLine, prRustLongLine, {
+    descriptor: { id: 'rust-stream-quote-longline-1mib', name: 'Rust edge stream (WASM) · quoted line without newlines · 1 MiB spans' },
     baseFn: () => { consumed += countByteChunks(baseGlue, longLineBytes()) },
     prFn: () => { consumed += countByteChunks(prGlue, longLineBytes()) },
     samples: 4,
     runs: 1,
-  })
+  }))
 
   const baseResults = { benches: [], observations: observations.base }
   const prResults = { benches: [], observations: observations.pr }

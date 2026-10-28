@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it, vi } from 'vitest'
 import { utf8Chunks } from './fixtures.ts'
-import { assertWasmMetadata, cpuRows, normalizedCpuRows, outputVerification, scalingRows, statistics, wasmRun } from './run.ts'
+import { assertWasmMetadata, cpuRows, main, normalizedCpuRows, outputVerification, scalingRows, statistics, wasmRun } from './run.ts'
 
 it('keeps multibyte characters intact across small transport chunks', () => {
   const source = 'A東京🙂éZ'
@@ -183,4 +186,54 @@ describe.each(['convert', 'stream'] as const)('same-revision WASM metadata (%s)'
     const unexpectedExtraction = { ...native, [key]: [{ selector: 'h2', tag: 'h2', text: 'page', attributes: [['class', 'title'], ['id', 'intro']], actualmetadata: 'unexpected' }] }
     expect(() => assertWasmMetadata([native, unexpectedExtraction], [wasm, wasm], 'page', operation)).toThrow('native and WASM metadata differ')
   })
+})
+
+it.each([false, true])('marks every written fixture row only when output changes (%s)', async (changed) => {
+  const root = mkdtempSync(join(tmpdir(), 'mdream-fixture-loop-'))
+  vi.stubEnv('RUST_PERF_SAMPLES', '2')
+  vi.stubEnv('RUST_PERF_FILTER', '')
+  try {
+    const base = join(root, 'base')
+    const head = join(root, 'head')
+    const out = join(root, 'results')
+    for (const dist of [base, head]) {
+      mkdirSync(join(dist, 'rust-perf'), { recursive: true })
+      writeFileSync(join(dist, 'rust-perf/build.json'), '{}')
+    }
+    let closed = 0
+    let killed = 0
+    const fixture = { id: 'page', name: 'page', operation: 'convert' as const, html: '<p>page</p>', options: 'default' as const, format: 'markdown' as const, inputBytes: 11 }
+    await main([base, head, out, '--native-only'], {
+      pinCpu: () => 'synthetic',
+      workloads: () => [fixture],
+      nativeRunner(binary, manifest) {
+        expect(JSON.parse(readFileSync(manifest, 'utf8'))).toEqual([fixture])
+        const output = changed && binary.startsWith(head) ? 'after' : 'before'
+        return {
+          async request(_index, mode) {
+            if (mode === 'verify')
+              return { output, frontmatter: null, extracted: [], truncated: false }
+            if (mode === 'alloc')
+              return { calls: 1, reallocations: 0, bytes: 10, peak: 10 }
+            return { cpu: 1 }
+          },
+          async close() { closed++ },
+          kill() { killed++ },
+        }
+      },
+    })
+    const runs = ['base', 'pr'].map(side => JSON.parse(readFileSync(join(out, `${side}-rust-perf.json`), 'utf8')))
+    for (const run of runs) {
+      expect(run.benches.map((row: { id: string }) => row.id)).toEqual(['calls', 'reallocations', 'bytes', 'peak', 'cpu', 'cpu-per-mib'].map(metric => `native-page-${metric}`))
+      for (const row of run.benches)
+        expect(Boolean(row.outputChanged)).toBe(changed)
+    }
+    expect(runs[0].verification.page === runs[1].verification.page).toBe(!changed)
+    expect(closed).toBe(4)
+    expect(killed).toBe(4)
+  }
+  finally {
+    vi.unstubAllEnvs()
+    rmSync(root, { recursive: true, force: true })
+  }
 })
