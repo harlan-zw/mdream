@@ -2011,6 +2011,8 @@ fn streaming_empty_nested_item_marker_matches_one_shot() {
     "<ul><li>a<ol><li></li></ol></li></ul>",
     "<ul><li></li></ul>",
     "<ul><li>a<ul><li></li><li>b</li></ul></li></ul>",
+    "<ul><li>a<ul><script>s</script><li></li></ul></li></ul>",
+    "<ul><li>a<ol><template>t</template><li></li></ol></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
@@ -3293,6 +3295,144 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
       assert_eq!(output, expected, "tail={tail}");
     }
   }
+}
+
+#[test]
+fn nested_ordered_start_separates_parent_paragraph() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><span>x</span><span>z</span><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- xz\n\n  10. y",
+    ),
+    (
+      "<ul><li><strong>x</strong><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- **x**\n\n  10. y",
+    ),
+    (
+      "<ol start=\"5\"><li>x<ol start=\"20\"><li>y</li><li>z</li></ol></li></ol>",
+      "5. x\n\n   20. y\n   21. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"0\"><li>y</li></ol></li></ul>",
+      "- x\n\n  0. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"1\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"-1\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "-\n  10. y",
+    ),
+    (
+      "<ul><li><span></span><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "-\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"></ol></li><li>z</li></ul>",
+      "- x\n- z",
+    ),
+    (
+      "<ul><li>x<ol reversed start=\"10\"><li value=\"20\">y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol reversed><li value=\"10\">y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<blockquote><ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul></blockquote>",
+      "> - x\n>\n>   10. y",
+    ),
+    (
+      "<ul><li>x<ul><li>z<ol start=\"10\"><li>y</li></ol></li></ul></li></ul>",
+      "- x\n  - z\n\n    10. y",
+    ),
+    (
+      "<ul><li><p>x</p><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>",
+      "- x\n\n  10. y\n  - z\n- after",
+    ),
+    (
+      "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x  \n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ul><li>y</li></ul><ol start=\"10\"><li>z</li></ol></li></ul>",
+      "- x\n  - y\n\n  10. z",
+    ),
+    (
+      "<ol><li><ol start=\"10\"><li>y</li></ol></li></ol>",
+      "1.\n   10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"1000000000\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li></li></ol></li></ul>",
+      "- x\n\n  10.",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol><p>tail</p></li></ul>",
+      "- x\n\n  10. y\n\n  tail",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><script>s</script><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><style>a{}</style><li>y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><noscript>n</noscript><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><template>t</template><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\">t<li>y</li></ol></li></ul>",
+      "- x t\n\n  10. y",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn nested_ordered_start_wraps_at_content_columns() {
+  let html = "<ul><li>alpha beta gamma delta<ol start=\"10\"><li>one two three four five</li></ol></li></ul>";
+  let opts = HtmlToMarkdownOptions::default().with_wrap_width(12);
+  assert_eq!(
+    html_to_markdown(html, opts.clone()),
+    "- alpha beta\n  gamma\n  delta\n\n  10. one\n      two\n      three\n      four\n      five"
+  );
+  assert_stream_matches(html, opts.clone());
+  assert_stream_matches_every_split(html, opts);
 }
 
 #[test]
