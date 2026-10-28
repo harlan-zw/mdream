@@ -475,10 +475,28 @@ impl ConvertState {
   /// may already have sent it: the blank is dropped there, or it would split
   /// the opener from the content.
   fn keeps_leading_blank(&self) -> bool {
-    self
-      .stack
-      .last()
-      .is_some_and(|node| node.is_inline && !self.writes_literal_opener(node))
+    let Some(node) = self.stack.last() else {
+      return false;
+    };
+    if !node.is_inline {
+      return false;
+    }
+    if !self.has_tag_overrides || node.current_walk_index != 0 {
+      return true;
+    }
+    // Only a first-child chain is still adjacent to the ancestor opener.
+    for node in self.stack.iter().rev() {
+      if !node.is_inline || node.child_text_node_index != 0 {
+        break;
+      }
+      if self.writes_literal_opener(node) {
+        return false;
+      }
+      if node.index != 0 || self.wrapper_emits_inline_markdown(node) {
+        break;
+      }
+    }
+    true
   }
 
   /// Depth and walk index for an emitted text node, plus its hazard flag.

@@ -6086,3 +6086,103 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
+
+#[test]
+fn review_literal_override_whitespace() {
+  {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "sup".into(),
+          TagOverrideConfig {
+            enter: Some("**".into()),
+            exit: Some("**".into()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(
+        "<p>a<sup><span> <span>2</span></span></sup>z</p>",
+        options.clone()
+      ),
+      "a**2**z"
+    );
+  }
+  {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "sup".into(),
+          TagOverrideConfig {
+            enter: Some("**".into()),
+            exit: Some("**".into()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(
+        "<p>a<sup><span><span> <span>2</span></span></span></sup>z</p>",
+        options.clone()
+      ),
+      "a**2**z"
+    );
+  }
+  {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "br".into(),
+          TagOverrideConfig {
+            enter: Some("".into()),
+            exit: Some("".into()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown("<p>a<em>x </em><br>b</p>", options.clone()),
+      "a*x* b"
+    );
+  }
+}
+
+#[test]
+fn literal_override_preserves_space_after_emitting_sibling() {
+  let html = "<p>a<sup><u></u><span> <span>2</span></span></sup>z</p>";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![
+        (
+          "sup".into(),
+          TagOverrideConfig {
+            enter: Some("**".into()),
+            exit: Some("**".into()),
+            ..Default::default()
+          },
+        ),
+        (
+          "u".into(),
+          TagOverrideConfig {
+            enter: Some("X".into()),
+            exit: Some(String::new()),
+            ..Default::default()
+          },
+        ),
+      ]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), "a**X 2**z");
+}

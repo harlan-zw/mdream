@@ -1,3 +1,4 @@
+import { createPlugin, htmlToMarkdown as jsHtmlToMarkdown, streamHtmlToMarkdown as jsStreamHtmlToMarkdown } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
@@ -443,6 +444,10 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
     const engine = await resolveEngine(engineConfig.engine)
     const span = { plugins: { tagOverrides: { span: { enter: '**', exit: '**' } } } }
     const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
+      ['<p>a<sup><u></u><span> <span>2</span></span></sup>z</p>', 'a**X 2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' }, u: { enter: 'X', exit: '' } } } }],
+      ['<p>a<sup><span> <span>2</span></span></sup>z</p>', 'a**2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><span><span> <span>2</span></span></span></sup>z</p>', 'a**2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<em>x </em><br>b</p>', 'a*x* b', { plugins: { tagOverrides: { br: { enter: '', exit: '' } } } }],
       ['<p>a<span> <i>x</i></span>z</p>', 'a***x***z', span],
       ['<p>a<span> <span>x</span></span>z</p>', 'a****x****z', span],
       ['<p>a<span> </span>z</p>', 'a****z', span],
@@ -461,4 +466,20 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       }
     }
   })
+})
+
+it('counts visible plugin text generated from a retained blank', async () => {
+  const plugin = createPlugin({
+    processTextNode(node) {
+      if (!node.value.trim())
+        return { content: 'visible', skip: false }
+    },
+  })
+  const html = '<p>a<a href="/x" title="fallback"> </a></p>'
+  const expected = 'a [visible](/x "fallback")'
+  expect(jsHtmlToMarkdown(html, { plugins: [plugin] })).toBe(expected)
+  for (let split = 0; split <= html.length; split++) {
+    expect(await collect(jsStreamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { plugins: [plugin] })))
+      .toBe(expected)
+  }
 })

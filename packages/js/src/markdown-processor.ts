@@ -2318,7 +2318,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
-        if (!isInlineElement || tagId === TAG_BR || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+        if (!isInlineElement || (tagId === TAG_BR && (!handler?.literalEnter || output?.some(fragment => fragment.endsWith('\n')))) || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {

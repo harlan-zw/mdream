@@ -116,11 +116,22 @@ function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
 // `<span>`. A literal `tagOverrides` opener is not held back, so a stream may
 // already have sent it: the blank is dropped there, or it would split the
 // opener from the content.
-function keepsLeadingBlank(node: ElementNode): boolean {
-  const handler = node.tagHandler
-  if (handler?.literalEnterHasOutput)
+function keepsLeadingBlank(node: ElementNode, state: ParseState): boolean {
+  if (!(node.tagHandler?.isInline ?? node.tagId === -1))
     return false
-  return handler?.isInline ?? node.tagId === -1
+  if (!state.tagOverrideHandlers || node.currentWalkIndex)
+    return true
+  let parent: ElementNode | null | undefined = node
+  while (parent && !parent.childTextNodeIndex && (parent.tagHandler?.isInline ?? parent.tagId === -1)) {
+    const handler = parent.tagHandler
+    if (handler?.literalEnterHasOutput)
+      return false
+    // A preceding sibling may have emitted content without a text node.
+    if (parent.index || (handler?.enter && !handler.literalEnter))
+      break
+    parent = parent.parent
+  }
+  return true
 }
 
 const SCRIPT_DATA = 0
@@ -1324,7 +1335,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   // Whitespace-only text before an element's first child is indentation, but
   // in inline content after earlier text it is the only word separator.
   const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
-  if (isLeadingBlank && ((state.plainText && !state.keepLeadingBlanks) || !keepsLeadingBlank(state.currentNode))) {
+  if (isLeadingBlank && ((state.plainText && !state.keepLeadingBlanks) || !keepsLeadingBlank(state.currentNode, state))) {
     return
   }
 
@@ -1367,6 +1378,12 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
         leadingBlank: true,
       }
       handleEvent({ type: NodeEventEnter, node: blank })
+      // Plugins can turn the retained separator into actual link content.
+      if (!blank.excludedFromMarkdown && blank.value.trim()) {
+        state.currentNode.currentWalkIndex!++
+        for (const parent of parentsToIncrement)
+          parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+      }
     }
     return
   }

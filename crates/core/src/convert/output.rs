@@ -1733,7 +1733,9 @@ impl ConvertState {
 
     // A separator owed from a closed element would only trail the line a
     // `<br>` ends, also where it is written as raw HTML.
-    if tag_id == Some(TAG_BR) {
+    if tag_id == Some(TAG_BR)
+      && (!enter_is_literal || output.as_deref().is_some_and(|value| value.ends_with('\n')))
+    {
       self.pending_inline_whitespace = false;
     }
     // Whitespace immediately before <br> has no visual effect in HTML. Let the
@@ -5405,7 +5407,7 @@ impl ConvertState {
   /// `raw_html_anchor` applies at exit). A heading nested in one must not end
   /// its line, or the wrapper's remaining text splits off.
   #[inline]
-  fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
+  pub(crate) fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
     if self.has_tag_overrides {
       let ovs = self
         .options
