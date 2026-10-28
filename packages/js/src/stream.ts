@@ -40,7 +40,7 @@ export async function* streamHtmlToMarkdown(
     ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
     : processor.processEvent
 
-  const incrementalPlainText = resolvedPlugins.length === 0 && !options.wrapWidth && !tagOverrideHandlers
+  const incrementalPlainText = resolvedPlugins.length === 0 && !options.wrapWidth && !tagOverrideHandlers?.size
   let remainingHtml = ''
 
   try {

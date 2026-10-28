@@ -1,5 +1,5 @@
 import type { ParseState } from '../../src/parse'
-import type { MdreamOptions, NodeEvent } from '../../src/types'
+import type { MdreamOptions, NodeEvent, TextNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { MAX_TAG_ID, TEXT_NODE } from '../../src/const'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
@@ -43,6 +43,35 @@ describe('incremental text parser prototype', () => {
     }
     finally {
       await iterator.return?.()
+    }
+  })
+
+  it.each([
+    ['commas', 'Hello, world '.repeat(6000), {}],
+    ['empty overrides', body, { tagOverrides: {} }],
+  ] as [string, string, MdreamOptions][])('emits early with %s', async (_name, prose, options) => {
+    let delivered = false
+    const source = new ReadableStream<string>({
+      pull(controller) {
+        if (delivered)
+          throw new Error('closing markup was requested before payload was emitted')
+        delivered = true
+        controller.enqueue(`<p>${prose}`)
+      },
+    }, { highWaterMark: 0 })
+    const iterator = streamHtmlToMarkdown(source, options)[Symbol.asyncIterator]()
+    try {
+      expect((await iterator.next()).value).toContain(prose.slice(0, 12))
+    }
+    finally {
+      await iterator.return?.()
+    }
+    const html = `<p>${prose}tail</p>`
+    for (const size of [4093, 65535, 65536, 65537, 70001]) {
+      const parts = []
+      for (let i = 0; i < html.length; i += size)
+        parts.push(html.slice(i, i + size))
+      expect(await convert(parts, options)).toBe(htmlToMarkdown(html, options))
     }
   })
 
@@ -91,7 +120,7 @@ describe('incremental text parser prototype', () => {
       ['<details><p>', '</p></details>'],
       ['<p>', '</p>'],
       [`${'<div>'.repeat(511)}<p><xmp>`, `</xmp></p>${'</div>'.repeat(511)}`],
-    ]) {
+    ] as const) {
       for (const value of [body, `${body}é漢😀`, 'a'.repeat(70000)]) {
         const html = `${open}${value}${close}`
         const options = { tagOverrides: { p: { enter: 'START', exit: 'END' } } }
@@ -113,7 +142,7 @@ describe('incremental text parser prototype', () => {
     const state: ParseState = { depthMap: new Uint16Array(MAX_TAG_ID), depth: 0 }
     const event = (event: NodeEvent) => {
       if (event.node.type === TEXT_NODE)
-        values.push(event.node.value)
+        values.push((event.node as TextNode).value)
     }
     const carry = parseHtmlStream(`<p>${body}`, state, event)
     expect(carry).toBe(body)
@@ -128,7 +157,7 @@ describe('incremental text parser prototype', () => {
     const state: ParseState = { depthMap: new Uint16Array(MAX_TAG_ID), depth: 0 }
     const event = (event: NodeEvent) => {
       if (event.node.type === TEXT_NODE)
-        values.push(event.node.value)
+        values.push((event.node as TextNode).value)
     }
     const carry = parseHtmlStream(`<p>${word}`, state, event)
     const snapshot = { ...state, depthMap: state.depthMap.slice(), currentNode: { ...state.currentNode } }
@@ -145,7 +174,7 @@ describe('incremental text parser prototype', () => {
     const state: ParseState = { depthMap: new Uint16Array(MAX_TAG_ID), depth: 0 }
     const event = (event: NodeEvent) => {
       if (event.node.type === TEXT_NODE)
-        values.push(event.node.value)
+        values.push((event.node as TextNode).value)
     }
     let carry = parseHtmlStream(`<p>${body}${word}`, state, event)
     carry = commitPlainTextPrefix(carry, state, event)
@@ -168,7 +197,7 @@ describe('incremental text parser prototype', () => {
     const state: ParseState = { depthMap: new Uint16Array(MAX_TAG_ID), depth: 0 }
     const event = (event: NodeEvent) => {
       if (event.node.type === TEXT_NODE)
-        values.push(event.node.value)
+        values.push((event.node as TextNode).value)
     }
     const carry = parseHtmlStream(`<p>${body}\t`, state, event)
     const snapshot = { ...state }

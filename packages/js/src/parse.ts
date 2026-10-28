@@ -874,7 +874,7 @@ export function commitPlainTextPrefix(
     return remainingHtml
   for (let offset = 0; offset < remainingHtml.length; offset++) {
     const code = remainingHtml.charCodeAt(offset)
-    if (code !== SPACE_CHAR && !isAsciiAlpha(code))
+    if (code !== SPACE_CHAR && !isAsciiAlpha(code) && code !== 44 /* comma */)
       return remainingHtml
   }
   const suffix = text.substring(boundary)
