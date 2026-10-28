@@ -6315,3 +6315,170 @@ fn scout9_excluded_list_spacing_options() {
     );
   }
 }
+
+#[test]
+fn quote_boundary_review_regressions() {
+  for (id, html, expected) in [
+    (
+      "Q1-em-sibling",
+      "<ul><li><blockquote>q</blockquote><em></em></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-em-nested",
+      "<ul><li><blockquote>q</blockquote><em></em><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-strong-sibling",
+      "<ul><li><blockquote>q</blockquote><strong></strong></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-strong-nested",
+      "<ul><li><blockquote>q</blockquote><strong></strong><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-code-sibling",
+      "<ul><li><blockquote>q</blockquote><code></code></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-code-nested",
+      "<ul><li><blockquote>q</blockquote><code></code><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-nested-empty",
+      "<ul><li><blockquote>q</blockquote><em><strong> </strong></em></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-nested-tail",
+      "<ul><li><blockquote>q</blockquote><em><strong> </strong></em>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "Q3-ul-br1",
+      "<ul><li><blockquote>q</blockquote><br>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "Q3-ul-br2",
+      "<ul><li><blockquote>q</blockquote><br><br>tail</li></ul>",
+      "- \n  > q  \n    \n  \n  tail",
+    ),
+    (
+      "Q3-ul-br3",
+      "<ul><li><blockquote>q</blockquote><br><br><br>tail</li></ul>",
+      "- \n  > q  \n    \n    \n  \n  tail",
+    ),
+    (
+      "Q3-ol-br1",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br>tail</li></ol>",
+      "10. \n    > q  \n    \n    tail",
+    ),
+    (
+      "Q3-ol-br2",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br><br>tail</li></ol>",
+      "10. \n    > q  \n      \n    \n    tail",
+    ),
+    (
+      "Q3-ol-br3",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br><br><br>tail</li></ol>",
+      "10. \n    > q  \n      \n      \n    \n    tail",
+    ),
+    (
+      "R1-empty-ul",
+      "<ul><li><blockquote>q</blockquote><ul></ul>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R1-empty-ol",
+      "<ul><li><blockquote>q</blockquote><ol></ol>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R1-empty-chain",
+      "<ul><li><blockquote>q</blockquote><ul></ul><ol></ol><span> </span>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R2-empty-caption",
+      "<ul><li><blockquote>q</blockquote><figcaption></figcaption>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R2-caption-br1",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-caption-br2",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n    \n  \n  tail",
+    ),
+    (
+      "R2-caption-br3",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><br><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n    \n    \n  \n  tail",
+    ),
+    (
+      "R2-caption-empty-em",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><em></em></figcaption>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-figure-caption",
+      "<ul><li><blockquote>q</blockquote><figure><figcaption><br></figcaption></figure>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-caption-sibling",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption></li><li>x</li></ul>",
+      "- \n  > q  \n- x",
+    ),
+    (
+      "R2-caption-nested",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption><ul><li>x</li></ul></li></ul>",
+      "- \n  > q  \n  - x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{id}");
+  }
+}
+
+#[test]
+fn quote_boundary_literal_after_alias_review_regression() {
+  let html = "<ul><li><x-first>q</x-first><blockquote>r</blockquote>tail</li></ul>";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![
+        (
+          "x-first".to_string(),
+          TagOverrideConfig {
+            alias_tag_id: mdream::get_tag_id("blockquote"),
+            ..Default::default()
+          },
+        ),
+        (
+          "blockquote".to_string(),
+          TagOverrideConfig {
+            enter: Some("[".to_string()),
+            exit: Some("]".to_string()),
+            spacing: Some([0, 0]),
+            ..Default::default()
+          },
+        ),
+      ]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(html, options.clone()),
+    "- \n  > q\n\n  [r] tail"
+  );
+}

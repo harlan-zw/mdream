@@ -1269,6 +1269,7 @@ impl ConvertState {
       }
       self.last_content_cache_len = 0;
       self.reset_empty_tentative_caption_frames();
+      self.restore_quote_parent_boundary();
       self.last_node_is_inline = is_inline;
       return true;
     }
@@ -1563,9 +1564,15 @@ impl ConvertState {
       });
     }
 
-    if self.caption_boundary == CaptionBoundary::QuoteParent
-      && matches!(tag_id, Some(TAG_UL | TAG_OL | TAG_LI))
+    // Empty list containers emit nothing. Only an actual item replaces the
+    // quote's pending continuation with list structure.
+    if tag_id == Some(TAG_LI)
+      && matches!(
+        self.caption_boundary,
+        CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+      )
     {
+      self.restore_quote_parent_boundary();
       self.caption_boundary = CaptionBoundary::None;
     }
     let caption_active =
@@ -1578,14 +1585,21 @@ impl ConvertState {
       !enter_is_literal && visible_output && tag_id.and_then(Self::inline_marker_type).is_some();
     let tentative_caption_output =
       default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
-    if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
+    let structural_quote = tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal;
+    let tentative_quote_boundary =
+      self.caption_boundary == CaptionBoundary::QuoteParent && tentative_caption_output;
+    if visible_output || structural_quote {
       self.expand_deferred_caption_breaks();
     }
-    let consumes_caption_boundary = if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
-      self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)))
+    let separator_start = self.buffer.len();
+    let consumes_caption_boundary = if visible_output || structural_quote {
+      self.prepare_caption_boundary(tag_id != Some(TAG_LI) && !structural_quote)
     } else {
       false
     };
+    if tentative_quote_boundary {
+      self.caption_boundary = CaptionBoundary::QuoteTentative(self.buffer.len() - separator_start);
+    }
     if visible_output && (tag_id != Some(TAG_BLOCKQUOTE) || enter_is_literal) {
       self.materialize_caption_frames(if caption_enter && enter_is_literal {
         CaptionMaterialization::ExplicitCommit
@@ -1974,6 +1988,7 @@ impl ConvertState {
       }
     }
     self.reset_empty_tentative_caption_frames();
+    self.restore_quote_parent_boundary();
     self.link_caption_break_snapshot_active = false;
     self.link_caption_break_snapshot.clear();
     self.end_link();
@@ -2132,7 +2147,11 @@ impl ConvertState {
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
-      if self.caption_boundary == CaptionBoundary::QuoteParent {
+      if matches!(
+        self.caption_boundary,
+        CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+      ) {
+        self.restore_quote_parent_boundary();
         self.caption_boundary = CaptionBoundary::None;
       }
     }
@@ -3812,6 +3831,27 @@ impl ConvertState {
     }
   }
 
+  // Marker streaming holds already retain the preceding whitespace. Only a
+  // fully dropped wrapper exposes this tentative separator at the buffer tail.
+  #[cold]
+  fn restore_quote_parent_boundary(&mut self) {
+    let CaptionBoundary::QuoteTentative(length) = self.caption_boundary else {
+      return;
+    };
+    if length > 0
+      && length <= self.buffer.len()
+      && self.buffer.as_bytes()[self.buffer.len() - length..]
+        .iter()
+        .all(|&byte| is_whitespace(byte))
+    {
+      self.truncate_buffer(self.buffer.len() - length);
+      self.last_content_cache_len = 0;
+      self.last_text_node_contains_whitespace = false;
+      self.has_last_text_node = false;
+      self.caption_boundary = CaptionBoundary::QuoteParent;
+    }
+  }
+
   #[inline]
   fn prepare_caption_boundary(&mut self, include_list_indent: bool) -> bool {
     let consumes_boundary = self.caption_boundary != CaptionBoundary::None;
@@ -4409,7 +4449,9 @@ impl ConvertState {
         (self.depth_map[TAG_LI as usize] > 0
           && !matches!(
             self.caption_boundary,
-            CaptionBoundary::Pending(_) | CaptionBoundary::QuoteParent
+            CaptionBoundary::Pending(_)
+              | CaptionBoundary::QuoteParent
+              | CaptionBoundary::QuoteTentative(_)
           ))
         .then_some(Cow::Borrowed("\n"))
       }

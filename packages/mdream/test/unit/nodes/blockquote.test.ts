@@ -246,6 +246,65 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     }
   })
 
+  it.each<[string, string, string, Record<string, TagOverride | string>?]>([
+    ['Q1-em-sibling', '<ul><li><blockquote>q</blockquote><em></em></li><li>x</li></ul>', '- \n  > q\n- x'],
+    ['Q1-em-nested', '<ul><li><blockquote>q</blockquote><em></em><ul><li>x</li></ul></li></ul>', '- \n  > q\n  - x'],
+    ['Q1-strong-sibling', '<ul><li><blockquote>q</blockquote><strong></strong></li><li>x</li></ul>', '- \n  > q\n- x'],
+    ['Q1-strong-nested', '<ul><li><blockquote>q</blockquote><strong></strong><ul><li>x</li></ul></li></ul>', '- \n  > q\n  - x'],
+    ['Q1-code-sibling', '<ul><li><blockquote>q</blockquote><code></code></li><li>x</li></ul>', '- \n  > q\n- x'],
+    ['Q1-code-nested', '<ul><li><blockquote>q</blockquote><code></code><ul><li>x</li></ul></li></ul>', '- \n  > q\n  - x'],
+    ['Q1-nested-empty', '<ul><li><blockquote>q</blockquote><em><strong> </strong></em></li><li>x</li></ul>', '- \n  > q\n- x'],
+    ['Q1-nested-tail', '<ul><li><blockquote>q</blockquote><em><strong> </strong></em>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['Q2-literal', '<ul><li><x-first>q</x-first><blockquote>r</blockquote>tail</li></ul>', '- \n  > q\n\n  [r] tail', { 'x-first': 'blockquote', 'blockquote': { enter: '[', exit: ']', spacing: [0, 0] } }],
+    ['Q3-ul-br1', '<ul><li><blockquote>q</blockquote><br>tail</li></ul>', '- \n  > q  \n  \n  tail'],
+    ['Q3-ul-br2', '<ul><li><blockquote>q</blockquote><br><br>tail</li></ul>', '- \n  > q  \n    \n  \n  tail'],
+    ['Q3-ul-br3', '<ul><li><blockquote>q</blockquote><br><br><br>tail</li></ul>', '- \n  > q  \n    \n    \n  \n  tail'],
+    ['Q3-ol-br1', '<ol start="10"><li><blockquote>q</blockquote><br>tail</li></ol>', '10. \n    > q  \n    \n    tail'],
+    ['Q3-ol-br2', '<ol start="10"><li><blockquote>q</blockquote><br><br>tail</li></ol>', '10. \n    > q  \n      \n    \n    tail'],
+    ['Q3-ol-br3', '<ol start="10"><li><blockquote>q</blockquote><br><br><br>tail</li></ol>', '10. \n    > q  \n      \n      \n    \n    tail'],
+    ['R1-empty-ul', '<ul><li><blockquote>q</blockquote><ul></ul>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['R1-empty-ol', '<ul><li><blockquote>q</blockquote><ol></ol>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['R1-empty-chain', '<ul><li><blockquote>q</blockquote><ul></ul><ol></ol><span> </span>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['R2-empty-caption', '<ul><li><blockquote>q</blockquote><figcaption></figcaption>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['R2-caption-br1', '<ul><li><blockquote>q</blockquote><figcaption><br></figcaption>tail</li></ul>', '- \n  > q  \n  \n  tail'],
+    ['R2-caption-br2', '<ul><li><blockquote>q</blockquote><figcaption><br><br></figcaption>tail</li></ul>', '- \n  > q  \n    \n  \n  tail'],
+    ['R2-caption-br3', '<ul><li><blockquote>q</blockquote><figcaption><br><br><br></figcaption>tail</li></ul>', '- \n  > q  \n    \n    \n  \n  tail'],
+    ['R2-caption-empty-em', '<ul><li><blockquote>q</blockquote><figcaption><br><em></em></figcaption>tail</li></ul>', '- \n  > q  \n  \n  tail'],
+    ['R2-figure-caption', '<ul><li><blockquote>q</blockquote><figure><figcaption><br></figcaption></figure>tail</li></ul>', '- \n  > q  \n  \n  tail'],
+    ['R2-caption-sibling', '<ul><li><blockquote>q</blockquote><figcaption><br></figcaption></li><li>x</li></ul>', '- \n  > q  \n- x'],
+    ['R2-caption-nested', '<ul><li><blockquote>q</blockquote><figcaption><br></figcaption><ul><li>x</li></ul></li></ul>', '- \n  > q  \n  - x'],
+  ])('repairs quote boundary %s at every width and split', async (_id, html, expected, tagOverrides) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = tagOverrides ? { plugins: { tagOverrides } } : undefined
+    expect(htmlToMarkdown(html, { ...options, engine })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        actual += chunk
+      expect(actual, `width ${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        actual += chunk
+      expect(actual, `split ${split}`).toBe(expected)
+    }
+  })
+
   it('keeps representative quote structure across every stream split', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>'

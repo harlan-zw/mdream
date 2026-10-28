@@ -211,6 +211,7 @@ enum CaptionBoundary {
   None,
   Pending(u8),
   QuoteParent,
+  QuoteTentative(usize),
   ConsumeSpace,
 }
 
