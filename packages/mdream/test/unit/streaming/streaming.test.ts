@@ -46,6 +46,12 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
     '<blockquote><div>x</div>tail</blockquote>',
     '<ul><li><blockquote>x</blockquote></li></ul>',
   ].map(html => ({ html, options: { plugins: { tagOverrides: { blockquote: 'div' } } } })),
+  ...([
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'script'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'style'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'textarea'],
+    ['<script><b>x</b></script><p>tail</p>', 'script', 'div'],
+  ] as const).map(([html, source, target]) => ({ html, options: { plugins: { tagOverrides: { [source]: target } } } })),
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',

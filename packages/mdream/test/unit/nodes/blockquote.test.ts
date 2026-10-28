@@ -14,6 +14,15 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     expect(engineConfig.engine.htmlToMarkdown(html, { plugins: { tagOverrides: { blockquote: 'div' } } })).toBe(expected)
   })
 
+  it.each([
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'script', 'tail'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'style', 'tail'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'textarea', 'x\n\ntail'],
+    ['<script><b>x</b></script><p>tail</p>', 'script', 'div', '**x**\n\ntail'],
+  ])('preserves raw-text alias boundaries: %s (%s to %s)', (html, source, target, expected) => {
+    expect(engineConfig.engine.htmlToMarkdown(html, { plugins: { tagOverrides: { [source]: target } } })).toBe(expected)
+  })
+
   it('converts blockquotes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote>This is a quote</blockquote>'
