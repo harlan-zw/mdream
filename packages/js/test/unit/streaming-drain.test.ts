@@ -1,6 +1,6 @@
 import type { ParseState } from '../../src/parse'
 import type { MdreamOptions, TransformPlugin } from '../../src/types'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor, noteListTailRewrite } from '../../src/markdown-processor'
 import { createMarkdownDrain } from '../../src/markdown-stream'
@@ -8,6 +8,7 @@ import { finalizeParse, parseHtmlStream } from '../../src/parse'
 import { processPluginsForEvent } from '../../src/plugin-processor'
 import { createPlugin, filterPlugin } from '../../src/plugins'
 import { tagHandlers } from '../../src/tags'
+import * as markerUtils from '../../src/utils'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
   return new ReadableStream({
@@ -474,4 +475,107 @@ it.each(['rewrite', 'truncate', 'compact'])('rescans retained list tails after %
   settle()
   expect(state.listTailStart).toBeUndefined()
   expect(state.emptyListMarkerFragment).toBeUndefined()
+})
+
+describe('recorded parent markers', () => {
+  it.each(['text-', 'text.'])('keeps plugin prose ending in a marker separate: %s', async (value) => {
+    const html = '<ul><li><ul><li></li></ul></li></ul>'
+    const options = { plugins: [createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'li' && !node.parent?.parent)
+          return value
+      },
+    })] }
+    const expected = `${value}\n\n  -`
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width, options), `width=${width}`).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options)) actual += chunk
+      expect(actual, `split=${split}`).toBe(expected)
+    }
+    const prefix = `<p>${'lead '.repeat(2000)}</p>`
+    const longExpected = `${'lead '.repeat(2000).trim()}\n\n${expected}`
+    for (const width of [1, 7, 4096])
+      expect(await streamConvert(prefix + html, width, options)).toBe(longExpected)
+  })
+  it.each(['- ', '10. '])('recognizes a genuine marker supplied by a plugin: %s', async (value) => {
+    const html = '<ul><li><ul><li></li></ul></li></ul>'
+    const options = { plugins: [createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'li' && !node.parent?.parent)
+          return value
+      },
+    })] }
+    const expected = `${value.trimEnd()}\n  -`
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    expect(await streamConvert(html, 1, options)).toBe(expected)
+  })
+
+  it('skips repeated parent-indent recognition at depth 50 and 200', () => {
+    const spy = vi.spyOn(markerUtils, 'listMarkerLineStart')
+    try {
+      for (const depth of [50, 200]) {
+        spy.mockClear()
+        htmlToMarkdown('<ul><li>'.repeat(depth))
+        expect(spy.mock.calls.length, `depth=${depth}`).toBeLessThanOrEqual(1)
+      }
+    }
+    finally {
+      spy.mockRestore()
+    }
+  })
+  it('asserts expected nested Markdown for every chunk width and split', async () => {
+    const cases = [
+      ['<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>', '-\n  -\n    - \\# h'],
+      ['<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>', '-\n  -\n    - | a |\n      | --- |'],
+      ['<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>', '-\n  -\n    - ***'],
+      ['<ul><li><ul><li></li></ul></li></ul>', '-\n  -'],
+      ['<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-\n  - \n    > q'],
+    ] as const
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html)).toBe(expected)
+      for (let width = 1; width <= html.length; width++)
+        expect(await streamConvert(html, width)).toBe(expected)
+      for (let split = 0; split <= html.length; split++) {
+        const stream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of streamHtmlToMarkdown(stream)) output += chunk
+        expect(output, `split=${split}`).toBe(expected)
+      }
+    }
+  })
+  it('preserves deep marker bytes in ancestor contexts', async () => {
+    for (const depth of [50, 200]) {
+      for (const [open, close, marker] of [['<ul><li>', '</li></ul>', '-'], ['<ol start="10"><li>', '</li></ol>', '10.']] as const) {
+        const body = `${open.repeat(depth)}# h${close.repeat(depth)}`
+        const expected = `${Array.from({ length: depth }, (_, level) => ' '.repeat(level * (marker.length + 1)) + marker).join('\n')} \\# h`
+        for (const [prefix, suffix, rendered] of [
+          ['', '', expected],
+          ['<div>', '</div>', expected],
+          ['<blockquote>', '</blockquote>', expected.split('\n').map(line => `> ${line}`).join('\n')],
+          [`<p>${'x'.repeat(9000)}</p>`, '', `${'x'.repeat(9000)}\n\n${expected}`],
+        ]) {
+          const html = prefix + body + suffix
+          expect(htmlToMarkdown(html), `depth=${depth}`).toBe(rendered)
+          for (const width of [1, 7, 64, 4096])
+            expect(await streamConvert(html, width), `depth=${depth}, width=${width}`).toBe(rendered)
+        }
+      }
+    }
+  })
 })

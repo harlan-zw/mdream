@@ -3289,6 +3289,8 @@ impl ConvertState {
       self.resolve_item_marker(true);
       output_start += self.buffer.len() - before;
     }
+    let parent_marker_end = self.last_item_marker_end;
+    self.last_item_marker_end = usize::MAX;
     // Only a list's first item can follow a paragraph, so every later sibling
     // skips the line scan below.
     if index != 0 {
@@ -3318,20 +3320,45 @@ impl ConvertState {
     };
     let starts_document = line_start == 0 && !self.has_streamed_output;
     let blank_above = before(1) != b'\n' || before(2) == b'\n';
+    // Cache only a built-in marker actually written on its own line. Literal
+    // overrides, raw HTML and a cap rejecting output cannot create a shortcut.
+    let marker_end = self.buffer.trim_end_matches(' ').len();
+    if (starts_document || before(1) == b'\n')
+      && self.buffer.len() > output_start
+      && bytes
+        .get(marker_end.wrapping_sub(1))
+        .is_some_and(|byte| matches!(byte, b'-' | b'.' | b')'))
+    {
+      self.last_item_marker_end = marker_end;
+    }
     // A parent's bare marker is no paragraph, and a blank line under it would
     // end that item and turn this one into its sibling. A marker outside the
     // innermost blockquote keeps the blank line it already had, which the
     // quote's prefix makes harmless.
-    let mut above_end = line_start.saturating_sub(1);
-    while above_end > 0 && bytes[above_end - 1] == b' ' {
-      above_end -= 1;
-    }
-    let follows_marker = above_end > 0
-      && self
+    let above_end = line_start.saturating_sub(1);
+    let follows_marker = if starts_document || blank_above {
+      false
+    } else if above_end > 0 && above_end == parent_marker_end {
+      self
         .blockquotes
         .last()
         .is_none_or(|frame| above_end > frame.content_start)
-      && self.list_marker_line_start(bytes, above_end);
+    } else {
+      #[cfg(test)]
+      {
+        self.parent_marker_scans += 1;
+      }
+      let mut above_end = above_end;
+      while above_end > 0 && bytes[above_end - 1] == b' ' {
+        above_end -= 1;
+      }
+      above_end > 0
+        && self
+          .blockquotes
+          .last()
+          .is_none_or(|frame| above_end > frame.content_start)
+        && self.list_marker_line_start(bytes, above_end)
+    };
     self.empty_item_hazard = !starts_document && !blank_above && !follows_marker;
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
@@ -3485,6 +3512,9 @@ impl ConvertState {
     }
     if self.list_tail_start != usize::MAX && self.list_tail_start >= at {
       self.list_tail_start += 1;
+    }
+    if self.last_item_marker_end != usize::MAX && self.last_item_marker_end >= at {
+      self.last_item_marker_end += 1;
     }
     for marker in &mut self.open_markers {
       if marker.output_start >= at {
@@ -5579,6 +5609,20 @@ impl ConvertState {
 mod tests {
   use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P, push_decimal};
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
+
+  #[test]
+  fn bare_parent_markers_skip_indent_recognition_at_depth() {
+    for depth in [50, 200] {
+      let mut state =
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      state.process_html(&"<ul><li>".repeat(depth));
+      assert!(
+        state.parent_marker_scans <= 1,
+        "depth={depth}: {} parent scans",
+        state.parent_marker_scans
+      );
+    }
+  }
 
   #[test]
   fn push_decimal_matches_display() {
