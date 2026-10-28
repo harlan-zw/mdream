@@ -1583,11 +1583,9 @@ impl ConvertState {
       }
     }
 
-    if self
-      .stack
-      .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none())
-    {
+    if self.stack.last().is_some_and(|node| {
+      node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none_or(|name| name == "script")
+    }) {
       match self.process_script_chunk(chunk, i) {
         ScriptChunk::Closed(close_index) => i = close_index,
         // Only the partial `</scr…` is carried, never the script text.
@@ -1846,18 +1844,16 @@ impl ConvertState {
             peek_end += 1;
           }
           let peek_name = &chunk[peek_start..peek_end];
-          let current_tag_id = self.stack.last().and_then(|curr| curr.tag_id);
+          let current_name = self.stack.last().map(|node| node.name());
           if peek_end == chunk_length
-            && current_tag_id
-              .is_some_and(|tag_id| can_complete_raw_end_tag(peek_name, TAG_NAMES[tag_id as usize]))
+            && current_name.is_some_and(|name| can_complete_raw_end_tag(peek_name, name))
           {
             run_start = i;
             carry = true;
             carry_bounded = true;
             break;
           }
-          let peek_tag_id = crate::consts::get_tag_id_ci_bytes(peek_name.as_bytes());
-          if current_tag_id.is_some_and(|tag_id| Some(tag_id) == peek_tag_id) {
+          if current_name.is_some_and(|name| name.eq_ignore_ascii_case(peek_name)) {
             // Matching closing tag: fall through to normal closing tag processing
             self.complete_text_node(&mut text_buffer);
             if self.held_output_exceeded {
@@ -2090,7 +2086,7 @@ impl ConvertState {
             self.just_closed_tag = true;
           } else {
             self.is_first_text_in_element = true;
-            if builtin_tag_id == Some(TAG_SCRIPT) {
+            if builtin_tag_id == Some(TAG_SCRIPT) && tag_id == Some(TAG_SCRIPT) {
               match self.process_script_chunk(chunk, i) {
                 ScriptChunk::Closed(close_index) => i = close_index,
                 // Only the partial `</scr…` is carried, never the script text.
@@ -2443,10 +2439,9 @@ impl ConvertState {
   /// end tag, so the residual is text unless it is an appropriate end tag that
   /// already reached a tag state.
   pub fn finalize(&mut self, leftover: &str) {
-    let in_script = self
-      .stack
-      .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none());
+    let in_script = self.stack.last().is_some_and(|node| {
+      node.tag_id == Some(TAG_SCRIPT) && node.custom_name().is_none_or(|name| name == "script")
+    });
     // A rawtext residual continues the text run already pending, so it has to
     // join that buffer rather than be flushed as a second text node: two nodes
     // are separated by a space this text never contained.
