@@ -6147,6 +6147,10 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 fn nested_ordered_start_separates_parent_paragraph() {
   for (html, expected) in [
     (
+      "<ul><li>x<br><ol start=\"10\"><script>s</script><li>y</li><template>t</template><li>z</li></ol></li></ul>",
+      "- x  \n\n  10. y\n  11. z",
+    ),
+    (
       "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
       "- x\n\n  10. y",
     ),

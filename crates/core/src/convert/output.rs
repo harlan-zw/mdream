@@ -5156,10 +5156,10 @@ impl ConvertState {
     }
     // Only a list starting at 1 may interrupt its parent's paragraph. A bare
     // parent marker has no paragraph to separate, so keep that list tight.
-    if !plain_text!(self)
-      && is_enter
+    if self.depth_map[TAG_LI as usize] > 1
       && tag_id == Some(TAG_LI)
-      && self.depth_map[TAG_LI as usize] > 1
+      && is_enter
+      && !plain_text!(self)
       && self.stack.last().is_some_and(|node| node.index == 0)
       && self
         .stack
