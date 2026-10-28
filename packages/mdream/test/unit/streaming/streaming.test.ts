@@ -6,6 +6,10 @@ const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
 const BYTE_PARITY_CASES = [
+  '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
+  '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
+  '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
+  '<ul><li>a</li><template>hidden</template><li>b</li></ul>',
   '<ul><li><hr><blockquote><br></blockquote>tail</li></ul>',
   '<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>',
   '<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>',
@@ -361,5 +365,90 @@ describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
       expect(markdown).toContain('# Main Content')
       expect(markdown).toContain('This is the main content.')
     })
+  })
+})
+
+describe('scout9_excluded_list_spacing streaming', () => {
+  it.each([
+    [
+      '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
+      '- a\n- b',
+    ],
+    [
+      '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
+      '- a\n- b',
+    ],
+    [
+      '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
+      '- a\n- b',
+    ],
+    [
+      '<ul><li>a</li><template>hidden</template><li>b</li></ul>',
+      '- a\n- b',
+    ],
+  ])('matches every split and chunk width: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      const options = {}
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream, options))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
+  })
+})
+
+describe('scout9_excluded_list_spacing option streaming', () => {
+  it.each(['alias', 'filter', 'spacing'])('preserves %s controls at every split and chunk width', async (kind) => {
+    for (const { engine, name } of engines) {
+      const html = kind === 'alias'
+        ? '<ul><li>a</li><x-text>visible</x-text><li>b</li></ul>'
+        : kind === 'filter'
+          ? '<ul><li>a</li><div class=hide>hidden</div><li>b</li></ul>'
+          : '<ul><li>a</li><script>visible</script><li>b</li></ul>'
+      const options: Parameters<typeof engine.htmlToMarkdown>[1] = kind === 'alias'
+        ? { plugins: { tagOverrides: { 'x-text': 'em' } } }
+        : kind === 'filter'
+          ? { plugins: { filter: { exclude: ['.hide'] } } }
+          : { plugins: { tagOverrides: { script: { spacing: [2, 2] } } } }
+      const expected = kind === 'alias' ? '- a*visible*\n- b' : kind === 'filter' ? '- a\n- b' : '- a\n\n- b'
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream, options))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
   })
 })
