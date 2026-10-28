@@ -7,11 +7,8 @@ import path from 'node:path'
 import { negotiateContent } from '@mdream/js/negotiate'
 import { htmlToMarkdown } from 'mdream'
 
-const GLOB_BACKSLASH_RE = /\\/g
-const GLOB_DOT_RE = /\./g
-const GLOB_DOUBLE_STAR_RE = /\*\*/g
-const GLOB_STAR_RE = /\*/g
-const GLOB_QUESTION_RE = /\?/g
+const GLOB_REGEX_SPECIAL_RE = /[\\^$+.[\]{}()|]/g
+const GLOB_WILDCARD_RE = /\*\*\/|\*\*|\*|\?/g
 const ENCODED_PATH_SEPARATOR_RE = /%(2f|5c)/gi
 
 /**
@@ -57,6 +54,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
     ...options.mdreamOptions,
   }
   const markdownCache = new Map<string, CacheEntry>()
+  const patternCache = new Map<string, RegExp>()
 
   function log(message: string) {
     if (options.verbose) {
@@ -191,15 +189,22 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
   function matchesPattern(fileName: string, patterns: string[]): boolean {
     return patterns.some((pattern) => {
-      // Simple glob pattern matching - convert to regex
-      const regexPattern = pattern
-        .replace(GLOB_BACKSLASH_RE, '\\\\') // Escape backslashes first
-        .replace(GLOB_DOT_RE, '\\.') // Escape literal dots
-        .replace(GLOB_DOUBLE_STAR_RE, '.*') // ** matches anything including /
-        .replace(GLOB_STAR_RE, '[^/]*') // * matches filename chars except /
-        .replace(GLOB_QUESTION_RE, '.') // ? matches any single char
+      let regex = patternCache.get(pattern)
+      if (!regex) {
+        const regexPattern = pattern
+          .replace(GLOB_REGEX_SPECIAL_RE, '\\$&')
+          .replace(GLOB_WILDCARD_RE, (wildcard) => {
+            switch (wildcard) {
+              case '**/': return '(?:.*/)?'
+              case '**': return '.*'
+              case '*': return '[^/]*'
+              default: return '[^/]'
+            }
+          })
 
-      const regex = new RegExp(`^${regexPattern}$`)
+        regex = new RegExp(`^${regexPattern}$`)
+        patternCache.set(pattern, regex)
+      }
       return regex.test(fileName)
     })
   }
@@ -302,6 +307,7 @@ export function viteHtmlToMarkdownPlugin(userOptions: ViteHtmlToMarkdownOptions 
 
     // Build-time processing - generate static markdown files
     generateBundle(_outputOptions, bundle) {
+      patternCache.clear()
       const htmlFiles = Object.entries(bundle).filter(([fileName, file]) => {
         return (
           fileName.endsWith('.html')

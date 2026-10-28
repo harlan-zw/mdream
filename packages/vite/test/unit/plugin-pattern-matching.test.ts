@@ -2,6 +2,114 @@ import { describe, expect, it, vi } from 'vitest'
 import { viteHtmlToMarkdownPlugin } from '../../src/plugin.js'
 
 describe('viteHtmlToMarkdownPlugin - Pattern Matching', () => {
+  it.each([
+    ['index.html', ['index.html', 'about.html'], ['index.md']],
+    ['**/nested/*.html', ['deep/nested/file.html', 'deep/other/file.html'], ['deep/nested/file.md']],
+    ['dist/**/*.html', ['dist/pages/test.html', 'src/pages/test.html'], ['dist/pages/test.md']],
+    ['pages/*.html', ['pages/about.html', 'docs/guide.html'], ['pages/about.md']],
+  ])('matches %s through bundle generation', (pattern, files, expected) => {
+    const plugin = viteHtmlToMarkdownPlugin({ include: [pattern], exclude: [] }) as any
+    const bundle = Object.fromEntries(files.map(fileName => [fileName, { type: 'asset', source: '<h1>Page</h1>' }]))
+    const emitFile = vi.fn()
+
+    plugin.generateBundle.call({ emitFile }, {}, bundle)
+
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual(expected)
+  })
+
+  it('compiles each visited pattern once per bundle', () => {
+    const plugin = viteHtmlToMarkdownPlugin({
+      include: ['docs/*.html', '*.html'],
+      exclude: ['docs/private*.html', '*.html', 'docs/*.html'],
+    }) as any
+    const bundle = Object.fromEntries([
+      'index.html',
+      'docs/a.html',
+      'docs/b.html',
+      'docs/private.html',
+    ].map(fileName => [fileName, { type: 'asset', source: '<h1>Page</h1>' }]))
+    const emitFile = vi.fn()
+    const regexSpy = vi.spyOn(globalThis, 'RegExp')
+
+    try {
+      plugin.generateBundle.call({ emitFile }, {}, bundle)
+      expect(regexSpy).toHaveBeenCalledTimes(3)
+      regexSpy.mockClear()
+      plugin.generateBundle.call({ emitFile }, {}, bundle)
+      expect(regexSpy).toHaveBeenCalledTimes(3)
+      expect(emitFile).not.toHaveBeenCalled()
+    }
+    finally {
+      regexSpy.mockRestore()
+    }
+  })
+
+  it('uses changed include and exclude arrays on subsequent bundles', () => {
+    const include = ['first.html']
+    const exclude = ['second.html']
+    const plugin = viteHtmlToMarkdownPlugin({ include, exclude }) as any
+    const bundle = Object.fromEntries(['first.html', 'second.html'].map(fileName => [
+      fileName,
+      { type: 'asset', source: '<h1>Page</h1>' },
+    ]))
+    const emitFile = vi.fn()
+    include[0] = 'second.html'
+    exclude[0] = 'first.html'
+
+    plugin.generateBundle.call({ emitFile }, {}, bundle)
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual(['second.md'])
+
+    include[0] = 'first.html'
+    exclude[0] = 'second.html'
+    emitFile.mockClear()
+    plugin.generateBundle.call({ emitFile }, {}, bundle)
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual(['first.md'])
+  })
+
+  it.each([undefined, ['**/*.html']])('matches root and nested HTML with include %j', (include) => {
+    const plugin = viteHtmlToMarkdownPlugin(include ? { include } : {}) as any
+    const mockBundle = Object.fromEntries([
+      'index.html',
+      'docs/guide.html',
+      'docs/api/page.html',
+      'node_modules/example/index.html',
+      'docs/node_modules/example/nested/page.html',
+    ].map(fileName => [fileName, { type: 'asset', source: '<h1>Page</h1>' }]))
+    const emitFile = vi.fn()
+
+    plugin.generateBundle.call({ emitFile }, {}, mockBundle)
+
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual([
+      'index.md',
+      'docs/guide.md',
+      'docs/api/page.md',
+    ])
+  })
+
+  it('matches zero or more directories in include and exclude patterns', () => {
+    const plugin = viteHtmlToMarkdownPlugin({
+      include: ['docs/**/*.html'],
+      exclude: ['docs/**/private/**'],
+    }) as any
+    const mockBundle = Object.fromEntries([
+      'index.html',
+      'docs/guide.html',
+      'docs/api/page.html',
+      'docs/api/v2/page.html',
+      'docs/private/page.html',
+      'docs/api/private/nested/page.html',
+    ].map(fileName => [fileName, { type: 'asset', source: '<h1>Page</h1>' }]))
+    const emitFile = vi.fn()
+
+    plugin.generateBundle.call({ emitFile }, {}, mockBundle)
+
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual([
+      'docs/guide.md',
+      'docs/api/page.md',
+      'docs/api/v2/page.md',
+    ])
+  })
+
   it('should match simple glob patterns with *', () => {
     const plugin = viteHtmlToMarkdownPlugin({
       include: ['*.html'],
@@ -58,6 +166,7 @@ describe('viteHtmlToMarkdownPlugin - Pattern Matching', () => {
       'page2.html': { type: 'asset', source: '<html><body>Page2</body></html>' },
       'pageAB.html': { type: 'asset', source: '<html><body>PageAB</body></html>' },
       'page.html': { type: 'asset', source: '<html><body>Page</body></html>' },
+      'page/.html': { type: 'asset', source: '<html><body>Nested</body></html>' },
     }
 
     const mockEmitFile = vi.fn()
@@ -69,6 +178,49 @@ describe('viteHtmlToMarkdownPlugin - Pattern Matching', () => {
     expect(mockEmitFile).toHaveBeenCalledTimes(2)
     expect(mockEmitFile).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'page1.md' }))
     expect(mockEmitFile).toHaveBeenCalledWith(expect.objectContaining({ fileName: 'page2.md' }))
+  })
+
+  it('does not let ? cross directories in exclude patterns', () => {
+    const plugin = viteHtmlToMarkdownPlugin({ exclude: ['docs?page.html'] }) as any
+    const mockBundle = {
+      'docs/page.html': { type: 'asset', source: '<h1>Nested</h1>' },
+      'docs-page.html': { type: 'asset', source: '<h1>Root</h1>' },
+    }
+    const emitFile = vi.fn()
+
+    plugin.generateBundle.call({ emitFile }, {}, mockBundle)
+
+    expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual(['docs/page.md'])
+  })
+
+  it.each([
+    ['c++.html', 'cc.html'],
+    ['page(1).html', 'page1.html'],
+    ['page[1].html', 'page1.html'],
+    ['page{2}.html', 'pagee.html'],
+    ['^page.html', 'page.html'],
+    ['page$.html', 'page.html'],
+    ['page|other.html', 'other.html'],
+    ['page(.html', 'page.html'],
+    ['page[.html', 'page.html'],
+  ])('treats %s literally in include and exclude patterns', (literal, other) => {
+    for (const shouldExclude of [false, true]) {
+      const plugin = viteHtmlToMarkdownPlugin({
+        include: shouldExclude ? ['*.html'] : [literal],
+        exclude: shouldExclude ? [literal] : [],
+      }) as any
+      const mockBundle = {
+        [literal]: { type: 'asset', source: '<h1>Literal</h1>' },
+        [other]: { type: 'asset', source: '<h1>Other</h1>' },
+      }
+      const emitFile = vi.fn()
+
+      plugin.generateBundle.call({ emitFile }, {}, mockBundle)
+
+      expect(emitFile.mock.calls.map(([file]) => file.fileName)).toEqual([
+        (shouldExclude ? other : literal).replace('.html', '.md'),
+      ])
+    }
   })
 
   it('should respect exclude patterns', () => {
