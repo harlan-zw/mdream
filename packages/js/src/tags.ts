@@ -451,10 +451,12 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_SCRIPT]: {
     excludesTextNodes: true,
     isNonNesting: true,
+    spacing: NO_SPACING,
   },
   [TAG_STYLE]: {
     isNonNesting: true,
     excludesTextNodes: true,
+    spacing: NO_SPACING,
   },
   [TAG_META]: {
     // No special handling for meta - plugins will handle frontmatter

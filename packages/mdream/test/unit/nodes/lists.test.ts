@@ -208,3 +208,36 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 })
+
+describe.each(engines)('scout9_excluded_list_spacing $name', (engineConfig) => {
+  it.each([
+    [
+      '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
+      '- a\n- b',
+    ],
+    [
+      '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
+      '- a\n- b',
+    ],
+    [
+      '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
+      '- a\n- b',
+    ],
+    [
+      '<ul><li>a</li><template>hidden</template><li>b</li></ul>',
+      '- a\n- b',
+    ],
+  ])('preserves structure: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('scout9_excluded_list_spacing options $name', (engineConfig) => {
+  it('preserves visible aliases while respecting filters and explicit spacing', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<ul><li>a</li><x-text>visible</x-text><li>b</li></ul>', { engine, plugins: { tagOverrides: { 'x-text': 'em' } } })).toBe('- a*visible*\n- b')
+    expect(htmlToMarkdown('<ul><li>a</li><div class=hide>hidden</div><li>b</li></ul>', { engine, plugins: { filter: { exclude: ['.hide'] } } })).toBe('- a\n- b')
+    expect(htmlToMarkdown('<ul><li>a</li><script>hidden</script><li>b</li></ul>', { engine, plugins: { tagOverrides: { script: { spacing: [2, 2] } } } })).toBe('- a\n\n- b')
+  })
+})
