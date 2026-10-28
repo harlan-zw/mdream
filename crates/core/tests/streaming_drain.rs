@@ -3782,7 +3782,7 @@ fn quote_block_fragments_own_their_boundary() {
     (
       "empty-pre-code-sibling",
       "<ul><li><blockquote>q</blockquote><pre><code></code></pre></li><li>x</li></ul>",
-      "- \n  > q\n\n  ```\n  \n  ```\n\n- x",
+      "- \n  > q\n\n  ```\n\n  ```\n\n- x",
     ),
     (
       "empty-pre-tail",
