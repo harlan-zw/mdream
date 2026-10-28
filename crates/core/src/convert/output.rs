@@ -1419,8 +1419,10 @@ impl ConvertState {
       return;
     }
 
-    let writes = configured_new_lines > 0 || output.as_deref().is_some_and(|o| !o.is_empty());
-    self.release_markers_on_exit(!is_inline && writes, output.as_deref());
+    if !self.open_markers.is_empty() {
+      let writes = configured_new_lines > 0 || output.as_deref().is_some_and(|o| !o.is_empty());
+      self.release_markers_on_exit(!is_inline && writes, output.as_deref());
+    }
 
     let output_start = self.buffer.len();
     self.write_output(
@@ -1970,10 +1972,10 @@ impl ConvertState {
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.
     // An element that writes nothing, like a dropped `<svg>`, is no boundary.
-    if tag_id.is_some()
+    if !self.open_markers.is_empty()
+      && tag_id.is_some()
       && !is_inline
       && (configured_new_lines > 0 || has_own_output)
-      && !self.open_markers.is_empty()
     {
       self.open_markers.clear();
     }
@@ -2542,11 +2544,13 @@ impl ConvertState {
       return;
     }
 
-    let writes = configured_new_lines > 0 || output.as_deref().is_some_and(|o| !o.is_empty());
-    self.release_markers_on_exit(
-      has_override || (tag_id.is_some() && !is_inline && writes),
-      output.as_deref(),
-    );
+    if !self.open_markers.is_empty() {
+      let writes = configured_new_lines > 0 || output.as_deref().is_some_and(|o| !o.is_empty());
+      self.release_markers_on_exit(
+        has_override || (tag_id.is_some() && !is_inline && writes),
+        output.as_deref(),
+      );
+    }
 
     if let Some(span) = closing_code_span {
       // An explicit exit override replaces the default closing delimiter, but
@@ -2852,7 +2856,10 @@ impl ConvertState {
       };
 
     let mut add_space = self.should_add_spacing_before_text(last_char, text);
-    if (add_space || text.starts_with(' ')) && self.hoist_opener_space() {
+    if !self.open_markers.is_empty()
+      && (add_space || text.starts_with(' '))
+      && self.hoist_opener_space()
+    {
       text = text.trim_start_matches(' ');
       if text.is_empty() {
         self.return_escape_scratch(escape_scratch);
