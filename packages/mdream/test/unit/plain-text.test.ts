@@ -9,6 +9,37 @@ async function collect(stream: AsyncIterable<string>): Promise<string> {
 }
 
 describe.each(engines)('plain text output $name', (engineConfig) => {
+  it.each([
+    ['<ul><li>a</li><script>hidden</script><li>b</li></ul>', 'a\nb'],
+    ['<ul><li>a</li><style>hidden</style><li>b</li></ul>', 'a\nb'],
+    ['a<script>hidden</script>b', 'a b'],
+    ['a<style>hidden</style>b', 'a b'],
+  ])('keeps inert script and style spacing consistent: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, format: 'text' as const }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      expect(await collect(streamHtmlToMarkdown(input, options))).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      expect(await collect(streamHtmlToMarkdown(input, options))).toBe(expected)
+    }
+  })
+
   it('omits markdown markup from common document structure', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<h1>Hello <em>World</em></h1><p>Visit <a href="https://example.com">Example</a> and <strong>read</strong>.</p><ul><li>One</li><li>Two</li></ul>'
