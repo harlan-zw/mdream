@@ -76,3 +76,12 @@ describe('performance report', () => {
     })
   })
 })
+
+it('marks changed output while retaining the measurements and verdict', () => {
+  const row = { id: 'cpu', name: 'Page CPU', kind: 'time' as const, value: 100 }
+  const report = renderPerfReport({ benches: [row] }, { benches: [{ ...row, value: 150, outputChanged: true }] })
+  expect(report).toContain('Page CPU (output changed)')
+  expect(report).toContain('150.00 ms')
+  expect(report).toContain('1 slower')
+  expect(report).toContain('Measurements marked "output changed" compare different output or metadata between base and PR.')
+})
