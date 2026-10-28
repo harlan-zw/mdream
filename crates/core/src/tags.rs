@@ -76,11 +76,13 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   t[TAG_SCRIPT as usize] = Some(TagHandler {
     excludes_text_nodes: true,
     is_non_nesting: true,
+    spacing: Some(NO_SPACING),
     ..NONE
   });
   t[TAG_STYLE as usize] = Some(TagHandler {
     is_non_nesting: true,
     excludes_text_nodes: true,
+    spacing: Some(NO_SPACING),
     ..NONE
   });
   t[TAG_META as usize] = Some(TagHandler {
