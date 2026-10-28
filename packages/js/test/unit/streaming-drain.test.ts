@@ -327,6 +327,48 @@ describe('streaming drain parity', () => {
 })
 
 describe('recorded parent markers', () => {
+  it.each(['text-', 'text.'])('keeps plugin prose ending in a marker separate: %s', async (value) => {
+    const html = '<ul><li><ul><li></li></ul></li></ul>'
+    const options = { plugins: [createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'li' && !node.parent?.parent)
+          return value
+      },
+    })] }
+    const expected = `${value}\n\n  -`
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width, options), `width=${width}`).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options)) actual += chunk
+      expect(actual, `split=${split}`).toBe(expected)
+    }
+    const prefix = `<p>${'lead '.repeat(2000)}</p>`
+    const longExpected = `${'lead '.repeat(2000).trim()}\n\n${expected}`
+    for (const width of [1, 7, 4096])
+      expect(await streamConvert(prefix + html, width, options)).toBe(longExpected)
+  })
+  it.each(['- ', '10. '])('recognizes a genuine marker supplied by a plugin: %s', async (value) => {
+    const html = '<ul><li><ul><li></li></ul></li></ul>'
+    const options = { plugins: [createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'li' && !node.parent?.parent)
+          return value
+      },
+    })] }
+    const expected = `${value.trimEnd()}\n  -`
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    expect(await streamConvert(html, 1, options)).toBe(expected)
+  })
+
   it('skips repeated parent-indent recognition at depth 50 and 200', () => {
     const spy = vi.spyOn(markerUtils, 'listMarkerLineStart')
     try {

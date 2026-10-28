@@ -2366,7 +2366,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter) {
-        recordItemMarker(state, element, !handler?.literalEnter && !element.pluginOutput)
+        recordItemMarker(state, element, !handler?.literalEnter && !hasPluginOutput)
       }
       else {
         resolveItemMarker(state, true)
