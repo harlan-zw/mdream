@@ -3705,3 +3705,99 @@ fn quote_boundary_literal_after_alias_review_regression() {
   assert_stream_matches(html, options.clone());
   assert_stream_matches_every_split(html, options);
 }
+
+#[test]
+fn quote_block_fragments_own_their_boundary() {
+  for (id, html, expected) in [
+    (
+      "hr-only",
+      "<ul><li><blockquote>q</blockquote><hr></li></ul>",
+      "- \n  > q\n\n  ---",
+    ),
+    (
+      "hr-sibling",
+      "<ul><li><blockquote>q</blockquote><hr></li><li>x</li></ul>",
+      "- \n  > q\n\n  ---\n- x",
+    ),
+    (
+      "hr-child",
+      "<ul><li><blockquote>q</blockquote><hr><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n\n  ---\n\n  - x",
+    ),
+    (
+      "hr-tail",
+      "<ul><li><blockquote>q</blockquote><hr>tail</li></ul>",
+      "- \n  > q\n\n  ---\n\n  tail",
+    ),
+    (
+      "pre-code-only",
+      "<ul><li><blockquote>q</blockquote><pre><code>x</code></pre></li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "pre-code-sibling",
+      "<ul><li><blockquote>q</blockquote><pre><code>x</code></pre></li><li>x</li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```\n\n- x",
+    ),
+    (
+      "pre-code-child",
+      "<ul><li><blockquote>q</blockquote><pre><code>x</code></pre><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```\n\n  - x",
+    ),
+    (
+      "pre-code-tail",
+      "<ul><li><blockquote>q</blockquote><pre><code>x</code></pre>tail</li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```\n\n  tail",
+    ),
+    (
+      "pre-only",
+      "<ul><li><blockquote>q</blockquote><pre>x</pre></li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "pre-sibling",
+      "<ul><li><blockquote>q</blockquote><pre>x</pre></li><li>x</li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```\n\n- x",
+    ),
+    (
+      "pre-child",
+      "<ul><li><blockquote>q</blockquote><pre>x</pre><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```\n\n  - x",
+    ),
+    (
+      "pre-tail",
+      "<ul><li><blockquote>q</blockquote><pre>x</pre>tail</li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```\n\n  tail",
+    ),
+    (
+      "empty-em-hr-sibling",
+      "<ul><li><blockquote>q</blockquote><em></em><hr></li><li>x</li></ul>",
+      "- \n  > q\n\n  ---\n- x",
+    ),
+    (
+      "empty-strong-pre-code-child",
+      "<ul><li><blockquote>q</blockquote><strong></strong><pre><code>x</code></pre><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n\n  ```\n  x\n  ```\n\n  - x",
+    ),
+    (
+      "empty-pre-code-sibling",
+      "<ul><li><blockquote>q</blockquote><pre><code></code></pre></li><li>x</li></ul>",
+      "- \n  > q\n\n  ```\n  \n  ```\n\n- x",
+    ),
+    (
+      "empty-pre-tail",
+      "<ul><li><blockquote>q</blockquote><pre></pre>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "caption-owner-hr",
+      "<figcaption>cap</figcaption><hr>",
+      "*cap*\n\n---",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{id}");
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}

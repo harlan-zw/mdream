@@ -1593,7 +1593,17 @@ impl ConvertState {
     }
     let separator_start = self.buffer.len();
     let consumes_caption_boundary = if visible_output || structural_quote {
-      self.prepare_caption_boundary(tag_id != Some(TAG_LI) && !structural_quote)
+      // HR and fence fragments can already carry their block separator.
+      if self.caption_boundary == CaptionBoundary::QuoteParent
+        && output
+          .as_deref()
+          .is_some_and(|fragment| fragment.starts_with("\n\n"))
+      {
+        self.caption_boundary = CaptionBoundary::ConsumeSpace;
+        true
+      } else {
+        self.prepare_caption_boundary(tag_id != Some(TAG_LI) && !structural_quote)
+      }
     } else {
       false
     };

@@ -2065,6 +2065,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const captionEvent = tagId === TAG_FIGCAPTION
     let captionTransition = false
     if (captionEvent || captionBoundary !== 0 || captionFrameCount !== 0) {
+      // An enter fragment that owns its block separator fulfills this boundary.
+      if (captionBoundary === 3 && eventType === NodeEventEnter && output?.[0]?.startsWith('\n\n'))
+        captionBoundary = 2
       const captionEnter = captionEvent && eventType === NodeEventEnter && !state.depthMap[TAG_PRE]
       const captionExit = captionEvent && eventType === NodeEventExit && !state.depthMap[TAG_PRE]
       if (captionEnter)
