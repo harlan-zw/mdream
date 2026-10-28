@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 
 use mdream::MarkdownStreamProcessor;
 use mdream::types::{
-  CleanConfig, HtmlToMarkdownOptions, IsolateMainConfig, OutputFormat, PluginConfig,
+  CleanConfig, FilterConfig, HtmlToMarkdownOptions, IsolateMainConfig, OutputFormat, PluginConfig,
   TagOverrideConfig, TailwindConfig,
 };
 use mdream::{html_to_format_result, html_to_markdown};
@@ -3722,5 +3722,94 @@ fn streaming_literal_heading_overrides_preserve_content() {
     assert_eq!(html_to_markdown(html, options.clone()), expected);
     assert_stream_matches(html, options.clone());
     assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn scout9_excluded_list_spacing_streaming() {
+  for (html, expected) in [
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><style>hidden</style><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><template>hidden</template><li>b</li></ul>",
+      "- a\n- b",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn scout9_excluded_list_spacing_options_streaming() {
+  let cases = [
+    (
+      "<ul><li>a</li><x-text>visible</x-text><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "x-text".to_string(),
+          TagOverrideConfig {
+            alias_tag_id: mdream::get_tag_id("em"),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a*visible*\n- b",
+    ),
+    (
+      "<ul><li>a</li><div class=hide>hidden</div><li>b</li></ul>",
+      PluginConfig {
+        filter: Some(FilterConfig {
+          exclude: Some(vec![".hide".to_string()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "script".to_string(),
+          TagOverrideConfig {
+            spacing: Some([2, 2]),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a\n\n- b",
+    ),
+  ];
+  for (html, plugins, expected) in cases {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
   }
 }

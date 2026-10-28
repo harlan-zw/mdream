@@ -31,6 +31,33 @@ export function createIdSelector(selector: string): SelectorMatcher {
   }
 }
 
+function containsWhitespaceSeparatedToken(value: string, token: string): boolean {
+  if (!token)
+    return false
+
+  let index = value.indexOf(token)
+  if (index === -1)
+    return false
+
+  for (let i = 0; i < token.length; i++) {
+    const char = token.charCodeAt(i)
+    if (isCssWhitespace(char))
+      return false
+  }
+
+  while (index !== -1) {
+    const before = value.charCodeAt(index - 1)
+    if (index === 0 || isCssWhitespace(before)) {
+      const end = index + token.length
+      const after = value.charCodeAt(end)
+      if (end === value.length || isCssWhitespace(after))
+        return true
+    }
+    index = value.indexOf(token, index + 1)
+  }
+  return false
+}
+
 /**
  * Creates a class selector matcher (e.g., '.container', '.header')
  */
@@ -40,11 +67,45 @@ export function createClassSelector(selector: string): SelectorMatcher {
     matches: (element: ElementNode) => {
       if (!element.attributes?.class)
         return false
-      const classes = element.attributes.class.trim().split(' ').filter(Boolean)
-      return classes.includes(className)
+      return containsWhitespaceSeparatedToken(element.attributes.class, className)
     },
     toString: () => `.${className}`,
   }
+}
+
+function findAttributeEnd(selector: string, start: number): number {
+  let quote = 0
+  for (let i = start + 1; i < selector.length; i++) {
+    const char = selector.charCodeAt(i)
+    if (char === 92 /* \\ */) {
+      i++
+      continue
+    }
+    if (quote) {
+      if (char === quote)
+        quote = 0
+      continue
+    }
+    if (char === 34 /* " */ || char === 39 /* ' */)
+      quote = char
+    else if (char === 93 /* ] */)
+      return i
+  }
+  return -1
+}
+
+function isCssWhitespace(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
+}
+
+function trimCssWhitespace(value: string): string {
+  let start = 0
+  let end = value.length
+  while (start < end && isCssWhitespace(value.charCodeAt(start)))
+    start++
+  while (end > start && isCssWhitespace(value.charCodeAt(end - 1)))
+    end--
+  return value.slice(start, end)
 }
 
 /**
@@ -54,10 +115,10 @@ export function createClassSelector(selector: string): SelectorMatcher {
 function parseAttributeSelector(selector: string): { attr: string, op?: string, value?: string } | null {
   if (selector.charCodeAt(0) !== 91 /* [ */)
     return null
-  const end = selector.indexOf(']', 1)
+  const end = findAttributeEnd(selector, 0)
   if (end === -1)
     return null
-  const inner = selector.slice(1, end)
+  const inner = trimCssWhitespace(selector.slice(1, end))
 
   // Find operator position
   let opIdx = -1
@@ -72,15 +133,15 @@ function parseAttributeSelector(selector: string): { attr: string, op?: string, 
   if (opIdx === -1)
     return { attr: inner }
 
-  const attr = inner.slice(0, opIdx)
+  const attr = trimCssWhitespace(inner.slice(0, opIdx))
   // Operator is 1 or 2 chars (e.g. "=", "^=", "~=")
   let opEnd = opIdx + 1
   if (opEnd < inner.length && inner.charCodeAt(opEnd) === 61)
     opEnd++
   const op = inner.slice(opIdx, opEnd)
   // Strip quotes from value
-  let value = inner.slice(opEnd)
-  if ((value.charCodeAt(0) === 34 || value.charCodeAt(0) === 39) && value.charCodeAt(value.length - 1) === value.charCodeAt(0))
+  let value = trimCssWhitespace(inner.slice(opEnd))
+  if (value.length >= 2 && (value.charCodeAt(0) === 34 || value.charCodeAt(0) === 39) && value.charCodeAt(value.length - 1) === value.charCodeAt(0))
     value = value.slice(1, -1)
 
   return { attr, op, value }
@@ -104,7 +165,7 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
       }
 
       // If we're just checking for existence, we've already confirmed it exists
-      if (!operator || !attrValue) {
+      if (!operator || attrValue === undefined) {
         return true
       }
 
@@ -118,13 +179,13 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
         case '=': // Exact match
           return value === attrValue
         case '^=': // Starts with
-          return value.startsWith(attrValue)
+          return attrValue.length > 0 && value.startsWith(attrValue)
         case '$=': // Ends with
-          return value.endsWith(attrValue)
+          return attrValue.length > 0 && value.endsWith(attrValue)
         case '*=': // Contains
-          return value.includes(attrValue)
+          return attrValue.length > 0 && value.includes(attrValue)
         case '~=': // Contains word
-          return value.trim().split(' ').filter(Boolean).includes(attrValue)
+          return containsWhitespaceSeparatedToken(value, attrValue)
         case '|=': // Starts with prefix
           return value === attrValue || value.startsWith(`${attrValue}-`)
         default:
@@ -132,7 +193,7 @@ export function createAttributeSelector(selector: string): SelectorMatcher {
       }
     },
     toString: () => {
-      if (!operator || !attrValue) {
+      if (!operator || attrValue === undefined) {
         return `[${attrName}]`
       }
       return `[${attrName}${operator}${attrValue}]`
@@ -170,12 +231,10 @@ function createSelectorList(selectors: SelectorMatcher[]): SelectorMatcher {
 function parseCompoundSelector(selector: string): SelectorMatcher {
   const selectorParts: SelectorMatcher[] = []
   let current = ''
-  let inAttribute = false
 
   for (let i = 0; i < selector.length; i++) {
     const char = selector[i]
 
-    // Handle selector type transitions BEFORE setting inAttribute
     if ((char === '.' || char === '#' || char === '[') && current) {
       // Save the current selector and start a new one
       if (current[0] === '.') {
@@ -196,15 +255,12 @@ function parseCompoundSelector(selector: string): SelectorMatcher {
       current += char
     }
 
-    // Track if we're inside attribute brackets
-    if (char === '[')
-      inAttribute = true
-    if (char === ']')
-      inAttribute = false
-
-    // If we're inside attribute brackets, keep collecting (but skip the opening bracket)
-    if (inAttribute && char !== '[') {
-      // Last statement in loop, no need for continue
+    if (char === '[') {
+      const end = findAttributeEnd(selector, i)
+      if (end === -1)
+        return createTagSelector(selector)
+      current += selector.slice(i + 1, end + 1)
+      i = end
     }
   }
 
@@ -247,33 +303,14 @@ export function parseSelector(selector: string): SelectorMatcher {
   // selector remains intact in extraction results; this only expands matching.
   const selectors: SelectorMatcher[] = []
   let start = 0
-  let inAttribute = false
-  let quote = 0
-  let escaped = false
 
   for (let i = 0; i < selector.length; i++) {
     const char = selector.charCodeAt(i)
-    if (quote) {
-      if (escaped) {
-        escaped = false
-      }
-      else if (char === 92 /* \ */) {
-        escaped = true
-      }
-      else if (char === quote) {
-        quote = 0
-      }
-      continue
-    }
-    if (inAttribute) {
-      if (char === 34 /* " */ || char === 39 /* ' */)
-        quote = char
-      else if (char === 93 /* ] */)
-        inAttribute = false
-      continue
-    }
     if (char === 91 /* [ */) {
-      inAttribute = true
+      const end = findAttributeEnd(selector, i)
+      if (end === -1)
+        break
+      i = end
     }
     else if (char === 44 /* , */) {
       const part = selector.slice(start, i).trim()
