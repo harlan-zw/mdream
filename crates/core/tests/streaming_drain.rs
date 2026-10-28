@@ -7,7 +7,7 @@ use std::fmt::Write as _;
 
 use mdream::MarkdownStreamProcessor;
 use mdream::types::{
-  CleanConfig, HtmlToMarkdownOptions, IsolateMainConfig, OutputFormat, PluginConfig,
+  CleanConfig, FilterConfig, HtmlToMarkdownOptions, IsolateMainConfig, OutputFormat, PluginConfig,
   TagOverrideConfig, TailwindConfig,
 };
 use mdream::{html_to_format_result, html_to_markdown};
@@ -2213,23 +2213,47 @@ fn streaming_block_open_after_drained_line_matches_one_shot() {
 #[test]
 fn streaming_nested_list_markers_match_one_shot() {
   let nested = [
-    "<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>",
-    "<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>",
-    "<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>",
-    "<ul><li><ul><li></li></ul></li></ul>",
-    "<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+    (
+      "<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>",
+      "-\n  -\n    - \\# h",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - | a |\n      | --- |",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ***",
+    ),
+    ("<ul><li><ul><li></li></ul></li></ul>", "-\n  -"),
+    (
+      "<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-\n  - \n    > q",
+    ),
   ];
-  for html in nested {
-    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  for (html, expected) in nested {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected
+    );
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+    for width in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, width, HtmlToMarkdownOptions::default()),
+        expected,
+        "width={width}"
+      );
+    }
   }
-  let prefix = format!("<p>{}</p>", "x".repeat(9000));
-  for html in nested {
+  let lead = "x".repeat(9000);
+  let prefix = format!("<p>{lead}</p>");
+  for (html, expected) in nested {
     let html = format!("{prefix}{html}");
+    let expected = format!("{lead}\n\n{expected}");
     for chunk in [1, 7, 64, 4096] {
       assert_eq!(
         stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
-        html_to_markdown(&html, HtmlToMarkdownOptions::default()),
+        expected,
         "chunk={chunk}"
       );
     }
@@ -3698,5 +3722,144 @@ fn empty_list_marker_releases_non_text_content_before_item_close() {
       peak < 128 * 1024,
       "{content}: peak {peak} pins the item until its close"
     );
+  }
+}
+
+#[test]
+fn deep_bare_markers_preserve_expected_bytes_in_ancestor_contexts() {
+  for depth in [50, 200] {
+    for (open, close, marker) in [
+      ("<ul><li>", "</li></ul>", "-"),
+      ("<ol start=\"10\"><li>", "</li></ol>", "10."),
+    ] {
+      let indent = marker.len() + 1;
+      let body = format!("{}# h{}", open.repeat(depth), close.repeat(depth));
+      let mut expected = (0..depth)
+        .map(|level| format!("{}{marker}", " ".repeat(level * indent)))
+        .collect::<Vec<_>>()
+        .join("\n");
+      expected.push_str(" \\# h");
+      for (prefix, suffix, rendered) in [
+        ("".to_owned(), "", expected.clone()),
+        ("<div>".to_owned(), "</div>", expected.clone()),
+        (
+          "<blockquote>".to_owned(),
+          "</blockquote>",
+          expected
+            .lines()
+            .map(|line| format!("> {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        ),
+        (
+          format!("<p>{}</p>", "x".repeat(9000)),
+          "",
+          format!("{}\n\n{expected}", "x".repeat(9000)),
+        ),
+      ] {
+        let html = format!("{prefix}{body}{suffix}");
+        assert_eq!(
+          html_to_markdown(&html, HtmlToMarkdownOptions::default()),
+          rendered,
+          "depth={depth}"
+        );
+        for chunk in [1, 7, 64, 4096] {
+          assert_eq!(
+            stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+            rendered,
+            "depth={depth}, chunk={chunk}"
+          );
+        }
+      }
+    }
+  }
+}
+
+#[test]
+fn scout9_excluded_list_spacing_streaming() {
+  for (html, expected) in [
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><style>hidden</style><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><template>hidden</template><li>b</li></ul>",
+      "- a\n- b",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn scout9_excluded_list_spacing_options_streaming() {
+  let cases = [
+    (
+      "<ul><li>a</li><x-text>visible</x-text><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "x-text".to_string(),
+          TagOverrideConfig {
+            alias_tag_id: mdream::get_tag_id("em"),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a*visible*\n- b",
+    ),
+    (
+      "<ul><li>a</li><div class=hide>hidden</div><li>b</li></ul>",
+      PluginConfig {
+        filter: Some(FilterConfig {
+          exclude: Some(vec![".hide".to_string()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "script".to_string(),
+          TagOverrideConfig {
+            spacing: Some([2, 2]),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a\n\n- b",
+    ),
+  ];
+  for (html, plugins, expected) in cases {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
   }
 }

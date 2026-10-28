@@ -71,12 +71,14 @@ import {
   TAG_RUBY,
   TAG_S,
   TAG_SAMP,
+  TAG_SCRIPT,
   TAG_SELECT,
   TAG_SMALL,
   TAG_SOURCE,
   TAG_SPAN,
   TAG_STRIKE,
   TAG_STRONG,
+  TAG_STYLE,
   TAG_SUB,
   TAG_SUP,
   TAG_SVG,
@@ -186,6 +188,7 @@ assign([TAG_DD], { spacing: [0, 1] })
 // Whitespace and spacing metadata the markdown table already carried. Plain
 // text reads the same fields, so both formats break a document the same way.
 assign([TAG_BR, TAG_LINK], { collapsesInnerWhiteSpace: true, isInline: true })
+assign([TAG_SCRIPT, TAG_STYLE], { spacing: NO_SPACING })
 assign([
   TAG_ASIDE,
   TAG_AUDIO,

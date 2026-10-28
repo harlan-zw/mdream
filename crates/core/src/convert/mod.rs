@@ -944,6 +944,10 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// Last built-in marker end, excluding its trailing space.
+  last_item_marker_end: usize,
+  #[cfg(test)]
+  parent_marker_scans: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
   /// Actual built-in item marker end, distinct from marker-like source text.
@@ -1202,6 +1206,9 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      last_item_marker_end: usize::MAX,
+      #[cfg(test)]
+      parent_marker_scans: 0,
       list_rule_pending: false,
       empty_list_marker_end: usize::MAX,
       empty_list_marker_depth: 0,
@@ -2637,6 +2644,9 @@ impl ConvertState {
     if self.list_tail_start != usize::MAX && offset < self.list_tail_start {
       self.list_tail_start = usize::MAX;
     }
+    if self.last_item_marker_end != usize::MAX && offset < self.last_item_marker_end {
+      self.last_item_marker_end = usize::MAX;
+    }
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -2659,6 +2669,12 @@ impl ConvertState {
   fn note_buffer_drain(&mut self, removed: usize) {
     self.list_tail_scanned_to = self.list_tail_scanned_to.saturating_sub(removed);
     self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.saturating_sub(removed);
+    if self.last_item_marker_end != usize::MAX {
+      self.last_item_marker_end = self
+        .last_item_marker_end
+        .checked_sub(removed)
+        .unwrap_or(usize::MAX);
+    }
     if self.blockquote_line_scanned_to != 0 {
       self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
       self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);
