@@ -227,3 +227,14 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
     }
   })
 })
+
+describe.each(engines)('empty list code fence parity $name', (config) => {
+  it.each([
+    ['<ul><li><pre><code></code></pre></li></ul>', '- ```\n\n  ```'],
+    ['<ol start="10"><li><pre><code></code></pre></li></ol>', '10. ```\n\n    ```'],
+    ['<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>', '> - ```\n>\n>   ```'],
+  ])('keeps the empty body line blank: %s', async (html, expected) => {
+    const engine = await resolveEngine(config.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})

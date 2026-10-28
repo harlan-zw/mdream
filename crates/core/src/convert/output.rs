@@ -585,6 +585,12 @@ impl ConvertState {
     };
     let max_run =
       Self::max_line_leading_run(&self.buffer[fence.content_start..], marker, &fence.indent);
+    // The opener reserves the first content line's list indent. With no body,
+    // remove that reservation so the empty line stays blank, as in JS.
+    if self.buffer.len() == fence.content_start && !fence.indent.is_empty() {
+      debug_assert!(self.buffer.ends_with(&fence.indent));
+      self.truncate_buffer(fence.content_start - fence.indent.len());
+    }
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;
     if self.replace_code_span_content(

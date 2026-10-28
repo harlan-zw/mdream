@@ -353,31 +353,29 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     }
   })
 
-  it.each<[string, string, string, string, Record<string, TagOverride | string>?]>([
-    ['hr-only', '<ul><li><blockquote>q</blockquote><hr></li></ul>', '- \n  > q\n\n  ---', '- \n  > q\n\n  ---'],
-    ['hr-sibling', '<ul><li><blockquote>q</blockquote><hr></li><li>x</li></ul>', '- \n  > q\n\n  ---\n- x', '- \n  > q\n\n  ---\n- x'],
-    ['hr-child', '<ul><li><blockquote>q</blockquote><hr><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  ---\n\n  - x', '- \n  > q\n\n  ---\n\n  - x'],
-    ['hr-tail', '<ul><li><blockquote>q</blockquote><hr>tail</li></ul>', '- \n  > q\n\n  ---\n\n  tail', '- \n  > q\n\n  ---\n\n  tail'],
-    ['pre-code-only', '<ul><li><blockquote>q</blockquote><pre><code>x</code></pre></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```', '- \n  > q\n\n  ```\n  x\n  ```'],
-    ['pre-code-sibling', '<ul><li><blockquote>q</blockquote><pre><code>x</code></pre></li><li>x</li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n- x', '- \n  > q\n\n  ```\n  x\n  ```\n\n- x'],
-    ['pre-code-child', '<ul><li><blockquote>q</blockquote><pre><code>x</code></pre><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x'],
-    ['pre-code-tail', '<ul><li><blockquote>q</blockquote><pre><code>x</code></pre>tail</li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  tail', '- \n  > q\n\n  ```\n  x\n  ```\n\n  tail'],
-    ['pre-only', '<ul><li><blockquote>q</blockquote><pre>x</pre></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```', '- \n  > q\n\n  ```\n  x\n  ```'],
-    ['pre-sibling', '<ul><li><blockquote>q</blockquote><pre>x</pre></li><li>x</li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n- x', '- \n  > q\n\n  ```\n  x\n  ```\n\n- x'],
-    ['pre-child', '<ul><li><blockquote>q</blockquote><pre>x</pre><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x'],
-    ['pre-tail', '<ul><li><blockquote>q</blockquote><pre>x</pre>tail</li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  tail', '- \n  > q\n\n  ```\n  x\n  ```\n\n  tail'],
-    ['empty-em-hr-sibling', '<ul><li><blockquote>q</blockquote><em></em><hr></li><li>x</li></ul>', '- \n  > q\n\n  ---\n- x', '- \n  > q\n\n  ---\n- x'],
-    ['empty-strong-pre-code-child', '<ul><li><blockquote>q</blockquote><strong></strong><pre><code>x</code></pre><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x'],
-    ['empty-pre-code-sibling', '<ul><li><blockquote>q</blockquote><pre><code></code></pre></li><li>x</li></ul>', '- \n  > q\n\n  ```\n\n  ```\n\n- x', '- \n  > q\n\n  ```\n  \n  ```\n\n- x'],
-    ['empty-pre-tail', '<ul><li><blockquote>q</blockquote><pre></pre>tail</li></ul>', '- \n  > q\n\n  tail', '- \n  > q\n\n  tail'],
-    ['empty-literal-hr-tail', '<ul><li><blockquote>q</blockquote><hr>tail</li></ul>', '- \n  > q\n\n  tail', '- \n  > q\n\n  tail', { hr: { enter: '', exit: '', spacing: [0, 0] } }],
-    ['literal-hr-sibling', '<ul><li><blockquote>q</blockquote><hr></li><li>x</li></ul>', '- \n  > q\n\n  [rule]\n- x', '- \n  > q\n\n  [rule]\n- x', { hr: { enter: '[rule]', exit: '', spacing: [0, 0] } }],
-    ['alias-hr-sibling', '<ul><li><blockquote>q</blockquote><x-rule></li><li>x</li></ul>', '- \n  > q\n\n  ---\n- x', '- \n  > q\n\n  ---\n- x', { 'x-rule': 'hr' }],
-    ['caption-owner-hr', '<figcaption>cap</figcaption><hr>', '*cap*\n\n---', '*cap*\n\n---'],
-  ])('writes one boundary for quote block fragment %s at every width and split', async (_id, html, expectedJs, expectedRust, tagOverrides) => {
+  it.each<[string, string, string, Record<string, TagOverride | string>?]>([
+    ['hr-only', '<ul><li><blockquote>q</blockquote><hr></li></ul>', '- \n  > q\n\n  ---'],
+    ['hr-sibling', '<ul><li><blockquote>q</blockquote><hr></li><li>x</li></ul>', '- \n  > q\n\n  ---\n- x'],
+    ['hr-child', '<ul><li><blockquote>q</blockquote><hr><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  ---\n\n  - x'],
+    ['hr-tail', '<ul><li><blockquote>q</blockquote><hr>tail</li></ul>', '- \n  > q\n\n  ---\n\n  tail'],
+    ['pre-code-only', '<ul><li><blockquote>q</blockquote><pre><code>x</code></pre></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```'],
+    ['pre-code-sibling', '<ul><li><blockquote>q</blockquote><pre><code>x</code></pre></li><li>x</li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n- x'],
+    ['pre-code-child', '<ul><li><blockquote>q</blockquote><pre><code>x</code></pre><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x'],
+    ['pre-code-tail', '<ul><li><blockquote>q</blockquote><pre><code>x</code></pre>tail</li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  tail'],
+    ['pre-only', '<ul><li><blockquote>q</blockquote><pre>x</pre></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```'],
+    ['pre-sibling', '<ul><li><blockquote>q</blockquote><pre>x</pre></li><li>x</li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n- x'],
+    ['pre-child', '<ul><li><blockquote>q</blockquote><pre>x</pre><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x'],
+    ['pre-tail', '<ul><li><blockquote>q</blockquote><pre>x</pre>tail</li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  tail'],
+    ['empty-em-hr-sibling', '<ul><li><blockquote>q</blockquote><em></em><hr></li><li>x</li></ul>', '- \n  > q\n\n  ---\n- x'],
+    ['empty-strong-pre-code-child', '<ul><li><blockquote>q</blockquote><strong></strong><pre><code>x</code></pre><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  ```\n  x\n  ```\n\n  - x'],
+    ['empty-pre-code-sibling', '<ul><li><blockquote>q</blockquote><pre><code></code></pre></li><li>x</li></ul>', '- \n  > q\n\n  ```\n\n  ```\n\n- x'],
+    ['empty-pre-tail', '<ul><li><blockquote>q</blockquote><pre></pre>tail</li></ul>', '- \n  > q\n\n  tail'],
+    ['empty-literal-hr-tail', '<ul><li><blockquote>q</blockquote><hr>tail</li></ul>', '- \n  > q\n\n  tail', { hr: { enter: '', exit: '', spacing: [0, 0] } }],
+    ['literal-hr-sibling', '<ul><li><blockquote>q</blockquote><hr></li><li>x</li></ul>', '- \n  > q\n\n  [rule]\n- x', { hr: { enter: '[rule]', exit: '', spacing: [0, 0] } }],
+    ['alias-hr-sibling', '<ul><li><blockquote>q</blockquote><x-rule></li><li>x</li></ul>', '- \n  > q\n\n  ---\n- x', { 'x-rule': 'hr' }],
+    ['caption-owner-hr', '<figcaption>cap</figcaption><hr>', '*cap*\n\n---'],
+  ])('writes one boundary for quote block fragment %s at every width and split', async (_id, html, expected, tagOverrides) => {
     const engine = await resolveEngine(engineConfig.engine)
-    // Empty fenced-code lines already differ in main; preserve each engine's bytes.
-    const expected = engineConfig.name === 'Rust Engine' ? expectedRust : expectedJs
     const options = tagOverrides ? { plugins: { tagOverrides } } : undefined
     expect(htmlToMarkdown(html, { ...options, engine })).toBe(expected)
     for (let width = 1; width <= html.length; width++) {

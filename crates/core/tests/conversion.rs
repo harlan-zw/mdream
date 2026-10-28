@@ -6482,3 +6482,23 @@ fn quote_boundary_literal_after_alias_review_regression() {
     "- \n  > q\n\n  [r] tail"
   );
 }
+
+#[test]
+fn empty_fenced_code_in_list_has_a_blank_body_line() {
+  for (html, expected) in [
+    (
+      "<ul><li><pre><code></code></pre></li></ul>",
+      "- ```\n\n  ```",
+    ),
+    (
+      "<ol start=\"10\"><li><pre><code></code></pre></li></ol>",
+      "10. ```\n\n    ```",
+    ),
+    (
+      "<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>",
+      "> - ```\n>\n>   ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}

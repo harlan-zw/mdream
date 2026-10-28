@@ -3801,3 +3801,16 @@ fn quote_block_fragments_own_their_boundary() {
     assert_stream_matches_every_split(html, options);
   }
 }
+
+#[test]
+fn empty_fenced_code_in_list_matches_every_split() {
+  for html in [
+    "<ul><li><blockquote>q</blockquote><pre><code></code></pre></li><li>x</li></ul>",
+    "<ul><li><pre><code></code></pre></li></ul>",
+    "<ol start=\"10\"><li><pre><code></code></pre></li></ol>",
+    "<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
