@@ -887,6 +887,7 @@ function parseHtmlInternal(
   state.justClosedTag ??= false
   state.isFirstTextInElement ??= false
   state.scriptDataState ??= SCRIPT_DATA
+  state.listItemCounts ??= undefined
   state.rawtextEndTagPending = false
   // Process chunk character by character
   let i = 0
