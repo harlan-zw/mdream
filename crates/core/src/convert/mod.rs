@@ -3269,9 +3269,9 @@ pub(crate) fn clamp_to_char_boundary(text: &str, max: usize) -> &str {
 /// ends at the run's limit, so the scan needs no other bound. Doubled,
 /// trailing, and pre-tag spaces leave the run to the general path, which keeps
 /// its collapsing semantics. Every byte it passes is ASCII, so the end is a
-/// char boundary. Out of line so this loop keeps its own code whatever the rest
-/// of `process_html` compiles to; one call per run.
-#[inline(never)]
+/// char boundary. Inline the scanner into the ASCII run path to avoid a call
+/// and expose its bounds to the surrounding loop.
+#[inline(always)]
 fn batchable_run_end(bytes: &[u8], start: usize) -> (usize, bool) {
   let limit = bytes.len();
   let mut i = start + 1;
