@@ -1799,19 +1799,32 @@ impl ConvertState {
 
   pub(crate) fn process_closing_tag_name(&mut self, tag_name_raw: &str) -> bool {
     let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
-    let tag_name: Cow<str> = if builtin_tag_id.is_some() {
-      Cow::Borrowed(tag_name_raw)
-    } else if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
-      Cow::Owned(tag_name_raw.to_ascii_lowercase())
+    // The default parser needs no alias lookup or alias identity bookkeeping.
+    let (tag_name, tag_id, is_builtin) = if !self.has_tag_overrides {
+      let tag_name: Cow<str> = if builtin_tag_id.is_some() {
+        Cow::Borrowed(tag_name_raw)
+      } else if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(tag_name_raw.to_ascii_lowercase())
+      } else {
+        Cow::Borrowed(tag_name_raw)
+      };
+      (tag_name, builtin_tag_id, builtin_tag_id.is_some())
     } else {
-      Cow::Borrowed(tag_name_raw)
+      let tag_name: Cow<str> = if builtin_tag_id.is_some() {
+        Cow::Borrowed(tag_name_raw)
+      } else if tag_name_raw.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(tag_name_raw.to_ascii_lowercase())
+      } else {
+        Cow::Borrowed(tag_name_raw)
+      };
+      // Closing tag may target an aliased custom element (e.g. </ex> where
+      // tagOverrides: { ex: 'em' } opened a TAG_EM node). Resolve the alias
+      // here so the close matches the open.
+      let alias_tag_id = self.alias_tag_id(tag_name.as_ref(), builtin_tag_id);
+      let tag_id = alias_tag_id.or(builtin_tag_id);
+      let is_builtin = builtin_tag_id.is_some() && alias_tag_id.is_none();
+      (tag_name, tag_id, is_builtin)
     };
-    // Closing tag may target an aliased custom element (e.g. </ex> where
-    // tagOverrides: { ex: 'em' } opened a TAG_EM node). Resolve the alias
-    // here so the close matches the open.
-    let alias_tag_id = self.alias_tag_id(tag_name.as_ref(), builtin_tag_id);
-    let tag_id = alias_tag_id.or(builtin_tag_id);
-    let is_builtin = builtin_tag_id.is_some() && alias_tag_id.is_none();
 
     if self.overflow_opaque_depth > 0 {
       if self.overflow_raw_name.is_some() {

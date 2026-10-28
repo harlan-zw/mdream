@@ -6278,3 +6278,64 @@ fn builtin_aliases_preserve_raw_source_boundaries() {
     );
   }
 }
+
+#[test]
+fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
+  for html in [
+    "<DIV CLASS='a'><BLOCKQUOTE><P>A &amp; B</P></BLOCKQUOTE><P>tail</P></DIV>",
+    "<X-NOTE DATA-X='a'>before <EM>x</EM></X-NOTE><P>tail</P>",
+    "<STYLE>a</div><!--unfinished</STYLE><P>tail</P>",
+    "<SCRIPT><!--<script></script>--></SCRIPT><P>tail</P>",
+    "<DIV><LONG-CUSTOM-NAME attr='data'>x</LONG-CUSTOM-NAME></DIV>",
+  ] {
+    for cap in [0, 8, 64] {
+      for format in [
+        OutputFormat::Markdown,
+        OutputFormat::Text,
+        OutputFormat::Html,
+      ] {
+        let plain = HtmlToMarkdownOptions {
+          max_node_bytes: cap,
+          ..Default::default()
+        };
+        let configured = HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            tag_overrides: Some(vec![]),
+            ..Default::default()
+          }),
+          ..plain.clone()
+        };
+        let expected = mdream::html_to_format(html, plain.clone(), format);
+        assert_eq!(
+          mdream::html_to_format(html, configured.clone(), format),
+          expected,
+          "{html} cap={cap} format={format:?}"
+        );
+        for opts in [plain, configured] {
+          for width in 1..=html.len() {
+            let mut stream = MarkdownStreamProcessor::new_with_format(opts.clone(), format);
+            let mut actual = String::new();
+            for chunk in html.as_bytes().chunks(width) {
+              actual.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+            }
+            actual.push_str(&stream.finish());
+            assert_eq!(
+              actual, expected,
+              "{html} cap={cap} format={format:?} width={width}"
+            );
+          }
+          for split in 0..=html.len() {
+            let mut stream = MarkdownStreamProcessor::new_with_format(opts.clone(), format);
+            let mut actual = stream.process_chunk(&html[..split]);
+            actual.push_str(&stream.process_chunk(&html[split..]));
+            actual.push_str(&stream.finish());
+            assert_eq!(
+              actual, expected,
+              "{html} cap={cap} format={format:?} split={split}"
+            );
+          }
+        }
+      }
+    }
+  }
+}
