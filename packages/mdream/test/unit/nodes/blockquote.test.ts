@@ -305,6 +305,54 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     }
   })
 
+  it.each<[string, string, string, { emptyLinks?: boolean, emptyLinkText?: boolean }?]>([
+    ['Q4-sibling-default', '<ul><li><blockquote>q</blockquote><a href="x"></a></li><li>x</li></ul>', '- \n  > q\n\n  [](x)\n- x'],
+    ['Q4-sibling-emptyLinks', '<ul><li><blockquote>q</blockquote><a href="x"></a></li><li>x</li></ul>', '- \n  > q\n\n  [](x)\n- x', { emptyLinks: true }],
+    ['Q4-sibling-emptyLinkText', '<ul><li><blockquote>q</blockquote><a href="x"></a></li><li>x</li></ul>', '- \n  > q\n- x', { emptyLinkText: true }],
+    ['control-code-sibling', '<ul><li><blockquote>q</blockquote><code></code></li><li>x</li></ul>', '- \n  > q\n- x'],
+    ['control-strong-sibling', '<ul><li><blockquote>q</blockquote><strong></strong></li><li>x</li></ul>', '- \n  > q\n- x'],
+    ['Q4-empty-wrapper-sibling', '<ul><li><blockquote>q</blockquote><strong></strong><a href="x"></a></li><li>x</li></ul>', '- \n  > q\n\n  [](x)\n- x'],
+    ['Q4-child-default', '<ul><li><blockquote>q</blockquote><a href="x"></a><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  [](x)\n  - x'],
+    ['Q4-child-emptyLinks', '<ul><li><blockquote>q</blockquote><a href="x"></a><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  [](x)\n  - x', { emptyLinks: true }],
+    ['Q4-child-emptyLinkText', '<ul><li><blockquote>q</blockquote><a href="x"></a><ul><li>x</li></ul></li></ul>', '- \n  > q\n  - x', { emptyLinkText: true }],
+    ['control-code-child', '<ul><li><blockquote>q</blockquote><code></code><ul><li>x</li></ul></li></ul>', '- \n  > q\n  - x'],
+    ['control-strong-child', '<ul><li><blockquote>q</blockquote><strong></strong><ul><li>x</li></ul></li></ul>', '- \n  > q\n  - x'],
+    ['Q4-empty-wrapper-child', '<ul><li><blockquote>q</blockquote><strong></strong><a href="x"></a><ul><li>x</li></ul></li></ul>', '- \n  > q\n\n  [](x)\n  - x'],
+    ['caption-space-owner', '<figcaption>cap</figcaption><a href="x"></a> tail', '*cap*\n\n[](x)tail'],
+    ['caption-strong-owner', '<figcaption>cap</figcaption><strong>tail</strong>', '*cap*\n\n**tail**'],
+    ['caption-list-owner', '<ul><li><figcaption>cap</figcaption><a href="x"></a> tail</li><li>x</li></ul>', '- *cap*\n\n  [](x)tail\n- x'],
+  ])('keeps preserved quote link transitions %s at every width and split', async (_id, html, expected, clean) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = clean ? { clean } : undefined
+    expect(htmlToMarkdown(html, { ...options, engine })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        actual += chunk
+      expect(actual, `width ${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        actual += chunk
+      expect(actual, `split ${split}`).toBe(expected)
+    }
+  })
+
   it('keeps representative quote structure across every stream split', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>'

@@ -1559,7 +1559,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   function consumeCaptionTransition(isInlineElement: boolean, tagId: number): void {
-    captionBoundary = isInlineElement && tagId !== TAG_IMG && tagId !== TAG_BR ? 2 : 0
+    // Visible output settles tentative quote spacing; only captions retain
+    // ownership of the next source space across inline output.
+    captionBoundary = captionBoundary !== 4 && isInlineElement && tagId !== TAG_IMG && tagId !== TAG_BR ? 2 : 0
   }
 
   function anchorPendingCaptions(fragment: number): void {
