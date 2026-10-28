@@ -1823,6 +1823,11 @@ impl ConvertState {
       let alias_tag_id = self.alias_tag_id(tag_name.as_ref(), builtin_tag_id);
       let tag_id = alias_tag_id.or(builtin_tag_id);
       let is_builtin = builtin_tag_id.is_some() && alias_tag_id.is_none();
+      let tag_name = if alias_tag_id.is_some() && tag_name.bytes().any(|b| b.is_ascii_uppercase()) {
+        Cow::Owned(tag_name.to_ascii_lowercase())
+      } else {
+        tag_name
+      };
       (tag_name, tag_id, is_builtin)
     };
 
