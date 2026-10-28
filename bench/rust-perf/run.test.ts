@@ -1,6 +1,6 @@
-import { expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { utf8Chunks } from './fixtures.ts'
-import { assertWasmMetadata, cpuRows, normalizedCpuRows, outputVerification, scalingRows, statistics } from './run.ts'
+import { assertWasmMetadata, cpuRows, normalizedCpuRows, outputVerification, scalingRows, statistics, wasmRun } from './run.ts'
 
 it('keeps multibyte characters intact across small transport chunks', () => {
   const source = 'A東京🙂éZ'
@@ -64,11 +64,123 @@ it('uses serialized observations for both the change flag and digests', () => {
   expect(omitted.hashes[0]).toBe(omitted.hashes[1])
 })
 
-it('keeps WASM metadata stable when native output changes without metadata changes', () => {
-  const native = [{ output: 'before', frontmatter: null }, { output: 'after', frontmatter: null }]
-  const wasm = [{ output: 'before', metadata: {} }, { output: 'after', metadata: { unexpected: 'broken' } }]
-  expect(() => assertWasmMetadata(native, wasm, 'page')).toThrow('WASM metadata differs without a native metadata change')
-  expect(() => assertWasmMetadata(native, [{ output: 'before', metadata: {} }, { output: 'after', metadata: {} }], 'page')).not.toThrow()
-  const changed = [{ output: 'before', frontmatter: { title: 'before' } }, { output: 'after', frontmatter: { title: 'after' } }]
-  expect(() => assertWasmMetadata(changed, wasm, 'page')).not.toThrow()
+// Protocol sources: bench/rust-perf/src/main.rs::run/extracted_values,
+// crates/edge/src/lib.rs::set_plugin_data and run.ts::wasmRun.
+function metadataObservation(operation: 'convert' | 'stream', title = 'page') {
+  const element = { selector: 'h2', tag: 'h2', text: title, attributes: [['id', 'intro'], ['class', 'title']] }
+  const native = { output: title, truncated: false, frontmatter: [['title', title]], [operation === 'stream' ? 'metadata' : 'extracted']: [element] }
+  const wasm = { output: title, metadata: { frontmatter: { title }, extracted: [{ selector: 'h2', tagName: 'h2', textContent: title, attributes: { class: 'title', id: 'intro' } }] } }
+  return { native, wasm }
+}
+
+describe.each(['convert', 'stream'] as const)('same-revision WASM metadata (%s)', (operation) => {
+  it('checks the actual wasmRun result shape with protocol-shaped glue', () => {
+    const { native, wasm } = metadataObservation(operation)
+    let drained = false
+    let freed = false
+    const glue = {
+      htmlToMarkdown: () => wasm.output,
+      htmlToMarkdownResult: () => ({ markdown: wasm.output, ...wasm.metadata }),
+      MarkdownStream: class {
+        processChunk() { return wasm.output }
+        finish() { return '' }
+        takeData() {
+          if (drained)
+            return {}
+          drained = true
+          return wasm.metadata
+        }
+
+        free() { freed = true }
+      },
+    }
+    const fixture = operation === 'convert'
+      ? { id: 'page', name: 'page', operation, html: '<h2>page</h2>', options: 'metadata' as const, format: 'markdown' as const, inputBytes: 13 }
+      : { id: 'page', name: 'page', operation, chunks: ['<h2>page</h2>'], options: 'metadata' as const, format: 'markdown' as const, inputBytes: 13 }
+    const observed = wasmRun(glue, fixture, true)
+    expect(observed).toEqual(wasm)
+    expect(() => assertWasmMetadata([native, native], [observed, observed], 'page', operation)).not.toThrow()
+    expect(freed).toBe(operation === 'stream')
+  })
+
+  it('allows matching metadata changes in both runtimes and marks the revision change', () => {
+    const base = metadataObservation(operation, 'before')
+    const head = metadataObservation(operation, 'after')
+    expect(() => assertWasmMetadata([base.native, head.native], [base.wasm, head.wasm], 'page', operation)).not.toThrow()
+    expect(outputVerification(base.native, head.native).changed).toBe(true)
+  })
+
+  it('marks a matching metadata-only change while Markdown stays the same', () => {
+    const base = metadataObservation(operation, 'before')
+    const head = metadataObservation(operation, 'after')
+    for (const row of [base, head]) {
+      row.native.output = 'same'
+      row.wasm.output = 'same'
+    }
+    expect(() => assertWasmMetadata([base.native, head.native], [base.wasm, head.wasm], 'page', operation)).not.toThrow()
+    expect(outputVerification(base.native, head.native).changed).toBe(true)
+  })
+
+  it.each([0, 1])('rejects a WASM-only mismatch on revision %s even when native metadata changes', (side) => {
+    const observations = [metadataObservation(operation, 'before'), metadataObservation(operation, 'after')]
+    observations[side]!.wasm.metadata.frontmatter.title = 'broken'
+    expect(() => assertWasmMetadata(observations.map(row => row.native), observations.map(row => row.wasm), 'page', operation)).toThrow('native and WASM metadata differ')
+  })
+
+  it.each([0, 1])('rejects a native-only mismatch on revision %s even when native metadata changes', (side) => {
+    const observations = [metadataObservation(operation, 'before'), metadataObservation(operation, 'after')]
+    observations[side]!.native.frontmatter = [['title', 'broken']]
+    expect(() => assertWasmMetadata(observations.map(row => row.native), observations.map(row => row.wasm), 'page', operation)).toThrow('native and WASM metadata differ')
+  })
+
+  it('rejects the same incorrect WASM metadata in both revisions', () => {
+    const { native, wasm } = metadataObservation(operation)
+    wasm.metadata.extracted[0]!.textContent = 'broken'
+    expect(() => assertWasmMetadata([native, native], [wasm, wasm], 'page', operation)).toThrow('native and WASM metadata differ')
+  })
+
+  it.each(['selector', 'tagName', 'textContent', 'attributes'] as const)('checks extraction %s rather than only frontmatter', (field) => {
+    const { native, wasm } = metadataObservation(operation)
+    const element = { ...wasm.metadata.extracted[0], [field]: field === 'attributes' ? { id: 'broken' } : 'broken' }
+    const broken = { ...wasm, metadata: { ...wasm.metadata, extracted: [element] } }
+    expect(() => assertWasmMetadata([native, native], [wasm, broken], 'page', operation)).toThrow('native and WASM metadata differ')
+  })
+
+  it.each([null, undefined, []])('normalizes absent or empty native plugin data (%s)', (empty) => {
+    const native = { output: 'same', truncated: true, frontmatter: empty, [operation === 'stream' ? 'metadata' : 'extracted']: empty }
+    // Convert omits absent data; wasmRun streaming always collects an array.
+    const wasm = { output: 'same', metadata: operation === 'stream' ? { frontmatter: undefined, extracted: [] } : {} }
+    expect(() => assertWasmMetadata([native, native], [wasm, wasm], 'empty', operation)).not.toThrow()
+    const emptyObjects = { output: 'same', metadata: { frontmatter: {}, extracted: [] } }
+    expect(() => assertWasmMetadata([native, native], [emptyObjects, emptyObjects], 'empty', operation)).not.toThrow()
+  })
+
+  it('rejects absent WASM data when native data is nonempty', () => {
+    const { native, wasm } = metadataObservation(operation)
+    const absentFrontmatter = { ...wasm, metadata: { extracted: wasm.metadata.extracted } }
+    const absentExtraction = { ...wasm, metadata: { frontmatter: wasm.metadata.frontmatter } }
+    for (const observed of [absentFrontmatter, absentExtraction])
+      expect(() => assertWasmMetadata([native, native], [wasm, observed], 'page', operation)).toThrow('native and WASM metadata differ')
+  })
+
+  it('normalizes empty extraction attributes and frontmatter pairs', () => {
+    const native = { output: 'same', truncated: false, frontmatter: [], [operation === 'stream' ? 'metadata' : 'extracted']: [{ selector: 'h2', tag: 'h2', text: '', attributes: [] }] }
+    const wasm = { output: 'same', metadata: { frontmatter: {}, extracted: [{ selector: 'h2', tagName: 'h2', textContent: '', attributes: {} }] } }
+    expect(() => assertWasmMetadata([native, native], [wasm, wasm], 'empty', operation)).not.toThrow()
+  })
+
+  it('preserves unexpected observation, metadata and extraction fields', () => {
+    const { native, wasm } = metadataObservation(operation)
+    const broken = [
+      { ...wasm, actualmetadata: 'unexpected' },
+      { ...wasm, metadata: { ...wasm.metadata, actualmetadata: 'unexpected' } },
+      { ...wasm, metadata: { ...wasm.metadata, extracted: [{ ...wasm.metadata.extracted[0], actualmetadata: 'unexpected' }] } },
+    ]
+    for (const observed of broken)
+      expect(() => assertWasmMetadata([native, native], [wasm, observed], 'page', operation)).toThrow('native and WASM metadata differ')
+    expect(() => assertWasmMetadata([native, { ...native, actualmetadata: 'unexpected' }], [wasm, wasm], 'page', operation)).toThrow('native and WASM metadata differ')
+    const key = operation === 'stream' ? 'metadata' : 'extracted'
+    const unexpectedExtraction = { ...native, [key]: [{ selector: 'h2', tag: 'h2', text: 'page', attributes: [['class', 'title'], ['id', 'intro']], actualmetadata: 'unexpected' }] }
+    expect(() => assertWasmMetadata([native, unexpectedExtraction], [wasm, wasm], 'page', operation)).toThrow('native and WASM metadata differ')
+  })
 })

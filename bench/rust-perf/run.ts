@@ -7,7 +7,6 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
-import { isDeepStrictEqual } from 'node:util'
 import { conversionOptions, workloads } from './fixtures.ts'
 
 export function outputVerification(base: unknown, head: unknown) {
@@ -18,15 +17,25 @@ export function outputVerification(base: unknown, head: unknown) {
   }
 }
 
-export function assertWasmMetadata(native: unknown[], wasm: unknown[], fixture: string) {
-  const metadata = (values: unknown[]) => values.map((value) => {
-    const { output: _output, ...rest } = value as Record<string, unknown>
-    return rest
+export function assertWasmMetadata(native: unknown[], wasm: unknown[], fixture: string, operation: 'convert' | 'stream') {
+  // main.rs::extracted_values uses tag/text and pair lists; set_plugin_data
+  // exposes tagName/textContent and objects. Keep unknown fields in extra.
+  const extraction = (values: unknown, native: boolean) => ((values ?? []) as Record<string, unknown>[]).map((value) => {
+    const { selector, [native ? 'tag' : 'tagName']: tagName, [native ? 'text' : 'textContent']: textContent, attributes, ...extra } = value
+    return { selector, tagName, textContent, attributes: native ? Object.fromEntries(attributes as [string, unknown][]) : attributes, extra }
   })
-  const nativeMetadata = metadata(native)
-  if (isDeepStrictEqual(nativeMetadata[0], nativeMetadata[1])) {
-    const wasmMetadata = metadata(wasm)
-    assert.deepEqual(wasmMetadata[0], wasmMetadata[1], `${fixture}: WASM metadata differs without a native metadata change`)
+  assert.equal(native.length, wasm.length, `${fixture}: native and WASM revision counts differ`)
+  for (const [side, value] of native.entries()) {
+    // Only the native harness exposes truncated. Streaming names its extracted
+    // elements metadata; conversion names them extracted. wasmRun wraps both.
+    const { output: _nativeOutput, truncated: _truncated, frontmatter, [operation === 'stream' ? 'metadata' : 'extracted']: extracted, ...nativeExtra } = value as Record<string, unknown>
+    const { output: _wasmOutput, metadata, ...wasmExtra } = wasm[side] as Record<string, unknown>
+    const { frontmatter: wasmFrontmatter, extracted: wasmExtracted, ...metadataExtra } = metadata as Record<string, unknown>
+    assert.deepEqual(
+      { extra: nativeExtra, metadata: { frontmatter: Object.fromEntries((frontmatter ?? []) as [string, unknown][]), extracted: extraction(extracted, true) } },
+      { extra: wasmExtra, metadata: { ...metadataExtra, frontmatter: wasmFrontmatter ?? {}, extracted: extraction(wasmExtracted, false) } },
+      `${fixture}: revision ${side} native and WASM metadata differ`,
+    )
   }
 }
 
@@ -104,7 +113,7 @@ async function loadWasm(dist: string, instance: string): Promise<{ glue: Glue, m
   const wasm = await glue.default({ module_or_path: readFileSync(resolve(dist, 'rust/mdream_edge_bg.wasm')) })
   return { glue, memory: wasm.memory }
 }
-function wasmRun(glue: Glue, fixture: Workload, verify = false) {
+export function wasmRun(glue: Glue, fixture: Workload, verify = false) {
   const options = conversionOptions(fixture.options, fixture.format)
   if (fixture.operation === 'split')
     throw new Error('The edge binding does not export the splitter.')
@@ -235,7 +244,7 @@ async function main() {
           const output = typeof observed === 'string' ? observed : (observed as { output: string }).output
           assert.equal(output, (observations[side] as { output: string }).output, `${fixture.id}: native and WASM output differ`)
         }
-        assertWasmMetadata(observations, wasmOutputs, fixture.id)
+        assertWasmMetadata(observations, wasmOutputs, fixture.id, fixture.operation)
         for (const runtime of wasm) {
           const until = performance.now() + 100
           do {
