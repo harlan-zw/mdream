@@ -6,6 +6,69 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines.ts'
 const RE_WHITESPACE = /\s+/
 
 describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
+  it.each(['[title=it\'s]', '[title="unfinished]', '[title=', '[title=ação\\'])('does not split an unterminated attribute in %s', async (attribute) => {
+    const resolvedEngine = await resolveEngine(engine)
+    const selector = `span, p${attribute}, a`
+    const html = '<p title="it\'s">shown</p><span>selected</span><a>also shown</a>'
+    const extracted: string[] = []
+
+    htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { extraction: {
+        [selector]: node => extracted.push(node.tagName),
+      } },
+    })
+    expect(extracted).toEqual(['span'])
+    expect(htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { include: [selector] } },
+    })).toBe('selected')
+    const excluded = htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { exclude: [selector] } },
+    })
+    expect(excluded).toContain('shown')
+    expect(excluded).toContain('also shown')
+    expect(excluded).not.toContain('selected')
+  })
+
+  it.each([
+    [String.raw`[data=a\]b\,c]`, String.raw`a\]b\,c`],
+    [String.raw`[data=a\]b,c]`, String.raw`a\]b,c`],
+    [String.raw`[data=a\"b,c]`, String.raw`a\"b,c`],
+    [String.raw`[data=a\'b,c]`, String.raw`a\'b,c`],
+    [String.raw`[data="a\"]b,c"]`, String.raw`a\"]b,c`],
+    [String.raw`[data='a\']b,c']`, String.raw`a\']b,c`],
+    [String.raw`[data=a\\]`, String.raw`a\\`],
+    [String.raw`[data=ação\\\]b,c]`, String.raw`ação\\\]b,c`],
+    [String.raw`[data=a\çb]`, String.raw`a\çb`],
+    [String.raw`[data=a\🦀b]`, String.raw`a\🦀b`],
+  ])('filters and extracts escaped selector lists with %s', async (attribute, value) => {
+    const resolvedEngine = await resolveEngine(engine)
+    const selector = `${attribute}.active, span`
+    const html = `<p class="active" data="${value.replaceAll('"', '&quot;')}">selected</p><span>other</span><p>shown</p>`
+    const extracted: string[] = []
+
+    htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { extraction: {
+        [selector]: node => extracted.push(node.tagName),
+      } },
+    })
+    expect(extracted).toEqual(['p', 'span'])
+    expect(htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { exclude: [selector] } },
+    })).toBe('shown')
+    const included = htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { include: [selector] } },
+    })
+    expect(included).toContain('selected')
+    expect(included).toContain('other')
+    expect(included).not.toContain('shown')
+  })
+
   // Basic tests for including elements
   it('includes specified elements by tag when provided with include option', async () => {
     const html = `
@@ -92,6 +155,20 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
     expect(markdown).not.toContain('This footer should be excluded')
   })
 
+  it.each(['.active', '[class~="active"]'])('uses only ASCII whitespace as token separators with %s', async (selector) => {
+    const excluded = ['&#32;', '&#9;', '&#10;', '&#13;', '&#12;']
+      .map(separator => `<p class="notice${separator}active">hidden</p>`)
+      .join('')
+    const html = `${excluded}<p class="notice&nbsp;active">NBSP</p><p class="notice&#11;active">VT</p>`
+
+    const markdown = htmlToMarkdown(html, {
+      engine: await resolveEngine(engine),
+      plugins: { filter: { exclude: [selector] } },
+    })
+
+    expect(markdown).toBe('NBSP\n\nVT')
+  })
+
   // Tests for compound selectors
   it('handles compound selectors', async () => {
     const html = `
@@ -109,6 +186,24 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
   })
 
   // Tests for attribute selectors
+  it.each([
+    ['[data-value]', 'empty\n\nhyphen\n\nvalue'],
+    ['[data-value=""]', 'empty'],
+    ['[data-value^=""]', ''],
+    ['[data-value$=""]', ''],
+    ['[data-value*=""]', ''],
+    ['[data-value~=""]', ''],
+    ['[data-value|=""]', 'empty\n\nhyphen'],
+  ])('handles the empty operand in %s', async (selector, expected) => {
+    const html = '<p data-value="">empty</p><p data-value="-en">hyphen</p><p data-value="real">value</p><p>absent</p>'
+    const markdown = htmlToMarkdown(html, {
+      engine: await resolveEngine(engine),
+      plugins: { filter: { include: [selector] } },
+    })
+
+    expect(markdown).toBe(expected)
+  })
+
   it('handles attribute selectors', async () => {
     const html = `
       <p>This should be excluded</p>
@@ -143,6 +238,51 @@ describe.each(engines)('querySelector plugin %s', ({ name, engine }) => {
 
     expect(markdown).toContain('This header should be included')
     expect(markdown).toContain('This content should be included')
+  })
+
+  it.each([
+    ...['=', '^=', '$=', '*=', '~=', '|='].map(operator => [
+      `[data-code${operator}"a^=b$=c*=d~=e|=f=g"]`,
+      '<p data-code="a^=b$=c*=d~=e|=f=g">selected</p>',
+    ]),
+    ['[ data-code ]', '<p data-code="value">selected</p>'],
+    ['[ data-code = "value" ]', '<p data-code="value">selected</p>'],
+    ['[ data-code ^= "val" ]', '<p data-code="value">selected</p>'],
+    ['[\tdata-code\t^=\t"val"\t]', '<p data-code="value">selected</p>'],
+    ['[\ndata-code\n=\n"value"\n]', '<p data-code="value">selected</p>'],
+    ['[\rdata-code\r=\r"value"\r]', '<p data-code="value">selected</p>'],
+    ['[\fdata-code\f=\f"value"\f]', '<p data-code="value">selected</p>'],
+    ['[ data-code = " spaced " ]', '<p data-code=" spaced ">selected</p>'],
+    ['[ data-code = "\'quoted\'" ]', '<p data-code="\'quoted\'">selected</p>'],
+    ['[ data-code = \'"quoted"\' ]', '<p data-code="&quot;quoted&quot;">selected</p>'],
+    ['[\u00A0data-code\u00A0]', '<p \u00A0data-code\u00A0="value">selected</p>'],
+    ['[\vdata-code\v]', '<p \vdata-code\v="value">selected</p>'],
+    ['[data-code=\u00A0value\u00A0]', '<p data-code="\u00A0value\u00A0">selected</p>'],
+    ['a[href="https://example.com"]', '<a href="https://example.com">selected</a>'],
+    ['img[src$=".png"]', '<img src="image.png" alt="selected">'],
+    ['a[href="#main"]', '<a href="#main">selected</a>'],
+    ['a[href="/docs/[name].html#section"].active', '<a href="/docs/[name].html#section" class="active">selected</a>'],
+    ['a[href=\'/docs/[name].html#section\'].active', '<a href="/docs/[name].html#section" class="active">selected</a>'],
+    [String.raw`a[href="a\"]b.c#d"].active`, String.raw`<a href="a\&quot;]b.c#d" class="active">selected</a>`],
+    [String.raw`a[href='a\']b.c#d'].active`, String.raw`<a href="a\']b.c#d" class="active">selected</a>`],
+    [String.raw`a[href=a\]b.c#d].active`, String.raw`<a href="a\]b.c#d" class="active">selected</a>`],
+    [String.raw`a[href="a\\"].active`, String.raw`<a href="a\\" class="active">selected</a>`],
+  ])('filters and extracts %s', async (selector, element) => {
+    const resolvedEngine = await resolveEngine(engine)
+    const html = `${element}<p>shown</p>`
+    const extracted: string[] = []
+
+    htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { extraction: {
+        [selector]: node => extracted.push(node.tagName),
+      } },
+    })
+    expect(extracted).toHaveLength(1)
+    expect(htmlToMarkdown(html, {
+      engine: resolvedEngine,
+      plugins: { filter: { exclude: [selector] } },
+    })).toBe('shown')
   })
 
   // Tests for child processing
