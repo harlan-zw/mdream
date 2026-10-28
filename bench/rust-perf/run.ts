@@ -7,6 +7,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
+import { isDeepStrictEqual } from 'node:util'
 import { conversionOptions, workloads } from './fixtures.ts'
 
 export function outputVerification(base: unknown, head: unknown) {
@@ -14,6 +15,18 @@ export function outputVerification(base: unknown, head: unknown) {
   return {
     changed: outputs[0] !== outputs[1],
     hashes: outputs.map(output => createHash('sha256').update(output).digest('hex')),
+  }
+}
+
+export function assertWasmMetadata(native: unknown[], wasm: unknown[], fixture: string) {
+  const metadata = (values: unknown[]) => values.map((value) => {
+    const { output: _output, ...rest } = value as Record<string, unknown>
+    return rest
+  })
+  const nativeMetadata = metadata(native)
+  if (isDeepStrictEqual(nativeMetadata[0], nativeMetadata[1])) {
+    const wasmMetadata = metadata(wasm)
+    assert.deepEqual(wasmMetadata[0], wasmMetadata[1], `${fixture}: WASM metadata differs without a native metadata change`)
   }
 }
 
@@ -222,6 +235,7 @@ async function main() {
           const output = typeof observed === 'string' ? observed : (observed as { output: string }).output
           assert.equal(output, (observations[side] as { output: string }).output, `${fixture.id}: native and WASM output differ`)
         }
+        assertWasmMetadata(observations, wasmOutputs, fixture.id)
         for (const runtime of wasm) {
           const until = performance.now() + 100
           do {

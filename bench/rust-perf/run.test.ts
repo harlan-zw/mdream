@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { utf8Chunks } from './fixtures.ts'
-import { cpuRows, normalizedCpuRows, outputVerification, scalingRows, statistics } from './run.ts'
+import { assertWasmMetadata, cpuRows, normalizedCpuRows, outputVerification, scalingRows, statistics } from './run.ts'
 
 it('keeps multibyte characters intact across small transport chunks', () => {
   const source = 'A東京🙂éZ'
@@ -62,4 +62,13 @@ it('uses serialized observations for both the change flag and digests', () => {
   const omitted = outputVerification(base, { ...base, absent: undefined })
   expect(omitted.changed).toBe(false)
   expect(omitted.hashes[0]).toBe(omitted.hashes[1])
+})
+
+it('keeps WASM metadata stable when native output changes without metadata changes', () => {
+  const native = [{ output: 'before', frontmatter: null }, { output: 'after', frontmatter: null }]
+  const wasm = [{ output: 'before', metadata: {} }, { output: 'after', metadata: { unexpected: 'broken' } }]
+  expect(() => assertWasmMetadata(native, wasm, 'page')).toThrow('WASM metadata differs without a native metadata change')
+  expect(() => assertWasmMetadata(native, [{ output: 'before', metadata: {} }, { output: 'after', metadata: {} }], 'page')).not.toThrow()
+  const changed = [{ output: 'before', frontmatter: { title: 'before' } }, { output: 'after', frontmatter: { title: 'after' } }]
+  expect(() => assertWasmMetadata(changed, wasm, 'page')).not.toThrow()
 })
