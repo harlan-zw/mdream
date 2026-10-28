@@ -126,7 +126,7 @@ export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
 
   const out: string[] = ['### ⚡ Performance _(directional)_', '']
   if (rows.some(row => row.bench.outputChanged || row.base?.outputChanged))
-    out.push('Measurements marked "output changed" compare different output between base and PR.', '')
+    out.push('Measurements marked "output changed" compare different output or metadata between base and PR.', '')
   if (slower.length)
     out.push(`⚠️ **${slower.length} slower** · past the per-metric noise gate`)
   else if (changed.length)

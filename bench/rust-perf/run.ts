@@ -7,13 +7,13 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
-import { isDeepStrictEqual } from 'node:util'
 import { conversionOptions, workloads } from './fixtures.ts'
 
 export function outputVerification(base: unknown, head: unknown) {
+  const outputs = [JSON.stringify(base), JSON.stringify(head)]
   return {
-    changed: !isDeepStrictEqual(base, head),
-    hashes: [base, head].map(output => createHash('sha256').update(JSON.stringify(output)).digest('hex')),
+    changed: outputs[0] !== outputs[1],
+    hashes: outputs.map(output => createHash('sha256').update(output).digest('hex')),
   }
 }
 

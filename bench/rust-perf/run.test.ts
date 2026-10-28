@@ -53,3 +53,13 @@ it('carries output changes into normalized and scaling measurements', () => {
   expect(normalizedCpuRows(cases, benches).map(row => row.outputChanged)).toEqual([false, true, false])
   expect(scalingRows(cases, benches).map(row => row.outputChanged)).toEqual([true, true])
 })
+
+it('uses serialized observations for both the change flag and digests', () => {
+  const base = { output: 'same', metadata: {} }
+  const reordered = outputVerification(base, { metadata: {}, output: 'same' })
+  expect(reordered.changed).toBe(true)
+  expect(reordered.hashes[0]).not.toBe(reordered.hashes[1])
+  const omitted = outputVerification(base, { ...base, absent: undefined })
+  expect(omitted.changed).toBe(false)
+  expect(omitted.hashes[0]).toBe(omitted.hashes[1])
+})

@@ -83,5 +83,5 @@ it('marks changed output while retaining the measurements and verdict', () => {
   expect(report).toContain('Page CPU (output changed)')
   expect(report).toContain('150.00 ms')
   expect(report).toContain('1 slower')
-  expect(report).toContain('Measurements marked "output changed" compare different output between base and PR.')
+  expect(report).toContain('Measurements marked "output changed" compare different output or metadata between base and PR.')
 })
