@@ -342,11 +342,18 @@ function handleHeading(depth: number): TagHandler {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `<h${depth}>`
       }
+      const heading = `${'#'.repeat(depth)} `
       if (state.listIndent && lastOutputChar(state.buffer) === 10) {
         const prefix = continuationPrefix(node, state.listIndentWidths || [], !state.bufferedBlockquoteDepth)
-        return `\n${prefix}${'#'.repeat(depth)} `
+        return `\n${prefix}${heading}`
       }
-      return `${'#'.repeat(depth)} `
+      if (state.listIndent && node.parent?.tagId === TAG_LI) {
+        const prefix = continuationPrefix(node, state.listIndentWidths || [], !state.bufferedBlockquoteDepth)
+        const open = blockOpenPrefix(state.buffer, prefix)
+        if (open !== undefined)
+          return `${open}${heading}`
+      }
+      return heading
     },
     exit: ({ state }) => {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {

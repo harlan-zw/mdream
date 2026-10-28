@@ -6158,6 +6158,11 @@ fn hard_break_trim_preserves_an_empty_item_guard() {
 #[test]
 fn heading_after_nested_hard_break_stays_in_parent_item() {
   for (html, expected) in [
+    ("<ul><li><p>a</p><h2>h</h2></li></ul>", "- a\n\n  ## h"),
+    (
+      "<ol start=\"10\"><li><p>a</p><h2>h</h2></li></ol>",
+      "10. a\n\n    ## h",
+    ),
     (
       "<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>",
       "- a\n  - b  \n\n  ## h",

@@ -4324,6 +4324,16 @@ impl ConvertState {
         } else if !self.list_indent.is_empty() && self.last_output_byte() == Some(b'\n') {
           let prefix = self.continuation_prefix();
           Some(Cow::Owned(format!("\n{prefix}{}", HEADING_PREFIXES[depth])))
+        } else if !self.list_indent.is_empty()
+          && _ancestors
+            .last()
+            .is_some_and(|parent| parent.tag_id == Some(TAG_LI))
+        {
+          let prefix = self.continuation_prefix();
+          Some(match self.block_open_prefix(&prefix) {
+            Some(open) => Cow::Owned(format!("{open}{}", HEADING_PREFIXES[depth])),
+            None => Cow::Borrowed(HEADING_PREFIXES[depth]),
+          })
         } else {
           Some(Cow::Borrowed(HEADING_PREFIXES[depth]))
         }

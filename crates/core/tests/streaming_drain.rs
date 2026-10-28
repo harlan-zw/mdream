@@ -3345,3 +3345,14 @@ fn heading_after_nested_hard_break_keeps_indent_across_drains() {
     );
   }
 }
+
+#[test]
+fn heading_after_paragraph_in_item_matches_every_split() {
+  for html in [
+    "<ul><li><p>a</p><h2>h</h2></li></ul>",
+    "<ol start=\"10\"><li><p>a</p><h2>h</h2></li></ol>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
