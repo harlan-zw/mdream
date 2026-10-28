@@ -133,6 +133,8 @@ export function wasmRun(glue: Glue, fixture: Workload, verify = false) {
   function observe(data: PluginData) {
     if (!verify)
       return
+    for (const key of Reflect.ownKeys(data))
+      assert.ok(key === 'frontmatter' || key === 'extracted', `Unexpected WASM stream metadata field: ${String(key)}`)
     if (data.frontmatter)
       frontmatter = data.frontmatter
     extracted.push(...data.extracted ?? [])

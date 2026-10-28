@@ -237,3 +237,96 @@ it.each([false, true])('marks every written fixture row only when output changes
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+function streamingMetadataProtocol(title: string, unexpectedStage?: 'chunk' | 'final', opaque = false) {
+  const calls: unknown[][] = []
+  const nativeElement = (text: string) => ({ selector: 'h2', tag: 'h2', text, attributes: [['id', text]] })
+  const wasmElement = (text: string) => ({ selector: 'h2', tagName: 'h2', textContent: text, attributes: { id: text } })
+  const first = `${title}-chunk`
+  const last = `${title}-final`
+  const native = { output: 'same', truncated: false, frontmatter: [['title', title]], metadata: [nativeElement(first), nativeElement(last)] }
+  const fixture = { id: 'page', name: 'page', operation: 'stream' as const, chunks: ['first', 'second'], options: 'metadata' as const, format: 'markdown' as const, inputBytes: 11 }
+  const schedule = [
+    { frontmatter: { title: 'partial' }, extracted: [wasmElement(first)] },
+    { frontmatter: { title }, extracted: [] },
+    { extracted: [wasmElement(last)] },
+  ]
+  let chunk = 0
+  let dataIndex = 0
+  const glue = {
+    htmlToMarkdown: () => '',
+    htmlToMarkdownResult: () => ({ markdown: '' }),
+    MarkdownStream: class {
+      constructor(options: unknown) { calls.push(['new', options]) }
+      processChunk(value: string) {
+        calls.push(['chunk', value])
+        return chunk++ === 0 ? 's' : 'ame'
+      }
+
+      finish() {
+        calls.push(['finish'])
+        return ''
+      }
+
+      takeData() {
+        calls.push(['takeData'])
+        const index = dataIndex++
+        const data = schedule[index]!
+        if (opaque) {
+          return new Proxy(data, {
+            ownKeys() { throw new Error('Timed path scanned metadata') },
+            get() { throw new Error('Timed path read metadata') },
+          })
+        }
+        return index === (unexpectedStage === 'chunk' ? 0 : unexpectedStage === 'final' ? 2 : -1)
+          ? { ...data, unexpected: 'broken' }
+          : data
+      }
+
+      free() { calls.push(['free']) }
+    },
+  }
+  return { glue, fixture, native, calls }
+}
+
+const streamingMetadataCalls = [
+  ['new', { format: 'markdown', plugins: { frontmatter: true, extraction: { selectors: ['h2'] } } }],
+  ['chunk', 'first'],
+  ['takeData'],
+  ['chunk', 'second'],
+  ['takeData'],
+  ['finish'],
+  ['takeData'],
+  ['free'],
+]
+
+it('collects legitimate changing streaming metadata through the final takeData', () => {
+  const rows = ['before', 'after'].map(title => streamingMetadataProtocol(title))
+  const observations = rows.map(row => wasmRun(row.glue, row.fixture, true))
+  expect(() => assertWasmMetadata(rows.map(row => row.native), observations, 'page', 'stream')).not.toThrow()
+  expect(outputVerification(rows[0]!.native, rows[1]!.native).changed).toBe(true)
+  for (const row of rows)
+    expect(row.calls).toEqual(streamingMetadataCalls)
+})
+
+describe.each([0, 1])('unexpected streaming metadata on revision %s', (side) => {
+  it.each(['chunk', 'final'] as const)('rejects a field from the %s takeData before parity can accept it', (stage) => {
+    const rows = ['before', 'after'].map((title, index) => streamingMetadataProtocol(title, index === side ? stage : undefined))
+    expect(() => {
+      const observations = rows.map(row => wasmRun(row.glue, row.fixture, true))
+      assertWasmMetadata(rows.map(row => row.native), observations, 'page', 'stream')
+    }).toThrow('Unexpected WASM stream metadata field: unexpected')
+    for (let index = 0; index <= side; index++) {
+      const calls = index === side && stage === 'chunk'
+        ? [...streamingMetadataCalls.slice(0, 3), ['free']]
+        : streamingMetadataCalls
+      expect(rows[index]!.calls).toEqual(calls)
+    }
+  })
+})
+
+it('does not inspect takeData objects on the timed streaming path', () => {
+  const row = streamingMetadataProtocol('page', undefined, true)
+  expect(wasmRun(row.glue, row.fixture, false)).toBe(4)
+  expect(row.calls).toEqual(streamingMetadataCalls)
+})
