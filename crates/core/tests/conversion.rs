@@ -6273,3 +6273,87 @@ fn nested_ordered_start_wraps_at_content_columns() {
     "- alpha beta\n  gamma\n  delta\n\n  10. one\n      two\n      three\n      four\n      five"
   );
 }
+
+#[test]
+fn scout9_excluded_list_spacing() {
+  for (html, expected) in [
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><style>hidden</style><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><template>hidden</template><li>b</li></ul>",
+      "- a\n- b",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
+fn scout9_excluded_list_spacing_options() {
+  let cases = [
+    (
+      "<ul><li>a</li><x-text>visible</x-text><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "x-text".to_string(),
+          TagOverrideConfig {
+            alias_tag_id: mdream::get_tag_id("em"),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a*visible*\n- b",
+    ),
+    (
+      "<ul><li>a</li><div class=hide>hidden</div><li>b</li></ul>",
+      PluginConfig {
+        filter: Some(FilterConfig {
+          exclude: Some(vec![".hide".to_string()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "script".to_string(),
+          TagOverrideConfig {
+            spacing: Some([2, 2]),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a\n\n- b",
+    ),
+  ];
+  for (html, plugins, expected) in cases {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+  }
+}
