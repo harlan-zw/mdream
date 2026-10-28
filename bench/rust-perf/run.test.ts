@@ -202,17 +202,16 @@ it.each([false, true])('marks every written fixture row only when output changes
     }
     let closed = 0
     let killed = 0
-    const fixture = { id: 'page', name: 'page', operation: 'convert' as const, html: '<p>page</p>', options: 'default' as const, format: 'markdown' as const, inputBytes: 11 }
+    const fixtures = [1, 2, 4, 8].map(size => ({ id: `page-${size}`, name: `page ${size}`, operation: 'convert' as const, html: '<p>page</p>', options: 'default' as const, format: 'markdown' as const, inputBytes: size * 11, scaling: { group: 'page', size } }))
     await main([base, head, out, '--native-only'], {
       pinCpu: () => 'synthetic',
-      workloads: () => [fixture],
+      workloads: () => fixtures,
       nativeRunner(binary, manifest) {
-        expect(JSON.parse(readFileSync(manifest, 'utf8'))).toEqual([fixture])
-        const output = changed && binary.startsWith(head) ? 'after' : 'before'
+        expect(JSON.parse(readFileSync(manifest, 'utf8'))).toEqual(fixtures)
         return {
-          async request(_index, mode) {
+          async request(index, mode) {
             if (mode === 'verify')
-              return { output, frontmatter: null, extracted: [], truncated: false }
+              return { output: changed && index === 1 && binary.startsWith(head) ? 'after' : 'before', frontmatter: null, extracted: [], truncated: false }
             if (mode === 'alloc')
               return { calls: 1, reallocations: 0, bytes: 10, peak: 10 }
             return { cpu: 1 }
@@ -224,11 +223,22 @@ it.each([false, true])('marks every written fixture row only when output changes
     })
     const runs = ['base', 'pr'].map(side => JSON.parse(readFileSync(join(out, `${side}-rust-perf.json`), 'utf8')))
     for (const run of runs) {
-      expect(run.benches.map((row: { id: string }) => row.id)).toEqual(['calls', 'reallocations', 'bytes', 'peak', 'cpu', 'cpu-per-mib'].map(metric => `native-page-${metric}`))
-      for (const row of run.benches)
-        expect(Boolean(row.outputChanged)).toBe(changed)
+      expect(run.benches).toHaveLength(27)
+      for (const size of [1, 2, 4, 8]) {
+        for (const metric of ['calls', 'reallocations', 'bytes', 'peak', 'cpu', 'cpu-per-mib']) {
+          const row = run.benches.find((item: { id: string }) => item.id === `native-page-${size}-${metric}`)
+          expect(row, `missing ${size} ${metric}`).toBeDefined()
+          expect(Boolean(row.outputChanged)).toBe(changed && size === 2)
+        }
+      }
+      for (const size of [2, 4, 8]) {
+        const row = run.benches.find((item: { id: string }) => item.id === `native-page-${size}-scaling`)
+        expect(row, `missing ${size} scaling`).toBeDefined()
+        expect(Boolean(row.outputChanged)).toBe(changed && size !== 8)
+      }
     }
-    expect(runs[0].verification.page === runs[1].verification.page).toBe(!changed)
+    for (const size of [1, 2, 4, 8])
+      expect(runs[0].verification[`page-${size}`] === runs[1].verification[`page-${size}`]).toBe(!changed || size !== 2)
     expect(closed).toBe(4)
     expect(killed).toBe(4)
   }
