@@ -6149,6 +6149,24 @@ fn scout9_list_tail_quote_spacing() {
 
 #[test]
 fn hard_break_trim_preserves_an_empty_item_guard() {
+  // Rust-only guard regression. JS still renders the final paragraph at the
+  // parent indent ("\n\n  y"); that known mismatch is not parity coverage.
   let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
   assert_eq!(convert(html), "- x\n\n  - \n  \n    y");
+}
+
+#[test]
+fn heading_after_nested_hard_break_stays_in_parent_item() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>",
+      "- a\n  - b  \n\n  ## h",
+    ),
+    (
+      "<ol start=\"10\"><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ol>",
+      "10. a\n    - b  \n\n    ## h",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
 }

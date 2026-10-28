@@ -3324,3 +3324,24 @@ fn hard_break_trim_preserves_an_empty_item_guard_at_every_split() {
   assert_stream_matches(html, HtmlToMarkdownOptions::default());
   assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
 }
+
+#[test]
+fn heading_after_nested_hard_break_keeps_indent_across_drains() {
+  let html = "<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>";
+  let expected = "- a\n  - b  \n\n  ## h";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    expected
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  let prefix = format!("<p>{}</p>", "lead ".repeat(1000));
+  let long = format!("{prefix}{html}");
+  let long_expected = format!("{}\n\n{expected}", "lead ".repeat(1000).trim());
+  for width in [1, 7, 4096] {
+    assert_eq!(
+      stream_chunks(&long, width, HtmlToMarkdownOptions::default()),
+      long_expected
+    );
+  }
+}

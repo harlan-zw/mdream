@@ -125,7 +125,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -338,9 +338,13 @@ function cellExit(node: HandlerContext['node'], state: HandlerContext['state']):
 function handleHeading(depth: number): TagHandler {
   return {
     // A `#` prefix needs its own line, which a GFM row cannot give it.
-    enter: ({ state }) => {
+    enter: ({ node, state }) => {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `<h${depth}>`
+      }
+      if (state.listIndent && lastOutputChar(state.buffer) === 10) {
+        const prefix = continuationPrefix(node, state.listIndentWidths || [], !state.bufferedBlockquoteDepth)
+        return `\n${prefix}${'#'.repeat(depth)} `
       }
       return `${'#'.repeat(depth)} `
     },

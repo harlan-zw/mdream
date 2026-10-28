@@ -196,3 +196,13 @@ describe.each(engines)('scout9_list_tail_quote_spacing $name', (engineConfig) =>
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 })
+
+describe.each(engines)('parent heading after nested hard break $name', (engineConfig) => {
+  it.each([
+    ['<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>', '- a\n  - b  \n\n  ## h'],
+    ['<ol start="10"><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ol>', '10. a\n    - b  \n\n    ## h'],
+  ])('keeps the heading in its parent item: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})

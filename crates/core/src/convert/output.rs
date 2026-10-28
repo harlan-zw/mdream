@@ -4321,6 +4321,9 @@ impl ConvertState {
             static H_OPEN: [&str; 6] = ["<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>"];
             Some(Cow::Borrowed(H_OPEN[depth]))
           }
+        } else if !self.list_indent.is_empty() && self.last_output_byte() == Some(b'\n') {
+          let prefix = self.continuation_prefix();
+          Some(Cow::Owned(format!("\n{prefix}{}", HEADING_PREFIXES[depth])))
         } else {
           Some(Cow::Borrowed(HEADING_PREFIXES[depth]))
         }
