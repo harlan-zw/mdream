@@ -124,6 +124,8 @@ export interface MarkdownState {
   bufferedBlockquoteDepth: number
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
+  lastItemMarkerFragment?: number
+  lastItemMarkerOwner?: ElementNode
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
 }
@@ -241,7 +243,12 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
  * underline: the text becomes a heading and the item disappears. A blank line, or
  * a sibling marker, opens its own block instead.
  */
-function recordItemMarker(state: MarkdownState, index: number): void {
+function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: boolean): void {
+  const previousFragment = state.lastItemMarkerFragment
+  const previousOwner = state.lastItemMarkerOwner
+  state.lastItemMarkerFragment = builtIn ? state.buffer.length - 1 : undefined
+  state.lastItemMarkerOwner = builtIn ? element : undefined
+  const index = element.index
   // Only a list's first item can follow a paragraph, so every later sibling
   // skips the scan below.
   if (index !== 0 || newlineRunBefore(state.buffer, state.buffer.length - 1) !== 1) {
@@ -258,7 +265,15 @@ function recordItemMarker(state: MarkdownState, index: number): void {
       const code = value.charCodeAt(cursor)
       if (code === 10 || code === 32)
         continue
-      state.emptyItemFragment = listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length)
+      // A direct first-child list cannot have inserted content before its
+      // parent's built-in marker. A drain/rewrite that moves that fragment
+      // misses this shortcut and keeps the general line recognizer.
+      const recordedParent = fragment === previousFragment
+        && previousOwner === element.parent?.parent
+        && element.parent?.index === 0
+        && (fragment === 0 || newlineRunBefore(state.buffer, fragment) > 0)
+        && (code === 45 || code === 46)
+      state.emptyItemFragment = (recordedParent || listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length))
         ? undefined
         : state.buffer.length - 1
       return
@@ -1366,6 +1381,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
+    lastItemMarkerFragment: undefined,
+    lastItemMarkerOwner: undefined,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -2348,10 +2365,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
-      if (eventType === NodeEventEnter)
-        recordItemMarker(state, element.index)
-      else
+      if (eventType === NodeEventEnter) {
+        recordItemMarker(state, element, !handler?.literalEnter && !element.pluginOutput)
+      }
+      else {
         resolveItemMarker(state, true)
+        state.lastItemMarkerFragment = undefined
+        state.lastItemMarkerOwner = undefined
+      }
     }
 
     if (eventType === NodeEventEnter

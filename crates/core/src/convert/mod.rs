@@ -944,6 +944,10 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// Last built-in marker end, excluding its trailing space.
+  last_item_marker_end: usize,
+  #[cfg(test)]
+  parent_marker_scans: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
@@ -1191,6 +1195,9 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      last_item_marker_end: usize::MAX,
+      #[cfg(test)]
+      parent_marker_scans: 0,
       list_rule_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
@@ -2607,6 +2614,9 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    if self.last_item_marker_end != usize::MAX && offset < self.last_item_marker_end {
+      self.last_item_marker_end = usize::MAX;
+    }
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -2627,6 +2637,12 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    if self.last_item_marker_end != usize::MAX {
+      self.last_item_marker_end = self
+        .last_item_marker_end
+        .checked_sub(removed)
+        .unwrap_or(usize::MAX);
+    }
     if self.blockquote_line_scanned_to != 0 {
       self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
       self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);
