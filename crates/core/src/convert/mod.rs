@@ -719,6 +719,11 @@ pub struct ConvertState {
   collapse_span_depth: u8,
   first_block_parent_index: Option<usize>,
   block_parent_indices: Vec<usize>,
+  /// The block whose text last counted as content of the link around it, or
+  /// `usize::MAX`, and `depth_map[TAG_A]` then. While that block is open and the
+  /// links are the same, later text there already has its link counted.
+  link_content_block: usize,
+  link_content_links: u16,
   parse_text_buffer: String,
   entity_buffer: String,
   /// Fixed-mask path: a start tag whose bytes ran out mid-tag, holding the
@@ -1072,6 +1077,8 @@ impl ConvertState {
       collapse_span_depth: 0,
       first_block_parent_index: None,
       block_parent_indices: Vec::with_capacity(16),
+      link_content_block: usize::MAX,
+      link_content_links: 0,
       parse_text_buffer: String::new(),
       entity_buffer: String::new(),
       pending_start: None,

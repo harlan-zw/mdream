@@ -503,6 +503,8 @@ impl ConvertState {
       if excluded || (!has_text && !self.in_pre) {
         self.count_hidden_link_text(up_to, excluded);
       } else if has_text
+        && (self.link_content_block > up_to
+          || self.link_content_links != self.depth_map[TAG_A as usize])
         && !self.stack[up_to..]
           .iter()
           .any(|node| node.tag_id == Some(TAG_A))
@@ -510,6 +512,11 @@ impl ConvertState {
         // Text in a block nested in the link, such as `<svg><text>`. Blank text
         // there, as in `<pre> </pre>`, shows nothing.
         self.count_content_in_enclosing_link(up_to);
+        // Only the first count matters: once the link has content, more never
+        // changes whether it takes its label. So skip the walk down to it while
+        // this block is open and no link opened inside it.
+        self.link_content_block = up_to;
+        self.link_content_links = self.depth_map[TAG_A as usize];
       }
     }
   }
@@ -1628,6 +1635,9 @@ impl ConvertState {
     }
 
     if self.first_block_parent_index == Some(popping_index) {
+      if self.link_content_block == popping_index {
+        self.link_content_block = usize::MAX;
+      }
       self.block_parent_indices.pop();
       self.first_block_parent_index = self
         .block_parent_indices

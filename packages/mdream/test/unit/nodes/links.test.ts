@@ -305,6 +305,18 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('Go [Cart](/cart)')
   })
 
+  // Text in a block nested in a link counts for the link around that block. A
+  // block of the next link, or a link opened inside the block, counts for its
+  // own link, so neither takes its label next to visible text.
+  it.each([
+    ['<a href="/a" title="A"><p>x</p></a><a href="/b" title="B"><p>y</p></a>', '[x](/a "A") [y](/b "B")'],
+    ['<a href="/a"><div>x<a href="/b" title="B"><p>y</p></a></div></a>', '[x [y](/b "B")](/a)'],
+    ['<a href="/a" title="A"><ul><li>x<ul><li>y<ul><li>z</li></ul></li></ul></li></ul></a>', '[- x  - y    - z](/a "A")'],
+  ])('counts text in a nested block for its own link in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   // Whitespace in a `<pre>` nested in a link shows nothing, so the link keeps its label.
   it.each([
     ['<a href="/p" aria-label="L"><pre> </pre></a>', '[L](/p)'],
