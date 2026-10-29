@@ -153,6 +153,7 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(htmlToMarkdown('<p>a|<mark>x</mark></p>', { engine })).toBe('a| <mark>x</mark>')
     expect(htmlToMarkdown('<p>a|<code>x</code></p>', { engine })).toBe('a|`x`')
     expect(htmlToMarkdown('<h2>a|<br>b</h2>', { engine })).toBe('## a| <br>b')
+    expect(htmlToMarkdown('<h2>a|<br>b</h2>', { engine, plugins: { tagOverrides: { br: { spacing: [0, 0] } } } })).toBe('## a| <br>b')
   })
 
   it('drops the separator owned by empty inline code in a list', async () => {
