@@ -3153,12 +3153,16 @@ impl ConvertState {
     let Some(mut indent) = self.markdown_line_indent() else {
       return false;
     };
-    for byte in text.bytes() {
+    for (offset, byte) in text.bytes().enumerate() {
       if byte == b' ' && indent < 3 {
         indent += 1;
         continue;
       }
-      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9');
+      // Prose such as `=SUM(A1)` cannot underline a heading, so it skips the escaper.
+      if byte == b'=' {
+        return Self::is_equals_line(&text.as_bytes()[offset..]);
+      }
+      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'0'..=b'9');
     }
     false
   }
