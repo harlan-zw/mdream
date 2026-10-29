@@ -274,7 +274,7 @@ function trailingNewlines(buffer: string[]): number {
   return count
 }
 
-function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined): void {
+function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined, afterLiteralOpener = false): void {
   const buffer = state.buffer
   const config = newlineConfig(element, state.depthMap)
   const wantedNewlines = config[eventType] || 0
@@ -305,7 +305,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
       }
       else if (firstOutput) {
         const last = charOf(lastOutputChar(buffer))
-        if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(firstOutput))
+        if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(firstOutput) && !afterLiteralOpener)
           buffer.push(' ')
         state.pendingInlineWhitespace = false
       }
@@ -382,6 +382,23 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
   // matches its own element, and the final output drops the hold.
   const openQuotes: number[] = []
   const openQuoteNodes: ElementNode[] = []
+  // Depth and buffer length right after each open inline element's literal
+  // `tagOverrides` opener, in pairs. A length of -1 marks one that output
+  // has already followed.
+  const literalOpeners: number[] = []
+
+  // A separator written while nothing follows the innermost open literal
+  // opener would split it from the content after it.
+  function followsLiteralOpener(): boolean {
+    const end = literalOpeners[literalOpeners.length - 1]!
+    if (end < 0 || end > state.buffer.length)
+      return false
+    for (let index = end; index < state.buffer.length; index++) {
+      if (state.buffer[index])
+        return false
+    }
+    return true
+  }
 
   function pushCaptionBoundary(newlines: number): boolean {
     if (state.buffer.length === 0 || newlines === 0)
@@ -418,7 +435,8 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       return
     if (node.leadingBlank && !hasNonWhitespace(node.value)) {
       if (captionClosedSpacing === 0 && !(captionOpen > 0 && !captionContent)
-        && openQuotes.at(-1) !== state.buffer.length - 1) {
+        && openQuotes.at(-1) !== state.buffer.length - 1
+        && !(literalOpeners.length && followsLiteralOpener())) {
         state.pendingInlineWhitespace = true
       }
       return
@@ -431,8 +449,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     if (state.pendingInlineWhitespace) {
       if (!hasNonWhitespace(node.value))
         return
-      if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(node.value[0] || ''))
+      if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(node.value[0] || '')
+        && !(literalOpeners.length && followsLiteralOpener())) {
         node.value = ` ${node.value}`
+      }
       state.pendingInlineWhitespace = false
     }
     if (state.depthMap[TAG_PRE] && state.buffer.length === 0)
@@ -482,7 +502,12 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       return
 
     const element = event.node as ElementNode
+    if (event.type === NodeEventExit) {
+      while (literalOpeners.length && literalOpeners[literalOpeners.length - 2]! >= element.depth)
+        literalOpeners.length -= 2
+    }
     let output: string | undefined
+    let literalEnter = false
     // A quotation with only whitespace since its opener emits nothing, but
     // keeps the space its opener added. Openers above this one belong to
     // quotations inside it whose exit never came.
@@ -507,7 +532,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
           if (empty) {
             const openerOutput = buffer[opener]
             buffer.length = opener
-            if (openerOutput === ' "')
+            if (openerOutput === ' "' && !(literalOpeners.length && followsLiteralOpener()))
               buffer.push(' ')
             state.lastNode = element
             return
@@ -523,6 +548,11 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
     else {
       output = elementOutput(element, event.type, state)
+      if (event.type === NodeEventEnter && output) {
+        const override = state.options.tagOverrides?.[element.name]
+        literalEnter = typeof override === 'object' && override.enter !== undefined
+          && (element.tagHandler?.isInline ?? element.tagId === -1)
+      }
     }
 
     if (element.tagId === TAG_BR && event.type === NodeEventEnter && output) {
@@ -561,7 +591,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       state.pendingInlineWhitespace = false
     }
 
-    appendOutput(state, element, event.type, output)
+    const outputStart = state.buffer.length
+    appendOutput(state, element, event.type, output, literalOpeners.length !== 0 && followsLiteralOpener())
+    if (literalEnter && state.buffer.length > outputStart)
+      literalOpeners.push(element.depth, state.buffer.length)
     if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {
       openQuotes.push(state.buffer.length - 1)
       openQuoteNodes.push(element)
@@ -614,6 +647,19 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       return
     if (state.options.wrapWidth)
       bufferColumn = columnAt(content, contextStart, bufferColumn)
+    // An opener only empty fragments follow ends the context fragment.
+    for (let pair = 1; pair < literalOpeners.length; pair += 2) {
+      let end = literalOpeners[pair]!
+      if (end >= keepFrom) {
+        end -= keepFrom - 1
+      }
+      else if (end >= 0) {
+        while (end < keepFrom && !buffer[end])
+          end++
+        end = end === keepFrom ? 1 : -1
+      }
+      literalOpeners[pair] = end
+    }
     const kept = buffer.slice(keepFrom)
     buffer.length = 0
     buffer.push(content.slice(contextStart, keptStart))

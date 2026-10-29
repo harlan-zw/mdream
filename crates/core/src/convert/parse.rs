@@ -471,32 +471,12 @@ impl ConvertState {
 
   /// A blank that opens an inline element can be the only word separator,
   /// whether the element writes a delimiter, like `<strong>`, or nothing, like
-  /// a `<span>`. A literal `tagOverrides` opener is not held back, so a stream
-  /// may already have sent it: the blank is dropped there, or it would split
-  /// the opener from the content.
+  /// a `<span>`. The output decides where it goes, or that it writes nothing.
+  /// Kept out of line: only blanks reach it, and inlined it slows every text
+  /// node.
+  #[inline(never)]
   fn keeps_leading_blank(&self) -> bool {
-    let Some(node) = self.stack.last() else {
-      return false;
-    };
-    if !node.is_inline {
-      return false;
-    }
-    if !self.has_tag_overrides || node.current_walk_index != 0 {
-      return true;
-    }
-    // Only a first-child chain is still adjacent to the ancestor opener.
-    for node in self.stack.iter().rev() {
-      if !node.is_inline || node.child_text_node_index != 0 {
-        break;
-      }
-      if self.writes_literal_opener(node) {
-        return false;
-      }
-      if node.index != 0 || self.wrapper_emits_inline_markdown(node) {
-        break;
-      }
-    }
-    true
+    self.stack.last().is_some_and(|node| node.is_inline)
   }
 
   /// Depth and walk index for an emitted text node, plus its hazard flag.

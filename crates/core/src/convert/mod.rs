@@ -888,6 +888,10 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
+  /// Depth and buffer offset right after each open inline element's literal
+  /// `tagOverrides` opener. The offset still ends the buffer while nothing
+  /// has been written since.
+  literal_opener_ends: Vec<(usize, usize)>,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1172,6 +1176,7 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      literal_opener_ends: Vec::new(),
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -3011,6 +3016,14 @@ impl ConvertState {
     for marker in &mut self.open_markers {
       marker.output_start -= drain_end;
       marker.content_start -= drain_end;
+    }
+    // An opener with drained output after it no longer ends anything.
+    for end in &mut self.literal_opener_ends {
+      end.1 = if end.1 == usize::MAX || end.1 < drain_end {
+        usize::MAX
+      } else {
+        end.1 - drain_end
+      };
     }
     for frame in &mut self.caption_frames {
       if let CaptionState::Tentative {

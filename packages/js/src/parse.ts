@@ -113,25 +113,9 @@ function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
 
 // A blank that opens an inline element can be the only word separator,
 // whether the element writes a delimiter, like `<strong>`, or nothing, like a
-// `<span>`. A literal `tagOverrides` opener is not held back, so a stream may
-// already have sent it: the blank is dropped there, or it would split the
-// opener from the content.
-function keepsLeadingBlank(node: ElementNode, state: ParseState): boolean {
-  if (!(node.tagHandler?.isInline ?? node.tagId === -1))
-    return false
-  if (!state.tagOverrideHandlers || node.currentWalkIndex)
-    return true
-  let parent: ElementNode | null | undefined = node
-  while (parent && !parent.childTextNodeIndex && (parent.tagHandler?.isInline ?? parent.tagId === -1)) {
-    const handler = parent.tagHandler
-    if (handler?.literalEnterHasOutput)
-      return false
-    // A preceding sibling may have emitted content without a text node.
-    if (parent.index || (handler?.enter && !handler.literalEnter))
-      break
-    parent = parent.parent
-  }
-  return true
+// `<span>`. The output decides where it goes, or that it writes nothing.
+function keepsLeadingBlank(node: ElementNode): boolean {
+  return node.tagHandler?.isInline ?? node.tagId === -1
 }
 
 const SCRIPT_DATA = 0
@@ -1335,7 +1319,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   // Whitespace-only text before an element's first child is indentation, but
   // in inline content after earlier text it is the only word separator.
   const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
-  if (isLeadingBlank && ((state.plainText && !state.keepLeadingBlanks) || !keepsLeadingBlank(state.currentNode, state))) {
+  if (isLeadingBlank && ((state.plainText && !state.keepLeadingBlanks) || !keepsLeadingBlank(state.currentNode))) {
     return
   }
 

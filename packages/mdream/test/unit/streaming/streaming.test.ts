@@ -34,6 +34,9 @@ const BYTE_PARITY_CASES = [
 const BYTE_PARITY_OVERRIDE_CASES = [
   ['<p>a<sup><span> <span>2</span></span></sup>z</p>', 'sup', '**', 'a**2**z'],
   ['<p>a<sup><span><span> <span>2</span></span></span></sup>z</p>', 'sup', '**', 'a**2**z'],
+  ['<p>a<sup><span></span><span> <span>2</span></span></sup>z</p>', 'sup', '**', 'a**2**z'],
+  ['<p>a<sup><svg></svg><span> <span>2</span></span></sup>z</p>', 'sup', '**', 'a**2**z'],
+  ['<p>a<sup><em> <span>2</span></em></sup>z</p>', 'sup', '**', 'a***2***z'],
   ['<p>a<em>x </em><br>b</p>', 'br', '', 'a*x* b'],
 ] as const
 

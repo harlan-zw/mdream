@@ -27,7 +27,6 @@ export function buildTagOverrideHandlers(
       const output = override.enter
       handler.enter = () => output
       handler.literalEnter = true
-      handler.literalEnterHasOutput = output.length > 0
     }
     if (override.exit !== undefined) {
       const output = override.exit

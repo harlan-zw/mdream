@@ -1382,6 +1382,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   const openMarkerFollowsSpace: boolean[] = []
   // The fragment holding the space the current event's pending separator wrote.
   let pendingSpaceFragment = -1
+  // Depth and buffer length right after each open inline element's literal
+  // `tagOverrides` opener, in pairs. A length of -1 marks one that output
+  // has already followed.
+  const literalOpeners: number[] = []
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
   // 1 needs a boundary; 2 emitted one and still owns the next source space.
@@ -1656,6 +1660,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     while (index > 0 && (openMarkers[index - 1]! & MARKER_TYPE_MASK) <= 4 && openMarkers[index - 1]! >> 3 === fragment - 1)
       fragment = openMarkers[--index]! >> 3
+    if (literalOpeners.length) {
+      const link = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
+      let at = fragment
+      while (at > 0 && !buffer[at - 1])
+        at--
+      // Moved in front of the run, it would split a literal opener from it.
+      if (followsLiteralOpener(link >= 0 && link === at - 1 ? link : fragment))
+        return true
+    }
     // A space moved in front of the run earlier already parts the words.
     if (buffer[fragment]!.charCodeAt(0) === 32)
       return true
@@ -1681,9 +1694,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    * A blank the parser kept at the start of an inline element parts the word
    * before it from the content after it. In front of an emphasis opener run
    * that ends the output it moves before the run. A link or quote opener that
-   * ends the output already parts it from a word, and code keeps its content
-   * as written, so there it writes nothing. Anywhere else it is owed to the
-   * next visible inline output, as a separator trimmed from a closed element.
+   * ends the output already parts it from a word, a literal `tagOverrides`
+   * opener would be split from its content, and code keeps its content as
+   * written, so there it writes nothing. Anywhere else it is owed to the next
+   * visible inline output, as a separator trimmed from a closed element.
    */
   function placeLeadingBlank(): void {
     const depthMap = state.depthMap
@@ -1693,8 +1707,46 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     const end = state.buffer.length - 1
     const link = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
-    if (!(openMarkerCount && openMarkers[openMarkerCount - 1]! >> 3 === end) && !(link >= 0 && link === end))
+    if (!(openMarkerCount && openMarkers[openMarkerCount - 1]! >> 3 === end) && !(link >= 0 && link === end)
+      && !(literalOpeners.length && followsLiteralOpener(end + 1))) {
       state.pendingInlineWhitespace = true
+    }
+  }
+
+  /**
+   * A literal `tagOverrides` opener is not held back, so a stream may already
+   * have sent it. A separator placed at `fragment`, with nothing written since
+   * the innermost open one, would split it from the content after it.
+   */
+  function followsLiteralOpener(fragment: number): boolean {
+    const end = literalOpeners[literalOpeners.length - 1]!
+    if (end < 0 || end > fragment || fragment > state.buffer.length)
+      return false
+    for (let index = end; index < fragment; index++) {
+      if (state.buffer[index])
+        return false
+    }
+    return true
+  }
+
+  /**
+   * Keep the output after an opener that nothing has followed yet, so its
+   * position survives the drain. Once output follows it, that output leaves
+   * with the drain and no open opener can end the output again.
+   */
+  function holdLiteralOpener(held: number): number {
+    const end = literalOpeners[literalOpeners.length - 1]!
+    if (end < 0 || end >= held)
+      return held
+    const limit = Math.min(held, state.buffer.length)
+    for (let index = end; index < limit; index++) {
+      if (state.buffer[index]) {
+        for (let pair = 1; pair < literalOpeners.length; pair += 2)
+          literalOpeners[pair] = -1
+        return held
+      }
+    }
+    return end
   }
 
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
@@ -1724,6 +1776,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (!hasNonWhitespace(textNode.value))
           return
         if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || '')
+          && !(literalOpeners.length && followsLiteralOpener(state.buffer.length))
           && !(openMarkerCount && hoistOpenerSpace())) {
           state.buffer.push(' ')
           state.lastContentCache = ' '
@@ -1938,6 +1991,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const element = node as ElementNode
     const handler = node.tagHandler
     const tagId = element.tagId!
+    if (eventType === NodeEventExit) {
+      while (literalOpeners.length && literalOpeners[literalOpeners.length - 2]! >= element.depth)
+        literalOpeners.length -= 2
+    }
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
@@ -2324,6 +2381,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         else if (firstOutput) {
           // An empty opener run ending the output takes the separator in front.
           if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)
+            && !(literalOpeners.length && followsLiteralOpener(state.buffer.length))
             && !(openMarkerCount && hoistOpenerSpace())) {
             state.buffer.push(' ')
             state.lastContentCache = ' '
@@ -2450,6 +2508,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
+    if (eventType === NodeEventEnter && handler?.literalEnter && (handler.isInline ?? tagId === -1) && outputStart < buff.length)
+      literalOpeners.push(element.depth, buff.length)
 
     if (gfmAction)
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
@@ -2540,6 +2600,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.codeFence?.fragment ?? Infinity,
           openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
         )
+    if (!final && literalOpeners.length)
+      heldFragment = holdLiteralOpener(heldFragment)
     // An open link can still be unwrapped at its close.
     if (cleanPass && !final)
       heldFragment = Math.min(heldFragment, cleanPass.held())

@@ -6282,6 +6282,90 @@ fn review_literal_override_whitespace() {
 }
 
 #[test]
+fn literal_override_drops_blank_after_empty_sibling() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "sup".into(),
+        TagOverrideConfig {
+          enter: Some("**".into()),
+          exit: Some("**".into()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    // A sibling that writes nothing leaves the opener ending the output.
+    (
+      "<p>a<sup><span></span><span> <span>2</span></span></sup>z</p>",
+      "a**2**z",
+    ),
+    (
+      "<p>a<sup><svg></svg><span> <span>2</span></span></sup>z</p>",
+      "a**2**z",
+    ),
+    ("<p>a<sup><b></b> <span>2</span></sup>z</p>", "a**2**z"),
+    ("<p>a<sup><a> <span>2</span></a></sup>z</p>", "a**2**z"),
+    // An emphasis run right after the opener takes no space in front.
+    ("<p>a<sup><em> <span>2</span></em></sup>z</p>", "a***2***z"),
+    ("<p>a<sup><b> 2</b></sup>z</p>", "a****2****z"),
+    // Content written after the opener keeps the separator.
+    (
+      "<p>a<sup><span>x</span><span> <span>2</span></span></sup>z</p>",
+      "a**x 2**z",
+    ),
+    (
+      "<p>a<sup><img src=\"x.png\"><span> <span>2</span></span></sup>z</p>",
+      "a**![](x.png) 2**z",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html}"
+    );
+  }
+  assert_eq!(
+    html_to_text(
+      "<p>a<sup><span></span><span> <span>2</span></span></sup>z</p>",
+      options
+    ),
+    "a**2**z"
+  );
+}
+
+#[test]
+fn literal_override_end_trimmed_by_break_keeps_separator() {
+  // The break trims the opener's spaces, and `x` brings the output back to
+  // the length the opener ended at.
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "sup".into(),
+        TagOverrideConfig {
+          enter: Some("^  ".into()),
+          exit: Some("^".into()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_text(
+      "<p>a<sup><br>x<span> <span>2</span></span></sup>z</p>",
+      options
+    ),
+    "a^\nx 2^z"
+  );
+}
+
+#[test]
 fn literal_override_preserves_space_after_emitting_sibling() {
   let html = "<p>a<sup><u></u><span> <span>2</span></span></sup>z</p>";
   let options = HtmlToMarkdownOptions {

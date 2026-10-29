@@ -423,6 +423,10 @@ impl ConvertState {
     } else {
       start
     };
+    // Moved in front of the run, it would split a literal opener from it.
+    if self.follows_literal_opener(at) {
+      return true;
+    }
     let before = match at.checked_sub(1) {
       Some(index) => Some(self.buffer.as_bytes()[index]),
       None if self.has_flushed_tail() => Some(self.flushed_tail[1]),
@@ -449,9 +453,10 @@ impl ConvertState {
   /// A blank the parser kept at the start of an inline element parts the word
   /// before it from the content after it. In front of an emphasis opener run
   /// that ends the output it moves before the run. A link or quote opener that
-  /// ends the output already parts it from a word, and code keeps its content
-  /// as written, so there it writes nothing. Anywhere else it is owed to the
-  /// next visible inline output, as a separator trimmed from a closed element.
+  /// ends the output already parts it from a word, a literal `tagOverrides`
+  /// opener would be split from its content, and code keeps its content as
+  /// written, so there it writes nothing. Anywhere else it is owed to the next
+  /// visible inline output, as a separator trimmed from a closed element.
   pub(crate) fn place_leading_blank(&mut self) {
     let caption_owns_space = self.caption_boundary != CaptionBoundary::None
       || self
@@ -475,10 +480,22 @@ impl ConvertState {
       .open_markers
       .last()
       .is_some_and(|marker| marker.content_start == end)
-      || (self.link.open && self.link.bracket_emitted && self.link.bracket_pos + 1 == end);
+      || (self.link.open && self.link.bracket_emitted && self.link.bracket_pos + 1 == end)
+      || self.follows_literal_opener(end);
     if !follows_opener {
       self.pending_inline_whitespace = true;
     }
+  }
+
+  /// A literal `tagOverrides` opener is not held back, so a stream may already
+  /// have sent it. A separator placed at `at`, with nothing written since the
+  /// innermost open one, would split it from the content after it.
+  #[inline]
+  fn follows_literal_opener(&self, at: usize) -> bool {
+    self
+      .literal_opener_ends
+      .last()
+      .is_some_and(|&(_, end)| end == at)
   }
 
   fn max_backtick_run(value: &str) -> usize {
@@ -1030,6 +1047,7 @@ impl ConvertState {
       replace_buffer_range(&mut self.buffer, shared_start..flush_end, &quoted);
       let quoted_end = shared_start + quoted.len();
       self.shift_raw_html_scan(flush_end, quoted_end);
+      self.shift_literal_opener_ends(flush_end, quoted_end);
       flush_end = quoted_end;
       self.blockquote_scratch = quoted;
       for frame in &mut self.blockquotes {
@@ -1079,6 +1097,7 @@ impl ConvertState {
     }
     self.blockquote_scratch = quoted;
     self.shift_raw_html_scan(unquoted_end, flush_end);
+    self.shift_literal_opener_ends(unquoted_end, flush_end);
 
     for frame in &mut self.blockquotes {
       frame.content_start = flush_end;
@@ -1820,6 +1839,11 @@ impl ConvertState {
       output.as_deref(),
       enter_is_literal,
     );
+    if enter_is_literal && is_inline && self.buffer.len() > output_start {
+      self
+        .literal_opener_ends
+        .push((self.stack[stack_len - 1].depth, self.buffer.len()));
+    }
 
     if tag_id == Some(TAG_IMG)
       && !enter_is_literal
@@ -2262,6 +2286,13 @@ impl ConvertState {
     let override_config = if node.enter_skipped {
       None
     } else if self.has_tag_overrides {
+      while self
+        .literal_opener_ends
+        .last()
+        .is_some_and(|&(depth, _)| depth >= node.depth)
+      {
+        self.literal_opener_ends.pop();
+      }
       let ovs = self
         .options
         .plugins
@@ -2961,6 +2992,7 @@ impl ConvertState {
       // An empty opener run ending the output takes the separator in front.
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None)
         && !is_whitespace(first)
+        && !self.follows_literal_opener(self.buffer.len())
         && (self.open_markers.is_empty() || !self.hoist_opener_space())
       {
         if plain_text!(self) && self.wrap_width != 0 && self.can_wrap_here() {
@@ -3514,6 +3546,18 @@ impl ConvertState {
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
   }
 
+  /// Follow a rewrite that moved the bytes from `old_end` on to `new_end`. An
+  /// opener ending before `old_end` had a whole line written after it.
+  fn shift_literal_opener_ends(&mut self, old_end: usize, new_end: usize) {
+    for end in &mut self.literal_opener_ends {
+      end.1 = if end.1 == usize::MAX || end.1 < old_end {
+        usize::MAX
+      } else {
+        end.1 - old_end + new_end
+      };
+    }
+  }
+
   /// Move every cached offset at or past `at` one byte right, for a newline inserted at `at`.
   fn shift_offsets_at_or_after(&mut self, at: usize) {
     for marker in &mut self.open_markers {
@@ -3522,6 +3566,11 @@ impl ConvertState {
       }
       if marker.content_start >= at {
         marker.content_start += 1;
+      }
+    }
+    for end in &mut self.literal_opener_ends {
+      if end.1 != usize::MAX && end.1 >= at {
+        end.1 += 1;
       }
     }
     for run in &mut self.streaming_break_runs {
@@ -3808,6 +3857,12 @@ impl ConvertState {
   pub(super) fn truncate_buffer(&mut self, len: usize) {
     self.note_buffer_rewrite(len);
     self.buffer.truncate(len);
+    // Output that grows back to a trimmed opener's end is not that opener.
+    for end in &mut self.literal_opener_ends {
+      if end.1 != usize::MAX && end.1 > len {
+        end.1 = usize::MAX;
+      }
+    }
     while self
       .streaming_break_runs
       .last()
@@ -5044,6 +5099,7 @@ impl ConvertState {
         // An empty opener run ending the output takes the separator in front.
         if !matches!(last, Some(b' ' | b'\n' | b'\t') | None)
           && !is_whitespace(first)
+          && !self.follows_literal_opener(self.buffer.len())
           && (self.open_markers.is_empty() || !self.hoist_opener_space())
         {
           self.push_code_span_content(" ", true);
@@ -5390,21 +5446,6 @@ impl ConvertState {
       }
     }
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
-  }
-
-  /// Whether a tag override writes a non-empty literal enter string for the
-  /// node.
-  pub(crate) fn writes_literal_opener(&self, node: &ElementNode) -> bool {
-    if !self.has_tag_overrides {
-      return false;
-    }
-    let ovs = self
-      .options
-      .plugins
-      .as_ref()
-      .and_then(|p| p.tag_overrides.as_ref());
-    Self::override_for_node(ovs, self.override_idx.as_deref(), node)
-      .is_some_and(|ov| ov.enter.as_ref().is_some_and(|s| !s.is_empty()))
   }
 
   /// Whether the tag writes visible inline Markdown around its content:
