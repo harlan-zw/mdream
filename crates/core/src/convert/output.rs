@@ -3362,6 +3362,8 @@ impl ConvertState {
   /// the same, and waiting for it pins the marker's line and everything the
   /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
   /// blank line also survives a nested list whose first `<li>` dropped it.
+  /// Kept out of line so the token loop stays small when nothing is pending.
+  #[inline(never)]
   pub(crate) fn settle_item_marker(&mut self) {
     if (self.empty_list_marker_end != usize::MAX || self.list_tail_start != usize::MAX)
       && self.open_markers.is_empty()
