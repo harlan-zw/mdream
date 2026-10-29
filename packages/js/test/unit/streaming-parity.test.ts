@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamOptions } from '../../src/types'
+import type { ElementNode, MdreamOptions, MdreamRuntimeState } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
@@ -218,7 +218,7 @@ describe('streaming parity with the Rust core', () => {
           if (id === 'old' && event.type === NodeEventEnter)
             oldDepth = node.depth
           if (id === 'child' && event.type === NodeEventEnter)
-            observed.push({ oldDepth, childDepth: node.depth, markerCount: state.listMarkers!.length })
+            observed.push({ oldDepth, childDepth: node.depth, markerCount: (state as MdreamRuntimeState).listMarkers!.length })
           if (id === 'wrapper' || (id === 'old' && event.type === NodeEventExit))
             return { skip: true }
         }
