@@ -1260,10 +1260,11 @@ function commitGfmAction(
   lifecycle: GfmLifecycleState,
   outputStart: number,
   owner: ElementNode,
+  keepsQuoteSeparator: boolean,
 ): void {
   switch (action._tag) {
     case 'BlockquoteEnter': {
-      if (state.blockquotes.length > 0)
+      if (state.blockquotes.length > 0 && !keepsQuoteSeparator)
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
@@ -1971,6 +1972,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An unknown tag with no handler is inline, as in the Rust engine.
     const isInlineElement = handler ? handler.isInline === true : tagId === -1
     let closesQuote = false
+    let keepsQuoteSeparator = false
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
     const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
@@ -2076,6 +2078,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       let dropBlockquoteOutput = false
       if ((captionBoundary === 1 || captionBoundary === 3)
         && eventType === NodeEventEnter && gfmAction?._tag === 'BlockquoteEnter') {
+        // A sibling quote keeps the separator after a closed quote's content. An
+        // empty quote left the item's opening line, where a blank would end it.
+        if (captionBoundary === 3) {
+          let last = lastOutputChar(state.buffer)
+          if (last === -1 && state.lastContentCache)
+            last = state.lastContentCache.charCodeAt(state.lastContentCache.length - 1)
+          keepsQuoteSeparator = last !== -1 && last !== 10
+        }
         captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, false) || captionBufferChanged
         captionTransition = true
         captionBoundary = 0
@@ -2267,7 +2277,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           }
         }
         if (gfmAction)
-          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
+          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element, keepsQuoteSeparator)
         updateListIndent(state, element, eventType)
         return
       }
@@ -2370,7 +2380,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (gfmAction)
-      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
+      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, keepsQuoteSeparator)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)

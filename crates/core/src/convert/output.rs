@@ -1592,15 +1592,19 @@ impl ConvertState {
     let tentative_caption_output =
       default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
     let structural_quote = tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal;
-    let tentative_quote_boundary =
-      self.caption_boundary == CaptionBoundary::QuoteParent && tentative_caption_output;
+    let quote_parent = self.caption_boundary == CaptionBoundary::QuoteParent;
+    let tentative_quote_boundary = quote_parent && tentative_caption_output;
+    // A sibling quote keeps the separator after a closed quote's content. An
+    // empty quote left the item's opening line, where a blank would end it.
+    let quote_sibling_separator =
+      quote_parent && structural_quote && self.last_output_byte().is_some_and(|byte| byte != b'\n');
     if visible_output || structural_quote {
       self.expand_deferred_caption_breaks();
     }
     let separator_start = self.buffer.len();
     let consumes_caption_boundary = if visible_output || structural_quote {
       // HR and fence fragments can already carry their block separator.
-      if self.caption_boundary == CaptionBoundary::QuoteParent
+      if quote_parent
         && output
           .as_deref()
           .is_some_and(|fragment| fragment.starts_with("\n\n"))
@@ -1786,7 +1790,7 @@ impl ConvertState {
     }
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
-      if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
+      if !self.blockquotes.is_empty() && !quote_sibling_separator && self.buffer.ends_with("\n\n") {
         self.truncate_buffer(self.buffer.len() - 1);
         // Frames anchored at the old end move with the popped byte. Siblings can
         // share an offset, so this is not only the innermost. See `trim_floor`.

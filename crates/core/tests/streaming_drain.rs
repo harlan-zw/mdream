@@ -3347,6 +3347,30 @@ fn blockquote_parent_continuation_matches_every_width_and_split() {
       "<ul><li><blockquote>q</blockquote><ul><li>next</li></ul></li></ul>",
       "- \n  > q\n  - next",
     ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote>tail</li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q\n>\n>   tail",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x</blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>\n>   > q",
+    ),
+    (
+      "<ul><li><blockquote><blockquote>x</blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > > x\n  >\n  > > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > q",
+    ),
+    (
+      "<blockquote><ul><li>a<blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - a\n>   > q",
+    ),
   ] {
     let options = HtmlToMarkdownOptions::default();
     assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");

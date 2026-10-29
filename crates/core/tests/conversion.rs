@@ -2279,6 +2279,40 @@ fn blockquote_parent_continuation() {
 }
 
 #[test]
+fn blockquote_parent_continuation_keeps_sibling_quotes_inside_a_quote() {
+  // A nested quote's enter folds a preceding blank line. After a closed quote
+  // that blank is the only separator, and without it the siblings merge.
+  for (html, expected) in [
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote>tail</li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q\n>\n>   tail",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x</blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>\n>   > q",
+    ),
+    (
+      "<ul><li><blockquote><blockquote>x</blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > > x\n  >\n  > > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > q",
+    ),
+    (
+      "<blockquote><ul><li>a<blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - a\n>   > q",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn sibling_blockquotes_separated_by_blank_line() {
   for (name, html, expected) in [
     (

@@ -273,6 +273,12 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     ['R2-figure-caption', '<ul><li><blockquote>q</blockquote><figure><figcaption><br></figcaption></figure>tail</li></ul>', '- \n  > q  \n  \n  tail'],
     ['R2-caption-sibling', '<ul><li><blockquote>q</blockquote><figcaption><br></figcaption></li><li>x</li></ul>', '- \n  > q  \n- x'],
     ['R2-caption-nested', '<ul><li><blockquote>q</blockquote><figcaption><br></figcaption><ul><li>x</li></ul></li></ul>', '- \n  > q  \n  - x'],
+    ['S1-hr-sibling', '<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>', '> - \n>   > x\n>   >\n>   > ---\n>\n>   > q'],
+    ['S1-hr-sibling-tail', '<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote>tail</li></ul></blockquote>', '> - \n>   > x\n>   >\n>   > ---\n>\n>   > q\n>\n>   tail'],
+    ['S1-sibling', '<blockquote><ul><li><blockquote>x</blockquote><blockquote>q</blockquote></li></ul></blockquote>', '> - \n>   > x\n>\n>   > q'],
+    ['S1-nested-sibling', '<ul><li><blockquote><blockquote>x</blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > > x\n  >\n  > > q'],
+    ['S1-empty-first', '<blockquote><ul><li><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>', '> - \n>   > q'],
+    ['S1-text-empty-first', '<blockquote><ul><li>a<blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>', '> - a\n>   > q'],
   ])('repairs quote boundary %s at every width and split', async (_id, html, expected, tagOverrides) => {
     const engine = await resolveEngine(engineConfig.engine)
     const options = tagOverrides ? { plugins: { tagOverrides } } : undefined
