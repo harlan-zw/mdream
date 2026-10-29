@@ -532,7 +532,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
           if (empty) {
             const openerOutput = buffer[opener]
             buffer.length = opener
-            if (openerOutput === ' "' && !(literalOpeners.length && followsLiteralOpener()))
+            if (openerOutput === ' "')
               buffer.push(' ')
             state.lastNode = element
             return

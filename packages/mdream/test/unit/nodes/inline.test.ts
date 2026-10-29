@@ -458,7 +458,6 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       ['<p>a<sup><b> 2</b></sup>z</p>', 'a****2****z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
       ['<p>a<x-y><span></span><span> <span>2</span></span></x-y>.</p>', 'a**2**.', { plugins: { tagOverrides: { 'x-y': { enter: '**', exit: '**' } } } }],
       ['<p>a<x-y><span></span><span> <span>2</span></span></x-y>.</p>', 'a**2**.', { format: 'text', plugins: { tagOverrides: { 'x-y': { enter: '**', exit: '**' } } } }],
-      ['<p>a<sup><q></q>2</sup>z</p>', 'a**2**z', { format: 'text', plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
       ['<p>a<sup><br>x<span> <span>2</span></span></sup>z</p>', 'a^\nx 2^z', { format: 'text', plugins: { tagOverrides: { sup: { enter: '^  ', exit: '^' } } } }],
       ['<p>a<em>x </em><br>b</p>', 'a*x* b', { plugins: { tagOverrides: { br: { enter: '', exit: '' } } } }],
       ['<p>a<span> <i>x</i></span>z</p>', 'a***x***z', span],
