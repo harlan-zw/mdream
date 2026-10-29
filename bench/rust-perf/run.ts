@@ -9,6 +9,36 @@ import { createInterface } from 'node:readline'
 import { pathToFileURL } from 'node:url'
 import { conversionOptions, workloads } from './fixtures.ts'
 
+export function outputVerification(base: unknown, head: unknown) {
+  const outputs = [JSON.stringify(base), JSON.stringify(head)]
+  return {
+    changed: outputs[0] !== outputs[1],
+    hashes: outputs.map(output => createHash('sha256').update(output).digest('hex')),
+  }
+}
+
+export function assertWasmMetadata(native: unknown[], wasm: unknown[], fixture: string, operation: 'convert' | 'stream') {
+  // main.rs::extracted_values uses tag/text and pair lists; set_plugin_data
+  // exposes tagName/textContent and objects. Keep unknown fields in extra.
+  const extraction = (values: unknown, native: boolean) => ((values ?? []) as Record<string, unknown>[]).map((value) => {
+    const { selector, [native ? 'tag' : 'tagName']: tagName, [native ? 'text' : 'textContent']: textContent, attributes, ...extra } = value
+    return { selector, tagName, textContent, attributes: native ? Object.fromEntries(attributes as [string, unknown][]) : attributes, extra }
+  })
+  assert.equal(native.length, wasm.length, `${fixture}: native and WASM revision counts differ`)
+  for (const [side, value] of native.entries()) {
+    // Only the native harness exposes truncated. Streaming names its extracted
+    // elements metadata; conversion names them extracted. wasmRun wraps both.
+    const { output: _nativeOutput, truncated: _truncated, frontmatter, [operation === 'stream' ? 'metadata' : 'extracted']: extracted, ...nativeExtra } = value as Record<string, unknown>
+    const { output: _wasmOutput, metadata, ...wasmExtra } = wasm[side] as Record<string, unknown>
+    const { frontmatter: wasmFrontmatter, extracted: wasmExtracted, ...metadataExtra } = metadata as Record<string, unknown>
+    assert.deepEqual(
+      { extra: nativeExtra, metadata: { frontmatter: Object.fromEntries((frontmatter ?? []) as [string, unknown][]), extracted: extraction(extracted, true) } },
+      { extra: wasmExtra, metadata: { ...metadataExtra, frontmatter: wasmFrontmatter ?? {}, extracted: extraction(wasmExtracted, false) } },
+      `${fixture}: revision ${side} native and WASM metadata differ`,
+    )
+  }
+}
+
 export function statistics(samples: number[]) {
   if (samples.length < 2 || samples.some(value => !Number.isFinite(value) || value <= 0))
     throw new Error('CPU samples must contain at least two positive finite values.')
@@ -83,7 +113,7 @@ async function loadWasm(dist: string, instance: string): Promise<{ glue: Glue, m
   const wasm = await glue.default({ module_or_path: readFileSync(resolve(dist, 'rust/mdream_edge_bg.wasm')) })
   return { glue, memory: wasm.memory }
 }
-function wasmRun(glue: Glue, fixture: Workload, verify = false) {
+export function wasmRun(glue: Glue, fixture: Workload, verify = false) {
   const options = conversionOptions(fixture.options, fixture.format)
   if (fixture.operation === 'split')
     throw new Error('The edge binding does not export the splitter.')
@@ -103,6 +133,8 @@ function wasmRun(glue: Glue, fixture: Workload, verify = false) {
   function observe(data: PluginData) {
     if (!verify)
       return
+    for (const key of Reflect.ownKeys(data))
+      assert.ok(key === 'frontmatter' || key === 'extracted', `Unexpected WASM stream metadata field: ${String(key)}`)
     if (data.frontmatter)
       frontmatter = data.frontmatter
     extracted.push(...data.extracted ?? [])
@@ -147,24 +179,29 @@ export function scalingRows(cases: Workload[], benches: PerfBench[]): PerfBench[
       const smaller = benches.find(row => row.id === `${runtime}-${prior.id}-cpu`)
       if (!current || !smaller)
         return []
-      return [{ id: `${runtime}-${fixture.id}-scaling`, name: `${runtime} ${fixture.name} / ${prior.name} CPU`, kind: 'ratio' as const, value: current.value / smaller.value, informational: true }]
+      return [{ id: `${runtime}-${fixture.id}-scaling`, name: `${runtime} ${fixture.name} / ${prior.name} CPU`, kind: 'ratio' as const, value: current.value / smaller.value, informational: true, outputChanged: current.outputChanged || smaller.outputChanged }]
     })
   })
 }
 
-async function main() {
-  const [baseDist, headDist, outputDir] = process.argv.slice(2)
-  if (!baseDist || !headDist || !outputDir)
-    throw new Error('Pass base dist, PR dist, and output directory.')
+function pinCpu() {
   // Separate processes must use the same CPU, including on heterogeneous runners.
   const allowedCpu = readFileSync('/proc/self/status', 'utf8').match(/^Cpus_allowed_list:\s*(\d+)/m)?.[1]
   if (!allowedCpu)
     throw new Error('Run this benchmark on Linux with a permitted CPU.')
   execFileSync('taskset', ['--pid', '--cpu-list', allowedCpu, String(process.pid)], { stdio: 'ignore' })
+  return allowedCpu
+}
+
+export async function main(args = process.argv.slice(2), dependencies = { nativeRunner, pinCpu, workloads }) {
+  const [baseDist, headDist, outputDir] = args
+  if (!baseDist || !headDist || !outputDir)
+    throw new Error('Pass base dist, PR dist, and output directory.')
+  const allowedCpu = dependencies.pinCpu()
   const samples = Number(process.env.RUST_PERF_SAMPLES || 12)
   if (!Number.isInteger(samples) || samples < 2)
     throw new Error('Sample count must be at least two.')
-  const cases = workloads(process.cwd(), process.argv.includes('--full')).filter(item => !process.env.RUST_PERF_FILTER || item.id.includes(process.env.RUST_PERF_FILTER))
+  const cases = dependencies.workloads(process.cwd(), args.includes('--full')).filter(item => !process.env.RUST_PERF_FILTER || item.id.includes(process.env.RUST_PERF_FILTER))
   if (!cases.length)
     throw new Error('No benchmark matches the filter.')
   mkdirSync(outputDir, { recursive: true })
@@ -173,21 +210,24 @@ async function main() {
   writeFileSync(manifest, serialized)
   const builds = [baseDist, headDist].map(dist => JSON.parse(readFileSync(resolve(dist, 'rust-perf/build.json'), 'utf8')))
   const results: [PerfRun, PerfRun] = [{ benches: [] }, { benches: [] }]
-  const nativeOnly = process.argv.includes('--native-only')
+  const nativeOnly = args.includes('--native-only')
   if (!nativeOnly && !globalThis.gc)
     throw new Error('Run WASM benchmarks with node --expose-gc.')
   const runners = [baseDist, headDist].map(dist => ({
-    cpu: nativeRunner(resolve(dist, 'rust-perf/cpu'), manifest),
-    alloc: nativeRunner(resolve(dist, 'rust-perf/alloc'), manifest),
+    cpu: dependencies.nativeRunner(resolve(dist, 'rust-perf/cpu'), manifest),
+    alloc: dependencies.nativeRunner(resolve(dist, 'rust-perf/alloc'), manifest),
   }))
-  const verification: Record<string, string> = {}
+  const verification: [Record<string, string>, Record<string, string>] = [{}, {}]
   try {
     const wasm = nativeOnly ? [] : await Promise.all([loadWasm(baseDist, 'base'), loadWasm(headDist, 'head')])
     for (const [index, fixture] of cases.entries()) {
       process.stderr.write(`Benchmark ${index + 1}/${cases.length}: ${fixture.id}\n`)
+      const starts = results.map(result => result.benches.length)
       const observations = await Promise.all(runners.map(runner => runner.cpu.request(index, 'verify')))
-      assert.deepEqual(observations[0], observations[1], `${fixture.id}: native output differs`)
-      verification[fixture.id] = createHash('sha256').update(JSON.stringify(observations[1])).digest('hex')
+      const output = outputVerification(observations[0], observations[1])
+      output.hashes.forEach((hash, side) => {
+        verification[side]![fixture.id] = hash
+      })
       for (const [side, runner] of runners.entries()) {
         assert.deepEqual(await runner.alloc.request(index, 'verify'), observations[side], `${fixture.id}: instrumented output differs`)
         const counts = await runner.alloc.request(index, 'alloc')
@@ -207,11 +247,11 @@ async function main() {
       rows.forEach((row, side) => results[side]!.benches.push(row))
       if (fixture.operation !== 'split' && wasm.length) {
         const wasmOutputs = wasm.map(runtime => wasmRun(runtime.glue, fixture, true))
-        assert.deepEqual(wasmOutputs[0], wasmOutputs[1], `${fixture.id}: WASM output differs`)
         for (const [side, observed] of wasmOutputs.entries()) {
           const output = typeof observed === 'string' ? observed : (observed as { output: string }).output
           assert.equal(output, (observations[side] as { output: string }).output, `${fixture.id}: native and WASM output differ`)
         }
+        assertWasmMetadata(observations, wasmOutputs, fixture.id, fixture.operation)
         for (const runtime of wasm) {
           const until = performance.now() + 100
           do {
@@ -238,11 +278,17 @@ async function main() {
           results[side]!.benches.push({ id: `wasm-${fixture.id}-memory`, name: `WASM ${fixture.name} linear memory`, kind: 'alloc', value: fresh.memory.buffer.byteLength })
         }
       }
+      if (output.changed) {
+        results.forEach((result, side) => {
+          for (let row = starts[side]!; row < result.benches.length; row++)
+            result.benches[row]!.outputChanged = true
+        })
+      }
     }
     for (const [side, label] of ['base', 'pr'].entries()) {
       const result = results[side]!
       result.benches.push(...scalingRows(cases, result.benches), ...normalizedCpuRows(cases, result.benches))
-      writeFileSync(resolve(outputDir, `${label}-rust-perf.json`), JSON.stringify({ ...result, build: builds[side], cpu: allowedCpu, architecture: process.arch, fixtureDigest: createHash('sha256').update(serialized).digest('hex'), verification, cases: cases.map(({ id, inputBytes, options, format, scaling }) => ({ id, inputBytes, options, format, scaling })) }))
+      writeFileSync(resolve(outputDir, `${label}-rust-perf.json`), JSON.stringify({ ...result, build: builds[side], cpu: allowedCpu, architecture: process.arch, fixtureDigest: createHash('sha256').update(serialized).digest('hex'), verification: verification[side], cases: cases.map(({ id, inputBytes, options, format, scaling }) => ({ id, inputBytes, options, format, scaling })) }))
     }
     for (const runner of runners) {
       await runner.cpu.close()

@@ -11,6 +11,8 @@ export default antfu({
     'rewrite-imports.mjs',
   ],
   rules: {
+    // Preserve existing formatting when upgrading to ESLint config 10.
+    'antfu/reasonable-newline': 'off',
     'no-use-before-define': 'off',
     'node/prefer-global/process': 'off',
     'node/prefer-global/buffer': 'off',
