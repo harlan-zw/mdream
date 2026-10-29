@@ -26,7 +26,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { resolveUrl } from './url'
-import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, trimOutputStart, trimTextAtLineStart } from './utils'
+import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
 
 interface TextState extends MdreamRuntimeState {
   options: EngineOptions
@@ -58,16 +58,6 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
     return false
   const firstChar = textNode.value[0]
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
-}
-
-function needsSpacing(lastCode: number, firstChar: string): boolean {
-  // Parity with the Rust engine's `needs_spacing`.
-  if (lastCode <= 32 || ' \n\t'.includes(firstChar))
-    return false
-  const lastChar = String.fromCharCode(lastCode)
-  if (lastChar === '|' && firstChar === '<')
-    return true
-  return !'[(>*_`'.includes(lastChar) && !'])<.,!?:;*_`'.includes(firstChar)
 }
 
 /** `base` is the column the first fragment starts at. */
@@ -258,13 +248,13 @@ function elementOutput(node: ElementNode, eventType: number, state: TextState): 
       if (output && hasVisibleContent(output)) {
         markRenderedChildContent(node)
         // Alt text reads as its own word, so it never runs into the text before it.
-        if (needsSpacing(lastOutputChar(state.buffer), output[0]!))
+        if (needsSpacing(charOf(lastOutputChar(state.buffer)), output[0]!))
           return ` ${output}`
       }
       return output
     }
     if (node.tagId === TAG_Q)
-      return needsSpacing(lastOutputChar(state.buffer), '"') ? ' "' : '"'
+      return needsSpacing(charOf(lastOutputChar(state.buffer)), '"') ? ' "' : '"'
   }
   else if (node.tagId === TAG_Q) {
     return '"'

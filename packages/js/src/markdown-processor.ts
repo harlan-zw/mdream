@@ -56,7 +56,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -319,22 +319,6 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     const width = state.listIndentWidths.pop() ?? 0
     state.listIndent = state.listIndent.slice(0, state.listIndent.length - width)
   }
-}
-
-/**
- * Determines if spacing is needed between two characters
- */
-function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState): boolean {
-  if (' \n\t'.includes(lastChar) || ' \n\t'.includes(firstChar)) {
-    return false
-  }
-
-  // Special case: Allow spacing between pipe and HTML tags in table cells
-  if (lastChar === '|' && firstChar === '<' && state && (state.depthMap[TAG_TABLE] || 0) > 0) {
-    return true
-  }
-
-  return !'[(>*_`'.includes(lastChar) && !'])<.,!?:;*_`'.includes(firstChar)
 }
 
 /**
@@ -2314,7 +2298,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Add spacing between inline elements if needed
-    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
+    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }

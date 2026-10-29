@@ -138,6 +138,12 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(htmlToMarkdown('<p>a<q></q>b</p>', { engine })).toBe('a b')
   })
 
+  it('separates raw inline HTML after a pipe outside tables', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>a|<mark>x</mark></p>', { engine })).toBe('a| <mark>x</mark>')
+    expect(htmlToMarkdown('<p>a|<code>x</code></p>', { engine })).toBe('a|`x`')
+  })
+
   it('drops the separator owned by empty inline code in a list', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<ul><li>x<code></code>y</li></ul>', { engine })).toBe('- xy')
