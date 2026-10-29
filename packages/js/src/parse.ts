@@ -73,13 +73,26 @@ import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 // The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
 const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
 
+// Keep rich element nodes to the same practical depth as browsers. One exact
+// flattened root preserves balanced recovery beyond it without allowing
+// untrusted nesting to grow memory forever.
+const MAX_ELEMENT_DEPTH = 512
+
 // The first `<base href>` replaces `origin` when it resolves to an `http(s)://host`
 // URL; anything else is ignored. A <base> inside a link is ignored too: the
 // link's open and close must resolve alike.
 function captureBaseHref(state: ParseState, href: string | undefined): void {
   const target = state.urlBaseTarget
-  if (!target || href === undefined || state.depthMap[TAG_A] || state.depthMap[TAG_TEMPLATE])
+  // At MAX_ELEMENT_DEPTH the element is flattened, and so is everything below it.
+  if (
+    !target
+    || href === undefined
+    || state.depthMap[TAG_A]
+    || state.depthMap[TAG_TEMPLATE]
+    || state.depth >= MAX_ELEMENT_DEPTH
+  ) {
     return
+  }
   state.baseHrefSeen = true
   // Strip leading and trailing C0 controls and space, as the URL spec does.
   let start = 0
@@ -143,11 +156,6 @@ const SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH = 6
 const SCRIPT_SEQUENCE_NO_MATCH = -1
 const SCRIPT_SEQUENCE_INCOMPLETE = -2
 const SCRIPT_SCAN_COMPLETE = -1
-
-// Keep rich element nodes to the same practical depth as browsers. One exact
-// flattened root preserves balanced recovery beyond it without allowing
-// untrusted nesting to grow memory forever.
-const MAX_ELEMENT_DEPTH = 512
 
 // Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
 // mode, any start tag NOT in this set implies the end of <head> and the start of

@@ -948,9 +948,11 @@ impl ConvertState {
   #[cold]
   #[inline(never)]
   fn capture_base_href(&mut self) {
+    // At MAX_ELEMENT_DEPTH the element is flattened, and so is everything below it.
     if self.base_href_seen
       || self.depth_map[TAG_A as usize] != 0
       || self.depth_map[TAG_TEMPLATE as usize] != 0
+      || self.stack.len() >= MAX_ELEMENT_DEPTH
     {
       return;
     }

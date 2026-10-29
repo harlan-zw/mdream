@@ -539,6 +539,13 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('[Link](https://example.com/article/page)')
     expect(htmlToMarkdown('<base href="https://[::1]:8080/docs/"><a href="page">Link</a>', { engine, origin }))
       .toBe('[Link](https://[::1]:8080/docs/page)')
+    // Elements flattened at the depth limit (an anchor, a div) must not set the base.
+    const deep = '<div>'.repeat(600)
+    const unwind = '</div>'.repeat(600)
+    expect(htmlToMarkdown(`${deep}<a href="/start"><base href="https://other.example/">X</a>${unwind}<a href="page">Link</a>`, { engine, origin }))
+      .toMatch(/\[Link\]\(https:\/\/example\.com\/article\/page\)$/)
+    expect(htmlToMarkdown(`${deep}<base href="https://other.example/">X${unwind}<a href="page">Link</a>`, { engine, origin }))
+      .toMatch(/\[Link\]\(https:\/\/example\.com\/article\/page\)$/)
     for (const href of ['http://@host.example/', 'http://:pw@host.example/']) {
       expect(htmlToMarkdown(`<base href="${href}"><a href="page">Link</a>`, { engine, origin }))
         .toBe(`[Link](${href}page)`)

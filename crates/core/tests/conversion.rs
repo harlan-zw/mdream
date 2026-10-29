@@ -956,6 +956,26 @@ fn base_href_ignores_empty_host_and_template_bases() {
     "</div>".repeat(600)
   );
   assert!(!html_to_markdown(&deep, origin.clone()).contains("other.example"));
+  // An anchor flattened at the depth limit must not let its <base> replace the origin.
+  let deep_anchor = format!(
+    "{}<a href=\"/start\"><base href=\"https://other.example/\">X</a>{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(
+    html_to_markdown(&deep_anchor, origin.clone())
+      .ends_with("[Link](https://example.com/article/page)")
+  );
+  // Same for a base directly under a flattened div.
+  let deep_div = format!(
+    "{}<base href=\"https://other.example/\">X{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(
+    html_to_markdown(&deep_div, origin.clone())
+      .ends_with("[Link](https://example.com/article/page)")
+  );
   // Userinfo with a real host is a valid base: the host follows the last '@'.
   for href in ["http://@host.example/", "http://:pw@host.example/"] {
     let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
