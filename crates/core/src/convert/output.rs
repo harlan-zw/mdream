@@ -5455,7 +5455,7 @@ impl ConvertState {
   /// `raw_html_anchor` applies at exit). A heading nested in one must not end
   /// its line, or the wrapper's remaining text splits off.
   #[inline]
-  pub(crate) fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
+  fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
     if self.has_tag_overrides {
       let ovs = self
         .options
