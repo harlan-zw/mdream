@@ -144,12 +144,15 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(htmlToMarkdown('<p>a<q> </q><br>x</p>', { engine })).toBe('a  \nx')
     expect(htmlToMarkdown('<p>a<del></del><br>x</p>', { engine })).toBe('a  \nx')
     expect(htmlToMarkdown('<p>a<q> </q><b><span></span><q> </q></b><br>x</p>', { engine })).toBe('a  \nx')
+    for (const br of [{ spacing: [0, 0] as [number, number] }, 'br'])
+      expect(htmlToMarkdown('<p>a<q></q><br>x</p>', { engine, plugins: { tagOverrides: { br } } })).toBe('a  \nx')
   })
 
   it('separates raw inline HTML after a pipe outside tables', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<p>a|<mark>x</mark></p>', { engine })).toBe('a| <mark>x</mark>')
     expect(htmlToMarkdown('<p>a|<code>x</code></p>', { engine })).toBe('a|`x`')
+    expect(htmlToMarkdown('<h2>a|<br>b</h2>', { engine })).toBe('## a| <br>b')
   })
 
   it('drops the separator owned by empty inline code in a list', async () => {

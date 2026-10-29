@@ -1909,6 +1909,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         captionBreakRun++
       }
       else if (breakOutput) {
+        // A raw `<br>` takes the separator other raw inline HTML gets, as in Rust.
+        if (breakOutput.charCodeAt(0) === 60 && lastOutputChar(buff) === 124)
+          buff.push(' ')
         buff.push(breakOutput)
         state.lastContentCache = breakOutput
         if (openMarkerCount && hasNonWhitespace(breakOutput))
@@ -2305,6 +2308,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
+    }
+
+    // An overridden <br> skips the break fast path, but its line break still
+    // subsumes the spaces before it.
+    if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
+      && !handler?.literalEnter && output?.at(-1)?.endsWith('\n') && lastOutputChar(buff) === 32) {
+      trimTrailingSpaces(buff)
     }
 
     // Add all output fragments
