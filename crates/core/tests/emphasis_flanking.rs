@@ -731,6 +731,39 @@ fn wraps_at_the_space_moved_past_a_closer() {
 }
 
 #[test]
+fn separator_before_the_word_keeps_it_as_written_in_every_mode() {
+  // A separator before the word already lets the closer flank. Wrapped and
+  // capped output decide that separator before they write a reference.
+  for (html, expected) in [
+    (
+      "<table><tr><td><em>b.</em><div>c</div></td></tr></table>",
+      "| *b.* c |\n| --- |",
+    ),
+    ("<p>1<strong>b. </strong>x</p>", "1**b.** x"),
+    ("<p><strong>b!</strong> <em></em>c</p>", "**b!** c"),
+    ("<p><strong>b!</strong>c</p>", "**b!**&#99;"),
+  ] {
+    for (width, cap) in [(0, 0), (20, 0), (0, 4096), (20, 4096)] {
+      let options = HtmlToMarkdownOptions::default()
+        .with_wrap_width(width)
+        .with_max_node_bytes(cap);
+      assert_eq!(
+        html_to_markdown(html, options.clone()),
+        expected,
+        "width={width} cap={cap} html={html:?}"
+      );
+      for chunk in 1..=html.len() {
+        assert_eq!(
+          stream_chunks(html, chunk, &options),
+          expected,
+          "chunk={chunk} width={width} cap={cap} html={html:?}"
+        );
+      }
+    }
+  }
+}
+
+#[test]
 fn keeps_the_separator_after_a_literal_tilde() {
   let html = "<p>x~<q>q</q></p>";
   assert_eq!(

@@ -2779,31 +2779,52 @@ impl ConvertState {
     out
   }
 
+  /// `text` with its first byte as a numeric reference when it would follow
+  /// the pending closer directly. Call it once no separator precedes `text`.
+  #[cold]
   #[inline(never)]
-  fn push_emphasis_text(&mut self, text: &str) {
+  fn emphasis_text<'a>(&mut self, text: &'a str) -> Cow<'a, str> {
     let code = self.take_emphasis_reference(text);
-    let start = self.buffer.len();
-    if code != 0 {
-      Self::write_emphasis_reference(&mut self.buffer, code, text);
-      self.last_content_cache_len += self.buffer.len() - start - text.len();
-    } else {
-      self.buffer.push_str(text);
+    if code == 0 {
+      return Cow::Borrowed(text);
     }
+    let mut referenced = String::with_capacity(text.len() + 5);
+    Self::write_emphasis_reference(&mut referenced, code, text);
+    Cow::Owned(referenced)
+  }
+
+  #[cold]
+  #[inline(never)]
+  fn push_emphasis_text(&mut self, text: &str, add_space: bool) {
+    let start = self.buffer.len();
+    if add_space {
+      self.pending_emphasis = 0;
+      self.buffer.push(' ');
+      self.buffer.push_str(text);
+    } else {
+      let code = self.take_emphasis_reference(text);
+      if code != 0 {
+        Self::write_emphasis_reference(&mut self.buffer, code, text);
+      } else {
+        self.buffer.push_str(text);
+      }
+    }
+    self.last_content_cache_len = self.buffer.len() - start;
   }
 
   #[inline(always)]
   fn push_text_uncapped(&mut self, text: &str, add_space: bool) {
+    if self.pending_emphasis != 0 {
+      self.push_emphasis_text(text, add_space);
+      return;
+    }
     if add_space {
       self.buffer.push(' ');
       self.last_content_cache_len = text.len() + 1;
     } else {
       self.last_content_cache_len = text.len();
     }
-    if self.pending_emphasis != 0 {
-      self.push_emphasis_text(text);
-    } else {
-      self.buffer.push_str(text);
-    }
+    self.buffer.push_str(text);
   }
 
   #[inline(always)]
@@ -3135,20 +3156,6 @@ impl ConvertState {
     };
 
     let written_from = self.buffer.len();
-    let mut emphasis_text;
-    let text =
-      if self.pending_emphasis != 0 && (self.wrap_width != 0 || self.options.max_node_bytes != 0) {
-        let code = self.take_emphasis_reference(text);
-        if code != 0 {
-          emphasis_text = String::with_capacity(text.len() + 6);
-          Self::write_emphasis_reference(&mut emphasis_text, code, text);
-          emphasis_text.as_str()
-        } else {
-          text
-        }
-      } else {
-        text
-      };
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
@@ -3157,8 +3164,12 @@ impl ConvertState {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
     } else if !owns_space && self.should_add_spacing_before_text(last_char, text) {
+      self.pending_emphasis = 0;
       let written = self.push_code_span_content(" ", true);
       self.last_content_cache_len = written + self.push_code_span_content(text, false);
+    } else if self.pending_emphasis != 0 {
+      let text = self.emphasis_text(text);
+      self.last_content_cache_len = self.push_code_span_content(&text, false);
     } else {
       self.last_content_cache_len = self.push_code_span_content(text, false);
     }
@@ -4410,6 +4421,17 @@ impl ConvertState {
     let first_needs_space = pending_space
       || leading_space
       || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
+    // A separator or a break already lets the closer flank.
+    let emphasis_storage;
+    let text = if self.pending_emphasis == 0 {
+      text
+    } else if first_needs_space {
+      self.pending_emphasis = 0;
+      text
+    } else {
+      emphasis_storage = self.emphasis_text(text);
+      emphasis_storage.as_ref()
+    };
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
     let buf_start = self.buffer.len();

@@ -239,6 +239,32 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
     expect(engine.htmlToMarkdown(html, { wrapWidth })).toBe(expected)
   })
 
+  // A separator before the word already lets the closer flank, wrapped or not.
+  it.each([
+    ['<table><tr><td><em>b.</em><div>c</div></td></tr></table>', '| *b.* c |\n| --- |'],
+    ['<p>1<strong>b. </strong>x</p>', '1**b.** x'],
+    ['<p><strong>b!</strong> <em></em>c</p>', '**b!** c'],
+    ['<p><strong>b!</strong>c</p>', '**b!**&#99;'],
+  ])('wraps %s like unwrapped output', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    for (const options of [{}, { wrapWidth: 20 }]) {
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output, `width=${width} options=${JSON.stringify(options)}`).toBe(expected)
+      }
+    }
+  })
+
   it('keeps a space-only text before the close as written in plain text', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(engine.htmlToMarkdown('<p>w <em>lo b Hel<span></span> </em>xx</p>', { format: 'text', wrapWidth: 12 })).toBe('w lo b Hel xx')
