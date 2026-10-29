@@ -592,6 +592,24 @@ function isDashLine(value: string, start: number): boolean {
   return true
 }
 
+/**
+ * A `=` run followed only by blanks is a setext underline; blanks inside the
+ * run make it plain text.
+ */
+function isEqualsLine(value: string, start: number): boolean {
+  let index = start + 1
+  while (index < value.length && value.charCodeAt(index) === 61)
+    index++
+  for (; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code === 10 || code === 13)
+      break
+    if (code !== 32 && code !== 9)
+      return false
+  }
+  return true
+}
+
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
 
 /**
@@ -686,8 +704,13 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
           || isMarkdownMarkerWhitespace(value.charCodeAt(index + 1))
           || (code === 45 && isDashLine(value, index))
       }
-      else if (code === 62 || code === 61) { // blockquote marker or possible setext underline
+      else if (code === 62) { // blockquote marker
         shouldEscape = true
+      }
+      // A node ending inside the run still escapes, since inline nodes can
+      // split one setext underline.
+      else if (code === 61) {
+        shouldEscape = isEqualsLine(value, index)
       }
     }
     else if (!shouldEscape && orderedDigits > 0 && (code === 46 || code === 41)) {

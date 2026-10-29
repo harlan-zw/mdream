@@ -3094,9 +3094,12 @@ impl ConvertState {
         } else if byte == b'-' || byte == b'+' {
           should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied())
             || (byte == b'-' && Self::is_dash_line(&bytes[index..]));
-        } else if byte == b'>' || byte == b'=' {
-          // Guard a possible setext underline even when inline nodes split it.
+        } else if byte == b'>' {
           should_escape = true;
+        } else if byte == b'=' {
+          // A node ending inside the run still escapes, since inline nodes can
+          // split one setext underline.
+          should_escape = Self::is_equals_line(&bytes[index..]);
         }
       } else if !should_escape && ordered_digits > 0 && (byte == b'.' || byte == b')') {
         should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied());
@@ -3421,6 +3424,22 @@ impl ConvertState {
         break;
       }
       if byte != b'-' && byte != b' ' && byte != b'\t' {
+        return false;
+      }
+    }
+    true
+  }
+
+  /// A `=` run followed only by blanks is a setext underline; blanks inside
+  /// the run make it plain text.
+  #[inline]
+  fn is_equals_line(value: &[u8]) -> bool {
+    let run = value.iter().take_while(|&&byte| byte == b'=').count();
+    for &byte in &value[run..] {
+      if byte == b'\n' || byte == b'\r' {
+        break;
+      }
+      if byte != b' ' && byte != b'\t' {
         return false;
       }
     }
