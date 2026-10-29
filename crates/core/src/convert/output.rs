@@ -5045,16 +5045,6 @@ impl ConvertState {
     literal: bool,
   ) {
     let output_str = output.unwrap_or("");
-    // Only contiguous closing delimiters may extend a pending closer.
-    if self.pending_emphasis != 0
-      && (configured_new_lines != 0
-        || (!output_str.is_empty()
-          && (is_enter
-            || output_str.as_bytes().first() != Some(&self.pending_emphasis)
-            || output_str.as_bytes().last() != Some(&self.pending_emphasis))))
-    {
-      self.pending_emphasis = 0;
-    }
     let is_line_boundary =
       || !literal && (output_str.starts_with('\n') || output_str.starts_with("\\\n"));
 
@@ -5088,6 +5078,18 @@ impl ConvertState {
     {
       self.last_node_is_inline = is_inline;
       return;
+    }
+
+    // Only contiguous closing delimiters may extend a pending closer. Events
+    // that returned above write nothing, so they leave it pending.
+    if self.pending_emphasis != 0
+      && (configured_new_lines != 0
+        || (!output_str.is_empty()
+          && (is_enter
+            || output_str.as_bytes().first() != Some(&self.pending_emphasis)
+            || output_str.as_bytes().last() != Some(&self.pending_emphasis))))
+    {
+      self.pending_emphasis = 0;
     }
 
     if configured_new_lines == 0 && !self.last_text_node_contains_whitespace {
