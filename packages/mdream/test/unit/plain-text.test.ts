@@ -101,6 +101,10 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
     ['<p>a<sup><img src="x.png" alt="pic">2</sup>z</p>', 'a^ pic2^z', { sup: { enter: '^', exit: '^' } }],
     ['<p>a&#11;<img src="x.png" alt="pic"></p>', 'a\u000B pic', undefined],
     ['<p>a&#12;<q>x</q></p>', 'a\f "x"', undefined],
+    ['<table><tr><td><pre>* </pre><img src="f.png"></td></tr></table>', '* f.png', undefined],
+    ['<table><tr><td><pre>*  </pre><img src="f.png"></td></tr></table>', '*  f.png', undefined],
+    ['<table><tr><th><pre>a </pre></th><td>z</td></tr></table>', 'a\tz', undefined],
+    ['<table><tr><td><pre>a&#10; </pre><br>x</td></tr></table>', 'a\n\nx', undefined],
   ])('separates image text and quotations like inline markup: %s', async (html, expected, tagOverrides) => {
     const engine = await resolveEngine(engineConfig.engine)
     const options = { engine, format: 'text' as const, plugins: tagOverrides && { tagOverrides } }
