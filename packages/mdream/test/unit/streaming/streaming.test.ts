@@ -461,3 +461,32 @@ describe('vertical tabs inside emphasis streaming', () => {
     }
   })
 })
+
+describe('emphasis holding only vertical tabs streaming', () => {
+  it.each([
+    ['<p>z</p><p><em>&#11;</em>x</p>', 'z\n\n\u000Bx'],
+    ['<p>z <em>&#11; </em>x</p>', 'z \u000B x'],
+    ['<p>z <strong><em>&#11;</em></strong>x</p>', 'z \u000Bx'],
+    ['<p><strong>a<em>&#11;</em></strong>x</p>', '**a**\u000Bx'],
+    ['<ul><li><em>&#11;</em></li></ul>', '- \u000B'],
+    ['<p>z<br><em>&#11;</em>x</p>', 'z  \n\u000Bx'],
+    ['<p>a <del>&#11;</del> x</p>', 'a \u000B x'],
+    ['<figure><img src="a.png"><figcaption><em>&#11;</em></figcaption></figure>', '![](a.png)\n\n*\u000B*'],
+    ['<p>z <code>&#11;</code>x</p>', 'z `\u000B`x'],
+  ] as const)('drops the delimiters of %s at every chunk width', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html), name).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream))
+          actual += part
+        expect(actual, `${name}, width ${width}`).toBe(expected)
+      }
+    }
+  })
+})

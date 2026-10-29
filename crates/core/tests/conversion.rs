@@ -6383,6 +6383,41 @@ fn emphasis_vertical_tabs_stream_after_the_emphasis_closes() {
 }
 
 #[test]
+fn emphasis_holding_only_vertical_tabs_drops_its_delimiters() {
+  // The closer moves the run after itself, so the pair is empty like `<em></em>`.
+  for (html, expected) in [
+    // The document-start trim takes the run, as it does for `<p>&#11;x</p>`.
+    ("<p><em>&#11;</em>x</p>", "x"),
+    ("<p>z</p><p><em>&#11;</em>x</p>", "z\n\n\u{000b}x"),
+    ("<p>z <em>&#11; </em>x</p>", "z \u{000b} x"),
+    ("<p>z <strong><em>&#11;</em></strong>x</p>", "z \u{000b}x"),
+    ("<p><strong>a<em>&#11;</em></strong>x</p>", "**a**\u{000b}x"),
+    ("<ul><li><em>&#11;</em></li></ul>", "- \u{000b}"),
+    ("<p>z<br><em>&#11;</em>x</p>", "z  \n\u{000b}x"),
+    ("<p>z <em>&#11;<br></em>x</p>", "z \u{000b}  \nx"),
+    ("<p>a <del>&#11;</del> x</p>", "a \u{000b} x"),
+    ("<p>a <cite>&#11;&#11;</cite> x</p>", "a \u{000b}\u{000b} x"),
+    ("<p>a <dfn>&#11;</dfn>x</p>", "a \u{000b}x"),
+    (
+      "<figure><img src=\"a.png\"><figcaption><em>&#11;</em></figcaption></figure>",
+      "![](a.png)\n\n*\u{000b}*",
+    ),
+    ("<p>z <code>&#11;</code>x</p>", "z `\u{000b}`x"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
 fn scout9_excluded_list_spacing() {
   for (html, expected) in [
     (

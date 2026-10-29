@@ -1271,26 +1271,43 @@ impl ConvertState {
     let Some(open_marker) = self.open_markers.pop() else {
       return false;
     };
-    if open_marker.kind == inline_marker_type
-      && open_marker.content_start <= self.buffer.len()
-      && self.buffer.as_bytes()[open_marker.content_start..]
-        .iter()
-        .all(|&b| is_whitespace(b))
-    {
-      // `output_start` keeps the opener's own separator, not the spacing `write_output` adds.
-      self.truncate_buffer(open_marker.output_start);
-      if open_marker.starts_at_hard_break {
-        self.hard_break_end = open_marker.output_start;
+    if open_marker.kind == inline_marker_type && open_marker.content_start <= self.buffer.len() {
+      let content = &self.buffer.as_bytes()[open_marker.content_start..];
+      if content.iter().all(|&b| is_whitespace(b)) {
+        // `output_start` keeps the opener's own separator, not the spacing `write_output` adds.
+        self.truncate_buffer(open_marker.output_start);
+        if open_marker.starts_at_hard_break {
+          self.hard_break_end = open_marker.output_start;
+        }
+        self.last_content_cache_len = 0;
+        self.reset_empty_tentative_caption_frames();
+        self.last_node_is_inline = is_inline;
+        return true;
       }
-      self.last_content_cache_len = 0;
-      self.reset_empty_tentative_caption_frames();
-      self.last_node_is_inline = is_inline;
-      return true;
+      if inline_marker_type <= 4 && content.iter().all(|&b| is_whitespace(b) || b == 11) {
+        self.drop_vertical_tab_marker_pair(open_marker, is_inline);
+        return true;
+      }
     }
     // A mismatched or externally modified opener cannot be dropped. Its
     // output makes every enclosing marker non-empty, so release them all.
     self.open_markers.clear();
     false
+  }
+
+  /// The closer would move this run of whitespace and vertical tabs after
+  /// itself and leave the pair empty, so drop both delimiters and keep the run.
+  #[cold]
+  #[inline(never)]
+  fn drop_vertical_tab_marker_pair(&mut self, open_marker: OpenMarker, is_inline: bool) {
+    let run = self.buffer[open_marker.content_start..].to_owned();
+    self.truncate_buffer(open_marker.output_start);
+    if open_marker.starts_at_hard_break {
+      self.hard_break_end = open_marker.output_start;
+    }
+    self.buffer.push_str(&run);
+    self.last_content_cache_len = run.len();
+    self.last_node_is_inline = is_inline;
   }
 
   /// Simple-tag exit; `link` selects the `<a>` variant.
@@ -2692,9 +2709,19 @@ impl ConvertState {
     index: usize,
   ) {
     if !self.open_markers.is_empty() || self.held_break_bytes != 0 {
-      let visible = has_visible(text.as_bytes());
-      if visible {
-        self.open_markers.clear();
+      let bytes = text.as_bytes();
+      if let Some(first) = bytes.iter().position(|&b| !is_whitespace(b)) {
+        // Vertical tabs alone leave an emphasis pair empty once its closer
+        // moves them out, so `drop_empty_marker_pair` still has to see it.
+        if bytes[first] != 11
+          || !self
+            .open_markers
+            .last()
+            .is_some_and(|marker| marker.kind <= 4)
+          || bytes[first..].iter().any(|&b| !is_whitespace(b) && b != 11)
+        {
+          self.open_markers.clear();
+        }
         // A tentative caption may still retract the held breaks.
         if self.held_break_bytes != 0 && self.first_tentative_caption_start().is_none() {
           self.held_break_bytes = 0;

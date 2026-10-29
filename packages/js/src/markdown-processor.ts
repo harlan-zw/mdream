@@ -905,6 +905,37 @@ function dropEmptyMarker(buffer: string[], packed: number, markerType: number, p
   return -1
 }
 
+/** Whether every character is ASCII whitespace or a vertical tab. */
+function isVerticalTabRun(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c !== 11 && !isAsciiWhitespace(c))
+      return false
+  }
+  return true
+}
+
+/**
+ * Drop an emphasis opener followed only by whitespace and vertical tabs. The
+ * closer would move that run after itself and leave the pair empty, so the
+ * run stays. Only the delimiter leaves the opener fragment, which can also
+ * hold a caption opener, and fragment indexes stay put.
+ */
+function dropVerticalTabMarker(buffer: string[], packed: number, markerType: number, marker: string, positions?: OutputPositions): boolean {
+  const idx = packed >> 3
+  const opener = buffer[idx]
+  if ((packed & MARKER_TYPE_MASK) !== markerType || opener === undefined || !opener.endsWith(marker))
+    return false
+  for (let index = idx + 1; index < buffer.length; index++) {
+    if (!isVerticalTabRun(buffer[index]!))
+      return false
+  }
+  const kept = opener.slice(0, opener.length - marker.length)
+  positions?.replace(idx, idx + 1, [kept])
+  buffer[idx] = kept
+  return true
+}
+
 function resetRetractedCaptionFrames(frames: number[] | undefined, count: number, fragment: number): void {
   if (!frames)
     return
@@ -1711,7 +1742,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (openLinkFragment >= 0 && hasVisibleText)
           openLinkFragment = -openLinkFragment - 2
         if (openMarkerCount && hasVisibleText) {
-          openMarkerCount = 0
+          // Vertical tabs alone leave an emphasis pair empty once its closer
+          // moves them out, so the exit still has to see the open marker.
+          const first = textNode.value.charCodeAt(0)
+          if ((first !== 11 && !isAsciiWhitespace(first))
+            || (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) > 4
+            || !isVerticalTabRun(textNode.value)) {
+            openMarkerCount = 0
+          }
           commitCaptionFrames()
         }
       }
@@ -2143,10 +2181,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
-        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
+        const packed = openMarkers[--openMarkerCount]!
+        const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
         if (idx >= 0) {
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+          return
+        }
+        if (markerType <= 4 && dropVerticalTabMarker(buff, packed, markerType, handlerOutput!, state.outputPositions)) {
+          state.lastContentCache = buff[buff.length - 1]
           return
         }
         openMarkerCount = 0
