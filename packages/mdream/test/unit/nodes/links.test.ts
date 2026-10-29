@@ -527,6 +527,24 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe('[Link](page)')
   })
 
+  it('ignores a base with an empty host or inside a template', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const origin = 'https://example.com/article/current.html'
+
+    for (const href of ['https://:80/docs/', 'http://user@/docs/', 'http://@/docs/']) {
+      expect(htmlToMarkdown(`<base href="${href}"><a href="page">Link</a>`, { engine, origin }))
+        .toBe('[Link](https://example.com/article/page)')
+    }
+    expect(htmlToMarkdown('<template><base href="https://other.example/"></template><a href="page">Link</a>', { engine, origin }))
+      .toBe('[Link](https://example.com/article/page)')
+    expect(htmlToMarkdown('<base href="https://[::1]:8080/docs/"><a href="page">Link</a>', { engine, origin }))
+      .toBe('[Link](https://[::1]:8080/docs/page)')
+    for (const href of ['http://@host.example/', 'http://:pw@host.example/']) {
+      expect(htmlToMarkdown(`<base href="${href}"><a href="page">Link</a>`, { engine, origin }))
+        .toBe(`[Link](${href}page)`)
+    }
+  })
+
   it('uses a base captured before filtering or main-content isolation', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<head><base href="/docs/"></head><main><a href="page">Link</a></main>'

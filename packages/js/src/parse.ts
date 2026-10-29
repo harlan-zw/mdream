@@ -70,17 +70,18 @@ import { parserTagHandlers } from './parser-tags'
 import { resolveUrl } from './url'
 import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 
-const HTTP_BASE_RE = /^https?:\/\/[^/?#]/i
+// The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
+const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
 
 // The first `<base href>` replaces `origin` when it resolves to an `http(s)://host`
 // URL; anything else is ignored. A <base> inside a link is ignored too: the
 // link's open and close must resolve alike.
 function captureBaseHref(state: ParseState, href: string | undefined): void {
   const target = state.urlBaseTarget
-  if (!target || href === undefined || state.depthMap[TAG_A])
+  if (!target || href === undefined || state.depthMap[TAG_A] || state.depthMap[TAG_TEMPLATE])
     return
   state.baseHrefSeen = true
-  const base = resolveUrl(href.trim(), target.options.origin)
+  const base = resolveUrl(href.replace(/^[\x00-\x20]+|[\x00-\x20]+$/g, ''), target.options.origin)
   if (HTTP_BASE_RE.test(base))
     target.options = { ...target.options, origin: base }
 }
@@ -1815,10 +1816,6 @@ function processOpeningTag(
     }
   }
 
-  // Captured before filtering, so an excluded <head> still sets the base.
-  if (isBase && !state.baseHrefSeen)
-    captureBaseHref(state, result.attributes.href)
-
   if ((state.flattenedOpaqueDepth || 0) > 0) {
     if (!result.selfClosing && tagName === state.flattenedOpaqueTagName)
       state.flattenedOpaqueDepth!++
@@ -1962,6 +1959,11 @@ function processOpeningTag(
       skip: true,
     }
   }
+
+  // Captured before filtering, so an excluded <head> still sets the base.
+  // After the opaque-overflow return, so a base inside a flattened subtree is ignored.
+  if (isBase && !state.baseHrefSeen)
+    captureBaseHref(state, result.attributes.href)
 
   if (!result.selfClosing && state.depth >= MAX_ELEMENT_DEPTH) {
     state.flattenedTagName = tagName

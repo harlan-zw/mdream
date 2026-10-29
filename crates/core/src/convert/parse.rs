@@ -948,7 +948,10 @@ impl ConvertState {
   #[cold]
   #[inline(never)]
   fn capture_base_href(&mut self) {
-    if self.base_href_seen || self.depth_map[TAG_A as usize] != 0 {
+    if self.base_href_seen
+      || self.depth_map[TAG_A as usize] != 0
+      || self.depth_map[TAG_TEMPLATE as usize] != 0
+    {
       return;
     }
     let Some(href) = self.attr_scratch.get_bit(ATTR_HREF) else {
@@ -972,11 +975,6 @@ impl ConvertState {
     overflow: bool,
   ) -> OpeningTagResult {
     let tag_handler = tag_id.and_then(get_tag_handler);
-
-    // Captured before filtering, so an excluded <head> still sets the base.
-    if tag_id == Some(TAG_BASE) {
-      self.capture_base_href();
-    }
 
     // A retained attribute outgrew `max_node_bytes`. Drop the tag whole, as an
     // over-cap tag always has; the children it would have wrapped still parse.
@@ -1186,6 +1184,10 @@ impl ConvertState {
       self.refresh_raw_html_block(id);
       if id == TAG_PRE {
         self.in_pre = true;
+      }
+      // Captured before filtering, so an excluded <head> still sets the base.
+      if id == TAG_BASE {
+        self.capture_base_href();
       }
     }
     self.depth += 1;

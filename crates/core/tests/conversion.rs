@@ -931,6 +931,43 @@ fn relative_path_with_origin() {
 }
 
 #[test]
+fn base_href_ignores_empty_host_and_template_bases() {
+  let origin = HtmlToMarkdownOptions {
+    origin: Some("https://example.com/article/".into()),
+    ..Default::default()
+  };
+  for href in ["https://:80/docs/", "http://user@/docs/", "http://@/docs/"] {
+    let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
+    assert_eq!(
+      html_to_markdown(&html, origin.clone()),
+      "[Link](https://example.com/article/page)",
+      "{href}"
+    );
+  }
+  let html = r#"<template><base href="https://other.example/"></template><a href="page">Link</a>"#;
+  assert_eq!(
+    html_to_markdown(html, origin.clone()),
+    "[Link](https://example.com/article/page)"
+  );
+  // A template at the depth limit is opaque and must not set the base either.
+  let deep = format!(
+    "{}<template><base href=\"https://other.example/\"></template>{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(!html_to_markdown(&deep, origin.clone()).contains("other.example"));
+  // Userinfo with a real host is a valid base: the host follows the last '@'.
+  for href in ["http://@host.example/", "http://:pw@host.example/"] {
+    let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
+    assert_eq!(
+      html_to_markdown(&html, origin.clone()),
+      format!("[Link]({href}page)"),
+      "{href}"
+    );
+  }
+}
+
+#[test]
 fn base_href_replaces_origin_for_later_urls() {
   let origin = "https://example.com/article/current.html";
   assert_eq!(
