@@ -91,6 +91,30 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
       .toBe('')
   })
 
+  it.each([
+    ['<p>a<img src="x.png" alt="pic">b</p>', 'a picb', undefined],
+    ['<p>(<img src="x.png" alt="pic">)</p>', '(pic)', undefined],
+    ['<p>a<img src="x.png" alt=".pic">b</p>', 'a.picb', undefined],
+    ['<p>(<q>x</q>)</p>', '("x")', undefined],
+    ['<p>a<sup><img src="x.png" alt="pic">2</sup>z</p>', 'a**pic2**z', { sup: { enter: '**', exit: '**' } }],
+    ['<p>a<sup><q></q>2</sup>z</p>', 'a**2**z', { sup: { enter: '**', exit: '**' } }],
+    ['<p>a<sup><img src="x.png" alt="pic">2</sup>z</p>', 'a^ pic2^z', { sup: { enter: '^', exit: '^' } }],
+  ])('separates image text and quotations like inline markup: %s', async (html, expected, tagOverrides) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, format: 'text' as const, plugins: tagOverrides && { tagOverrides } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 1; split < html.length; split++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      expect((await collect(streamHtmlToMarkdown(stream, options))).trimEnd(), `split=${split}`).toBe(expected)
+    }
+  })
+
   it('matches streaming output', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<h2>Title</h2><p>A <code>code</code> sample with <a href="/docs">docs</a>.</p>'

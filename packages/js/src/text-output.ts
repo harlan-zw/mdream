@@ -60,6 +60,16 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
 }
 
+function needsSpacing(lastCode: number, firstChar: string): boolean {
+  // Parity with the Rust engine's `needs_spacing`.
+  if (lastCode <= 32 || ' \n\t'.includes(firstChar))
+    return false
+  const lastChar = String.fromCharCode(lastCode)
+  if (lastChar === '|' && firstChar === '<')
+    return true
+  return !'[(>*_`'.includes(lastChar) && !'])<.,!?:;*_`'.includes(firstChar)
+}
+
 /** `base` is the column the first fragment starts at. */
 function currentColumn(buffer: string[], base: number, scan: [fragments: number, column: number]): number {
   if (scan[0] >= buffer.length) {
@@ -248,13 +258,13 @@ function elementOutput(node: ElementNode, eventType: number, state: TextState): 
       if (output && hasVisibleContent(output)) {
         markRenderedChildContent(node)
         // Alt text reads as its own word, so it never runs into the text before it.
-        if (lastOutputChar(state.buffer) > 32)
+        if (needsSpacing(lastOutputChar(state.buffer), output[0]!))
           return ` ${output}`
       }
       return output
     }
     if (node.tagId === TAG_Q)
-      return lastOutputChar(state.buffer) > 32 ? ' "' : '"'
+      return needsSpacing(lastOutputChar(state.buffer), '"') ? ' "' : '"'
   }
   else if (node.tagId === TAG_Q) {
     return '"'
