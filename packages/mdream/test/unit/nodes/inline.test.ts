@@ -138,6 +138,14 @@ describe.each(engines)('empty inline emphasis $name', (engineConfig) => {
     expect(htmlToMarkdown('<p>a<q></q>b</p>', { engine })).toBe('a b')
   })
 
+  it('lets a hard break absorb the spacing an emptied element keeps', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>a<q></q><br>x</p>', { engine })).toBe('a  \nx')
+    expect(htmlToMarkdown('<p>a<q> </q><br>x</p>', { engine })).toBe('a  \nx')
+    expect(htmlToMarkdown('<p>a<del></del><br>x</p>', { engine })).toBe('a  \nx')
+    expect(htmlToMarkdown('<p>a<q> </q><b><span></span><q> </q></b><br>x</p>', { engine })).toBe('a  \nx')
+  })
+
   it('separates raw inline HTML after a pipe outside tables', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<p>a|<mark>x</mark></p>', { engine })).toBe('a| <mark>x</mark>')

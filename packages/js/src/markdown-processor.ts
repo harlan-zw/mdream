@@ -1893,6 +1893,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastTextNode = undefined
         }
       }
+      // Spaces before a line break have no visual effect, even when an emptied
+      // inline element left them, so the break subsumes them as in Rust.
+      if (!inPre && breakOutput?.endsWith('\n') && lastOutputChar(buff) === 32)
+        trimTrailingSpaces(buff)
 
       const pendingCaption = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
