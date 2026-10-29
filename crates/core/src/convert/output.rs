@@ -1755,6 +1755,7 @@ impl ConvertState {
       self.empty_list_marker_end = self.buffer.trim_end_matches(' ').len();
       self.empty_list_marker_scanned_to = self.empty_list_marker_end;
       self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
+      self.item_settle_pending = true;
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -3418,6 +3419,9 @@ impl ConvertState {
     {
       self.resolve_item_marker(true);
     }
+    self.item_settle_pending = self.empty_item_hazard
+      || self.empty_list_marker_end != usize::MAX
+      || self.list_tail_start != usize::MAX;
   }
 
   /// Give a marker that ended up alone on its line the blank line it needs: the
@@ -4380,6 +4384,7 @@ impl ConvertState {
     self.trim_trailing_spaces();
     self.list_tail_start = self.buffer.len();
     self.list_tail_scanned_to = self.list_tail_start;
+    self.item_settle_pending = true;
     let prefix = self.continuation_prefix();
     let separator = format!("\n\n{prefix}");
     self.last_content_cache_len = self.push_code_span_content(&separator, true);

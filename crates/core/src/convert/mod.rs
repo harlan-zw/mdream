@@ -944,6 +944,11 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// Set with `empty_item_hazard`, `empty_list_marker_end` or `list_tail_start`
+  /// and recomputed by `settle_item_marker`, so the token loop and the hot
+  /// paths test one flag. It may stay set after all three clear, never the
+  /// other way round.
+  item_settle_pending: bool,
   /// Last built-in marker end, excluding its trailing space.
   last_item_marker_end: usize,
   #[cfg(test)]
@@ -1206,6 +1211,7 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      item_settle_pending: false,
       last_item_marker_end: usize::MAX,
       #[cfg(test)]
       parent_marker_scans: 0,
@@ -1368,10 +1374,7 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
-    if self.empty_item_hazard
-      || self.empty_list_marker_end != usize::MAX
-      || self.list_tail_start != usize::MAX
-    {
+    if self.item_settle_pending {
       self.settle_item_marker();
     }
     self.check_held_output();
