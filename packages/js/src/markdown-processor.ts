@@ -2036,11 +2036,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         handlerOutput = undefined
       }
 
+      const literalOutput = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
       let meaningfulOutput = !dropBlockquoteOutput && output?.some(hasNonWhitespace) === true
       if (meaningfulOutput && handlerOutput !== undefined) {
         const markerType = INLINE_MARKER_TYPE[tagId]!
-        const literal = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
-        if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literal) {
+        if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literalOutput) {
           if (captionBoundary === 1) {
             captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, true) || captionBufferChanged
             captionTransition = true
@@ -2049,7 +2049,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           if (eventType === NodeEventEnter) {
             // Inside an opened caption the marker follows its text and takes
             // the usual separator, as in the Rust engine.
-            if (captionNeedsPreparation())
+            if (captionFrameCount !== 0 && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0)
               captionTransition = true
             anchorPendingCaptions(state.buffer.length)
           }
@@ -2075,7 +2075,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             captionBufferChanged = true
           captionBufferChanged = prepareCaptionOutput(false) || captionBufferChanged
           captionTransition = true
-          consumeCaptionTransition(isInlineElement, tagId)
+          consumeCaptionTransition(isInlineElement && !literalOutput, tagId)
         }
         finishCaptionFrame()
         if (!opened && flushCaptionBreakRun())
@@ -2084,7 +2084,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       else if (meaningfulOutput && captionNeedsPreparation()) {
         captionBufferChanged = prepareCaptionOutput(captionEnter, tagId !== TAG_LI) || captionBufferChanged
         captionTransition = true
-        consumeCaptionTransition(isInlineElement, tagId)
+        consumeCaptionTransition(isInlineElement && !literalOutput, tagId)
       }
       if (meaningfulOutput)
         commitCaptionFrames()
