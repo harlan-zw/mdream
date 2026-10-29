@@ -1197,7 +1197,6 @@ impl ConvertState {
       configured_new_lines,
       output.as_deref(),
       false,
-      false,
     );
 
     if link {
@@ -1334,14 +1333,19 @@ impl ConvertState {
     self.release_markers_on_exit(!is_inline, output.as_deref());
 
     let output_start = self.buffer.len();
-    self.write_output(
-      false,
-      is_inline,
-      configured_new_lines,
-      output.as_deref(),
-      false,
-      tag_id.is_some_and(|id| EMPHASIS_EXIT_TAG[id as usize]),
-    );
+    if let Some(output) = output.as_deref()
+      && self.emphasis_exit_follows_whitespace(tag_id, output)
+    {
+      self.write_emphasis_exit(is_inline, configured_new_lines, output);
+    } else {
+      self.write_output(
+        false,
+        is_inline,
+        configured_new_lines,
+        output.as_deref(),
+        false,
+      );
+    }
     self.settle_empty_text_pending(output_start, || false);
   }
 
@@ -1719,7 +1723,6 @@ impl ConvertState {
       configured_new_lines,
       output.as_deref(),
       enter_is_literal,
-      false,
     );
 
     if tag_id == Some(TAG_IMG)
@@ -2056,7 +2059,7 @@ impl ConvertState {
     configured_new_lines: u8,
     resolved_href: Option<Cow<'_, str>>,
   ) {
-    self.write_output(false, is_inline, configured_new_lines, None, false, false);
+    self.write_output(false, is_inline, configured_new_lines, None, false);
 
     // That trim misses a space before an empty element (`<a>A <span></span></a>`).
     let text_end = self.buffer.trim_end_matches(' ').len();
@@ -2483,14 +2486,14 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
-    self.write_output(
-      false,
-      is_inline,
-      configured_new_lines,
-      effective,
-      has_override,
-      !has_override && tag_id.is_some_and(|id| EMPHASIS_EXIT_TAG[id as usize]),
-    );
+    if let Some(output) = effective
+      && self.emphasis_exit_follows_whitespace(tag_id, output)
+      && !has_override
+    {
+      self.write_emphasis_exit(is_inline, configured_new_lines, output);
+    } else {
+      self.write_output(false, is_inline, configured_new_lines, effective, false);
+    }
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
     }
@@ -3756,7 +3759,7 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
-    self.write_output(true, true, 0, Some(fragment), false, false);
+    self.write_output(true, true, 0, Some(fragment), false);
     if self.buffer.len() == output_start + fragment.len() {
       self.streaming_break_runs.push(StreamingBreakRun {
         output_start,
@@ -3886,7 +3889,7 @@ impl ConvertState {
         if run.fragment == "\n" && self.buffer.ends_with("\n\n") {
           continue;
         }
-        self.write_output(true, true, 0, Some(&run.fragment), false, false);
+        self.write_output(true, true, 0, Some(&run.fragment), false);
       }
     }
   }
@@ -4882,6 +4885,32 @@ impl ConvertState {
     self.last_content_cache_len = trailing.len();
   }
 
+  /// An emphasis delimiter closing after whitespace, which may hold a vertical
+  /// tab that `write_emphasis_exit` has to move outside the delimiter.
+  #[inline(always)]
+  fn emphasis_exit_follows_whitespace(&self, tag_id: Option<u8>, output: &str) -> bool {
+    matches!(output, "*" | "**" | "~~")
+      && tag_id.is_some_and(|id| EMPHASIS_EXIT_TAG[id as usize])
+      && self
+        .buffer
+        .as_bytes()
+        .last()
+        .is_some_and(|&byte| byte.is_ascii_whitespace() || byte == 11)
+  }
+
+  #[cold]
+  #[inline(never)]
+  fn write_emphasis_exit(&mut self, is_inline: bool, configured_new_lines: u8, output: &str) {
+    self.write_output_body(
+      false,
+      is_inline,
+      configured_new_lines,
+      Some(output),
+      false,
+      true,
+    );
+  }
+
   #[inline]
   pub(crate) fn write_output(
     &mut self,
@@ -4890,7 +4919,29 @@ impl ConvertState {
     configured_new_lines: u8,
     output: Option<&str>,
     literal: bool,
-    emphasis_exit: bool,
+  ) {
+    self.write_output_body(
+      is_enter,
+      is_inline,
+      configured_new_lines,
+      output,
+      literal,
+      false,
+    );
+  }
+
+  /// Shared by `write_output` and the cold `write_emphasis_exit`. Inlined into
+  /// both natively; on wasm32 a second copy costs more than the call.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline)]
+  fn write_output_body(
+    &mut self,
+    is_enter: bool,
+    is_inline: bool,
+    configured_new_lines: u8,
+    output: Option<&str>,
+    literal: bool,
+    closes_emphasis: bool,
   ) {
     let output_str = output.unwrap_or("");
     let is_line_boundary =
@@ -4927,8 +4978,6 @@ impl ConvertState {
       return;
     }
 
-    let closes_emphasis =
-      emphasis_exit && !is_enter && !literal && matches!(output_str, "*" | "**" | "~~");
     let (emphasis_whitespace_start, emphasis_has_vertical_tab) = if closes_emphasis {
       self.trailing_emphasis_whitespace()
     } else {
@@ -5510,7 +5559,7 @@ mod tests {
     state.cut_line_lead = CutLineLead::Blank(0);
     state.flushed_tail = [b'\n', b'\n'];
 
-    state.write_output(true, false, 2, Some("next"), false, false);
+    state.write_output(true, false, 2, Some("next"), false);
 
     assert_eq!(state.buffer, "next");
   }
@@ -5524,7 +5573,7 @@ mod tests {
     state.has_streamed_output = true;
     state.buffer.push('c');
 
-    state.write_output(true, false, 2, Some("next"), false, false);
+    state.write_output(true, false, 2, Some("next"), false);
 
     assert_eq!(state.buffer, "c\n\nnext");
   }
