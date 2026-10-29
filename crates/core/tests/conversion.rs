@@ -6309,6 +6309,50 @@ fn cleaned_empty_links_preserve_adjacent_list_markers() {
   }
 }
 
+/// Overrides that make a list or quote inline, or alias a tag to a list.
+fn inline_list_overrides() -> HtmlToMarkdownOptions {
+  let inline = TagOverrideConfig {
+    is_inline: Some(true),
+    ..Default::default()
+  };
+  HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default()
+        .with_tag_override("ul", inline.clone())
+        .with_tag_override("blockquote", inline)
+        .with_tag_override("x-list", TagOverrideConfig::alias("ol")),
+    ),
+    ..Default::default()
+  }
+}
+
+// Inline tags skip the list bookkeeping unless an override exists, so an
+// override that makes a list inline must keep its push and pop paired.
+#[test]
+fn inline_overridden_lists_keep_adjacent_list_markers() {
+  for (html, expected) in [
+    ("<ul><li>a</li></ul><ul><li>b</li></ul>", "- a\n\n* b"),
+    (
+      "<ul><li>a<ul><li>b</li></ul></li></ul><ul><li>c</li></ul>",
+      "- a\n  - b\n\n* c",
+    ),
+    (
+      "<ol><li>a</li></ol><x-list><li>b</li></x-list>",
+      "1. a\n\n1) b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote>q</blockquote><ul><li>b</li></ul>",
+      "- a\n\n> q\n\n- b",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, inline_list_overrides()),
+      expected,
+      "html={html:?}"
+    );
+  }
+}
+
 #[test]
 fn scout9_excluded_list_spacing() {
   for (html, expected) in [

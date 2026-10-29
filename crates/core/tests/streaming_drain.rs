@@ -3362,6 +3362,32 @@ fn removable_output_adjacent_lists_streaming() {
 }
 
 #[test]
+fn inline_overridden_lists_match_one_shot_at_every_split() {
+  let inline = TagOverrideConfig {
+    is_inline: Some(true),
+    ..Default::default()
+  };
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default()
+        .with_tag_override("ul", inline.clone())
+        .with_tag_override("blockquote", inline)
+        .with_tag_override("x-list", TagOverrideConfig::alias("ol")),
+    ),
+    ..Default::default()
+  };
+  for html in [
+    "<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>",
+    "<ul><li>a<ul><li>b</li></ul></li></ul><ul><li>c</li></ul>",
+    "<ol><li>a</li></ol><x-list><li>b</li></x-list>",
+    "<ul><li>a</li></ul><blockquote>q</blockquote><ul><li>b</li></ul>",
+  ] {
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options.clone());
+  }
+}
+
+#[test]
 fn cleaned_empty_links_preserve_adjacent_lists_at_every_split() {
   let options = HtmlToMarkdownOptions {
     clean: Some(CleanConfig {

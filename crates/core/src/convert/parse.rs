@@ -302,6 +302,39 @@ fn is_hidden(node: &ElementNode) -> bool {
 }
 
 impl ConvertState {
+  /// Open a `<ul>`/`<ol>` marker entry, or let a quote end the list before it.
+  #[inline(never)]
+  fn push_list_marker(&mut self, tag_id: Option<u8>, skip_node: bool, excluded: bool) {
+    if matches!(tag_id, Some(TAG_UL | TAG_OL)) {
+      let ordered = tag_id == Some(TAG_OL);
+      let marker = if skip_node {
+        if ordered { b'.' } else { b'-' }
+      } else {
+        self.next_list_marker(ordered)
+      };
+      self.list_markers.push(marker);
+    } else if tag_id == Some(TAG_BLOCKQUOTE) && !skip_node && !excluded {
+      // A quote boundary ends the list before it, written or not.
+      self.sibling_list_marker = 0;
+    }
+  }
+
+  /// Close what [`Self::push_list_marker`] opened for the same element.
+  #[inline(never)]
+  fn pop_list_marker(&mut self, id: u8, skipped: bool, excluded: bool) {
+    if id == TAG_UL || id == TAG_OL {
+      // An empty list writes nothing, leaving the one before it in place.
+      if let Some(marker) = self.list_markers.pop()
+        && marker & LIST_HAS_ITEM != 0
+      {
+        self.sibling_list_marker = marker & !LIST_HAS_ITEM;
+        self.sibling_list_depth = self.depth_map[TAG_LI as usize];
+      }
+    } else if id == TAG_BLOCKQUOTE && !skipped && !excluded {
+      self.sibling_list_marker = 0;
+    }
+  }
+
   fn matches_overflow_tag(&self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool) -> bool {
     if is_builtin {
       self.overflow_tag_id == tag_id
@@ -1412,18 +1445,11 @@ impl ConvertState {
       );
     }
     // A skipped node writes nothing and takes no part, as its events take none
-    // in the JS engine.
-    if matches!(tag_id, Some(TAG_UL | TAG_OL)) {
-      let ordered = tag_id == Some(TAG_OL);
-      let marker = if skip_node {
-        if ordered { b'.' } else { b'-' }
-      } else {
-        self.next_list_marker(ordered)
-      };
-      self.list_markers.push(marker);
-    } else if tag_id == Some(TAG_BLOCKQUOTE) && !skip_node && !tag.excluded_from_markdown {
-      // A quote boundary ends the list before it, written or not.
-      self.sibling_list_marker = 0;
+    // in the JS engine. Lists and quotes are blocks unless an override makes
+    // one inline, and the close takes the same test, so push and pop pair up.
+    if !tag.is_inline || self.has_tag_overrides {
+      let excluded = tag.excluded_from_markdown;
+      self.push_list_marker(tag_id, skip_node, excluded);
     }
 
     if let Some(p) = parent {
@@ -1566,6 +1592,7 @@ impl ConvertState {
       node_excluded,
       node_enter_skipped,
       node_child_text_index,
+      node_is_inline,
     ) = {
       let node = self.stack.retired();
       (
@@ -1575,6 +1602,7 @@ impl ConvertState {
         node.excluded_from_markdown,
         node.enter_skipped,
         node.child_text_node_index,
+        node.is_inline,
       )
     };
 
@@ -1710,16 +1738,8 @@ impl ConvertState {
       if id == TAG_OL {
         self.ordered_starts.pop();
       }
-      if id == TAG_UL || id == TAG_OL {
-        // An empty list writes nothing, leaving the one before it in place.
-        if let Some(marker) = self.list_markers.pop()
-          && marker & LIST_HAS_ITEM != 0
-        {
-          self.sibling_list_marker = marker & !LIST_HAS_ITEM;
-          self.sibling_list_depth = self.depth_map[TAG_LI as usize];
-        }
-      } else if id == TAG_BLOCKQUOTE && !node_enter_skipped && !node_excluded {
-        self.sibling_list_marker = 0;
+      if !node_is_inline || self.has_tag_overrides {
+        self.pop_list_marker(id, node_enter_skipped, node_excluded);
       }
       if id == TAG_LI
         && let Some(w) = self.list_indent_widths.pop()
