@@ -484,13 +484,13 @@ impl ConvertState {
     (depth, index)
   }
 
-  /// `has_text`: inside a link, whether the text holds more than whitespace.
+  /// `text`: the node's text as written, only read inside a link.
   #[inline(always)]
   fn advance_text_node_counters(
     &mut self,
     first_block_parent_index: Option<usize>,
     excluded: bool,
-    has_text: bool,
+    text: &str,
   ) {
     if let Some(parent) = self.stack.last_mut() {
       parent.current_walk_index += 1;
@@ -500,11 +500,17 @@ impl ConvertState {
       self.stack[idx].child_text_node_index += 1;
     }
     if self.depth_map[TAG_A as usize] > 0 {
-      if excluded || (!has_text && !self.in_pre) {
-        self.count_hidden_link_text(up_to, excluded);
-      } else if has_text
-        && (self.link_content_block > up_to
-          || self.link_content_links != self.depth_map[TAG_A as usize])
+      self.count_link_text(up_to, excluded, text);
+    }
+  }
+
+  /// Text inside a link: hidden text is counted as such, and text in a block
+  /// nested in the link counts for the link.
+  #[inline(never)]
+  fn count_link_text(&mut self, up_to: usize, excluded: bool, text: &str) {
+    if !excluded && (self.text_run_has_text || !text.bytes().all(is_whitespace)) {
+      if (self.link_content_block > up_to
+        || self.link_content_links != self.depth_map[TAG_A as usize])
         && !self.stack[up_to..]
           .iter()
           .any(|node| node.tag_id == Some(TAG_A))
@@ -518,6 +524,8 @@ impl ConvertState {
         self.link_content_block = up_to;
         self.link_content_links = self.depth_map[TAG_A as usize];
       }
+    } else if excluded || !self.in_pre {
+      self.count_hidden_link_text(up_to, excluded);
     }
   }
 
@@ -630,12 +638,9 @@ impl ConvertState {
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
     }
 
-    let has_text = self.depth_map[TAG_A as usize] > 0
-      && (self.text_run_has_text || !text.bytes().all(is_whitespace));
+    self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, &text);
     text.clear();
     *text_buffer = text;
-
-    self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, has_text);
   }
 
   /// Emit buffered text. Internal size flushes split one source text node into
@@ -804,19 +809,16 @@ impl ConvertState {
       );
     }
 
-    let has_text = self.depth_map[TAG_A as usize] > 0
-      && (self.text_run_has_text || !text.bytes().all(is_whitespace));
+    if completes_text_node {
+      self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, &text);
+    } else if self.depth_map[TAG_A as usize] > 0 && !self.text_run_has_text {
+      // A later piece may be blank only because the cut left it whitespace.
+      self.text_run_has_text = !text.bytes().all(is_whitespace);
+    }
 
     // Recover String allocation
     text.clear();
     *text_buffer = text;
-
-    if completes_text_node {
-      self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, has_text);
-    } else {
-      // A later piece may be blank only because the cut left it whitespace.
-      self.text_run_has_text = has_text;
-    }
   }
 
   /// Close open nodes from the top of the stack up to and including the nearest
