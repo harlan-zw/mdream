@@ -1378,6 +1378,13 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
+    debug_assert!(
+      self.item_settle_pending
+        || (!self.empty_item_hazard
+          && self.empty_list_marker_end == usize::MAX
+          && self.list_tail_start == usize::MAX),
+      "list item state is pending without item_settle_pending"
+    );
     if self.item_settle_pending {
       self.settle_item_marker();
     }

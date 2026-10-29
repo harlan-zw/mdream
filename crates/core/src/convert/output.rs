@@ -2704,6 +2704,9 @@ impl ConvertState {
     {
       self.empty_list_marker_end = usize::MAX;
       self.list_tail_start = usize::MAX;
+      // Only the hazard can still need settling, so a filled item does not
+      // call `settle_item_marker` again at its next token.
+      self.item_settle_pending = self.empty_item_hazard;
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.has_last_text_node = true;
