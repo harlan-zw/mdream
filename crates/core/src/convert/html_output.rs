@@ -12,6 +12,7 @@ pub(super) enum HtmlFrame {
   Pre {
     depth: usize,
     language: String,
+    code_language_selected: bool,
     output: String,
   },
 }
@@ -190,7 +191,7 @@ impl ConvertState {
         }
       }
       TAG_CODE => {
-        let language = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
+        let language = Self::get_language_from_attributes(node);
         if !language.is_empty() {
           output.push_str(" class=\"language-");
           push_escaped(&mut output, language, true);
@@ -240,11 +241,18 @@ impl ConvertState {
     };
     let tag_id = node.tag_id;
     if let Some(HtmlFrame::Pre {
-      language, output, ..
+      language,
+      code_language_selected,
+      output,
+      ..
     }) = self.html_frames.last_mut()
     {
-      if tag_id == Some(TAG_CODE) && language.is_empty() {
-        *language = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS)).to_string();
+      if tag_id == Some(TAG_CODE) && !*code_language_selected {
+        let code_language = Self::get_language_from_attributes(node);
+        if !code_language.is_empty() {
+          *language = code_language.to_string();
+          *code_language_selected = true;
+        }
       } else if tag_id == Some(TAG_BR) {
         output.push('\n');
       }
@@ -262,7 +270,8 @@ impl ConvertState {
     if tag_id == Some(TAG_PRE) {
       self.html_frames.push(HtmlFrame::Pre {
         depth: node.depth,
-        language: Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS)).to_string(),
+        language: Self::get_language_from_attributes(node).to_string(),
+        code_language_selected: false,
         output: String::new(),
       });
       return;

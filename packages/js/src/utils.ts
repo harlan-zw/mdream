@@ -264,6 +264,22 @@ export function getLanguageFromClass(className: string | undefined): string {
   return ''
 }
 
+// One `data-*` language token: HTML whitespace is trimmed; an interior space or
+// a byte unsafe in a fence info string (see `isUnsafeFenceInfoCode`) rejects it.
+// eslint-disable-next-line no-control-regex
+const DATA_LANGUAGE_RE = /^[\t\n\f\r ]*([^\0-\x20"&'<>`~\x7F]+)[\t\n\f\r ]*$/
+
+function getLanguageFromDataAttribute(value: string | undefined): string {
+  return value ? DATA_LANGUAGE_RE.exec(value)?.[1] ?? '' : ''
+}
+
+/** Resolve language metadata in the order used for a `<code>` or `<pre>`. */
+export function getLanguageFromAttributes(attributes: ElementNode['attributes'] | undefined): string {
+  return getLanguageFromClass(attributes?.class)
+    || getLanguageFromDataAttribute(attributes?.['data-language'])
+    || getLanguageFromDataAttribute(attributes?.['data-lang'])
+}
+
 // Strict u32 parsing shared by numeric HTML attributes. Partial reads such as
 // `2x` and values outside Rust's u32 range must be rejected consistently.
 export function parseUnsignedInteger(raw: string | undefined): number | undefined {

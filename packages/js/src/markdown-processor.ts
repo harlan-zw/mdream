@@ -56,7 +56,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -104,7 +104,8 @@ export interface MarkdownState {
    * first non-whitespace content so empty/whitespace-only blocks emit nothing.
    * `preFencePending`: inside a <pre> whose fence is not yet decided.
    * `preFencePendingDepth`: <pre> depth of that <pre>; nested ones defer to it.
-   * `preFenceLang`: language resolved from the <pre>'s own class.
+   * `preFenceLang`: language resolved from the owning <pre>'s class/data
+   * attributes; a <code> that owns the fence can provide a higher-priority value.
    */
   preFencePending?: boolean
   preFencePendingDepth?: number
@@ -1226,12 +1227,15 @@ function consumeGfmAction(action: GfmAction, state: MarkdownState, lifecycle: Gf
     case 'PreExit': {
       // The parser already counted this <pre> out of the depth map.
       const depth = state.depthMap[TAG_PRE]! + 1
-      if (state.preFencePendingDepth === depth)
+      if (state.preFencePendingDepth === depth) {
         state.preFencePending = false
+        state.preFenceLang = ''
+      }
       // Only the <pre> that owns the fence closes it.
       if (state.preFenceOwnerDepth !== depth)
         return undefined
       state.preFenceOwnerDepth = 0
+      state.preFenceLang = ''
       // The fence owns the trailing code whitespace. Later boundaries must not trim it.
       state.lastTextNode = undefined
       const indent = state.listIndent
@@ -1795,8 +1799,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const literalOverride = eventType === NodeEventEnter
           ? pendingHandler?.literalEnter
           : pendingHandler?.literalExit
-        if (literalOverride && codeOwnsPendingPreFence(state, pendingElement))
-          state.preFenceLang = getLanguageFromClass(pendingElement.attributes?.class)
+        if (literalOverride && codeOwnsPendingPreFence(state, pendingElement)) {
+          const language = getLanguageFromAttributes(pendingElement.attributes)
+          if (language)
+            state.preFenceLang = language
+        }
         if (pendingElement.pluginOutput?.length || literalOverride) {
           preparePendingPreFence()
           flushPreFence(state)

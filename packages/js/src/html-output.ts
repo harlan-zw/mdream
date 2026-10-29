@@ -43,7 +43,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { escapeHtml, getLanguageFromClass, isSafeHtmlUrl, markRenderedChildContent, parseUnsignedInteger } from './utils'
+import { escapeHtml, getLanguageFromAttributes, isSafeHtmlUrl, markRenderedChildContent, parseUnsignedInteger } from './utils'
 
 interface HeadingFrame {
   _tag: 0
@@ -56,6 +56,7 @@ interface PreFrame {
   _tag: 1
   depth: number
   language: string
+  codeLanguageSelected: boolean
   output: string
 }
 
@@ -124,7 +125,7 @@ function safeAttributes(node: ElementNode, tagId: number): string | undefined {
     return start === undefined ? '' : ` start="${start}"`
   }
   if (tagId === TAG_CODE) {
-    const language = getLanguageFromClass(attributes.class)
+    const language = getLanguageFromAttributes(attributes)
     return language ? ` class="language-${escapeHtml(language, true)}"` : ''
   }
   if (tagId === TAG_TH || tagId === TAG_TD) {
@@ -216,12 +217,19 @@ export function processHtmlOutputEvent(
   const tagId = resolveTagId(element)
   const frame = state.frames.at(-1)
   if (frame?._tag === 1) {
-    if (type === NodeEventEnter && tagId === TAG_CODE && !frame.language)
-      frame.language = getLanguageFromClass(element.attributes.class)
-    else if (type === NodeEventEnter && tagId === TAG_BR)
+    if (type === NodeEventEnter && tagId === TAG_CODE && !frame.codeLanguageSelected) {
+      const codeLanguage = getLanguageFromAttributes(element.attributes)
+      if (codeLanguage) {
+        frame.language = codeLanguage
+        frame.codeLanguageSelected = true
+      }
+    }
+    else if (type === NodeEventEnter && tagId === TAG_BR) {
       frame.output += '\n'
-    else if (type !== NodeEventEnter && tagId === TAG_PRE && element.depth === frame.depth)
+    }
+    else if (type !== NodeEventEnter && tagId === TAG_PRE && element.depth === frame.depth) {
       closeFrame(state, output, frame)
+    }
     return
   }
 
@@ -234,7 +242,13 @@ export function processHtmlOutputEvent(
     return
   }
   if (type === NodeEventEnter && tagId === TAG_PRE) {
-    state.frames.push({ _tag: 1, depth: element.depth, language: getLanguageFromClass(element.attributes.class), output: '' })
+    state.frames.push({
+      _tag: 1,
+      depth: element.depth,
+      language: getLanguageFromAttributes(element.attributes),
+      codeLanguageSelected: false,
+      output: '',
+    })
     return
   }
   if (tagId === TAG_BR) {
