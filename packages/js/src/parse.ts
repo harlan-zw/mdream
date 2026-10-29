@@ -1,4 +1,4 @@
-import type { ElementNode, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
+import type { ElementNode, EngineOptions, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   ELEMENT_NODE,
   isInsideRawHtmlBlock,
@@ -67,7 +67,23 @@ import {
   TEXT_NODE,
 } from './const'
 import { parserTagHandlers } from './parser-tags'
+import { resolveUrl } from './url'
 import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+
+const HTTP_BASE_RE = /^https?:\/\/[^/?#]/i
+
+// The first `<base href>` replaces `origin` when it resolves to an `http(s)://host`
+// URL; anything else is ignored. A <base> inside a link is ignored too: the
+// link's open and close must resolve alike.
+function captureBaseHref(state: ParseState, href: string | undefined): void {
+  const target = state.urlBaseTarget
+  if (!target || href === undefined || state.depthMap[TAG_A])
+    return
+  state.baseHrefSeen = true
+  const base = resolveUrl(href.trim(), target.options.origin)
+  if (HTTP_BASE_RE.test(base))
+    target.options = { ...target.options, origin: base }
+}
 
 // A tag outside the dictionary with no override renders only its text, inline
 // with zero spacing, as in the Rust engine: `<x>X</x><y>Y</y>` is `XY`.
@@ -632,6 +648,10 @@ export interface ParseState {
   tagOverrideHandlers?: Map<string, TagHandler>
   /** Whether emitted text should skip Markdown-only escaping */
   plainText?: boolean
+  /** Output state whose `options.origin` the first usable `<base href>` replaces. */
+  urlBaseTarget?: { options: EngineOptions }
+  /** Only the first `<base href>` counts, even when it is not usable. */
+  baseHrefSeen?: boolean
   /**
    * Parsed (whitespace-collapsed) form of the raw run the last parse returned.
    * At end of input it is committed instead of the raw run, so trailing text
@@ -1774,6 +1794,7 @@ function processOpeningTag(
   selfClosing: boolean
   skip?: boolean
 } {
+  const isBase = tagId === TAG_BASE
   tagId = effectiveTagId(tagName, tagId, state)
 
   // Check if current element needs closing
@@ -1793,6 +1814,10 @@ function processOpeningTag(
       selfClosing: false,
     }
   }
+
+  // Captured before filtering, so an excluded <head> still sets the base.
+  if (isBase && !state.baseHrefSeen)
+    captureBaseHref(state, result.attributes.href)
 
   if ((state.flattenedOpaqueDepth || 0) > 0) {
     if (!result.selfClosing && tagName === state.flattenedOpaqueTagName)

@@ -942,6 +942,24 @@ impl ConvertState {
     }
   }
 
+  /// The first `<base href>` replaces `origin` when it resolves to an HTTP(S)
+  /// URL. A `<base>` inside a link is ignored: the link's open and close must
+  /// resolve alike. Out of line: it runs at most once per document.
+  #[cold]
+  #[inline(never)]
+  fn capture_base_href(&mut self) {
+    if self.base_href_seen || self.depth_map[TAG_A as usize] != 0 {
+      return;
+    }
+    let Some(href) = self.attr_scratch.get_bit(ATTR_HREF) else {
+      return;
+    };
+    self.base_href_seen = true;
+    if let Some(base) = resolve_base_href(href, self.options.origin.as_deref()) {
+      self.options.origin = Some(base);
+    }
+  }
+
   /// Open an element whose attributes are already scanned into `attr_scratch`:
   /// tree recovery, overflow handling and node creation.
   pub(crate) fn apply_opening_tag(
@@ -954,6 +972,11 @@ impl ConvertState {
     overflow: bool,
   ) -> OpeningTagResult {
     let tag_handler = tag_id.and_then(get_tag_handler);
+
+    // Captured before filtering, so an excluded <head> still sets the base.
+    if tag_id == Some(TAG_BASE) {
+      self.capture_base_href();
+    }
 
     // A retained attribute outgrew `max_node_bytes`. Drop the tag whole, as an
     // over-cap tag always has; the children it would have wrapped still parse.

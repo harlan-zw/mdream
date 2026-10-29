@@ -931,6 +931,34 @@ fn relative_path_with_origin() {
 }
 
 #[test]
+fn base_href_replaces_origin_for_later_urls() {
+  let origin = "https://example.com/article/current.html";
+  assert_eq!(
+    convert_with_origin(
+      r#"<a href="a">A</a> <base href="/docs/"><base href="https://ignored.example/"><a href="b">B</a> <img src="c.png" alt="C">"#,
+      origin
+    ),
+    "[A](https://example.com/article/a) [B](https://example.com/docs/b) ![C](https://example.com/docs/c.png)"
+  );
+  for href in [
+    "javascript:alert(1)",
+    "ftp://cdn.example/",
+    "https:///x/",
+    "",
+  ] {
+    assert_eq!(
+      convert_with_origin(&format!(r#"<base href="{href}"><a href="b">B</a>"#), origin),
+      "[B](https://example.com/article/b)",
+      "{href:?}"
+    );
+  }
+  assert_eq!(
+    convert(r#"<a href="a">A<base href="https://cdn.example/">x</a> <a href="b">B</a>"#),
+    "[Ax](a) [B](b)"
+  );
+}
+
+#[test]
 fn relative_path_without_origin() {
   assert_eq!(
     convert(r#"<a href="/page#section">Link</a>"#),
