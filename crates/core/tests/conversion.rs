@@ -6340,6 +6340,49 @@ fn emphasis_vertical_tabs_before_breaks_and_aliases() {
 }
 
 #[test]
+fn emphasis_vertical_tabs_stream_after_the_emphasis_closes() {
+  // Text output moves no run, and the held run must not go stale once the
+  // emphasis closes (a debug build asserts on it).
+  for (format, html, expected) in [
+    (OutputFormat::Text, "<h2><em>a&#11;</em></h2>", "a\u{000b}"),
+    (
+      OutputFormat::Text,
+      "<p><em>a&#11;&#11;</em></p>",
+      "a\u{000b}\u{000b}",
+    ),
+    (OutputFormat::Text, "<p><em>a&#11;</em>b</p>", "a\u{000b}b"),
+    (
+      OutputFormat::Markdown,
+      "<pre><em>T&#11;</em>x</pre>",
+      "```\nT\u{000b}x\n```",
+    ),
+    (
+      OutputFormat::Markdown,
+      "<pre><em>T&#11; </em>x</pre>",
+      "```\nT\u{000b} x\n```",
+    ),
+    (
+      OutputFormat::Markdown,
+      "<p><em>T&#11;</em>&#11;x</p>",
+      "*T*\u{000b}\u{000b}x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    let one_shot = mdream::html_to_format_result(html, options.clone(), format);
+    assert_eq!(one_shot.markdown, expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{format:?} {html}, width {width}");
+    }
+  }
+}
+
+#[test]
 fn scout9_excluded_list_spacing() {
   for (html, expected) in [
     (

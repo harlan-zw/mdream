@@ -437,3 +437,27 @@ describe('scout9_excluded_list_spacing option streaming', () => {
     }
   })
 })
+
+describe('vertical tabs inside emphasis streaming', () => {
+  it.each([
+    ['text', '<h2><em>a&#11;</em></h2><p>b</p>', 'a\u000B\n\nb'],
+    ['text', '<p><em>a&#11;</em>b</p>', 'a\u000Bb'],
+    ['markdown', '<pre><em>T&#11;</em>x</pre>', '```\nT\u000Bx\n```'],
+    ['markdown', '<p><em>T&#11;</em>&#11;x</p>', '*T*\u000B\u000Bx'],
+  ] as const)('%s %s matches at every chunk width', async (format, html, expected) => {
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html, { format }), name).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream, { format }))
+          actual += part
+        expect(actual, `${name}, width ${width}`).toBe(expected)
+      }
+    }
+  })
+})
