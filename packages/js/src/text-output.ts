@@ -316,12 +316,13 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
   }
 
   // Preformatted content keeps its trailing bytes. Closing the block drops a
-  // trailing space run, but never the newlines the block ends on. In a table
-  // cell the block has no boundary to own the run of its own text, so that
-  // run stays, as in Rust.
+  // trailing space run, but never the newlines the block ends on. When the
+  // close writes no newline, a run its own last child ends with stays, as in
+  // Rust.
   const closesPre = element.tagId === TAG_PRE
   const inPre = state.depthMap[TAG_PRE]! > 0 && !closesPre
-  const keepsCellSpaces = closesPre && state.lastTextNode?.parent === element && isInsideTableCell(state)
+  const keepsOwnSpaces = closesPre && missingNewlines === 0 && state.lastTextNode?.parent === element
+    && state.lastTextNode.index === element.currentWalkIndex! - 1
   if (buffer.length && state.lastTextNode?.containsWhitespace && !inPre) {
     const isBlock = !isInline && missingNewlines > 0
     const collapses = element.tagHandler?.collapsesInnerWhiteSpace
@@ -330,7 +331,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
     const trim = (element.tagId === TAG_BR && output?.endsWith('\n'))
       || isBlock
       || ((!isInline || eventType === NodeEventExit) && !(collapses && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
-    if (trim && !keepsCellSpaces) {
+    if (trim && !keepsOwnSpaces) {
       const last = buffer.at(-1)!
       const trimmed = closesPre || state.lastTextNode.parent?.tagId === TAG_PRE ? trimSpacesEnd(last) : trimAsciiWhitespaceEnd(last)
       if (trimmed.length !== last.length) {
@@ -339,7 +340,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
           state.pendingInlineWhitespace = true
       }
     }
-    if (!keepsCellSpaces)
+    if (!keepsOwnSpaces)
       state.lastTextNode = undefined
   }
 
