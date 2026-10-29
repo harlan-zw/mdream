@@ -1387,6 +1387,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   const listMarkerDepths: number[] | undefined = listMarkerOwners ? [] : undefined
   const eventPath: ElementNode[] | undefined = listMarkerOwners ? [] : undefined
   const missingAncestors: ElementNode[] | undefined = listMarkerOwners ? [] : undefined
+  // Set while processGapEvent renders its event.
+  let inGapEvent = false
+  // A list closed with items during the gap event.
+  let listClosedInGap = false
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
   let inRawHtmlRegion = false
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
@@ -1763,85 +1767,88 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   /**
-   * Process a DOM event. A list closed with items waits for its same-type
-   * sibling until an event writes visible output.
+   * Reconcile the open list owners with the event's ancestry. A plugin can skip
+   * one edge of a list, so its marker leaves when the walk passes its owner.
    */
-  function processEvent(event: NodeEvent): void {
+  function reconcileListPath(event: NodeEvent): void {
     const node = event.node
-    const tagId = node.type === ELEMENT_NODE ? (node as ElementNode).tagId : undefined
-    const isList = tagId === TAG_UL || tagId === TAG_OL
-    if (eventPath) {
-      // Reconcile each open ancestor at most once as the parser advances. A
-      // skipped enter can leave gaps; a skipped exit leaves stale path nodes.
-      let ancestor = node.parent
-      let top = eventPath.at(-1)
-      while (ancestor !== top) {
-        if (top && (!ancestor || top.depth >= ancestor.depth)) {
-          eventPath.pop()
-          if (top !== node && top === listMarkerOwners!.at(-1)) {
-            listMarkerOwners!.pop()
-            const depth = listMarkerDepths!.pop()!
-            const marker = state.listMarkers.pop()
-            if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
-              siblingListMarker = marker ^ LIST_HAS_ITEM
-              siblingListDepth = depth
-            }
+    const path = eventPath!
+    // Reconcile each open ancestor at most once as the parser advances. A
+    // skipped enter can leave gaps; a skipped exit leaves stale path nodes.
+    let ancestor = node.parent
+    let top = path.at(-1)
+    while (ancestor !== top) {
+      if (top && (!ancestor || top.depth >= ancestor.depth)) {
+        path.pop()
+        if (top !== node && top === listMarkerOwners!.at(-1)) {
+          listMarkerOwners!.pop()
+          const depth = listMarkerDepths!.pop()!
+          const marker = state.listMarkers.pop()
+          if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
+            siblingListMarker = marker ^ LIST_HAS_ITEM
+            siblingListDepth = depth
           }
-          top = eventPath.at(-1)
         }
-        else if (ancestor) {
-          missingAncestors!.push(ancestor)
-          ancestor = ancestor.parent
-        }
-        else {
+        top = path.at(-1)
+      }
+      else if (ancestor) {
+        missingAncestors!.push(ancestor)
+        ancestor = ancestor.parent
+      }
+      else {
+        break
+      }
+    }
+    while (missingAncestors!.length)
+      path.push(missingAncestors!.pop()!)
+    if (node.type === ELEMENT_NODE && event.type === NodeEventEnter)
+      path.push(node as ElementNode)
+  }
+
+  /**
+   * Close the marker entry its own `<ul>`/`<ol>` opened. An empty list writes
+   * nothing, leaving the one before it in place.
+   */
+  function closeListMarker(element: ElementNode): void {
+    if (listMarkerOwners) {
+      if (listMarkerOwners.at(-1) !== element)
+        return
+      listMarkerOwners.pop()
+      listMarkerDepths!.pop()
+    }
+    const marker = state.listMarkers.pop()
+    if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
+      siblingListMarker = marker ^ LIST_HAS_ITEM
+      siblingListDepth = state.depthMap[TAG_LI]!
+      listClosedInGap = true
+    }
+  }
+
+  /**
+   * Process an event while a list closed with items waits for its same-type
+   * sibling: visible output ends the wait.
+   */
+  function processGapEvent(event: NodeEvent): void {
+    // Fragments already written are only trimmed, or dropped back to a
+    // construct whose visible opener already ended the run, so whatever the
+    // event writes lands in fragments it pushes.
+    const fragments = state.buffer.length
+    inGapEvent = true
+    listClosedInGap = false
+    processEvent(event)
+    inGapEvent = false
+    // A list that closed with items replaced the one waiting.
+    if (listClosedInGap)
+      return
+    const buffer = state.buffer
+    // These openers can still disappear on an empty close. Visible text
+    // commits inline markers; a code span commits when its close survives.
+    if (openMarkerCount === 0 && openLinkFragment < 0 && gfmLifecycle.openCodeSpans.length === 0) {
+      for (let index = Math.min(fragments, buffer.length); index < buffer.length; index++) {
+        if (hasNonWhitespace(buffer[index]!)) {
+          siblingListMarker = 0
           break
         }
-      }
-      while (missingAncestors!.length)
-        eventPath.push(missingAncestors!.pop()!)
-      if (node.type === ELEMENT_NODE && event.type === NodeEventEnter)
-        eventPath.push(node as ElementNode)
-    }
-    if (isList) {
-      if (event.type === NodeEventEnter) {
-        state.listMarkers.push(nextListMarker(tagId === TAG_OL))
-        listMarkerOwners?.push(node as ElementNode)
-        listMarkerDepths?.push(state.depthMap[TAG_LI]!)
-      }
-    }
-    else if (tagId === TAG_BLOCKQUOTE && !(node as ElementNode).excludedFromMarkdown) {
-      // A quote boundary ends the list before it, written or not.
-      siblingListMarker = 0
-    }
-    if (siblingListMarker === 0) {
-      renderEvent(event)
-    }
-    else {
-      // Fragments already written are only trimmed, or dropped back to a
-      // construct whose visible opener already ended the run, so whatever the
-      // event writes lands in fragments it pushes.
-      const fragments = state.buffer.length
-      renderEvent(event)
-      const buffer = state.buffer
-      // These openers can still disappear on an empty close. Visible text
-      // commits inline markers; a code span commits when its close survives.
-      if (openMarkerCount === 0 && openLinkFragment < 0 && gfmLifecycle.openCodeSpans.length === 0) {
-        for (let index = Math.min(fragments, buffer.length); index < buffer.length; index++) {
-          if (hasNonWhitespace(buffer[index]!)) {
-            siblingListMarker = 0
-            break
-          }
-        }
-      }
-    }
-    if (isList && event.type === NodeEventExit && (!listMarkerOwners || listMarkerOwners.at(-1) === node)) {
-      // An empty list writes nothing, leaving the one before it in place.
-      listMarkerOwners?.pop()
-      listMarkerDepths?.pop()
-      const marker = state.listMarkers.pop()
-      if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
-        siblingListMarker = marker ^ LIST_HAS_ITEM
-        siblingListDepth = state.depthMap[TAG_LI]!
       }
     }
   }
@@ -1849,7 +1856,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   /**
    * Process a DOM event and generate markdown
    */
-  function renderEvent(event: NodeEvent): void {
+  function processEvent(event: NodeEvent): void {
+    if (eventPath && !inGapEvent)
+      reconcileListPath(event)
+    if (siblingListMarker !== 0 && !inGapEvent)
+      return processGapEvent(event)
     const { type: eventType, node } = event
     // Update depth for plugin access
     state.depth = node.depth
@@ -1959,6 +1970,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const element = node as ElementNode
     const handler = node.tagHandler
     const tagId = element.tagId!
+    if (tagId === TAG_UL || tagId === TAG_OL) {
+      if (eventType === NodeEventEnter) {
+        state.listMarkers.push(nextListMarker(tagId === TAG_OL))
+        listMarkerOwners?.push(element)
+        listMarkerDepths?.push(state.depthMap[TAG_LI]!)
+      }
+    }
+    else if (tagId === TAG_BLOCKQUOTE) {
+      // A quote boundary ends the list before it, written or not.
+      siblingListMarker = 0
+    }
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
@@ -2354,6 +2376,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         if (gfmAction)
           commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
+        if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
+          closeListMarker(element)
         updateListIndent(state, element, eventType)
         return
       }
@@ -2506,6 +2530,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       openLinkFragment = -1
     }
 
+    if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
+      closeListMarker(element)
     updateListIndent(state, element, eventType)
 
     if (!insideRawHtmlRegion && inRawHtmlRegion) {
