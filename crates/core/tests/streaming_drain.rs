@@ -3833,6 +3833,8 @@ fn empty_fenced_code_in_list_matches_every_split() {
     "<ul><li><pre><code></code></pre></li></ul>",
     "<ol start=\"10\"><li><pre><code></code></pre></li></ol>",
     "<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>",
+    "<ul><li><pre><code></code></pre>after</li><li>b</li></ul>",
+    "<ol start=\"10\"><li><pre><code></code></pre>after</li><li>b</li></ol>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());

@@ -10,6 +10,8 @@ const BYTE_PARITY_CASES = [
   '<ul><li><pre><code></code></pre></li></ul>',
   '<ol start="10"><li><pre><code></code></pre></li></ol>',
   '<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>',
+  '<ul><li><pre><code></code></pre>after</li><li>b</li></ul>',
+  '<ol start="10"><li><pre><code></code></pre>after</li><li>b</li></ol>',
   '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
   '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
   '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',

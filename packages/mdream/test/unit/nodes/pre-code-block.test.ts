@@ -233,6 +233,9 @@ describe.each(engines)('empty list code fence parity $name', (config) => {
     ['<ul><li><pre><code></code></pre></li></ul>', '- ```\n\n  ```'],
     ['<ol start="10"><li><pre><code></code></pre></li></ol>', '10. ```\n\n    ```'],
     ['<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>', '> - ```\n>\n>   ```'],
+    // The blank body line is fence content, so the item continues past it.
+    ['<ul><li><pre><code></code></pre>after</li><li>b</li></ul>', '- ```\n\n  ```\n\n  after\n- b'],
+    ['<ol start="10"><li><pre><code></code></pre>after</li><li>b</li></ol>', '10. ```\n\n    ```\n\n    after\n11. b'],
   ])('keeps the empty body line blank: %s', async (html, expected) => {
     const engine = await resolveEngine(config.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)

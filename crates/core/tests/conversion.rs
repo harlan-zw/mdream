@@ -6519,6 +6519,9 @@ fn quote_boundary_literal_after_alias_review_regression() {
 
 #[test]
 fn empty_fenced_code_in_list_has_a_blank_body_line() {
+  // A whitespace-only line is just as blank in CommonMark. The opening fence
+  // already started the item, so this blank is fence content and the item,
+  // with anything after the fence, continues.
   for (html, expected) in [
     (
       "<ul><li><pre><code></code></pre></li></ul>",
@@ -6531,6 +6534,14 @@ fn empty_fenced_code_in_list_has_a_blank_body_line() {
     (
       "<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>",
       "> - ```\n>\n>   ```",
+    ),
+    (
+      "<ul><li><pre><code></code></pre>after</li><li>b</li></ul>",
+      "- ```\n\n  ```\n\n  after\n- b",
+    ),
+    (
+      "<ol start=\"10\"><li><pre><code></code></pre>after</li><li>b</li></ol>",
+      "10. ```\n\n    ```\n\n    after\n11. b",
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html}");
