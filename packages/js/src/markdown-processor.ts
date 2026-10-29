@@ -1382,6 +1382,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let siblingListMarker = 0
   // `<li>` depth that list closed at: a list opening at another one is no sibling.
   let siblingListDepth = 0
+  // Plugins may suppress only one edge of a list; retain ownership for cleanup.
+  const listMarkerOwners: ElementNode[] | undefined = (options as EngineOptions & { plugins?: unknown[] }).plugins?.length ? [] : undefined
+  const listMarkerDepths: number[] | undefined = listMarkerOwners ? [] : undefined
+  const eventPath: ElementNode[] | undefined = listMarkerOwners ? [] : undefined
+  const missingAncestors: ElementNode[] | undefined = listMarkerOwners ? [] : undefined
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
   let inRawHtmlRegion = false
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
@@ -1765,9 +1770,44 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const node = event.node
     const tagId = node.type === ELEMENT_NODE ? (node as ElementNode).tagId : undefined
     const isList = tagId === TAG_UL || tagId === TAG_OL
+    if (eventPath) {
+      // Reconcile each open ancestor at most once as the parser advances. A
+      // skipped enter can leave gaps; a skipped exit leaves stale path nodes.
+      let ancestor = node.parent
+      let top = eventPath.at(-1)
+      while (ancestor !== top) {
+        if (top && (!ancestor || top.depth >= ancestor.depth)) {
+          eventPath.pop()
+          if (top !== node && top === listMarkerOwners!.at(-1)) {
+            listMarkerOwners!.pop()
+            const depth = listMarkerDepths!.pop()!
+            const marker = state.listMarkers.pop()
+            if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
+              siblingListMarker = marker ^ LIST_HAS_ITEM
+              siblingListDepth = depth
+            }
+          }
+          top = eventPath.at(-1)
+        }
+        else if (ancestor) {
+          missingAncestors!.push(ancestor)
+          ancestor = ancestor.parent
+        }
+        else {
+          break
+        }
+      }
+      while (missingAncestors!.length)
+        eventPath.push(missingAncestors!.pop()!)
+      if (node.type === ELEMENT_NODE && event.type === NodeEventEnter)
+        eventPath.push(node as ElementNode)
+    }
     if (isList) {
-      if (event.type === NodeEventEnter)
+      if (event.type === NodeEventEnter) {
         state.listMarkers.push(nextListMarker(tagId === TAG_OL))
+        listMarkerOwners?.push(node as ElementNode)
+        listMarkerDepths?.push(state.depthMap[TAG_LI]!)
+      }
     }
     else if (tagId === TAG_BLOCKQUOTE && !(node as ElementNode).excludedFromMarkdown) {
       // A quote boundary ends the list before it, written or not.
@@ -1794,8 +1834,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
-    if (isList && event.type === NodeEventExit) {
+    if (isList && event.type === NodeEventExit && (!listMarkerOwners || listMarkerOwners.at(-1) === node)) {
       // An empty list writes nothing, leaving the one before it in place.
+      listMarkerOwners?.pop()
+      listMarkerDepths?.pop()
       const marker = state.listMarkers.pop()
       if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
         siblingListMarker = marker ^ LIST_HAS_ITEM

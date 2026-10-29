@@ -2,7 +2,7 @@ import type { ElementNode, MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
-import { htmlToMarkdown, NodeEventExit, streamHtmlToMarkdown } from '../../src/index'
+import { ELEMENT_NODE, htmlToMarkdown, NodeEventEnter, NodeEventExit, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/plugins'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
@@ -129,6 +129,137 @@ describe('streaming parity with the Rust core', () => {
     '<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>',
   ])('keeps cmark block structure across every split for %s', async (html) => {
     await expectStreamingParity(html)
+  })
+
+  it('restores the parent list marker when a plugin skips a nested list exit', async () => {
+    const html = '<ul><li>first</li></ul><ul><li>outer<ul id="inner"><li>inner</li></ul></li><li>next</li></ul>'
+    const exits: string[] = []
+    const options = {
+      plugins: [createPlugin({
+        beforeNodeProcess(event) {
+          if (event.type === NodeEventExit && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes.id === 'inner')
+            return { skip: true }
+        },
+        onNodeExit(node) {
+          if (node.name === 'ul')
+            exits.push(node.attributes.id || 'outer')
+        },
+      })],
+    }
+    const expected = '- first\n\n* outer\n  - inner\n* next'
+    expect(convertOnce(html, options)).toBe(expected)
+    expect(exits).toEqual(['outer', 'outer'])
+    exits.length = 0
+    expect(await streamConvert(html, 7, options)).toBe(expected)
+    expect(exits).toEqual(['outer', 'outer'])
+  })
+
+  it.each(['ul', 'ol'])('keeps the parent marker after a skipped nested %s enter', async (tag) => {
+    const html = `<ul><li>first</li></ul><ul><li>outer<${tag} id="inner"><li>inner</li></${tag}></li><li>next</li></ul>`
+    const seen: string[] = []
+    const options = {
+      plugins: [createPlugin({
+        beforeNodeProcess(event) {
+          if (event.type === NodeEventEnter && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes.id === 'inner')
+            return { skip: true }
+        },
+        onNodeEnter(node) {
+          if (node.attributes.id === 'inner')
+            seen.push('enter')
+        },
+        onNodeExit(node) {
+          if (node.attributes.id === 'inner')
+            seen.push('exit')
+        },
+      })],
+    }
+    expect(convertOnce(html, options)).toMatch(/\n\* next$/)
+    expect(seen).toEqual(['exit'])
+    seen.length = 0
+    expect(await streamConvert(html, 1, options)).toMatch(/\n\* next$/)
+    expect(seen).toEqual(['exit'])
+  })
+
+  it('restores the parent marker when a plugin skips a nested ordered-list exit', async () => {
+    const html = '<ul><li>first</li></ul><ul><li>outer<ol id="inner"><li>inner</li></ol></li><li>next</li></ul>'
+    const options = { plugins: [createPlugin({
+      beforeNodeProcess(event) {
+        if (event.type === NodeEventExit && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes.id === 'inner')
+          return { skip: true }
+      },
+    })] }
+    const expected = '- first\n\n* outer\n  1. inner\n* next'
+    expect(convertOnce(html, options)).toBe(expected)
+    for (const size of [1, 7, html.length])
+      expect(await streamConvert(html, size, options)).toBe(expected)
+  })
+
+  it('keeps adjacent list separation when a plugin skips a list exit', async () => {
+    const html = '<ul id="first"><li>one</li></ul><ul><li>two</li></ul>'
+    const options = { plugins: [createPlugin({
+      beforeNodeProcess(event) {
+        if (event.type === NodeEventExit && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes.id === 'first')
+          return { skip: true }
+      },
+    })] }
+    expect(convertOnce(html, options)).toMatch(/\* two$/)
+    expect(await streamConvert(html, 3, options)).toMatch(/\* two$/)
+  })
+
+  it('reconciles skipped list exits across skipped wrapper events', async () => {
+    const html = '<ul><li>first</li></ul><ul><li>outer<ul id="old"><li>x</li></ul><div id="wrapper"><ul><li id="child">y</li></ul></div></li><li>next</li></ul>'
+    const observed: { oldDepth: number, childDepth: number, markerCount: number }[] = []
+    let oldDepth = 0
+    const options = { plugins: [createPlugin({
+      beforeNodeProcess(event, state) {
+        if (event.node.type === ELEMENT_NODE) {
+          const node = event.node as ElementNode
+          const id = node.attributes.id
+          if (id === 'old' && event.type === NodeEventEnter)
+            oldDepth = node.depth
+          if (id === 'child' && event.type === NodeEventEnter)
+            observed.push({ oldDepth, childDepth: node.depth, markerCount: state.listMarkers!.length })
+          if (id === 'wrapper' || (id === 'old' && event.type === NodeEventExit))
+            return { skip: true }
+        }
+      },
+    })] }
+    const result = convertOnce(html, options)
+    expect(result).toBe('- first\n\n* outer\n  - x\n  * y\n* next')
+    for (const size of [1, 5, html.length])
+      expect(await streamConvert(html, size, options)).toBe(result)
+    expect(observed).toHaveLength(4)
+    for (const observation of observed) {
+      expect(observation.childDepth).toBeGreaterThan(observation.oldDepth)
+      expect(observation.markerCount).toBe(2)
+    }
+  })
+
+  it('keeps parent reads bounded for nested divs under a list with a plugin', () => {
+    function countParentReads(depth: number): number {
+      let reads = 0
+      const html = `<ul><li>${'<div>'.repeat(depth)}x${'</div>'.repeat(depth)}</li></ul>`
+      htmlToMarkdown(html, { plugins: [createPlugin({
+        beforeNodeProcess(event) {
+          if (event.type !== NodeEventEnter || event.node.type !== ELEMENT_NODE || (event.node as ElementNode).name !== 'div')
+            return
+          const node = event.node as ElementNode
+          const parent = node.parent
+          Object.defineProperty(node, 'parent', {
+            configurable: true,
+            get() {
+              reads++
+              return parent
+            },
+          })
+        },
+      })] })
+      return reads
+    }
+    const shallow = countParentReads(32)
+    const deep = countParentReads(64)
+    expect(shallow).toBeGreaterThan(0)
+    expect(deep).toBeLessThanOrEqual(shallow * 3)
   })
 
   it.each([
