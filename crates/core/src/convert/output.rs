@@ -937,9 +937,11 @@ impl ConvertState {
         self.quoted_bytes += quoted.len();
       }
       self.scan_before_requote(flush_end);
+      let list_gap = self.list_gap_before_requote(flush_end);
       self.note_buffer_rewrite(shared_start);
       replace_buffer_range(&mut self.buffer, shared_start..flush_end, &quoted);
       let quoted_end = shared_start + quoted.len();
+      self.list_gap_after_requote(list_gap, flush_end, quoted_end);
       self.shift_raw_html_scan(flush_end, quoted_end);
       flush_end = quoted_end;
       self.blockquote_scratch = quoted;
@@ -961,6 +963,7 @@ impl ConvertState {
     // Taken once for the whole walk: every frame rewrites the same region again,
     // so without this each nesting level allocates its own copy of it per flush.
     let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+    let list_gap = self.list_gap_before_requote(unquoted_end);
     self.note_buffer_rewrite(shared_start);
     for frame in self.blockquotes.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
@@ -990,6 +993,7 @@ impl ConvertState {
     }
     self.blockquote_scratch = quoted;
     self.shift_raw_html_scan(unquoted_end, flush_end);
+    self.list_gap_after_requote(list_gap, unquoted_end, flush_end);
 
     for frame in &mut self.blockquotes {
       frame.content_start = flush_end;
@@ -1237,7 +1241,7 @@ impl ConvertState {
     self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
 
     if !is_inline && !self.open_markers.is_empty() {
-      self.open_markers.clear();
+      self.release_markers_at_block();
     }
   }
 
@@ -1860,7 +1864,7 @@ impl ConvertState {
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.
     if tag_id.is_some() && !is_inline && !self.open_markers.is_empty() {
-      self.open_markers.clear();
+      self.release_markers_at_block();
     }
 
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
@@ -2596,11 +2600,29 @@ impl ConvertState {
   /// Release open inline markers when a block closes or visible text ends them.
   #[inline(always)]
   fn release_markers_on_exit(&mut self, closes_block: bool, output: Option<&str>) {
-    if !self.open_markers.is_empty()
-      && (closes_block || output.is_some_and(|o| has_visible(o.as_bytes())))
-    {
-      self.open_markers.clear();
+    if !self.open_markers.is_empty() {
+      if closes_block {
+        self.release_markers_at_block();
+      } else if output.is_some_and(|o| has_visible(o.as_bytes())) {
+        self.open_markers.clear();
+      }
     }
+  }
+
+  /// Make the open inline markers permanent at a block boundary. Their openers
+  /// were written while they could still retract, so as in the JS engine they
+  /// never end a closed list's run; output from the boundary on still can.
+  #[inline(never)]
+  fn release_markers_at_block(&mut self) {
+    if self.sibling_list_marker != 0
+      && let (Some(first), Some(last)) = (self.open_markers.first(), self.open_markers.last())
+    {
+      let from = self.list_gap_from;
+      if !has_visible(&self.buffer.as_bytes()[from.min(first.output_start)..first.output_start]) {
+        self.list_gap_from = from.max(last.content_start);
+      }
+    }
+    self.open_markers.clear();
   }
 
   /// Settle a pending empty-text link once visible text follows it.
@@ -3235,6 +3257,7 @@ impl ConvertState {
     if sibling != 0
       && self.sibling_list_depth == self.depth_map[TAG_LI as usize]
       && matches!(sibling, b'.' | b')') == ordered
+      && !self.list_gap_visible()
     {
       return match sibling {
         b'-' => b'*',
@@ -3246,36 +3269,55 @@ impl ConvertState {
     if ordered { b'.' } else { b'-' }
   }
 
-  /// Buffer length before output that may separate a closed list from the next
-  /// one, or `usize::MAX` while no list waits for a sibling.
-  #[inline(always)]
-  pub(crate) fn list_gap_start(&mut self) -> usize {
-    if self.sibling_list_marker == 0 {
-      return usize::MAX;
+  /// Whether output since the closed list ends its run. An empty inline
+  /// wrapper, code span or cleaned link can still retract its opener, so
+  /// nothing from the first one still open on counts yet.
+  fn list_gap_visible(&self) -> bool {
+    let mut end = self.buffer.len();
+    if let Some(marker) = self.open_markers.first() {
+      end = end.min(marker.output_start);
     }
-    self.list_gap_rewrite = usize::MAX;
-    self.buffer.len()
+    if let Some(span) = self.code_spans.first() {
+      end = end.min(span.output_start);
+    }
+    if self.link.empty_text_pending {
+      end = end.min(self.link.bracket_pos);
+    }
+    let start = self.list_gap_from.min(end);
+    has_visible(&self.buffer.as_bytes()[start..end])
   }
 
-  /// Visible output written since `start`, or since the lowest offset the event
-  /// rewrote, ends the closed list's run.
-  #[inline(always)]
-  pub(crate) fn end_list_gap(&mut self, start: usize) {
-    // An empty inline wrapper retracts its opener on close. Defer the
-    // decision until visible text commits its marker, a code span closes, or
-    // an empty-text link survives cleaning.
-    if start != usize::MAX
-      && self.open_markers.is_empty()
-      && self.code_spans.is_empty()
-      && !self.link.empty_text_pending
-      && self
-        .buffer
-        .as_bytes()
-        .get(start.min(self.list_gap_rewrite)..)
-        .is_some_and(has_visible)
+  /// Visible output leaving the buffer before `drain_end` ends the closed
+  /// list's run. The drain stops short of any opener that can still retract.
+  pub(super) fn note_list_gap_drain(&mut self, drain_end: usize) {
+    if self.sibling_list_marker != 0
+      && self.list_gap_from < drain_end
+      && has_visible(&self.buffer.as_bytes()[self.list_gap_from..drain_end])
     {
       self.sibling_list_marker = 0;
     }
+  }
+
+  /// Settle the run before quoting rewrites `..unquoted_end`, whose `>` would
+  /// read as output; returns where the run resumes, before the shift.
+  fn list_gap_before_requote(&mut self, unquoted_end: usize) -> usize {
+    let from = self.list_gap_from;
+    if self.sibling_list_marker != 0
+      && from < unquoted_end
+      && has_visible(&self.buffer.as_bytes()[from..unquoted_end])
+    {
+      self.sibling_list_marker = 0;
+    }
+    from
+  }
+
+  /// Move the run past the quoted lines, or along with the bytes after them.
+  fn list_gap_after_requote(&mut self, from: usize, unquoted_end: usize, quoted_end: usize) {
+    self.list_gap_from = if from >= unquoted_end {
+      from - unquoted_end + quoted_end
+    } else {
+      quoted_end
+    };
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from

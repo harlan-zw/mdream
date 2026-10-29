@@ -50,6 +50,9 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<ul><li>x<ul><li>a</li></ul></li></ul><ul><li>b</li></ul>', '- x\n  - a\n\n* b'],
     ['<blockquote><ul><li>a</li></ul><ul><li>b</li></ul></blockquote>', '> - a\n>\n> * b'],
     ['<ul><li>a</li></ul><ul><li><hr></li><li>* * *</li></ul>', '- a\n\n* ---\n* \\* \\* \\*'],
+    // A block makes the enclosing opener permanent without visible output.
+    ['<ol><li>a</li></ol><em><div></div><ol><li>b</li></ol></em>', '1. a\n\n*1) b*'],
+    ['<ol><li>a</li></ol><strong><p></p><ol><li>b</li></ol></strong><ol><li>c</li></ol>', '1. a\n\n**1) b**\n\n1. c'],
   ])('alternates the marker of an adjacent same-type list: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)

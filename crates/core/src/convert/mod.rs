@@ -931,16 +931,16 @@ pub struct ConvertState {
   /// Marker character of each open `<ul>`/`<ol>`, innermost last, with
   /// [`LIST_HAS_ITEM`] set once one of its items wrote a marker.
   list_markers: Vec<u8>,
-  /// Marker character of the list that last closed with items, or 0 once
-  /// visible output follows it. CommonMark joins the next list of the same type
-  /// into it, blank line or not, so that list takes the other character.
+  /// Marker character of the list that last closed with items, or 0 once a
+  /// quote or visible output leaving the buffer ends its run. CommonMark joins
+  /// the next list of the same type into it, blank line or not, so that list
+  /// takes the other character.
   sibling_list_marker: u8,
   /// `<li>` depth that list closed at: a list opening at another one is no sibling.
   sibling_list_depth: u16,
-  /// Lowest offset rewritten since the current event began, while
-  /// `sibling_list_marker` is set. A trim can move the event's own output below
-  /// the length the buffer started at.
-  list_gap_rewrite: usize,
+  /// Buffer offset where output after that list starts, lowered by rewrites
+  /// and shifted by drains. Read only while `sibling_list_marker` is set.
+  list_gap_from: usize,
   /// The latest item marker is `*`, where a rule on its line reads `* ***`.
   last_item_star: bool,
 
@@ -1205,7 +1205,7 @@ impl ConvertState {
       list_markers: Vec::new(),
       sibling_list_marker: 0,
       sibling_list_depth: 0,
-      list_gap_rewrite: usize::MAX,
+      list_gap_from: 0,
       last_item_star: false,
 
       pre_fence_pending: false,
@@ -1498,9 +1498,7 @@ impl ConvertState {
     };
     self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
     let tail = text_buffer.split_off(cut);
-    let list_gap = self.list_gap_start();
     self.process_text_buffer_piece(text_buffer, false);
-    self.end_list_gap(list_gap);
     // A blank link's text can outgrow the cap within a single run.
     self.check_held_output();
     self.last_node_is_inline = true;
@@ -2634,7 +2632,7 @@ impl ConvertState {
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
-    self.list_gap_rewrite = self.list_gap_rewrite.min(offset);
+    self.list_gap_from = self.list_gap_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
@@ -2666,6 +2664,7 @@ impl ConvertState {
     self.held_whitespace.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
+    self.list_gap_from = self.list_gap_from.saturating_sub(removed);
     self.leading_whitespace = 0;
     if self.hard_break_end != usize::MAX {
       self.hard_break_end = self
@@ -3020,6 +3019,7 @@ impl ConvertState {
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
+    self.note_list_gap_drain(drain_end);
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;

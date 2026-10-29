@@ -6309,6 +6309,24 @@ fn cleaned_empty_links_preserve_adjacent_list_markers() {
   }
 }
 
+// A block inside an inline wrapper makes its opener permanent without writing
+// anything visible. As in the JS engine, that opener does not end the run.
+#[test]
+fn block_committed_inline_opener_keeps_adjacent_list_markers() {
+  for (html, expected) in [
+    (
+      "<ol><li>a</li></ol><em><div></div><ol><li>b</li></ol></em>",
+      "1. a\n\n*1) b*",
+    ),
+    (
+      "<ol><li>a</li></ol><strong><p></p><ol><li>b</li></ol></strong><ol><li>c</li></ol>",
+      "1. a\n\n**1) b**\n\n1. c",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
 /// Overrides that make a list or quote inline, or alias a tag to a list.
 fn inline_list_overrides() -> HtmlToMarkdownOptions {
   let inline = TagOverrideConfig {

@@ -3362,6 +3362,48 @@ fn removable_output_adjacent_lists_streaming() {
 }
 
 #[test]
+fn block_committed_inline_opener_lists_match_one_shot_at_every_split() {
+  for html in [
+    "<ol><li>a</li></ol><em><div></div><ol><li>b</li></ol></em>",
+    "<ol><li>a</li></ol><strong><p></p><ol><li>b</li></ol></strong><ol><li>c</li></ol>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// Quoting settled lines between chunks rewrites the bytes after a closed list.
+// The `>` it adds does not separate the next list from that one.
+#[test]
+fn quoted_lines_between_chunks_keep_adjacent_list_markers() {
+  let text = "word ".repeat(2000);
+  for (html, alternated) in [
+    (
+      format!(
+        "<blockquote><blockquote><p>{text}</p><ul><li>a</li></ul>\n<ul><li>b</li></ul><p>{text}</p><ol><li>c</li></ol><ol><li>d</li></ol></blockquote></blockquote>"
+      ),
+      "> > * b",
+    ),
+    (
+      format!(
+        "<ul><li><blockquote><p>{text}</p><ul><li>a</li></ul><ul><li>b</li></ul></blockquote></li></ul>"
+      ),
+      "  > * b",
+    ),
+  ] {
+    let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+    assert!(expected.contains(alternated), "{expected:?}");
+    for chunk in [1, 7, 64, 1000, 4096] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
 fn inline_overridden_lists_match_one_shot_at_every_split() {
   let inline = TagOverrideConfig {
     is_inline: Some(true),

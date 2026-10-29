@@ -329,6 +329,7 @@ impl ConvertState {
       {
         self.sibling_list_marker = marker & !LIST_HAS_ITEM;
         self.sibling_list_depth = self.depth_map[TAG_LI as usize];
+        self.list_gap_from = self.buffer.len();
       }
     } else if id == TAG_BLOCKQUOTE && !skipped && !excluded {
       self.sibling_list_marker = 0;
@@ -468,13 +469,11 @@ impl ConvertState {
   }
 
   pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
-    let list_gap = self.list_gap_start();
     if self.text_node_fast_path_ok() {
       self.process_plain_text_node(text_buffer);
     } else {
       self.process_text_buffer_piece(text_buffer, true);
     }
-    self.end_list_gap(list_gap);
   }
 
   /// Gate for [`Self::process_plain_text_node`]: no per-node state needs the general path.
@@ -1481,7 +1480,6 @@ impl ConvertState {
 
     // Inline emit (no callback!)
     if !skip_node {
-      let list_gap = self.list_gap_start();
       if self.element_fast_path_ok(tag_id) {
         self.emit_enter_simple(false);
       } else if self.link_fast_path_ok(tag_id) {
@@ -1489,7 +1487,6 @@ impl ConvertState {
       } else {
         self.emit_enter_element();
       }
-      self.end_list_gap(list_gap);
     }
 
     // After the LI prefix is emitted, push this LI's marker-width worth of
@@ -1669,7 +1666,6 @@ impl ConvertState {
         modified_node.child_text_node_index = 1;
         let text_depth = node_depth + 1;
         self.stack.push(modified_node);
-        let list_gap = self.list_gap_start();
         // Emit synthetic text
         self.emit_text(&prefix, false, text_depth, 0);
         for prev in self.stack.iter_mut() {
@@ -1680,7 +1676,6 @@ impl ConvertState {
         };
         // Emit exit
         self.emit_exit_element(&modified_node2);
-        self.end_list_gap(list_gap);
         self.stack.restore_retired(modified_node2);
         self.stack.release_retired();
         if let Some(id) = node_tag_id {
@@ -1712,7 +1707,6 @@ impl ConvertState {
     }
 
     // The general exit needs the node owned; the fast ones read it in place.
-    let list_gap = self.list_gap_start();
     if self.element_fast_path_ok(node_tag_id) {
       self.emit_exit_simple(false);
     } else if self.link_fast_path_ok(node_tag_id) {
@@ -1722,7 +1716,6 @@ impl ConvertState {
       self.emit_exit_element(&node);
       self.stack.restore_retired(node);
     }
-    self.end_list_gap(list_gap);
     self.stack.release_retired();
 
     if let Some(id) = node_tag_id {
@@ -2031,9 +2024,7 @@ impl ConvertState {
       if !excluded {
         let depth = self.depth;
         let index = self.stack.last().map_or(0, |n| n.current_walk_index);
-        let list_gap = self.list_gap_start();
         self.emit_text(content, false, depth, index as usize);
-        self.end_list_gap(list_gap);
       }
       if let Some(parent) = self.stack.last_mut() {
         parent.current_walk_index += 1;
