@@ -646,10 +646,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
     return false
 
   const code = value.charCodeAt(index)
-  // Prose such as `=SUM(A1)` cannot underline a heading, so it skips the escaper.
-  if (code === 61)
-    return isEqualsLine(value, index)
-  return '#+->'.includes(value[index]!)
+  return '#+->='.includes(value[index]!)
     || (code >= 48 && code <= 57)
 }
 
