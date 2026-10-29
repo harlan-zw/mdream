@@ -2059,8 +2059,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             captionBoundary = 2
           }
           if (eventType === NodeEventEnter) {
+            // Inside an opened caption the marker follows its text and takes
+            // the usual separator, as in the Rust engine.
+            if (captionNeedsPreparation())
+              captionTransition = true
             anchorPendingCaptions(state.buffer.length)
-            captionTransition = true
           }
           meaningfulOutput = false
         }
