@@ -81,7 +81,12 @@ function captureBaseHref(state: ParseState, href: string | undefined): void {
   if (!target || href === undefined || state.depthMap[TAG_A] || state.depthMap[TAG_TEMPLATE])
     return
   state.baseHrefSeen = true
-  const base = resolveUrl(href.replace(/^[\x00-\x20]+|[\x00-\x20]+$/g, ''), target.options.origin)
+  // Strip leading and trailing C0 controls and space, as the URL spec does.
+  let start = 0
+  let end = href.length
+  while (start < end && href.charCodeAt(start) <= 0x20) start++
+  while (end > start && href.charCodeAt(end - 1) <= 0x20) end--
+  const base = resolveUrl(href.slice(start, end), target.options.origin)
   if (HTTP_BASE_RE.test(base))
     target.options = { ...target.options, origin: base }
 }
