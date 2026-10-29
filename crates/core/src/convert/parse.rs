@@ -1446,7 +1446,9 @@ impl ConvertState {
     // A skipped node writes nothing and takes no part, as its events take none
     // in the JS engine. Lists and quotes are blocks unless an override makes
     // one inline, and the close takes the same test, so push and pop pair up.
-    if !tag.is_inline || self.has_tag_overrides {
+    if (!tag.is_inline || self.has_tag_overrides)
+      && matches!(tag_id, Some(TAG_UL | TAG_OL | TAG_BLOCKQUOTE))
+    {
       let excluded = tag.excluded_from_markdown;
       self.push_list_marker(tag_id, skip_node, excluded);
     }
@@ -1731,7 +1733,9 @@ impl ConvertState {
       if id == TAG_OL {
         self.ordered_starts.pop();
       }
-      if !node_is_inline || self.has_tag_overrides {
+      if (!node_is_inline || self.has_tag_overrides)
+        && matches!(id, TAG_UL | TAG_OL | TAG_BLOCKQUOTE)
+      {
         self.pop_list_marker(id, node_enter_skipped, node_excluded);
       }
       if id == TAG_LI
