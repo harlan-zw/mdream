@@ -1695,7 +1695,9 @@ impl ConvertState {
       self.flush_streaming_blockquote_lines();
     }
 
-    if tag_id.is_some_and(Self::is_raw_html_block_tag) {
+    // Plain text neither arms a boundary nor escapes, so it skips both raw-tag steps.
+    let raw_html_block_tag = !plain_text!(self) && tag_id.is_some_and(Self::is_raw_html_block_tag);
+    if raw_html_block_tag {
       self.enter_raw_html_boundary(enter_is_literal, output.is_some(), configured_new_lines);
     }
 
@@ -1748,10 +1750,7 @@ impl ConvertState {
     // before the region began and earlier block spacing is read as if inside,
     // escaping text that is passed through verbatim: `\*` reaches the reader as a
     // literal backslash.
-    if !plain_text!(self)
-      && tag_id.is_some_and(Self::is_raw_html_block_tag)
-      && self.raw_html_block_depth() == 1
-    {
+    if raw_html_block_tag && self.raw_html_block_depth() == 1 {
       self.raw_html_markdown = false;
       self.raw_html_scanned_to = self.buffer.len();
     }
@@ -4117,7 +4116,8 @@ impl ConvertState {
   }
 
   // Keep boundary tracking out of the common element emitters. These helpers
-  // are reached only for the raw HTML tags above, never for Markdown BR/LI.
+  // are reached only for the raw HTML tags above outside plain text, never for
+  // Markdown BR/LI.
   #[inline(never)]
   fn enter_raw_html_boundary(&mut self, literal: bool, has_output: bool, new_lines: u8) {
     if self.raw_html_needs_boundary {
@@ -4126,8 +4126,7 @@ impl ConvertState {
         self.raw_html_needs_boundary = false;
       }
     }
-    if !plain_text!(self)
-      && !literal
+    if !literal
       && !self.in_table_cell()
       && self.depth_map[TAG_PRE as usize] == 0
       && has_output
