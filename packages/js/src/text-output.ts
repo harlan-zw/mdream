@@ -26,7 +26,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { resolveUrl } from './url'
-import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, trimOutputStart, trimTextAtLineStart } from './utils'
+import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
 
 interface TextState extends MdreamRuntimeState {
   options: EngineOptions
@@ -248,13 +248,13 @@ function elementOutput(node: ElementNode, eventType: number, state: TextState): 
       if (output && hasVisibleContent(output)) {
         markRenderedChildContent(node)
         // Alt text reads as its own word, so it never runs into the text before it.
-        if (lastOutputChar(state.buffer) > 32)
+        if (needsSpacing(charOf(lastOutputChar(state.buffer)), output[0]!))
           return ` ${output}`
       }
       return output
     }
     if (node.tagId === TAG_Q)
-      return lastOutputChar(state.buffer) > 32 ? ' "' : '"'
+      return needsSpacing(charOf(lastOutputChar(state.buffer)), '"') ? ' "' : '"'
   }
   else if (node.tagId === TAG_Q) {
     return '"'
@@ -316,9 +316,13 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
   }
 
   // Preformatted content keeps its trailing bytes. Closing the block drops a
-  // trailing space run, but never the newlines the block ends on.
+  // trailing space run, but never the newlines the block ends on. When the
+  // close writes no newline, a run its own last child ends with stays, as in
+  // Rust.
   const closesPre = element.tagId === TAG_PRE
   const inPre = state.depthMap[TAG_PRE]! > 0 && !closesPre
+  const keepsOwnSpaces = closesPre && missingNewlines === 0 && state.lastTextNode?.parent === element
+    && state.lastTextNode.index === element.currentWalkIndex! - 1
   if (buffer.length && state.lastTextNode?.containsWhitespace && !inPre) {
     const isBlock = !isInline && missingNewlines > 0
     const collapses = element.tagHandler?.collapsesInnerWhiteSpace
@@ -327,16 +331,17 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
     const trim = (element.tagId === TAG_BR && output?.endsWith('\n'))
       || isBlock
       || ((!isInline || eventType === NodeEventExit) && !(collapses && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
-    if (trim) {
+    if (trim && !keepsOwnSpaces) {
       const last = buffer.at(-1)!
-      const trimmed = closesPre ? trimSpacesEnd(last) : trimAsciiWhitespaceEnd(last)
+      const trimmed = closesPre || state.lastTextNode.parent?.tagId === TAG_PRE ? trimSpacesEnd(last) : trimAsciiWhitespaceEnd(last)
       if (trimmed.length !== last.length) {
         buffer[buffer.length - 1] = trimmed
         if (eventType === NodeEventExit && isInline)
           state.pendingInlineWhitespace = true
       }
     }
-    state.lastTextNode = undefined
+    if (!keepsOwnSpaces)
+      state.lastTextNode = undefined
   }
 
   const newline = missingNewlines ? '\n'.repeat(missingNewlines) : ''
