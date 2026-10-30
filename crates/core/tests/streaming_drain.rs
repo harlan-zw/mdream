@@ -3472,6 +3472,47 @@ fn streaming_escapes_block_markers_after_a_decoded_bare_cr() {
     ("<p><span>abc&#13;</span>===</p>", "abc\r\\==="),
     ("<p>abc&#13;=SUM(A1)</p>", "abc\r=SUM(A1)"),
     ("<p>abc&#13;x === y</p>", "abc\rx === y"),
+    (
+      "<b>a&#13;<ul><li># heading</li></ul></b>",
+      "**a\r - \\# heading**",
+    ),
+    (
+      "<b>a&#13;<ol><li># heading</li></ol></b>",
+      "**a\r 1. \\# heading**",
+    ),
+    (
+      "<a href=\"/x\">a&#13;<ul><li># heading</li></ul></a>",
+      "[a\r - \\# heading](/x)",
+    ),
+    ("<b>a&#13;<ul><li>- x</li></ul></b>", "**a\r - \\- x**"),
+    ("<b>a&#13;<ul><li>1. x</li></ul></b>", "**a\r - 1\\. x**"),
+    ("<b>a&#13;<ul><li>===</li></ul></b>", "**a\r - \\===**"),
+    ("<b>a&#13;<ul><li>&gt; x</li></ul></b>", "**a\r - \\> x**"),
+    (
+      "<b>a&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></b>",
+      "**a\r - | x |\n  | --- |\n  | 1 |**",
+    ),
+    (
+      "<b>a&#13;<ul><li><pre>x</pre></li></ul></b>",
+      "**a\r - ```\n  x\n  ```\n\n  **",
+    ),
+    (
+      "<small>a&#13;<ul><li># heading</li></ul></small>",
+      "a\r - \\# heading",
+    ),
+    (
+      "<small>a&#13;<ol><li># heading</li></ol></small>",
+      "a\r 1. \\# heading",
+    ),
+    (
+      "<small>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></small>",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r - | x |\n  | --- |\n  | 1 |",
+    ),
+    (
+      "<small>|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></small>",
+      "|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r - | x |\n  | --- |\n  | 1 |",
+    ),
+    ("<b>a<ul><li># heading</li></ul></b>", "**a - # heading**"),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),

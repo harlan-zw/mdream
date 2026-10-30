@@ -283,12 +283,12 @@ function lineStateBeforeRow(buffer: string[]): number {
 
   if (firstNonSpace === -1)
     return LINE_OPEN
-  // A row already open only needs its line broken, not a new block.
-  if (firstNonSpace === 124) // |
-    return LINE_ROW
   // A pending list marker is block prefix, not content: a table's first row
-  // belongs on it.
-  return listMarkerLineStart(buffer, markerFragment, markerIndex) ? LINE_OPEN : LINE_CONTENT
+  // belongs on it, whatever the text before a decoded CR led with.
+  if (listMarkerLineStart(buffer, markerFragment, markerIndex))
+    return LINE_OPEN
+  // A row already open only needs its line broken, not a new block.
+  return firstNonSpace === 124 ? LINE_ROW : LINE_CONTENT // |
 }
 
 // A row's own line at the enclosing list item's content column. Outside a list

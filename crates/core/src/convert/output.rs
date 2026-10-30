@@ -3230,9 +3230,9 @@ impl ConvertState {
       spaces += 1;
     }
     if index == 0 {
-      return !self.has_flushed_tail() || self.flushed_tail[1] == b'\n';
+      return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
     }
-    bytes[index - 1] == b'\n'
+    matches!(bytes[index - 1], b'\n' | b'\r')
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -5397,11 +5397,17 @@ impl ConvertState {
       .iter()
       .position(|byte| !matches!(byte, b' ' | b'\t'))
       .unwrap_or(line.len());
+    let after_marker = || {
+      let end = bytes.len() - trailing_spaces(bytes);
+      end != 0 && self.list_marker_line_start(bytes, end)
+    };
     // `index == 0` means the scan ran out of buffer, not that the line starts
     // here: a drain may have taken the beginning of this line away. Trusting the
     // fragment reads an open row as content and separates it with a blank line,
-    // which ends the GFM table and ejects every row after it.
-    if index == 0 && line_lead_drained {
+    // which ends the GFM table and ejects every row after it. A marker behind a
+    // decoded `\r` has its own line start, so what the drain took says nothing
+    // about it.
+    if index == 0 && line_lead_drained && !after_marker() {
       match self.cut_line_lead {
         CutLineLead::Row => return LineBeforeRow::Row,
         CutLineLead::RawHtml | CutLineLead::Content => return LineBeforeRow::Content,
@@ -5409,18 +5415,13 @@ impl ConvertState {
       }
     }
     match line.get(start) {
-      Some(b'|') => LineBeforeRow::Row,
       None => LineBeforeRow::Open,
       // A pending list marker is block prefix, not content: a table's first row
-      // belongs on it.
+      // belongs on it, whatever the text before a decoded `\r` led with.
       // A drain can empty the buffer entirely; the marker scan needs a byte to
       // start from, and a fully drained line has none to offer.
-      Some(_)
-        if !bytes.is_empty()
-          && self.list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) =>
-      {
-        LineBeforeRow::Open
-      }
+      Some(_) if after_marker() => LineBeforeRow::Open,
+      Some(b'|') => LineBeforeRow::Row,
       Some(_) => LineBeforeRow::Content,
     }
   }
