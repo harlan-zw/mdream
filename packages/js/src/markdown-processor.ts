@@ -880,8 +880,9 @@ function hasNonWhitespace(value: string): boolean {
   return false
 }
 
+/** HTML's ASCII whitespace, as in Rust: U+000B is content. */
 export function isAsciiWhitespace(code: number): boolean {
-  return code === 32 || (code >= 9 && code <= 13)
+  return code === 32 || (code >= 9 && code <= 13 && code !== 11)
 }
 
 export function trimAsciiWhitespaceEnd(value: string): string {

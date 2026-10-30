@@ -150,6 +150,22 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<p>a&#12;<br>b</p>', 'a\f  \nb', 'a\f\nb'],
   ['<li>a&#9;<br>b</li>', '- a\t  \n  b'],
   ['<blockquote>a&#9;<br>b</blockquote>', '> a\t  \n> b'],
+  // HTML's ASCII whitespace leaves out U+000B, so it is content and stops a trim.
+  ['<p>a&#11;<br></p>', 'a\u000B', 'a\u000B'],
+  ['<p>a&#11;</p>', 'a\u000B', 'a\u000B'],
+  ['a&#11;', 'a\u000B', 'a\u000B'],
+  ['<p>a&#9;&#11;<br></p>', 'a\t\u000B', 'a\t\u000B'],
+  ['<p>a&#11;&#9;<br></p>', 'a\u000B', 'a\u000B'],
+  ['<p>a&#11;&#11;&#32;</p>', 'a\u000B\u000B', 'a\u000B\u000B'],
+  ['<li>a&#11;<br></li>', '- a\u000B', 'a\u000B'],
+  ['<ul><li>a<ul><li>b&#11;<br></li></ul></li></ul>', '- a\n  - b\u000B', 'a\nb\u000B'],
+  ['<blockquote><p>a&#11;<br></p></blockquote>', '> a\u000B', 'a\u000B'],
+  ['<h2>a #&#11;</h2>', '## a #\u000B', 'a #\u000B'],
+  ['<p>x y&#11;<br>b</p>', 'x y\u000B  \nb', 'x y\u000B\nb'],
+  ['<p><b>x y&#11;</b><br>b</p>', '**x y\u000B**  \nb', 'x y\u000B\nb'],
+  ['<p><span>x y&#11;</span>z</p>', 'x y\u000Bz', 'x y\u000Bz'],
+  ['<p>x y&#11;</p><p>b</p>', 'x y\u000B\n\nb', 'x y\u000B\n\nb'],
+  ['<pre><code>a&#11;\n</code></pre>', '```\na\u000B\n```', 'a\u000B'],
 ]
 
 describe('trailing whitespace at every chunking', () => {

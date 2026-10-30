@@ -194,6 +194,26 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
 }
 
 #[test]
+fn vertical_tab_is_content_to_the_trailing_trims() {
+  // HTML's ASCII whitespace leaves out U+000B, so it stops a trim and stays in
+  // the output, as it does in the JS engine.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a&#11;<br></p>", "a\u{b}"),
+    ("<p>a&#11;</p>", "a\u{b}"),
+    ("a&#11;", "a\u{b}"),
+    ("<p>a&#9;&#11;<br></p>", "a\t\u{b}"),
+    ("<p>a&#11;&#9;<br></p>", "a\u{b}"),
+    ("<li>a&#11;<br></li>", "- a\u{b}"),
+    ("<blockquote><p>a&#11;<br></p></blockquote>", "> a\u{b}"),
+    ("<h2>a #&#11;</h2>", "## a #\u{b}"),
+    ("<p>x y&#11;<br>b</p>", "x y\u{b}  \nb"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
 fn output_after_a_hard_break_leaves_one_paragraph_separator() {
   // Output after the break reopens its line, so a block inside the item gets
   // the separator it gets without the break, never a second one.

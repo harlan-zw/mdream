@@ -41,7 +41,7 @@ function trimAsciiWhitespaceEnd(value: string): string {
   let end = value.length
   while (end > 0) {
     const code = value.charCodeAt(end - 1)
-    if (code !== 32 && (code < 9 || code > 13))
+    if (code !== 32 && (code < 9 || code > 13 || code === 11))
       break
     end--
   }
@@ -645,7 +645,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       }
       while (stableEnd > leading) {
         const code = content.charCodeAt(stableEnd - 1)
-        if (code !== 32 && (code < 9 || code > 13))
+        if (code !== 32 && (code < 9 || code > 13 || code === 11))
           break
         stableEnd--
       }
