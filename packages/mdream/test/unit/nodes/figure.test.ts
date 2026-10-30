@@ -221,6 +221,33 @@ describe.each(engines)('figure $name', (engineConfig) => {
     expect(markdown).toBe('*Caption*\n\n![A](/i)')
   })
 
+  it('spaces inline markup inside a figcaption as it does in a paragraph', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<figure><img src="i.png"><figcaption>a<del>x</del>2</figcaption></figure>', { engine }))
+      .toBe('![](i.png)\n\n*a ~~x~~2*')
+    expect(htmlToMarkdown('<figure><figcaption>a<q>x</q>2</figcaption></figure>', { engine }))
+      .toBe('*a "x"2*')
+    expect(htmlToMarkdown('<figure><img src="i.png"><figcaption><del>x</del>2</figcaption></figure>', { engine }))
+      .toBe('![](i.png)\n\n*~~x~~2*')
+    const plugins = { tagOverrides: { sup: { enter: '^', exit: '^' } } }
+    expect(htmlToMarkdown('<figure><img src="i.png"><figcaption>a<sup><del></del>2</sup>z</figcaption></figure>', { engine, plugins }))
+      .toBe('![](i.png)\n\n*a^ 2^z*')
+    expect(htmlToMarkdown('<figure><img src="i.png"><figcaption><a href="/x"></a><del>x</del></figcaption></figure>', { engine }))
+      .toBe('![](i.png)\n\n*[](/x) ~~x~~*')
+    const label = { tagOverrides: { figcaption: { enter: 'Figure:' } } }
+    expect(htmlToMarkdown('<figure><figcaption><del>x</del></figcaption></figure>', { engine, plugins: label }))
+      .toBe('Figure: ~~x~~*')
+  })
+
+  it('keeps the space after literal output that opens a figcaption', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<figure><img src="f.png"><figcaption><x-y></x-y> a</figcaption></figure>'
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides: { 'x-y': { enter: '**', exit: '**' } } } }))
+      .toBe('![](f.png)\n\n***** a*')
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides: { 'x-y': { enter: 'E' } } } }))
+      .toBe('![](f.png)\n\n*E a*')
+  })
+
   it('preserves figcaption block spacing through an inline wrapper', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<figure><img src="/i" alt="A"><span><figcaption>Caption</figcaption></span></figure>'
