@@ -245,7 +245,8 @@ pub(crate) struct ElementNode {
   pub child_text_node_index: u32,
   // Small fields grouped to minimize padding
   pub tag_id: Option<u8>,
-  pub contains_whitespace: bool,
+  /// Content below this node already counts for the nearest link at or above it.
+  pub link_content_counted: bool,
   pub excluded_from_markdown: bool,
   /// A plugin skipped this node's start, so its end must not be emitted either.
   /// Unlike `excluded_from_markdown`, the node's descendants stay eligible.

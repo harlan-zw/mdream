@@ -358,19 +358,29 @@ impl ConvertState {
 
   /// Content inside a block nested in a link is link content too: count it for
   /// the nearest link before `scope_start` and the inline nodes up to its block.
+  /// Only the first count matters, since a link with content stays above 0 and
+  /// above its hidden count, so each node walked is marked and the next walk
+  /// stops there. A node's ancestors never change, so its mark holds for as long
+  /// as it is open.
   pub(super) fn count_content_in_enclosing_link(&mut self, scope_start: usize) {
-    let mut anchor_found = false;
-    for parent in self.stack[..scope_start].iter_mut().rev() {
-      if !anchor_found {
-        if parent.tag_id != Some(TAG_A) {
-          continue;
-        }
-        anchor_found = true;
-      }
-      parent.child_text_node_index += 1;
-      if !parent.is_inline {
+    let mut index = scope_start;
+    while index > 0 {
+      index -= 1;
+      let node = &mut self.stack[index];
+      if node.link_content_counted {
         return;
       }
+      node.link_content_counted = true;
+      if node.tag_id != Some(TAG_A) {
+        continue;
+      }
+      for parent in self.stack[..=index].iter_mut().rev() {
+        parent.child_text_node_index += 1;
+        if !parent.is_inline {
+          return;
+        }
+      }
+      return;
     }
   }
 
@@ -5548,7 +5558,7 @@ mod tests {
       current_walk_index: 0,
       child_text_node_index: 0,
       tag_id: Some(tag_id),
-      contains_whitespace: false,
+      link_content_counted: false,
       excluded_from_markdown: false,
       enter_skipped: false,
       is_inline,

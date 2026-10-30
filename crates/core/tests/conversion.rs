@@ -809,6 +809,11 @@ fn nested_block_text_counts_for_its_own_link() {
       r#"<div><p><img src="/i" alt="I"></p><a href="/b" title="B"><p>y</p></a></div>"#,
       "![I](/i)\n\n[y](/b \"B\")",
     ),
+    // Sibling blocks under a counted wrapper, then a link opened below it.
+    (
+      r#"<a href="/a" title="A"><div><div><p>x</p><p>y</p><a href="/b" title="B"><p>z</p></a></div></div></a>"#,
+      r#"[x y [z](/b "B")](/a "A")"#,
+    ),
   ];
   for (html, expected) in cases {
     assert_eq!(convert(html), expected, "{html}");
