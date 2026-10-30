@@ -203,6 +203,50 @@ describe('trailing whitespace at every chunking', () => {
   })
 })
 
+// Longer than the run the JS drain rejoins on every chunk, so these reach the
+// path that reads only the fragments after it.
+const longRun = (unit: string) => unit.repeat(1200)
+
+const LONG_HELD_RUN_CASES = [
+  `<p>a${longRun('&#9;<i></i>')}</p>`,
+  `<p>a${longRun('&#9;<i></i>')}b</p>`,
+  `<p>a${longRun('&#12;<span></span>')}</p><p>b</p>`,
+  `<p>a${longRun('&#13;<b></b>')}<b>x</b></p>`,
+  `<p>a${longRun('<span>&#9;</span>')}<em>x</em> y</p>`,
+  `<p>a${longRun('<br>')}</p>`,
+  `<p>a${longRun('<br>')}b</p>`,
+  `<p>a${longRun('&#9;<br>')}b</p>`,
+  `<ul><li>a${longRun('&#9;<i></i>')}</li><li>b</li></ul>`,
+  `<h2>a${longRun('&#9;<i></i>')}</h2><p>b</p>`,
+  `<p>a${longRun('&#9;<i></i>')}</p><blockquote>${'<p>line</p>'.repeat(1200)}</blockquote>`,
+  `<p>a${longRun('&#9;<i></i>')}<a href="x"></a></p>`,
+  `<p>a${longRun('&#9;<i></i>')}</p><pre>${longRun('&#9;<i></i>')}</pre><p>b</p>`,
+]
+
+describe('long held whitespace run', () => {
+  it.each(LONG_HELD_RUN_CASES.map(html => [`${html.slice(0, 24)}...${html.slice(-24)}`, html]))('matches one-shot output: %s', async (_, html) => {
+    const outputs: string[] = []
+    for (const { engine, name } of engines) {
+      const expected = engine.htmlToMarkdown(html)
+      outputs.push(expected)
+      for (const width of [1, 7, 11, 13, 64, 1024, html.length]) {
+        const stream = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(stream))
+          streamed += chunk
+        expect(streamed === expected, `engine=${name} width=${width}`).toBe(true)
+      }
+    }
+    expect(outputs[1] === outputs[0]).toBe(true)
+  })
+})
+
 describe('cross-engine streaming byte parity', () => {
   it.each(LINK_SPACE_CASES)('trims link label spaces at every split: %s', async (html, expected) => {
     for (const { engine, name } of engines) {
