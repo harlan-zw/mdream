@@ -3381,6 +3381,134 @@ fn heading_after_paragraph_in_item_matches_every_split() {
 }
 
 #[test]
+fn block_opening_a_quote_in_an_item_streams_like_one_shot() {
+  // FL2-style: every cleaner that streams, and a 1 MiB cap.
+  let fl2_style = HtmlToMarkdownOptions {
+    clean: Some(safe_clean()),
+    max_node_bytes: 1 << 20,
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote><h1>h</h1></blockquote></li></ul>",
+      "- \n  > # h",
+    ),
+    (
+      "<ol><li><blockquote><h2>h</h2></blockquote></li></ol>",
+      "1. \n   > ## h",
+    ),
+    (
+      "<ol start=\"10\"><li><blockquote><h3>h</h3></blockquote></li></ol>",
+      "10. \n    > ### h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<blockquote><h2>h</h2></blockquote></li></ul></li></ul>",
+      "- a\n  - b\n    > ## h",
+    ),
+    (
+      "<ul><li>a<ul><li><blockquote><h2>h</h2></blockquote></li></ul></li></ul>",
+      "- a\n\n  - \n    > ## h",
+    ),
+    (
+      "<ul><li>a<blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  > ## h",
+    ),
+    (
+      "<ul><li><p>a</p><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  > ## h",
+    ),
+    (
+      "<ul><li>a<br><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a  \n  \n  > ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<br></li></ul><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  - b  \n\n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><div><h2>h</h2></div></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><blockquote><h2>h</h2></blockquote></blockquote></li></ul>",
+      "- \n  > > ## h",
+    ),
+    (
+      "<ul><li><blockquote> <h2>h</h2></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><b></b><h2>h</h2></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><h2>h</h2><p>x</p></blockquote></li></ul>",
+      "- \n  > ## h\n  >\n  > x",
+    ),
+    (
+      "<ul><li><blockquote><p>x</p></blockquote></li></ul>",
+      "- \n  > x",
+    ),
+    (
+      "<ul><li><blockquote><pre>x</pre></blockquote></li></ul>",
+      "- \n  > ```\n  > x\n  > ```",
+    ),
+    (
+      "<ul><li><blockquote><hr></blockquote></li></ul>",
+      "- \n  > ---",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>y</li></ul></blockquote></li></ul>",
+      "- \n  > - y",
+    ),
+    (
+      "<ul><li><blockquote><table><tr><th>t</th></tr><tr><td>c</td></tr></table></blockquote></li></ul>",
+      "- \n  > | t |\n  > | --- |\n  > | c |",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>y<br></li></ul><h2>h</h2></blockquote></li></ul>",
+      "- \n  > - y  \n  >\n  > ## h",
+    ),
+  ] {
+    for opts in [HtmlToMarkdownOptions::default(), fl2_style.clone()] {
+      assert_eq!(
+        html_to_markdown(html, opts.clone()),
+        expected,
+        "html={html}"
+      );
+      assert_stream_matches(html, opts.clone());
+      assert_stream_matches_every_split(html, opts.clone());
+      let lead = "lead ".repeat(1000);
+      let long = format!("<p>{lead}</p>{html}");
+      let long_expected = format!("{}\n\n{expected}", lead.trim());
+      for width in [1, 7, 4096] {
+        assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+      }
+    }
+  }
+}
+
+#[test]
+fn heading_after_a_flushed_hard_break_keeps_its_blank_quote_line() {
+  // The empty `<code>` flushes the quote up to the hard break and leaves its
+  // anchor at the buffer end, as if the quote had written nothing.
+  let lead = "<p>line</p>".repeat(2000);
+  let html = format!(
+    "<ul><li><blockquote>{lead}<ul><li>y<br></li></ul><code></code><h2>h</h2></blockquote></li></ul>"
+  );
+  let opts = HtmlToMarkdownOptions::default();
+  let expected = html_to_markdown(&html, opts.clone());
+  assert!(
+    expected.ends_with("\n  > - y  \n  >\n  > ## h"),
+    "{}",
+    &expected[expected.len() - 40..]
+  );
+  for width in [1, 7, 64, 4096, html.len()] {
+    assert_eq!(stream_chunks(&html, width, opts.clone()), expected);
+  }
+}
+
+#[test]
 fn block_on_a_nested_pending_marker_streams_like_one_shot() {
   // FL2-style: every cleaner that streams, and a 1 MiB cap.
   let fl2_style = HtmlToMarkdownOptions {

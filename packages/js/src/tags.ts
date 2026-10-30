@@ -344,7 +344,9 @@ function handleHeading(depth: number): TagHandler {
         return `<h${depth}>`
       }
       const heading = `${'#'.repeat(depth)} `
-      if (state.listIndent && lastOutputChar(state.buffer) === 10) {
+      // The newline a quote opened on already starts the heading's line.
+      if (state.listIndent && lastOutputChar(state.buffer) === 10
+        && state.blockquotes?.at(-1)?.fragment !== state.buffer.length) {
         const prefix = continuationPrefix(node, state.listIndentWidths || [], !state.bufferedBlockquoteDepth)
         return `\n${prefix}${heading}`
       }

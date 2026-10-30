@@ -4192,6 +4192,19 @@ impl ConvertState {
     }
   }
 
+  /// Whether the innermost open quote has written nothing yet, so the output
+  /// still sits on the line its opener started. A streaming flush also anchors a
+  /// quote at the buffer end, past a hard break it wrote, so the frame alone
+  /// cannot tell.
+  #[cold]
+  fn quote_at_start(&self) -> bool {
+    self.hard_break_end != self.buffer.len()
+      && self
+        .blockquotes
+        .last()
+        .is_some_and(|frame| frame.content_start == self.buffer.len())
+  }
+
   /// Continuation prefix re-emitted at the start of each continued line so the
   /// content stays inside its block context. Built by walking the open
   /// ancestor stack outermost-first so blockquote markers (`> `) and list-item
@@ -4351,7 +4364,10 @@ impl ConvertState {
             static H_OPEN: [&str; 6] = ["<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>"];
             Some(Cow::Borrowed(H_OPEN[depth]))
           }
-        } else if !self.list_indent.is_empty() && self.last_output_byte() == Some(b'\n') {
+        } else if !self.list_indent.is_empty()
+          && self.last_output_byte() == Some(b'\n')
+          && !self.quote_at_start()
+        {
           let prefix = self.continuation_prefix();
           Some(Cow::Owned(format!("\n{prefix}{}", HEADING_PREFIXES[depth])))
         } else if !self.list_indent.is_empty()
@@ -5468,7 +5484,10 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P, push_decimal};
+  use super::{
+    BlockquoteFrame, ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_H2, TAG_LI, TAG_P,
+    push_decimal,
+  };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -5570,6 +5589,23 @@ mod tests {
     state.emit_enter_element();
 
     assert_eq!(state.buffer, "\n\n  ");
+  }
+
+  // A drain can take the newline a quote opened on, leaving it readable only
+  // through `flushed_tail`. The heading still opens the quote's first line.
+  #[test]
+  fn drained_quote_opener_keeps_the_heading_on_its_line() {
+    let mut state = drained_open_list_item();
+    state.flushed_tail = *b"y\n";
+    state.blockquotes.push(BlockquoteFrame {
+      content_start: 0,
+      list_indent: "  ".to_string(),
+    });
+    state.stack.push(entering_node(TAG_H2, false));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, "## ");
   }
 
   // A code span after drained content glues with a separator space, the way

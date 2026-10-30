@@ -6285,6 +6285,94 @@ fn heading_after_nested_hard_break_stays_in_parent_item() {
 }
 
 #[test]
+fn block_opens_on_the_first_line_of_a_quote_in_an_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote><h1>h</h1></blockquote></li></ul>",
+      "- \n  > # h",
+    ),
+    (
+      "<ol><li><blockquote><h2>h</h2></blockquote></li></ol>",
+      "1. \n   > ## h",
+    ),
+    (
+      "<ol start=\"10\"><li><blockquote><h3>h</h3></blockquote></li></ol>",
+      "10. \n    > ### h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<blockquote><h2>h</h2></blockquote></li></ul></li></ul>",
+      "- a\n  - b\n    > ## h",
+    ),
+    (
+      "<ul><li>a<ul><li><blockquote><h2>h</h2></blockquote></li></ul></li></ul>",
+      "- a\n\n  - \n    > ## h",
+    ),
+    (
+      "<ul><li>a<blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  > ## h",
+    ),
+    (
+      "<ul><li><p>a</p><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  > ## h",
+    ),
+    (
+      "<ul><li>a<br><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a  \n  \n  > ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<br></li></ul><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  - b  \n\n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><div><h2>h</h2></div></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><blockquote><h2>h</h2></blockquote></blockquote></li></ul>",
+      "- \n  > > ## h",
+    ),
+    (
+      "<ul><li><blockquote> <h2>h</h2></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><b></b><h2>h</h2></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><h2>h</h2><p>x</p></blockquote></li></ul>",
+      "- \n  > ## h\n  >\n  > x",
+    ),
+    (
+      "<ul><li><blockquote><p>x</p></blockquote></li></ul>",
+      "- \n  > x",
+    ),
+    (
+      "<ul><li><blockquote><pre>x</pre></blockquote></li></ul>",
+      "- \n  > ```\n  > x\n  > ```",
+    ),
+    (
+      "<ul><li><blockquote><hr></blockquote></li></ul>",
+      "- \n  > ---",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>y</li></ul></blockquote></li></ul>",
+      "- \n  > - y",
+    ),
+    (
+      "<ul><li><blockquote><table><tr><th>t</th></tr><tr><td>c</td></tr></table></blockquote></li></ul>",
+      "- \n  > | t |\n  > | --- |\n  > | c |",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>y<br></li></ul><h2>h</h2></blockquote></li></ul>",
+      "- \n  > - y  \n  >\n  > ## h",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
 fn block_opens_on_a_nested_pending_marker() {
   for (html, expected) in [
     (

@@ -529,6 +529,137 @@ describe('scout9_list_tail_quote_spacing streaming', () => {
   })
 })
 
+describe('blocks opening a quote in an item streaming', () => {
+  it.each([
+    [
+      '<ul><li><blockquote><h1>h</h1></blockquote></li></ul>',
+      '- \n  > # h',
+    ],
+    [
+      '<ol><li><blockquote><h2>h</h2></blockquote></li></ol>',
+      '1. \n   > ## h',
+    ],
+    [
+      '<ol start="10"><li><blockquote><h3>h</h3></blockquote></li></ol>',
+      '10. \n    > ### h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<blockquote><h2>h</h2></blockquote></li></ul></li></ul>',
+      '- a\n  - b\n    > ## h',
+    ],
+    [
+      '<ul><li>a<ul><li><blockquote><h2>h</h2></blockquote></li></ul></li></ul>',
+      '- a\n\n  - \n    > ## h',
+    ],
+    [
+      '<ul><li>a<blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  > ## h',
+    ],
+    [
+      '<ul><li><p>a</p><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  > ## h',
+    ],
+    [
+      '<ul><li>a<br><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a  \n  \n  > ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<br></li></ul><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  - b  \n\n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><div><h2>h</h2></div></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><blockquote><h2>h</h2></blockquote></blockquote></li></ul>',
+      '- \n  > > ## h',
+    ],
+    [
+      '<ul><li><blockquote> <h2>h</h2></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><b></b><h2>h</h2></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><h2>h</h2><p>x</p></blockquote></li></ul>',
+      '- \n  > ## h\n  >\n  > x',
+    ],
+    [
+      '<ul><li><blockquote><p>x</p></blockquote></li></ul>',
+      '- \n  > x',
+    ],
+    [
+      '<ul><li><blockquote><pre>x</pre></blockquote></li></ul>',
+      '- \n  > ```\n  > x\n  > ```',
+    ],
+    [
+      '<ul><li><blockquote><hr></blockquote></li></ul>',
+      '- \n  > ---',
+    ],
+    [
+      '<ul><li><blockquote><ul><li>y</li></ul></blockquote></li></ul>',
+      '- \n  > - y',
+    ],
+    [
+      '<ul><li><blockquote><table><tr><th>t</th></tr><tr><td>c</td></tr></table></blockquote></li></ul>',
+      '- \n  > | t |\n  > | --- |\n  > | c |',
+    ],
+    [
+      '<ul><li><blockquote><ul><li>y<br></li></ul><h2>h</h2></blockquote></li></ul>',
+      '- \n  > - y  \n  >\n  > ## h',
+    ],
+  ])('matches every split and chunk width: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
+  })
+
+  // An empty `<code>` flushes the quote up to the hard break in the Rust engine,
+  // leaving its anchor at the buffer end as if the quote had written nothing.
+  it('keeps the blank quote line after a flushed hard break', async () => {
+    const lead = '<p>line</p>'.repeat(2000)
+    const html = `<ul><li><blockquote>${lead}<ul><li>y<br></li></ul><code></code><h2>h</h2></blockquote></li></ul>`
+    for (const { engine, name } of engines) {
+      const expected = engine.htmlToMarkdown(html)
+      expect(expected.slice(-23), name).toBe('\n  > - y  \n  >\n  > ## h')
+      for (const width of [1, 7, 64, 4096, html.length]) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
+  })
+})
+
 describe('blocks around nested pending markers streaming', () => {
   it.each([
     [

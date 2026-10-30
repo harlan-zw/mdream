@@ -209,6 +209,94 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
   })
 })
 
+describe.each(engines)('blocks opening a quote in an item $name', (engineConfig) => {
+  it.each([
+    [
+      '<ul><li><blockquote><h1>h</h1></blockquote></li></ul>',
+      '- \n  > # h',
+    ],
+    [
+      '<ol><li><blockquote><h2>h</h2></blockquote></li></ol>',
+      '1. \n   > ## h',
+    ],
+    [
+      '<ol start="10"><li><blockquote><h3>h</h3></blockquote></li></ol>',
+      '10. \n    > ### h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<blockquote><h2>h</h2></blockquote></li></ul></li></ul>',
+      '- a\n  - b\n    > ## h',
+    ],
+    [
+      '<ul><li>a<ul><li><blockquote><h2>h</h2></blockquote></li></ul></li></ul>',
+      '- a\n\n  - \n    > ## h',
+    ],
+    [
+      '<ul><li>a<blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  > ## h',
+    ],
+    [
+      '<ul><li><p>a</p><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  > ## h',
+    ],
+    [
+      '<ul><li>a<br><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a  \n  \n  > ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<br></li></ul><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  - b  \n\n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><div><h2>h</h2></div></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><blockquote><h2>h</h2></blockquote></blockquote></li></ul>',
+      '- \n  > > ## h',
+    ],
+    [
+      '<ul><li><blockquote> <h2>h</h2></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><b></b><h2>h</h2></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><h2>h</h2><p>x</p></blockquote></li></ul>',
+      '- \n  > ## h\n  >\n  > x',
+    ],
+    [
+      '<ul><li><blockquote><p>x</p></blockquote></li></ul>',
+      '- \n  > x',
+    ],
+    [
+      '<ul><li><blockquote><pre>x</pre></blockquote></li></ul>',
+      '- \n  > ```\n  > x\n  > ```',
+    ],
+    [
+      '<ul><li><blockquote><hr></blockquote></li></ul>',
+      '- \n  > ---',
+    ],
+    [
+      '<ul><li><blockquote><ul><li>y</li></ul></blockquote></li></ul>',
+      '- \n  > - y',
+    ],
+    [
+      '<ul><li><blockquote><table><tr><th>t</th></tr><tr><td>c</td></tr></table></blockquote></li></ul>',
+      '- \n  > | t |\n  > | --- |\n  > | c |',
+    ],
+    [
+      '<ul><li><blockquote><ul><li>y<br></li></ul><h2>h</h2></blockquote></li></ul>',
+      '- \n  > - y  \n  >\n  > ## h',
+    ],
+  ])('keeps the block on the first quote line: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
 describe.each(engines)('blocks around nested pending markers $name', (engineConfig) => {
   it.each([
     [
