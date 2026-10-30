@@ -56,7 +56,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -325,22 +325,6 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     const width = state.listIndentWidths.pop() ?? 0
     state.listIndent = state.listIndent.slice(0, state.listIndent.length - width)
   }
-}
-
-/**
- * Determines if spacing is needed between two characters
- */
-function needsSpacing(lastChar: string, firstChar: string, state?: MarkdownState): boolean {
-  if (' \n\t'.includes(lastChar) || ' \n\t'.includes(firstChar)) {
-    return false
-  }
-
-  // Special case: Allow spacing between pipe and HTML tags in table cells
-  if (lastChar === '|' && firstChar === '<' && state && (state.depthMap[TAG_TABLE] || 0) > 0) {
-    return true
-  }
-
-  return !'[(>*_`'.includes(lastChar) && !'])<.,!?:;*_`'.includes(firstChar)
 }
 
 /**
@@ -2031,6 +2015,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastTextNode = undefined
         }
       }
+      // Spaces before a line break have no visual effect, even when an emptied
+      // inline element left them, so the break subsumes them as in Rust.
+      if (!inPre && breakOutput?.endsWith('\n') && lastOutputChar(buff) === 32)
+        trimTrailingSpaces(buff)
 
       const pendingCaption = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
@@ -2043,6 +2031,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         captionBreakRun++
       }
       else if (breakOutput) {
+        // A raw `<br>` takes the separator other raw inline HTML gets, as in Rust.
+        if (breakOutput.charCodeAt(0) === 60 && lastOutputChar(buff) === 124)
+          buff.push(' ')
         buff.push(breakOutput)
         state.lastContentCache = breakOutput
         if (openMarkerCount && hasNonWhitespace(breakOutput))
@@ -2176,19 +2167,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         handlerOutput = undefined
       }
 
+      const literalOutput = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
       let meaningfulOutput = !dropBlockquoteOutput && output?.some(hasNonWhitespace) === true
       if (meaningfulOutput && handlerOutput !== undefined) {
         const markerType = INLINE_MARKER_TYPE[tagId]!
-        const literal = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
-        if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literal) {
+        if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literalOutput) {
           if (captionBoundary === 1) {
             captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, true) || captionBufferChanged
             captionTransition = true
             captionBoundary = 2
           }
           if (eventType === NodeEventEnter) {
+            // Inside an opened caption the marker follows its text and takes
+            // the usual separator, as in the Rust engine.
+            if (captionFrameCount !== 0 && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0)
+              captionTransition = true
             anchorPendingCaptions(state.buffer.length)
-            captionTransition = true
           }
           meaningfulOutput = false
         }
@@ -2212,7 +2206,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             captionBufferChanged = true
           captionBufferChanged = prepareCaptionOutput(false) || captionBufferChanged
           captionTransition = true
-          consumeCaptionTransition(isInlineElement, tagId)
+          consumeCaptionTransition(isInlineElement && !literalOutput, tagId)
         }
         finishCaptionFrame()
         if (!opened && flushCaptionBreakRun())
@@ -2221,7 +2215,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       else if (meaningfulOutput && captionNeedsPreparation()) {
         captionBufferChanged = prepareCaptionOutput(captionEnter, tagId !== TAG_LI) || captionBufferChanged
         captionTransition = true
-        consumeCaptionTransition(isInlineElement, tagId)
+        consumeCaptionTransition(isInlineElement && !literalOutput, tagId)
       }
       if (meaningfulOutput)
         commitCaptionFrames()
@@ -2492,7 +2486,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Add spacing between inline elements if needed
-    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state)) {
+    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
@@ -2510,6 +2504,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         trimTrailingSpaces(buff)
       }
       state.headingBreakPending = true
+    }
+
+    // An overridden <br> skips the break fast path, but its line break still
+    // subsumes the spaces before it.
+    if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
+      && !handler?.literalEnter && output?.at(-1)?.endsWith('\n') && lastOutputChar(buff) === 32) {
+      trimTrailingSpaces(buff)
     }
 
     // Add all output fragments
