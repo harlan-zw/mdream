@@ -399,3 +399,54 @@ fn only_plugin_hidden_subtrees_start_opaque_overflow() {
     assert_eq!(html_to_markdown(&html, options), "after");
   }
 }
+
+#[test]
+fn aliased_builtin_closes_are_case_insensitive_at_depth_limit() {
+  for depth in [LIMIT - 2, LIMIT - 1, LIMIT, LIMIT + 1] {
+    let prefix = "<span>".repeat(depth);
+    let suffix = format!("{}<p>end</p>", "</span>".repeat(depth));
+    for (open, close) in [("BLOCKQUOTE", "BLOCKQUOTE"), ("BlOcKqUoTe", "bLoCkQuOtE")] {
+      let body = format!("<blockquote><{open}>x</{close}>tail</blockquote>");
+      let html = format!("{prefix}{body}{suffix}");
+      let expected = if depth == LIMIT - 2 {
+        "x\n\ntail\n\nend"
+      } else {
+        "x tail\n\nend"
+      };
+      for cap in [0, 16, 64] {
+        let opts = HtmlToMarkdownOptions {
+          max_node_bytes: cap,
+          plugins: Some(PluginConfig {
+            tag_overrides: Some(vec![("blockquote".into(), TagOverrideConfig::alias("div"))]),
+            ..Default::default()
+          }),
+          ..Default::default()
+        };
+        assert_eq!(
+          html_to_markdown(&html, opts.clone()),
+          expected,
+          "depth={depth} cap={cap} close={close}"
+        );
+        for width in [1, 7, 64, 512, html.len()] {
+          let mut stream = MarkdownStreamProcessor::new(opts.clone());
+          let mut actual = String::new();
+          for chunk in html.as_bytes().chunks(width) {
+            actual.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+          }
+          actual.push_str(&stream.finish());
+          assert_eq!(actual, expected, "depth={depth} cap={cap} width={width}");
+        }
+        // Prime the depth once, then split at every byte in both aliased tags.
+        for split in 0..=body.len() {
+          let mut stream = MarkdownStreamProcessor::new(opts.clone());
+          let mut actual = stream.process_chunk(&prefix);
+          actual.push_str(&stream.process_chunk(&body[..split]));
+          actual.push_str(&stream.process_chunk(&body[split..]));
+          actual.push_str(&stream.process_chunk(&suffix));
+          actual.push_str(&stream.finish());
+          assert_eq!(actual, expected, "depth={depth} cap={cap} split={split}");
+        }
+      }
+    }
+  }
+}
