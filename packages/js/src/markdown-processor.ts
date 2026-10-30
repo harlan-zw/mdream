@@ -1363,8 +1363,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
   // 1 needs caption spacing; 2 owns the next source space after a boundary;
-  // 3 needs quote-parent spacing; 4 wrote tentative spacing before an inline
-  // marker. Empty markers retract that spacing before the next list transition.
+  // 3 needs quote-parent spacing; 4 wrote tentative spacing before inline
+  // output. Empty markers retract that spacing before the next list transition.
   let captionBoundary = 0
   let quoteTentativeSpacing: string | undefined
   let captionBoundarySpacing = 0
@@ -1555,9 +1555,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   function consumeCaptionTransition(isInlineElement: boolean, tagId: number): void {
-    // Visible output settles tentative quote spacing; only captions retain
-    // ownership of the next source space across inline output.
-    captionBoundary = captionBoundary !== 4 && isInlineElement && tagId !== TAG_IMG && tagId !== TAG_BR ? 2 : 0
+    if (!isInlineElement || tagId === TAG_IMG || tagId === TAG_BR) {
+      captionBoundary = 0
+    }
+    // Inline output takes a quote's separator without settling it, so the next
+    // list or block transition still spaces itself.
+    else if (captionBoundary === 3) {
+      captionBoundary = 4
+      quoteTentativeSpacing = undefined
+    }
+    else if (captionBoundary !== 4) {
+      captionBoundary = 2
+    }
   }
 
   function anchorPendingCaptions(fragment: number): void {
@@ -1850,8 +1859,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
-    if ((captionBoundary === 3 || captionBoundary === 4)
-      && eventType === NodeEventEnter && tagId === TAG_LI) {
+    if ((captionBoundary === 3 || captionBoundary === 4) && tagId === TAG_LI) {
       restoreQuoteParentBoundary()
       captionBoundary = 0
     }
@@ -2100,6 +2108,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // An enter fragment that owns its block separator fulfills this boundary.
       if (captionBoundary === 3 && eventType === NodeEventEnter && output?.[0]?.startsWith('\n\n'))
         captionBoundary = 2
+      // Once its wrappers closed, a block settles the tentative spacing and
+      // spaces itself.
+      if (captionBoundary === 4 && eventType === NodeEventEnter && !isInlineElement && !openMarkerCount)
+        captionBoundary = 0
+      // A link close stays on the quote's last line, as in the Rust engine. The
+      // boundary keeps waiting for the content after the link.
+      const holdsQuoteBoundary = captionBoundary === 3 && tagId === TAG_A && eventType === NodeEventExit
+        && handlerOutput !== undefined && !handler?.literalExit && !insideRawHtmlRegion
+      if (holdsQuoteBoundary)
+        captionBoundary = 0
       const captionEnter = captionEvent && eventType === NodeEventEnter && !state.depthMap[TAG_PRE]
       const captionExit = captionEvent && eventType === NodeEventExit && !state.depthMap[TAG_PRE]
       if (captionEnter)
@@ -2180,6 +2198,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
       if (meaningfulOutput)
         commitCaptionFrames()
+      if (holdsQuoteBoundary)
+        captionBoundary = 3
     }
 
     // A hard break already supplies the item boundary. Its continuation
@@ -2472,17 +2492,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     // The existing deferred block boundary ignores invisible output and adds
     // the parent's list indentation only when a continuation actually arrives.
-    if (eventType === NodeEventExit) {
-      if (closesQuote && state.depthMap[TAG_LI]
-        && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion) {
-        captionBoundary = 3
-        captionBoundarySpacing = 2
-        state.listRulePending = undefined
-      }
-      else if (tagId === TAG_LI && (captionBoundary === 3 || captionBoundary === 4)) {
-        restoreQuoteParentBoundary()
-        captionBoundary = 0
-      }
+    if (closesQuote && state.depthMap[TAG_LI]
+      && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion) {
+      captionBoundary = 3
+      captionBoundarySpacing = 2
+      state.listRulePending = undefined
     }
     updateListIndent(state, element, eventType)
 

@@ -2379,6 +2379,114 @@ fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
 }
 
 #[test]
+fn inline_wrapper_around_blockquote_in_list_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ol><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ol>",
+      "1. [\n   > next](/x)",
+    ),
+    (
+      "<ul><li>pre <a href=\"/x\"><blockquote>next</blockquote></a></li></ul>",
+      "- pre [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\">pre <blockquote>next</blockquote></a></li></ul>",
+      "- [pre \n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><span><blockquote>next</blockquote></span></a></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><span><a href=\"/x\"><blockquote>next</blockquote></a></span></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a> tail</li></ul>",
+      "- [\n  > next](/x)\n\n  tail",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><blockquote>b</blockquote></li></ul>",
+      "- [\n  > next](/x)\n\n  > b",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><p>para</p></li></ul>",
+      "- [\n  > next](/x)\n\n  para",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><ul><li>x</li></ul></li></ul>",
+      "- [\n  > next](/x)\n  - x",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li><li>x</li></ul>",
+      "- [\n  > next](/x)\n- x",
+    ),
+    (
+      "<ul><li><strong><a href=\"/x\"><blockquote>next</blockquote></a></strong></li></ul>",
+      "- **[\n  > next](/x)\n\n  **",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><strong><blockquote>next</blockquote></strong></a> tail</li></ul>",
+      "- [**\n  > next\n\n  **](/x)tail",
+    ),
+    (
+      "<table><tr><td><ul><li><span><blockquote>next</blockquote></span></li></ul></td></tr></table>",
+      "| <ul><li>\n> next</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ul></td></tr></table>",
+      "| <ul><li>[\n> next](/x)</li></ul> |\n| --- |",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong></li><li>x</li></ul>",
+      "- **\n  > next\n\n  **\n- x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><ul><li>x</li></ul></li></ul>",
+      "- **\n  > next\n\n  **\n  - x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><br></li><li>x</li></ul>",
+      "- **\n  > next\n\n  **  \n- x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><div>d</div></li></ul>",
+      "- **\n  > next\n\n  ** d",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub></li><li>x</li></ul>",
+      "- <sub>\n  > next\n\n  </sub>\n- x",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub><ul><li>x</li></ul></li></ul>",
+      "- <sub>\n  > next\n\n  </sub>\n  - x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><sub></sub></li><li>x</li></ul>",
+      "- \n  > q\n\n  <sub></sub>\n- x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><sub></sub><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n\n  <sub></sub>\n  - x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><p><blockquote>r</blockquote></p></li></ul>",
+      "- \n  > q\n\n  \n  > r",
+    ),
+    (
+      "<ul><li><p><span><blockquote>q</blockquote></span></p><p><span><blockquote>r</blockquote></span></p></li></ul>",
+      "- \n  > q\n\n  \n  > r",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn sibling_blockquotes_separated_by_blank_line() {
   for (name, html, expected) in [
     (

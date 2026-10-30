@@ -1593,6 +1593,14 @@ impl ConvertState {
         // The break's whitespace would pass for the spacing at the buffer tail.
         self.caption_boundary = CaptionBoundary::QuoteTentative(0);
       }
+      // Paragraph, HR and fence fragments can already carry their block separator.
+      if self.caption_boundary == CaptionBoundary::QuoteParent
+        && output
+          .as_deref()
+          .is_some_and(|fragment| fragment.starts_with("\n\n"))
+      {
+        self.caption_boundary = CaptionBoundary::ConsumeSpace;
+      }
     }
     let caption_active =
       self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
@@ -1606,8 +1614,6 @@ impl ConvertState {
       default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
     let structural_quote = tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal;
     let quote_parent = self.caption_boundary == CaptionBoundary::QuoteParent;
-    // An anchor without an href writes nothing, so it cannot carry the boundary.
-    let tentative_quote_boundary = quote_parent && tentative_caption_output && visible_output;
     // A sibling quote keeps the separator after a closed quote's content. An
     // empty quote left the item's opening line, where a blank would end it.
     let quote_sibling_separator =
@@ -1615,25 +1621,16 @@ impl ConvertState {
     if visible_output || structural_quote {
       self.expand_deferred_caption_breaks();
     }
-    let separator_start = self.buffer.len();
     let consumes_caption_boundary = if visible_output || structural_quote {
-      // HR and fence fragments can already carry their block separator.
-      if quote_parent
-        && output
-          .as_deref()
-          .is_some_and(|fragment| fragment.starts_with("\n\n"))
-      {
-        self.caption_boundary = CaptionBoundary::ConsumeSpace;
-        true
+      // An anchor without an href writes nothing, so it cannot carry the boundary.
+      if visible_output && is_inline && self.quote_boundary_pending() {
+        self.prepare_inline_quote_boundary(enter_is_literal)
       } else {
         self.prepare_caption_boundary(tag_id != Some(TAG_LI) && !structural_quote)
       }
     } else {
       false
     };
-    if tentative_quote_boundary {
-      self.caption_boundary = CaptionBoundary::QuoteTentative(self.buffer.len() - separator_start);
-    }
     if visible_output && (tag_id != Some(TAG_BLOCKQUOTE) || enter_is_literal) {
       self.materialize_caption_frames(if caption_enter && enter_is_literal {
         CaptionMaterialization::ExplicitCommit
@@ -2322,8 +2319,11 @@ impl ConvertState {
     if !caption_exit {
       if visible_output {
         self.expand_deferred_caption_breaks();
-        consumes_caption_boundary =
-          self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)));
+        consumes_caption_boundary = if is_inline && self.quote_boundary_pending() {
+          self.prepare_inline_quote_boundary(has_override)
+        } else {
+          self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)))
+        };
         self.materialize_caption_frames(if default_inline_marker {
           CaptionMaterialization::Tentative
         } else {
@@ -3870,6 +3870,27 @@ impl ConvertState {
     if let Some(prefix) = self.caption_open_prefix(prefix, configured_new_lines) {
       self.push_caption_content(prefix.as_ref());
     }
+  }
+
+  fn quote_boundary_pending(&self) -> bool {
+    matches!(
+      self.caption_boundary,
+      CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+    )
+  }
+
+  // Default inline output takes the separator without settling it, so the next
+  // list or block transition still spaces itself. Literal output settles it.
+  #[cold]
+  fn prepare_inline_quote_boundary(&mut self, literal: bool) -> bool {
+    let separator_start = self.buffer.len();
+    let consumes_boundary = self.prepare_caption_boundary(true);
+    if literal {
+      self.caption_boundary = CaptionBoundary::None;
+    } else if self.caption_boundary == CaptionBoundary::ConsumeSpace {
+      self.caption_boundary = CaptionBoundary::QuoteTentative(self.buffer.len() - separator_start);
+    }
+    consumes_boundary
   }
 
   // Marker streaming holds already retain the preceding whitespace. Only a
