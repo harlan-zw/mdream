@@ -1462,8 +1462,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     const hidden = textNode.excludedFromMarkdown || (isBlank && !wasBlank)
     if (hidden || isBlank)
       countHiddenLinkText(parentsToIncrement, hidden)
-    else if ((hasText || textNode.rewrittenBlank === false)
-      && (state.depthMap[TAG_A] > 1 || !hasAnchorParent(parentsToIncrement)))
+    else if ((hasText || textNode.rewrittenBlank === false) && (state.depthMap[TAG_A] > 1 || !hasAnchorParent(parentsToIncrement)))
       // Text in a block nested in the link, such as `<svg><text>`, or in a link
       // nested in a block of another one. Blank text there, as in
       // `<pre> </pre>`, shows nothing.
