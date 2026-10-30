@@ -2516,7 +2516,7 @@ fn inline_wrapper_around_blockquote_in_list_item() {
     ),
     (
       "<ul><li><a href=\"/x\"><strong><blockquote>next</blockquote></strong></a> tail</li></ul>",
-      "- [**\n  > next\n\n  **](/x)tail",
+      "- [**\n  > next\n\n  **](/x) tail",
     ),
     (
       "<table><tr><td><ul><li><span><blockquote>next</blockquote></span></li></ul></td></tr></table>",
@@ -2597,6 +2597,50 @@ fn inline_wrapper_around_blockquote_in_list_item() {
     (
       "<ul><li><p><span><blockquote>q</blockquote></span></p><p><span><blockquote>r</blockquote></span></p></li></ul>",
       "- \n  > q\n\n  \n  > r",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong> tail</li></ul>",
+      "- **\n  > next\n\n  ** tail",
+    ),
+    (
+      "<ul><li>pre <strong><blockquote>next</blockquote></strong> tail</li></ul>",
+      "- pre **\n  > next\n\n  ** tail",
+    ),
+    (
+      "<ul><li><strong><a href=\"/x\"><blockquote>next</blockquote></a></strong> tail</li></ul>",
+      "- **[\n  > next](/x)\n\n  ** tail",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub> tail</li></ul>",
+      "- <sub>\n  > next\n\n  </sub> tail",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><strong><blockquote>next</blockquote></strong> tail</a></li></ul>",
+      "- [**\n  > next\n\n  ** tail](/x)",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong>tail</li></ul>",
+      "- **\n  > next\n\n  **tail",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong> <p>para</p></li></ul>",
+      "- **\n  > next\n\n  **\n\n  para",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><br> tail</li></ul>",
+      "- **\n  > next\n\n  **  \n  tail",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><em> tail</em></li></ul>",
+      "- **\n  > next\n\n  ***tail*",
+    ),
+    (
+      "<ul><li>pre<blockquote>q</blockquote><strong> tail</strong></li></ul>",
+      "- pre\n  > q\n\n  **tail**",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><strong></strong> tail</li></ul>",
+      "- \n  > q\n\n  tail",
     ),
   ] {
     assert_eq!(convert(html), expected, "{html}");

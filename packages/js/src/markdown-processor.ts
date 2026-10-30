@@ -56,7 +56,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -1366,6 +1366,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // 1 needs caption spacing; 2 owns the next source space after a boundary;
   // 3 needs quote-parent spacing; 4 wrote tentative spacing before inline
   // output. Empty markers retract that spacing before the next list transition.
+  // 5 is 4 past a closing delimiter, where the next source space separates words.
   let captionBoundary = 0
   let quoteTentativeSpacing: string | undefined
   let captionBoundarySpacing = 0
@@ -1565,7 +1566,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       captionBoundary = 4
       quoteTentativeSpacing = undefined
     }
-    else if (captionBoundary !== 4) {
+    else if (captionBoundary < 4) {
       captionBoundary = 2
     }
   }
@@ -1640,8 +1641,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastTextNode = undefined
       restoreQuoteParentBoundary()
     }
-    else if (captionBreakRun !== 0 && captionFrameCount === 0
-      && captionBoundary !== 3 && captionBoundary !== 4) {
+    else if (captionBreakRun !== 0 && captionFrameCount === 0 && captionBoundary < 3) {
       captionBoundary = 2
     }
   }
@@ -1655,7 +1655,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const ownsCaptionSpace = captionNeedsPreparation()
       if (ownsCaptionSpace) {
-        if (textNode.value.charCodeAt(0) === 32)
+        if (captionBoundary !== 5 && textNode.value.charCodeAt(0) === 32)
           textNode.value = textNode.value.slice(1)
         if (!hasNonWhitespace(textNode.value))
           return
@@ -1860,7 +1860,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
-    if ((captionBoundary === 3 || captionBoundary === 4) && tagId === TAG_LI) {
+    if (captionBoundary >= 3 && tagId === TAG_LI) {
       restoreQuoteParentBoundary()
       captionBoundary = 0
     }
@@ -1893,6 +1893,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       let breakOutput: string | undefined = renderBreak(element, state)
 
       if (captionBoundary !== 0 || captionFrameCount !== 0) {
+        // The break's whitespace would pass for the spacing at the buffer tail.
+        if (captionBoundary === 5)
+          captionBoundary = 4
         const pendingCaption = captionFrameCount !== 0
           && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
         if (!inPre
@@ -1983,6 +1986,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An unknown tag with no handler is inline, as in the Rust engine.
     const isInlineElement = handler ? handler.isInline === true : tagId === -1
     let closesQuote = false
+    let closesQuoteWrapper = false
     let keepsQuoteSeparator = false
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
@@ -2111,7 +2115,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         captionBoundary = 2
       // Once its wrappers closed, a block settles the tentative spacing and
       // spaces itself.
-      if (captionBoundary === 4 && eventType === NodeEventEnter && !isInlineElement && !openMarkerCount)
+      if (captionBoundary >= 4 && eventType === NodeEventEnter && !isInlineElement && !openMarkerCount)
         captionBoundary = 0
       // A link close stays on the quote's last line, as in the Rust engine. The
       // boundary keeps waiting for the content after the link.
@@ -2145,6 +2149,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const literalOutput = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
       let meaningfulOutput = !dropBlockquoteOutput && output?.some(hasNonWhitespace) === true
+      closesQuoteWrapper = meaningfulOutput && eventType === NodeEventExit && isInlineElement && !captionExit
+        && captionBoundary >= 3 && tagId !== TAG_A && !handler?.literalExit
+      // Past a new opener the next source space belongs to its wrapper again.
+      if (captionBoundary === 5 && meaningfulOutput && eventType === NodeEventEnter) {
+        captionBoundary = 4
+        quoteTentativeSpacing = undefined
+      }
       if (meaningfulOutput && handlerOutput !== undefined) {
         const markerType = INLINE_MARKER_TYPE[tagId]!
         if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literalOutput) {
@@ -2256,6 +2267,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         openMarkerCount = 0
       }
+    }
+
+    // Text after a closing delimiter continues its line, so its first space
+    // separates words. It is not the block's first text, which the parser trims.
+    if (closesQuoteWrapper) {
+      captionBoundary = 5
+      quoteTentativeSpacing = undefined
+      const block = traverseUpToFirstBlockNode(element.parent as ElementNode).at(-1)!
+      block.childTextNodeIndex = (block.childTextNodeIndex || 0) + 1
     }
 
     // A <br> can introduce one blank line, but never needs 3+ consecutive

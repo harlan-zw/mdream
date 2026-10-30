@@ -2534,8 +2534,12 @@ impl ConvertState {
 
     let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
-    if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
-      self.caption_boundary = CaptionBoundary::None;
+    if consumes_caption_boundary {
+      if !is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR)) {
+        self.caption_boundary = CaptionBoundary::None;
+      } else if !caption_exit && self.quote_boundary_pending() {
+        self.close_quote_wrapper();
+      }
     }
     if caption_exit_spacing > 0 {
       self.caption_boundary = CaptionBoundary::Pending(caption_exit_spacing);
@@ -2849,7 +2853,10 @@ impl ConvertState {
           .caption_frames
           .iter()
           .any(|frame| !matches!(frame.state, CaptionState::Committed));
-      if owns_leading_space && text.as_bytes().first() == Some(&b' ') {
+      if owns_leading_space
+        && self.caption_boundary != CaptionBoundary::QuoteTentative(QUOTE_CLOSED)
+        && text.as_bytes().first() == Some(&b' ')
+      {
         text = &text[1..];
         if text.is_empty() {
           return;
@@ -3893,10 +3900,23 @@ impl ConvertState {
     let consumes_boundary = self.prepare_caption_boundary(true);
     if literal {
       self.caption_boundary = CaptionBoundary::None;
-    } else if self.caption_boundary == CaptionBoundary::ConsumeSpace {
+    } else if matches!(
+      self.caption_boundary,
+      CaptionBoundary::ConsumeSpace | CaptionBoundary::QuoteTentative(QUOTE_CLOSED)
+    ) {
       self.caption_boundary = CaptionBoundary::QuoteTentative(self.buffer.len() - separator_start);
     }
     consumes_boundary
+  }
+
+  // Text after a closing delimiter continues its line, so its first space
+  // separates words. It is not the block's first text, which the parser trims.
+  #[cold]
+  fn close_quote_wrapper(&mut self) {
+    self.caption_boundary = CaptionBoundary::QuoteTentative(QUOTE_CLOSED);
+    if let Some(block) = self.first_block_parent_index {
+      self.stack[block].child_text_node_index += 1;
+    }
   }
 
   // Marker streaming holds already retain the preceding whitespace. Only a
