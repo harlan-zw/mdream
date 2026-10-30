@@ -529,6 +529,88 @@ describe('scout9_list_tail_quote_spacing streaming', () => {
   })
 })
 
+describe('blocks around nested pending markers streaming', () => {
+  it.each([
+    [
+      '<ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ## h',
+    ],
+    [
+      '<ol><li>a<ol><li>a<ol><li><h2>h</h2></li></ol></li></ol></li></ol>',
+      '1. a\n   1. a\n      1. ## h',
+    ],
+    [
+      '<ol start="100"><li>a<ul><li><h2>h</h2></li></ul></li></ol>',
+      '100. a\n     - ## h',
+    ],
+    [
+      '<ul><li><ul><li><ul><li><h2>h</h2></li></ul></li></ul></li></ul>',
+      '-\n  -\n    - ## h',
+    ],
+    [
+      '<blockquote><ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul></blockquote>',
+      '> - a\n>   - a\n>     - ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><pre>x</pre></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ```\n      x\n      ```',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><hr></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ***',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - | t |\n      | --- |\n      | c |',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
+      '- a\n\n  - \n\n  ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
+      '- a\n  - b\n\n    - \n\n    ## h',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
+      '- a\n\n  - \n\n  ```\n  x\n  ```',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><hr></li></ul>',
+      '- a\n\n  - \n\n  ---',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
+      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
+    ],
+  ])('matches every split and chunk width: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      const options = {}
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream, options))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
+  })
+})
+
 describe('scout9_wrap_setext_boundary streaming', () => {
   it.each([
     [

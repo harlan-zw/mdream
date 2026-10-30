@@ -6285,6 +6285,82 @@ fn heading_after_nested_hard_break_stays_in_parent_item() {
 }
 
 #[test]
+fn block_opens_on_a_nested_pending_marker() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ## h",
+    ),
+    (
+      "<ol><li>a<ol><li>a<ol><li><h2>h</h2></li></ol></li></ol></li></ol>",
+      "1. a\n   1. a\n      1. ## h",
+    ),
+    (
+      "<ol start=\"100\"><li>a<ul><li><h2>h</h2></li></ul></li></ol>",
+      "100. a\n     - ## h",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><h2>h</h2></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ## h",
+    ),
+    (
+      "<blockquote><ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul></blockquote>",
+      "> - a\n>   - a\n>     - ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><pre>x</pre></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ```\n      x\n      ```",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><hr></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ***",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - | t |\n      | --- |\n      | c |",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn block_leaves_the_marker_of_a_closed_nested_item() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>",
+      "- a\n\n  - \n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>",
+      "- a\n  - b\n\n    - \n\n    ## h",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>",
+      "- a\n\n  - \n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><hr></li></ul>",
+      "- a\n\n  - \n\n  ---",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>",
+      "- a\n\n  - \n\n  | t |\n  | --- |\n  | c |",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn text_after_a_closed_nested_item_stays_escaped() {
+  assert_eq!(
+    convert("<ul><li>a<ul><li></li></ul># t</li></ul>"),
+    "- a\n\n  - \\# t"
+  );
+}
+
+#[test]
 fn scout9_wrap_setext_boundary() {
   for (html, expected) in [
     ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),

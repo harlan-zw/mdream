@@ -3381,6 +3381,86 @@ fn heading_after_paragraph_in_item_matches_every_split() {
 }
 
 #[test]
+fn block_on_a_nested_pending_marker_streams_like_one_shot() {
+  // FL2-style: every cleaner that streams, and a 1 MiB cap.
+  let fl2_style = HtmlToMarkdownOptions {
+    clean: Some(safe_clean()),
+    max_node_bytes: 1 << 20,
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ## h",
+    ),
+    (
+      "<ol><li>a<ol><li>a<ol><li><h2>h</h2></li></ol></li></ol></li></ol>",
+      "1. a\n   1. a\n      1. ## h",
+    ),
+    (
+      "<ol start=\"100\"><li>a<ul><li><h2>h</h2></li></ul></li></ol>",
+      "100. a\n     - ## h",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><h2>h</h2></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ## h",
+    ),
+    (
+      "<blockquote><ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul></blockquote>",
+      "> - a\n>   - a\n>     - ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><pre>x</pre></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ```\n      x\n      ```",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><hr></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ***",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - | t |\n      | --- |\n      | c |",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>",
+      "- a\n\n  - \n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>",
+      "- a\n  - b\n\n    - \n\n    ## h",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>",
+      "- a\n\n  - \n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><hr></li></ul>",
+      "- a\n\n  - \n\n  ---",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>",
+      "- a\n\n  - \n\n  | t |\n  | --- |\n  | c |",
+    ),
+  ] {
+    for opts in [HtmlToMarkdownOptions::default(), fl2_style.clone()] {
+      assert_eq!(
+        html_to_markdown(html, opts.clone()),
+        expected,
+        "html={html}"
+      );
+      assert_stream_matches(html, opts.clone());
+      assert_stream_matches_every_split(html, opts.clone());
+      let lead = "lead ".repeat(1000);
+      let long = format!("<p>{lead}</p>{html}");
+      let long_expected = format!("{}\n\n{expected}", lead.trim());
+      for width in [1, 7, 4096] {
+        assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+      }
+    }
+  }
+}
+
+#[test]
 fn scout9_wrap_setext_boundary_streaming() {
   for (html, expected) in [
     ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),

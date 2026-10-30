@@ -3205,9 +3205,18 @@ impl ConvertState {
     }
   }
 
-  /// Whether `end` sits just past a list marker that is all its line holds:
-  /// optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
-  fn list_marker_line_start(&self, bytes: &[u8], end: usize) -> bool {
+  /// Deepest indent of a marker a block can share a line with. A list writes the
+  /// open item's marker at its container's content column; a marker past that
+  /// column belongs to a closed nested item, whose line the block must leave.
+  fn pending_marker_indent(&self) -> usize {
+    self.list_indent_widths.last().map_or(3, |&width| {
+      self.list_indent.len().saturating_sub(usize::from(width))
+    })
+  }
+
+  /// Whether `end` sits just past a list marker that is all its line holds: up
+  /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+  fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
     let mut index = end - 1;
     match bytes[index] {
       b'.' | b')' => {
@@ -3223,7 +3232,7 @@ impl ConvertState {
       _ => return false,
     }
     let mut spaces = 0;
-    while index > 0 && bytes[index - 1] == b' ' && spaces < 3 {
+    while index > 0 && bytes[index - 1] == b' ' && spaces < max_spaces {
       index -= 1;
       spaces += 1;
     }
@@ -3482,7 +3491,9 @@ impl ConvertState {
       if byte != b' ' || spaces == 3 {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
-        return self.list_marker_line_start(bytes, offset + 1).then_some(0);
+        return self
+          .list_marker_line_start(bytes, offset + 1, 3)
+          .then_some(0);
       }
       spaces += 1;
     }
@@ -4166,7 +4177,9 @@ impl ConvertState {
           // marker scan's starting point — left with the drain.
           return drained_onto_content.then(|| Cow::Owned(format!("\n\n{prefix}")));
         }
-        if bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end) {
+        if bytes[end - 1] != b'\n'
+          && !self.list_marker_line_start(bytes, end, self.pending_marker_indent())
+        {
           Some(Cow::Owned(format!("\n\n{prefix}")))
         } else {
           None
@@ -5405,7 +5418,11 @@ impl ConvertState {
       // start from, and a fully drained line has none to offer.
       Some(_)
         if !bytes.is_empty()
-          && self.list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) =>
+          && self.list_marker_line_start(
+            bytes,
+            bytes.len() - trailing_spaces(bytes),
+            self.pending_marker_indent(),
+          ) =>
       {
         LineBeforeRow::Open
       }

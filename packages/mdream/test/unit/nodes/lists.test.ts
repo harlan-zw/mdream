@@ -209,6 +209,77 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
   })
 })
 
+describe.each(engines)('blocks around nested pending markers $name', (engineConfig) => {
+  it.each([
+    [
+      '<ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ## h',
+    ],
+    [
+      '<ol><li>a<ol><li>a<ol><li><h2>h</h2></li></ol></li></ol></li></ol>',
+      '1. a\n   1. a\n      1. ## h',
+    ],
+    [
+      '<ol start="100"><li>a<ul><li><h2>h</h2></li></ul></li></ol>',
+      '100. a\n     - ## h',
+    ],
+    [
+      '<ul><li><ul><li><ul><li><h2>h</h2></li></ul></li></ul></li></ul>',
+      '-\n  -\n    - ## h',
+    ],
+    [
+      '<blockquote><ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul></blockquote>',
+      '> - a\n>   - a\n>     - ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><pre>x</pre></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ```\n      x\n      ```',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><hr></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ***',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - | t |\n      | --- |\n      | c |',
+    ],
+  ])('opens the block on the marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    [
+      '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
+      '- a\n\n  - \n\n  ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
+      '- a\n  - b\n\n    - \n\n    ## h',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
+      '- a\n\n  - \n\n  ```\n  x\n  ```',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><hr></li></ul>',
+      '- a\n\n  - \n\n  ---',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
+      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
+    ],
+  ])('leaves the marker of a closed item: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it('keeps escaping text after a closed item', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<ul><li>a<ul><li></li></ul># t</li></ul>', { engine })).toBe('- a\n\n  - \\# t')
+  })
+})
+
 describe.each(engines)('scout9_wrap_setext_boundary $name', (engineConfig) => {
   it.each([
     [
