@@ -412,6 +412,40 @@ describe.each(engines)('links $name', (engineConfig) => {
     }
   })
 
+  // An empty link still writes `[](url)`, so the text after it keeps its space.
+  it.each([
+    ['<p><a href="/x"></a> tail</p>', '[](/x) tail'],
+    ['<p><a href="/x"></a>tail</p>', '[](/x)tail'],
+    ['<p><a href="/x"></a> <a href="/y"></a> tail</p>', '[](/x) [](/y) tail'],
+    ['<ul><li><a href="/x"></a> tail</li></ul>', '- [](/x) tail'],
+    ['<p><span><a href="/x"></a></span> tail</p>', '[](/x) tail'],
+    ['<p><a href="/x"> </a> tail</p>', '[](/x) tail'],
+    ['<p><a name="x"></a> tail</p>', 'tail'],
+    ['<a href="/a" title="A"><div><a href="/b"></a></div></a>', '[[](/b)](/a "A")'],
+  ])('keeps the space after an empty link in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe(html.includes('title') ? 'A' : 'tail')
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
+  it('drops an empty link and its space in clean mode', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p><a href="/x"></a> tail</p>', { engine, clean: { emptyLinkText: true } })).toBe('tail')
+  })
+
   // A link in a block of another link stays nested, as the parser only closes
   // an open link at a new one in the same block. Its content is content of the
   // outer link too, so the outer link takes no label.

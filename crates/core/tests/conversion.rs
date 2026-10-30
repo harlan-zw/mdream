@@ -763,6 +763,40 @@ fn text_in_a_block_inside_a_link_is_link_text() {
   );
 }
 
+/// An empty link still writes `[](url)`, so the text after it keeps its space.
+#[test]
+fn empty_link_keeps_the_space_after_it() {
+  let cases = [
+    (r#"<p><a href="/x"></a> tail</p>"#, "[](/x) tail"),
+    (r#"<p><a href="/x"></a>tail</p>"#, "[](/x)tail"),
+    (
+      r#"<p><a href="/x"></a> <a href="/y"></a> tail</p>"#,
+      "[](/x) [](/y) tail",
+    ),
+    (
+      r#"<ul><li><a href="/x"></a> tail</li></ul>"#,
+      "- [](/x) tail",
+    ),
+    (
+      r#"<p><span><a href="/x"></a></span> tail</p>"#,
+      "[](/x) tail",
+    ),
+    (r#"<p><a name="x"></a> tail</p>"#, "tail"),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "{html} width={width}");
+    }
+  }
+}
+
 /// Text in a block nested in a link counts for the link around that block. A
 /// block of the next link, or a link opened inside the block, counts for its
 /// own link, so neither takes its label next to visible text.

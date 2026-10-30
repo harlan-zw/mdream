@@ -334,7 +334,11 @@ impl ConvertState {
 
   #[inline]
   pub(super) fn mark_rendered_child_content(&mut self) {
-    let image_index = self.stack.len().saturating_sub(1);
+    self.mark_rendered_content_below(self.stack.len().saturating_sub(1));
+  }
+
+  /// Count rendered content for the open nodes before `image_index`, up to their block.
+  fn mark_rendered_content_below(&mut self, image_index: usize) {
     let mut scope_start = self.first_block_parent_index.unwrap_or(0);
     if scope_start >= image_index {
       scope_start = if self.block_parent_indices.len() > 1 {
@@ -1311,6 +1315,7 @@ impl ConvertState {
     let tag_id = node.tag_id;
     let is_inline = node.is_inline;
     let spacing = node.spacing;
+    let empty_text = node.child_text_node_index == 0;
     if link {
       let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
       self.link.empty_text_pending = false;
@@ -1319,7 +1324,13 @@ impl ConvertState {
       if !(self.clean_flags != 0
         && self.try_link_clean_rewrite(&attributes, is_inline, false, &mut resolved_href))
       {
-        self.write_link_exit(&attributes, is_inline, new_line_config[1], resolved_href);
+        self.write_link_exit(
+          &attributes,
+          is_inline,
+          new_line_config[1],
+          resolved_href,
+          empty_text,
+        );
       }
       self.stack.retired_mut().attributes = attributes;
       return;
@@ -2084,6 +2095,7 @@ impl ConvertState {
     is_inline: bool,
     configured_new_lines: u8,
     resolved_href: Option<Cow<'_, str>>,
+    empty_text: bool,
   ) {
     self.write_output(false, is_inline, configured_new_lines, None, false);
 
@@ -2141,6 +2153,11 @@ impl ConvertState {
       }
       // A length, not an offset. `bracket_pos` is `buffer.len()` when no `[` was emitted.
       self.last_content_cache_len = self.buffer.len().saturating_sub(self.link.bracket_pos);
+      // An empty link still writes `[](url)`. Like an image, it is content of
+      // its block, so the text after it keeps its leading space.
+      if empty_text {
+        self.mark_rendered_content_below(self.stack.len());
+      }
       if self.clean_flags & CLEAN_FRAGMENTS != 0
         && self.depth_map[TAG_CODE as usize] == 0
         // A skipped anchor has no link of its own; `self.link` is an ancestor's.
@@ -2462,6 +2479,7 @@ impl ConvertState {
         is_inline,
         configured_new_lines,
         resolved_href,
+        node.child_text_node_index == 0,
       );
       return;
     }

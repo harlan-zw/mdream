@@ -719,6 +719,10 @@ export const tagHandlers: Record<number, TagHandler> = {
           return ''
         }
       }
+      // An empty link still writes `[](url)`. Like an image, it is content of
+      // its block, so the text after it keeps its leading space.
+      if (!node.childTextNodeIndex && !state.depthMap?.[TAG_PRE])
+        markRenderedChildContent(node)
       return `]${serializeMarkdownResource(href, title)}`
     },
     collapsesInnerWhiteSpace: true,
