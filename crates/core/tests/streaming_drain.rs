@@ -4010,6 +4010,67 @@ fn empty_quote_keeps_nested_list_tail() {
   }
 }
 
+// An empty exit override writes nothing, so the list still ends before the
+// parent's text. One with output keeps its text in place of the separator.
+#[test]
+fn empty_list_exit_override_keeps_nested_list_tail() {
+  for (tag, exit, html, expected) in [
+    (
+      "ul",
+      "",
+      "<ul><li><ul><li>a</li></ul>tail</li></ul>",
+      "-\n  - a\n\n  tail",
+    ),
+    (
+      "ol",
+      "",
+      "<ol><li><ol><li>a</li></ol>tail</li></ol>",
+      "1.\n   1. a\n\n   tail",
+    ),
+    (
+      "ul",
+      "",
+      "<ul><li><ul><li></li></ul><em>tail</em></li></ul>",
+      "-\n  -\n\n  *tail*",
+    ),
+    (
+      "ul",
+      "",
+      "<ul><li>A<ul><li>a</li></ul><blockquote></blockquote>t</li></ul>",
+      "- A\n  - a\n\n  t",
+    ),
+    (
+      "ul",
+      "",
+      "<ul><li>A<ul><li>a</li></ul><span></span></li><li>n</li></ul>",
+      "- A\n  - a\n- n",
+    ),
+    (
+      "ul",
+      "X",
+      "<ul><li><ul><li>a</li></ul>tail</li></ul>",
+      "-\n  - aX tailX",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          tag.to_string(),
+          TagOverrideConfig {
+            exit: Some(exit.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, opts.clone()), expected, "{html}");
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
 // A flush rewrites the quoted lines before a tail that `</li>` may still retract,
 // and a `<code>` enter runs that flush during one-shot conversion too.
 #[test]

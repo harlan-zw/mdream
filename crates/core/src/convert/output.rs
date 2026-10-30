@@ -2364,7 +2364,11 @@ impl ConvertState {
       self.list_pending |= LIST_RULE_PENDING;
     }
 
-    if !has_override && matches!(tag_id, Some(TAG_UL | TAG_OL)) {
+    // An empty exit override writes nothing, so the parent's text still needs
+    // the separator that ends the list.
+    if matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && (!has_override || output.as_deref().is_some_and(str::is_empty))
+    {
       self.defer_list_tail();
     }
 
