@@ -4009,3 +4009,57 @@ fn empty_quote_keeps_nested_list_tail() {
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
+
+// A flush rewrites the quoted lines before a tail that `</li>` may still retract,
+// and a `<code>` enter runs that flush during one-shot conversion too.
+#[test]
+fn quote_flush_leaves_nested_list_tail_retractable() {
+  let lines = "<p>quoted paragraph</p>".repeat(512);
+  for (open, close, expected) in [
+    (
+      "<blockquote>",
+      "</blockquote>",
+      ">\n> - A\n>   - inner\n> - next",
+    ),
+    (
+      "<blockquote><blockquote>",
+      "</blockquote></blockquote>",
+      "> >\n> > - A\n> >   - inner\n> > - next",
+    ),
+    (
+      "<blockquote><p>lead</p><blockquote>",
+      "</blockquote></blockquote>",
+      "> >\n> > - A\n> >   - inner\n> > - next",
+    ),
+    (
+      "<ul><li><blockquote>",
+      "</blockquote></li></ul>",
+      "  > - A\n  >   - inner\n  > - next",
+    ),
+  ] {
+    for empty in [
+      "<code></code>",
+      "<em></em>",
+      "<span></span>",
+      "<a></a>",
+      "<p></p>",
+      "<pre></pre>",
+    ] {
+      let tail = format!("<ul><li>A<ul><li>inner</li></ul>{empty}</li><li>next</li></ul>{close}");
+      let html = format!("{open}{lines}{tail}");
+      let one_shot = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+      assert!(
+        one_shot.ends_with(&format!("quoted paragraph\n{expected}")),
+        "{open}{empty}: {:?}",
+        &one_shot[one_shot.len() - 80..]
+      );
+      for split in html.len() - tail.len()..html.len() {
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut streamed = processor.process_chunk(&html[..split]);
+        streamed.push_str(&processor.process_chunk(&html[split..]));
+        streamed.push_str(&processor.finish());
+        assert_eq!(streamed, one_shot, "{open}{empty} split={split}");
+      }
+    }
+  }
+}

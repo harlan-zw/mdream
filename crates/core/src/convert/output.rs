@@ -826,6 +826,7 @@ impl ConvertState {
       self.code_spans.first().map(|span| span.output_start),
       link_start,
       self.empty_item_hazard.then_some(self.empty_item_line_start),
+      (self.list_tail_start != usize::MAX).then_some(self.list_tail_start),
     ]
     .into_iter()
     .flatten()

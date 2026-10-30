@@ -237,6 +237,29 @@ describe('cross-engine streaming byte parity', () => {
 
     expect(engineOutputs[1]).toBe(engineOutputs[0])
   })
+
+  it.each(['<code></code>', '<em></em>', '<span></span>'])('retracts a nested list tail after %s at every split past a quote flush', async (empty) => {
+    const tail = `<ul><li>A<ul><li>inner</li></ul>${empty}</li><li>next</li></ul></blockquote>`
+    const html = `<blockquote>${'<p>quoted paragraph</p>'.repeat(512)}${tail}`
+    const expected = engines[0]!.engine.htmlToMarkdown(html)
+
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html), `engine=${name}`).toBe(expected)
+      for (let split = html.length - tail.length; split < html.length; split++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(expected)
+      }
+    }
+  })
 })
 
 describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
