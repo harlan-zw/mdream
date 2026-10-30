@@ -3116,7 +3116,8 @@ impl ConvertState {
         copied_until = index + 1;
       }
 
-      if byte == b'\n' {
+      // A decoded `&#13;` is a bare CR, which also ends a CommonMark line.
+      if matches!(byte, b'\n' | b'\r') {
         line_indent = Some(0);
         ordered_digits = 0;
       } else if let Some(indent) = line_indent {
@@ -3486,7 +3487,7 @@ impl ConvertState {
     let mut spaces = 0usize;
     let structural_indent = self.list_indent.len();
     for (offset, &byte) in bytes.iter().enumerate().rev() {
-      if byte == b'\n' {
+      if matches!(byte, b'\n' | b'\r') {
         return Some(spaces.saturating_sub(structural_indent) as u8);
       }
       if byte != b' ' || spaces == structural_indent + 3 {
@@ -3497,7 +3498,7 @@ impl ConvertState {
       spaces += 1;
     }
     if self.buffer.is_empty() && self.has_streamed_output {
-      if self.flushed_tail[1] == b'\n' {
+      if matches!(self.flushed_tail[1], b'\n' | b'\r') {
         Some(0)
       } else {
         None
@@ -5504,6 +5505,20 @@ mod tests {
 
     state.buffer.push('z');
     assert_eq!(state.last_output_byte(), Some(b'z'));
+  }
+
+  // A decoded `&#13;` ends a CommonMark line, so text after a drain that cut
+  // right behind it may open a block just as it would after `\n`.
+  #[test]
+  fn drained_bare_cr_starts_a_markdown_line() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Content;
+    state.flushed_tail = *b"c\r";
+    assert_eq!(state.markdown_line_indent(), Some(0));
+
+    state.flushed_tail = *b"cd";
+    assert_eq!(state.markdown_line_indent(), None);
   }
 
   /// An open list item whose buffer a drain emptied: the item's content line

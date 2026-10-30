@@ -536,7 +536,7 @@ function markdownLineIndent(buffer: string[], structuralIndent: number): number 
     const fragment = buffer[fragmentIndex]!
     for (let index = fragment.length - 1; index >= 0; index--) {
       const code = fragment.charCodeAt(index)
-      if (code === 10)
+      if (code === 10 || code === 13)
         return Math.max(0, spaces - structuralIndent)
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
@@ -708,7 +708,8 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
       copiedUntil = index + 1
     }
 
-    if (code === 10) {
+    // A decoded `&#13;` is a bare CR, which also ends a CommonMark line.
+    if (code === 10 || code === 13) {
       lineIndent = 0
       orderedDigits = 0
     }

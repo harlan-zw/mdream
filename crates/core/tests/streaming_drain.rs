@@ -3456,6 +3456,29 @@ fn wrap_keeps_setext_markers_after_an_escaped_line_start_streaming() {
 }
 
 #[test]
+fn streaming_escapes_block_markers_after_a_decoded_bare_cr() {
+  for (html, expected) in [
+    ("<p>abc&#13;===</p>", "abc\r\\==="),
+    ("<p>abc&#13;---</p>", "abc\r\\---"),
+    ("<p>abc&#13;# x</p>", "abc\r\\# x"),
+    ("<p>abc&#13;- x</p>", "abc\r\\- x"),
+    ("<p>abc&#13;1. x</p>", "abc\r1\\. x"),
+    ("<p>abc&#13;<span>===</span></p>", "abc\r\\==="),
+    ("<p><span>abc&#13;</span>===</p>", "abc\r\\==="),
+    ("<p>abc&#13;=SUM(A1)</p>", "abc\r=SUM(A1)"),
+    ("<p>abc&#13;x === y</p>", "abc\rx === y"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn scout9_excluded_list_spacing_streaming() {
   for (html, expected) in [
     (

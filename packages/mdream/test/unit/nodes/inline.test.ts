@@ -340,3 +340,24 @@ describe.each(engines)('wrapped setext markers after an escaped line start $name
     }
   })
 })
+
+describe.each(engines)('block markers after a decoded bare CR $name', (engineConfig) => {
+  it.each([
+    ['<p>abc&#13;===</p>', 'abc\r\\==='],
+    ['<p>abc&#13;---</p>', 'abc\r\\---'],
+    ['<p>abc&#13;# x</p>', 'abc\r\\# x'],
+    ['<p>abc&#13;- x</p>', 'abc\r\\- x'],
+    ['<p>abc&#13;1. x</p>', 'abc\r1\\. x'],
+    ['<p>abc&#13;<span>===</span></p>', 'abc\r\\==='],
+    ['<p><span>abc&#13;</span>===</p>', 'abc\r\\==='],
+    ['<p>abc&#13;=SUM(A1)</p>', 'abc\r=SUM(A1)'],
+    ['<p>abc&#13;x === y</p>', 'abc\rx === y'],
+  ])('escapes like after a newline: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+})
