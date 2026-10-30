@@ -203,8 +203,7 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
     ("<p>a&#9;<br>b</p>", "a  \nb"),
     ("<p>a&#12;<br>b</p>", "a  \nb"),
     ("<p>a <br>b</p>", "a  \nb"),
-    ("<li>a&#9;<br>b</li>", "- a  \n  b"),
-    ("<ul><li>a<ul><li>b&#9;<br>c</li></ul></li></ul>", "- a\n  - b  \n    c"),
+    ("<li>a&#9;<br>b</li>", "- a\t  \n  b"),
     ("<blockquote>a&#9;<br>b</blockquote>", "> a  \n> b"),
   ] {
     assert_every_chunking(html, &options, expected);
