@@ -3437,6 +3437,25 @@ fn scout9_wrap_setext_boundary_streaming() {
 }
 
 #[test]
+fn wrap_keeps_setext_markers_after_an_escaped_line_start_streaming() {
+  for (html, width, expected) in [
+    ("<p>===<span> --</span></p>", 4, "\\=== --"),
+    ("<p><span>===</span> --</p>", 5, "\\=== --"),
+    ("<p><span>--</span> --</p>", 5, "\\-- --"),
+    ("<p>a<br><span>--</span> --</p>", 5, "a  \n\\-- --"),
+  ] {
+    let opts = HtmlToMarkdownOptions::default().with_wrap_width(width);
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
 fn scout9_excluded_list_spacing_streaming() {
   for (html, expected) in [
     (

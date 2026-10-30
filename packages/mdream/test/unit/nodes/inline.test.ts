@@ -324,3 +324,19 @@ describe.each(engines)('setext dash escaping $name', (engineConfig) => {
     }
   })
 })
+
+describe.each(engines)('wrapped setext markers after an escaped line start $name', (engineConfig) => {
+  it.each([
+    ['<p>===<span> --</span></p>', 4, '\\=== --'],
+    ['<p><span>===</span> --</p>', 5, '\\=== --'],
+    ['<p><span>--</span> --</p>', 5, '\\-- --'],
+    ['<p>a<br><span>--</span> --</p>', 5, 'a  \n\\-- --'],
+  ] as const)('keeps the marker on the escaped line: %s', async (html, wrapWidth, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, wrapWidth })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine, wrapWidth }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+})
