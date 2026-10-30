@@ -5,11 +5,98 @@ import { engines, resolveEngine, streamHtmlToMarkdown } from '../../utils/engine
 const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
-const BYTE_PARITY_CASES = [
+const LINK_SPACE_CASES: [string, string][] = [
+  [
+    '<a href="x"><ul><li></li></ul></a>',
+    '[-](x)',
+  ],
+  [
+    '<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>',
+    '- [  -](x)\n  - \\# h',
+  ],
+  [
+    '<a href="x"><ul><li></li><li></li></ul></a>',
+    '[- -](x)',
+  ],
+  [
+    '<a href="x"><ol start="10"><li></li></ol></a>',
+    '[10.](x)',
+  ],
+  [
+    '<a href="x"><ul><li><ul><li></li></ul></li></ul></a>',
+    '[-   -](x)',
+  ],
+  [
+    '<a href="x"><ul><li>one</li><li>two</li></ul></a>',
+    '[- one - two](x)',
+  ],
+  [
+    '<a href="x">before<ul><li></li></ul>after</a>',
+    '[before - after](x)',
+  ],
+  [
+    '<a href="x">text <span></span></a>tail',
+    '[text](x) tail',
+  ],
+  [
+    '<a href="x" title="Title"><ul><li></li></ul></a>tail',
+    '[- Title](x)tail',
+  ],
+  [
+    '<a href="x"><ul><li></li></ul></a><em>tail</em>',
+    '[-](x) *tail*',
+  ],
+  [
+    '<a href="x"><img src="i" alt="A"> <span></span></a>tail',
+    '[![A](i)](x) tail',
+  ],
+  [
+    '<a href="x" title="text">text <span></span></a>',
+    '[text](x)',
+  ],
+  [
+    '<a href="x" title="Title">text <span></span></a>',
+    '[text](x "Title")',
+  ],
+  [
+    '<a href="x"> </a>tail',
+    '[](x)tail',
+  ],
+  [
+    '<code><a href="x"><ul><li></li></ul></a></code>',
+    '`[- ](x)`',
+  ],
+  [
+    '<a href="x"><ul><li><code>a </code></li></ul></a>',
+    '[- `a`](x)',
+  ],
+  [
+    '<details><a href="x"><ul><li></li></ul></a></details>',
+    '<details><a href="x">- </a></details>',
+  ],
+]
+
+const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { tagOverrides: Record<string, string> } } }> = [
+  ...LINK_SPACE_CASES.map(([html]) => html),
   '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
   '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
   '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
   '<ul><li>a</li><template>hidden</template><li>b</li></ul>',
+  ...[
+    '<blockquote>x</blockquote><p>tail</p>',
+    '<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>',
+    '<blockquote>x</div>tail</blockquote><p>end</p>',
+    '<div>x</blockquote>tail</div><p>end</p>',
+    '<blockquote><p>a</p><p>b</p></blockquote>',
+    '<blockquote><div>x</div>tail</blockquote>',
+    '<ul><li><blockquote>x</blockquote></li></ul>',
+  ].map(html => ({ html, options: { plugins: { tagOverrides: { blockquote: 'div' } } } })),
+  ...([
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'script'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'style'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'textarea'],
+    ['<script><b>x</b></script><p>tail</p>', 'script', 'div'],
+  ] as const).map(([html, source, target]) => ({ html, options: { plugins: { tagOverrides: { [source]: target } } } })),
   '<p>aaaaaaaaaa --</p>',
   '<p>aaaaaaaaaa ==</p>',
   '<p>aaaaaaaaaa -</p>',
@@ -43,11 +130,30 @@ const BYTE_PARITY_CASES = [
 ]
 
 describe('cross-engine streaming byte parity', () => {
-  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (html) => {
+  it.each(LINK_SPACE_CASES)('trims link label spaces at every split: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      for (let split = 0; split <= html.length; split++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(expected)
+      }
+    }
+  })
+
+  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (testCase) => {
+    const { html, options } = typeof testCase === 'string' ? { html: testCase, options: undefined } : testCase
     const engineOutputs: string[] = []
 
     for (const { engine, name } of engines) {
-      const expected = engine.htmlToMarkdown(html)
+      const expected = engine.htmlToMarkdown(html, options)
       engineOutputs.push(expected)
 
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
@@ -59,9 +165,22 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
           streamed += chunk
         expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
+      }
+      for (let split = 1; split < html.length; split++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(expected)
       }
     }
 
