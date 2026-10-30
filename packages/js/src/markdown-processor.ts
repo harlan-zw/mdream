@@ -2096,6 +2096,34 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         openLinkFragment = -1
         return
       }
+      // Match Rust's link-close trim even when an empty element cleared the
+      // last text node. Only a trailing ASCII space run after label content
+      // moves outside the link; code spans and raw/custom anchors keep it.
+      if (eventType === NodeEventExit && tagId === TAG_A && openLinkFragment !== -1
+        && !handler.literalExit && !insideRawHtmlRegion && !gfmLifecycle.openCodeSpans.length
+        && lastChar === ' ') {
+        const bracket = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
+        let removed = 0
+        for (let index = buff.length - 1; index > bracket; index--) {
+          const fragment = buff[index]!
+          let end = fragment.length
+          while (end > 0 && fragment.charCodeAt(end - 1) === 32)
+            end--
+          removed += fragment.length - end
+          if (end === 0)
+            continue
+          if (removed && !isAsciiWhitespace(fragment.charCodeAt(end - 1))) {
+            trimTrailingSpaces(buff)
+            const cache = state.lastContentCache
+            if (cache)
+              state.lastContentCache = cache.slice(0, Math.max(0, cache.length - removed))
+            state.pendingInlineWhitespace = true
+            lastBuffEntry = buff.at(-1)!
+            lastChar = String.fromCharCode(lastOutputChar(buff))
+          }
+          break
+        }
+      }
       const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
         if (res) {
