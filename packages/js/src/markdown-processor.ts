@@ -56,7 +56,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -344,22 +344,13 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
 /**
  * Determines if spacing is needed between two characters
  */
-function needsSpacing(lastChar: string, firstChar: string, state: MarkdownState, openMarkerCount: number): boolean {
-  if (' \n\t'.includes(lastChar) || ' \n\t'.includes(firstChar)) {
-    return false
-  }
-
-  // Special case: Allow spacing between pipe and HTML tags in table cells
-  if (lastChar === '|' && firstChar === '<' && state && (state.depthMap[TAG_TABLE] || 0) > 0) {
-    return true
-  }
-
+function needsMarkdownSpacing(lastChar: string, firstChar: string, openMarkerCount: number): boolean {
   // A strikethrough opener touches its content; a closer or a literal tilde
   // keeps the separator.
   if (lastChar === '~' && openMarkerCount)
     return firstChar === '~'
 
-  return !'[(>*_`'.includes(lastChar) && !'])<.,!?:;*_`'.includes(firstChar)
+  return needsSpacing(lastChar, firstChar)
 }
 
 /**
@@ -785,6 +776,17 @@ function columnWidth(value: string, start: number): number {
   return width
 }
 
+function isSetextMarkerRun(word: string): boolean {
+  const first = word.charCodeAt(0)
+  if (first !== 45 && first !== 61)
+    return false
+  for (let index = 1; index < word.length; index++) {
+    if (word.charCodeAt(index) !== first)
+      return false
+  }
+  return true
+}
+
 /**
  * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
  * Words are never split, so an oversized token (e.g. a URL) overflows rather
@@ -809,7 +811,7 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
       const word = value.slice(i, next)
       const wordLen = [...word].length
       const needSpace = first ? leading : true
-      if (needSpace && col > prefixLen && col + 1 + wordLen > width) {
+      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !isSetextMarkerRun(word)) {
         out += `\n${prefix}`
         col = prefixLen
       }
@@ -1944,6 +1946,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastTextNode = undefined
         }
       }
+      // Spaces before a line break have no visual effect, even when an emptied
+      // inline element left them, so the break subsumes them as in Rust.
+      if (!inPre && breakOutput?.endsWith('\n') && lastOutputChar(buff) === 32)
+        trimTrailingSpaces(buff)
 
       const pendingCaption = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
@@ -1956,6 +1962,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         captionBreakRun++
       }
       else if (breakOutput) {
+        // A raw `<br>` takes the separator other raw inline HTML gets, as in Rust.
+        if (breakOutput.charCodeAt(0) === 60 && lastOutputChar(buff) === 124)
+          buff.push(' ')
         buff.push(breakOutput)
         state.lastContentCache = breakOutput
         if (openMarkerCount && hasNonWhitespace(breakOutput))
@@ -2011,6 +2020,34 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (cleanPass && eventType === NodeEventExit && tagId === TAG_A && cleanPass.unwrap(element)) {
         openLinkFragment = -1
         return
+      }
+      // Match Rust's link-close trim even when an empty element cleared the
+      // last text node. Only a trailing ASCII space run after label content
+      // moves outside the link; code spans and raw/custom anchors keep it.
+      if (eventType === NodeEventExit && tagId === TAG_A && openLinkFragment !== -1
+        && !handler.literalExit && !insideRawHtmlRegion && !gfmLifecycle.openCodeSpans.length
+        && lastChar === ' ') {
+        const bracket = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
+        let removed = 0
+        for (let index = buff.length - 1; index > bracket; index--) {
+          const fragment = buff[index]!
+          let end = fragment.length
+          while (end > 0 && fragment.charCodeAt(end - 1) === 32)
+            end--
+          removed += fragment.length - end
+          if (end === 0)
+            continue
+          if (removed && !isAsciiWhitespace(fragment.charCodeAt(end - 1))) {
+            trimTrailingSpaces(buff)
+            const cache = state.lastContentCache
+            if (cache)
+              state.lastContentCache = cache.slice(0, Math.max(0, cache.length - removed))
+            state.pendingInlineWhitespace = true
+            lastBuffEntry = buff.at(-1)!
+            lastChar = String.fromCharCode(lastOutputChar(buff))
+          }
+          break
+        }
       }
       const res = handler[eventFn]({ node: element, state })
       if (typeof res === 'string') {
@@ -2083,19 +2120,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         handlerOutput = undefined
       }
 
+      const literalOutput = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
       let meaningfulOutput = !dropBlockquoteOutput && output?.some(hasNonWhitespace) === true
       if (meaningfulOutput && handlerOutput !== undefined) {
         const markerType = INLINE_MARKER_TYPE[tagId]!
-        const literal = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
-        if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literal) {
+        if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literalOutput) {
           if (captionBoundary === 1) {
             captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, true) || captionBufferChanged
             captionTransition = true
             captionBoundary = 2
           }
           if (eventType === NodeEventEnter) {
+            // Inside an opened caption the marker follows its text and takes
+            // the usual separator, as in the Rust engine.
+            if (captionFrameCount !== 0 && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0)
+              captionTransition = true
             anchorPendingCaptions(state.buffer.length)
-            captionTransition = true
           }
           meaningfulOutput = false
         }
@@ -2119,7 +2159,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             captionBufferChanged = true
           captionBufferChanged = prepareCaptionOutput(false) || captionBufferChanged
           captionTransition = true
-          consumeCaptionTransition(isInlineElement, tagId)
+          consumeCaptionTransition(isInlineElement && !literalOutput, tagId)
         }
         finishCaptionFrame()
         if (!opened && flushCaptionBreakRun())
@@ -2128,7 +2168,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       else if (meaningfulOutput && captionNeedsPreparation()) {
         captionBufferChanged = prepareCaptionOutput(captionEnter, tagId !== TAG_LI) || captionBufferChanged
         captionTransition = true
-        consumeCaptionTransition(isInlineElement, tagId)
+        consumeCaptionTransition(isInlineElement && !literalOutput, tagId)
       }
       if (meaningfulOutput)
         commitCaptionFrames()
@@ -2349,7 +2389,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Add spacing between inline elements if needed
-    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0], state, openMarkerCount)) {
+    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsMarkdownSpacing(lastChar, output[0][0], openMarkerCount)) {
       pendingCloser = 0
       state.buffer.push(' ')
       state.lastContentCache = ' '
@@ -2372,6 +2412,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Only contiguous closing delimiters may extend a pending closer.
     if (pendingCloser && output && breaksPendingCloser(output, eventType === NodeEventEnter, pendingCloser))
       pendingCloser = 0
+
+    // An overridden <br> skips the break fast path, but its line break still
+    // subsumes the spaces before it.
+    if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
+      && !handler?.literalEnter && output?.at(-1)?.endsWith('\n') && lastOutputChar(buff) === 32) {
+      trimTrailingSpaces(buff)
+    }
 
     // Add all output fragments
     let outputStart = state.buffer.length
