@@ -773,15 +773,13 @@ function columnWidth(value: string, start: number): number {
   return width
 }
 
+/**
+ * Only the word's own line counts: a decoded line ending or a trailing tab
+ * inside the word still leaves the marker alone on the wrapped line.
+ */
 function isSetextMarkerRun(word: string): boolean {
   const first = word.charCodeAt(0)
-  if (first !== 45 && first !== 61)
-    return false
-  for (let index = 1; index < word.length; index++) {
-    if (word.charCodeAt(index) !== first)
-      return false
-  }
-  return true
+  return first === 45 ? isDashLine(word, 0) : first === 61 && isEqualsLine(word, 0)
 }
 
 /**

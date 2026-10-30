@@ -3424,6 +3424,11 @@ fn scout9_wrap_setext_boundary_streaming() {
     ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
     ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
     ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+    ("<p>aaaaaaaaaa ===&#10;foo</p>", "aaaaaaaaaa ===\nfoo"),
+    ("<p>aaaaaaaaaa ===&#13;foo</p>", "aaaaaaaaaa ===\rfoo"),
+    ("<p>aaaaaaaaaa ---&#13;foo</p>", "aaaaaaaaaa ---\rfoo"),
+    ("<p>aaaaaaaaaa ===&#9;&#10;foo</p>", "aaaaaaaaaa ===\t\nfoo"),
+    ("<p>aaaaaaaaaa ==x&#10;foo</p>", "aaaaaaaaaa\n==x\nfoo"),
   ] {
     let opts = HtmlToMarkdownOptions::default().with_wrap_width(10);
     assert_eq!(

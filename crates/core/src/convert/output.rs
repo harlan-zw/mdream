@@ -4247,10 +4247,16 @@ impl ConvertState {
     self.list_rule_pending = false;
   }
 
+  /// Only the word's own line counts: a decoded line ending or a trailing tab
+  /// inside the word still leaves the marker alone on the wrapped line.
   #[cold]
   fn is_setext_marker_run(word: &str) -> bool {
     let bytes = word.as_bytes();
-    matches!(bytes[0], b'-' | b'=') && bytes.iter().all(|&byte| byte == bytes[0])
+    match bytes[0] {
+      b'-' => Self::is_dash_line(bytes),
+      b'=' => Self::is_equals_line(bytes),
+      _ => false,
+    }
   }
 
   /// Push `text` into the buffer, hard-wrapping on spaces so no output line

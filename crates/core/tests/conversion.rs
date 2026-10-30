@@ -6240,6 +6240,15 @@ fn scout9_wrap_setext_boundary() {
     ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
     ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
     ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+    ("<p>aaaaaaaaaa ===&#10;foo</p>", "aaaaaaaaaa ===\nfoo"),
+    ("<p>aaaaaaaaaa ===&#13;foo</p>", "aaaaaaaaaa ===\rfoo"),
+    ("<p>aaaaaaaaaa ---&#10;foo</p>", "aaaaaaaaaa ---\nfoo"),
+    ("<p>aaaaaaaaaa ---&#13;foo</p>", "aaaaaaaaaa ---\rfoo"),
+    ("<p>aaaaaaaaaa ===&#9;&#10;foo</p>", "aaaaaaaaaa ===\t\nfoo"),
+    ("<p>aaaaaaaaaa ---&#9;&#13;foo</p>", "aaaaaaaaaa ---\t\rfoo"),
+    ("<p>aaaaaaaaaa -&#9;-&#9;-</p>", "aaaaaaaaaa -\t-\t-"),
+    ("<p>aaaaaaaaaa ===&#9;foo</p>", "aaaaaaaaaa\n===\tfoo"),
+    ("<p>aaaaaaaaaa ==x&#10;foo</p>", "aaaaaaaaaa\n==x\nfoo"),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
