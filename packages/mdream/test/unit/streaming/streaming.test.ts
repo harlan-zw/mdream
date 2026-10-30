@@ -144,6 +144,15 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<ul><li><blockquote>a&#13;<br></blockquote></li></ul>', '- \n  > a', 'a'],
   ['<h2>a&#9;</h2>', '## a', 'a'],
   ['<h2>a #&#9;</h2>', '## a \\#', 'a #'],
+  // The closing-sequence escape reads the heading's real end, past spacing an
+  // emptied element left and across a run split between fragments.
+  ['<h2>a #&#9;<i></i>&#9;<i></i></h2>', '## a \\#', 'a #'],
+  ['<h2>a #<i></i> <i></i></h2>', '## a \\#', 'a #'],
+  ['<h2>a ##<i></i>#</h2>', '## a \\###', 'a ###'],
+  ['<h2>#<i></i>&#9;</h2>', '## \\#', '#'],
+  ['<h2>a #<q></q></h2>', '## a \\#', 'a #'],
+  ['<li><h2>a #&#9;<i></i></h2></li>', '- ## a \\#', 'a #'],
+  ['<h2>a#<i></i>#</h2>', '## a##', 'a##'],
   ['<p><b>x y&#9;</b><br>b</p>', '**x y**  \nb', 'x y\nb'],
   ['<p><span>x y&#9;</span>z</p>', 'x y z', 'x y z'],
   // A break subsumes the run before it whatever the text's source whitespace,

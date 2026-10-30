@@ -238,6 +238,24 @@ fn a_break_subsumes_the_whitespace_run_before_it() {
 }
 
 #[test]
+fn heading_closing_run_is_read_at_the_real_end() {
+  // An emptied inline element can leave spacing after the run, and the run can
+  // be split around one; the escape still sees the run the renderer would.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<h2>a #&#9;<i></i>&#9;<i></i></h2>", "## a \\#"),
+    ("<h2>a #<i></i> <i></i></h2>", "## a \\#"),
+    ("<h2>a ##<i></i>#</h2>", "## a \\###"),
+    ("<h2>#<i></i>&#9;</h2>", "## \\#"),
+    ("<h2>a #<q></q></h2>", "## a \\#"),
+    ("<li><h2>a #&#9;<i></i></h2></li>", "- ## a \\#"),
+    ("<h2>a#<i></i>#</h2>", "## a##"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
 fn vertical_tab_is_content_to_the_trailing_trims() {
   // HTML's ASCII whitespace leaves out U+000B, so it stops a trim and stays in
   // the output, as it does in the JS engine.
