@@ -12,7 +12,9 @@ use crate::types::{
   ElementNode, ExtractedElement, HtmlToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
   TagOverrideConfig, TailwindData,
 };
-use crate::url::{is_autolink_uri, is_data_url, is_empty_link_href, resolve_url, slugify_heading};
+use crate::url::{
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url, slugify_heading,
+};
 use std::borrow::Cow;
 
 /// Whether the conversion writes plain text. A macro rather than a method: a
@@ -727,6 +729,9 @@ pub struct ConvertState {
   /// `ATTR_ALL` path: how far the `>` search reached, so the next chunk resumes
   /// it. The raw tag is carried by the caller.
   pending_tag: Option<PendingTagScan>,
+  /// Only the first `<base href>` counts, even when it is not usable. A usable
+  /// one replaces `options.origin` for every later URL.
+  base_href_seen: bool,
   discard: Discard,
   script_text_buffer: String,
   pub(crate) stack: crate::types::NodeStack,
@@ -1074,6 +1079,7 @@ impl ConvertState {
       entity_buffer: String::new(),
       pending_start: None,
       pending_tag: None,
+      base_href_seen: false,
       discard: Discard::No,
       script_text_buffer: String::new(),
       stack: crate::types::NodeStack::with_capacity(TYPICAL_NESTING_DEPTH),
