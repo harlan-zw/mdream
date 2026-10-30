@@ -453,7 +453,9 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
     const last = charOf(lastOutputChar(state.buffer))
     if (state.pendingInlineWhitespace) {
-      if (!node.value.trim())
+      // Only HTML's ASCII whitespace collapses into the pending space, as in
+      // Rust: U+000B, U+00A0 and other Unicode spaces are content.
+      if (!hasNonWhitespace(node.value))
         return
       if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(node.value[0] || ''))
         node.value = ` ${node.value}`

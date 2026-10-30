@@ -238,6 +238,31 @@ fn a_break_subsumes_the_whitespace_run_before_it() {
 }
 
 #[test]
+fn vertical_tab_does_not_collapse_into_a_pending_space() {
+  // Only HTML's ASCII whitespace collapses into the space an inline close
+  // left pending; U+000B and U+00A0 are content, as in the JS engine.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected_markdown, expected_text) in [
+    ("<b>a </b>&#11;", "**a** \u{b}", "a \u{b}"),
+    ("<span>a </span>&#11;<b>z</b>", "a \u{b}**z**", "a \u{b}z"),
+    (
+      "<p><span>a </span>&#11;</p><p>b</p>",
+      "a \u{b}\n\nb",
+      "a \u{b}\n\nb",
+    ),
+    (
+      "<span>a </span>&#160;<b>z</b>",
+      "a \u{a0}**z**",
+      "a \u{a0}z",
+    ),
+    ("<span>a </span>&#9;<b>z</b>", "a **z**", "a z"),
+  ] {
+    assert_every_chunking(html, &options, expected_markdown);
+    assert_every_text_chunking(html, expected_text);
+  }
+}
+
+#[test]
 fn heading_closing_run_is_read_at_the_real_end() {
   // An emptied inline element can leave spacing after the run, and the run can
   // be split around one; the escape still sees the run the renderer would.

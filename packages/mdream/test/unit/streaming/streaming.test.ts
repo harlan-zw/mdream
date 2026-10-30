@@ -186,6 +186,13 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<p><span>x y&#11;</span>z</p>', 'x y\u000Bz', 'x y\u000Bz'],
   ['<p>x y&#11;</p><p>b</p>', 'x y\u000B\n\nb', 'x y\u000B\n\nb'],
   ['<pre><code>a&#11;\n</code></pre>', '```\na\u000B\n```', 'a\u000B'],
+  // Nor does it collapse into the space an inline close left pending, and
+  // neither does other non-ASCII whitespace.
+  ['<b>a </b>&#11;', '**a** \u000B', 'a \u000B'],
+  ['<span>a </span>&#11;<b>z</b>', 'a \u000B**z**', 'a \u000Bz'],
+  ['<p><span>a </span>&#11;</p><p>b</p>', 'a \u000B\n\nb', 'a \u000B\n\nb'],
+  ['<span>a </span>&#160;<b>z</b>', 'a \u00A0**z**', 'a \u00A0z'],
+  ['<span>a </span>&#9;<b>z</b>', 'a **z**', 'a z'],
 ]
 
 describe('trailing whitespace at every chunking', () => {

@@ -1664,7 +1664,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
 
       if (state.pendingInlineWhitespace) {
-        if (!textNode.value.trim())
+        // Only HTML's ASCII whitespace collapses into the pending space, as in
+        // Rust: U+000B, U+00A0 and other Unicode spaces are content.
+        if (!hasNonWhitespace(textNode.value))
           return
         if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
           textNode.value = ` ${textNode.value}`
