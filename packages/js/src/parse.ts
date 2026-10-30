@@ -1718,7 +1718,7 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
       }
       // The label is content of a link around this link's block too, as Rust
       // counts it for every open node.
-      if (state.depthMap[TAG_A] > 1)
+      if (state.depthMap[TAG_A]! > 1)
         countContentInEnclosingLink(parents.at(-1))
     }
   }
