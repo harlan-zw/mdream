@@ -3384,6 +3384,10 @@ impl ConvertState {
       return;
     }
     self.empty_item_hazard = false;
+    // Inserting before the marker moves a trailing hard break without removing
+    // it. Preserve its boundary so a following parent paragraph resets the
+    // child item's continuation indent, just as it does without this guard.
+    let break_at_end = self.hard_break_end == self.buffer.len();
     if !self.replace_code_span_content(self.empty_item_line_start..self.empty_item_line_start, "\n")
     {
       return;
@@ -3400,6 +3404,9 @@ impl ConvertState {
 
     let at = self.empty_item_line_start;
     self.shift_offsets_at_or_after(at);
+    if break_at_end {
+      self.hard_break_end = self.buffer.len();
+    }
 
     self.invalidate_line_start();
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
