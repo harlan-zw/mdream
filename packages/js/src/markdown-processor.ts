@@ -135,6 +135,8 @@ export interface MarkdownState {
   emptyListMarkerDepth: number
   /** A separate parent-paragraph boundary after a nested list. */
   listTailPending?: boolean
+  /** The quote that took a pending tail at enter. */
+  listTailQuote?: ElementNode
   listTailStart?: number
   /** First fragment to recheck, including the last fragment a writer may append to. */
   listTailScanFrom?: number
@@ -163,6 +165,8 @@ export interface BlockquoteFrame {
    * can flush the pre-quote context before the exit reads it.
    */
   followsWhitespace: boolean
+  /** Took over a nested list's pending tail at enter. */
+  listTail: boolean
 }
 
 interface GfmLifecycleState {
@@ -1140,8 +1144,13 @@ function finalizeBlockquote(state: MarkdownState): void {
   // An empty quote whose start followed terminated output writes nothing.
   // The context is the enter-time snapshot: streaming may have already
   // yielded and compacted the characters this decision used to read back.
-  if (!content && frame.followsWhitespace)
+  if (!content && frame.followsWhitespace) {
+    // Nothing is left to quote, so the parent's next content still needs the
+    // blank line that ends the nested list above it.
+    if (frame.listTail)
+      state.listTailPending = true
     return
+  }
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -1348,7 +1357,9 @@ function commitGfmAction(
           ? state.lastContentCache !== undefined
           && isAsciiWhitespace(state.lastContentCache.charCodeAt(state.lastContentCache.length - 1))
           : isAsciiWhitespace(before),
+        listTail: state.listTailQuote === owner,
       })
+      state.listTailQuote = undefined
       state.bufferedBlockquoteDepth = state.blockquotes.length
       break
     }
@@ -1425,6 +1436,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     emptyListMarkerFragment: undefined,
     emptyListMarkerDepth: 0,
     listTailPending: false,
+    listTailQuote: undefined,
     listTailStart: undefined,
     listTailScanFrom: undefined,
     emptyListMarkerScanFrom: undefined,
@@ -1880,6 +1892,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       else if (node.type === ELEMENT_NODE && eventType === NodeEventEnter) {
         const tagId = (node as ElementNode).tagId
         if (tagId === TAG_BLOCKQUOTE) {
+          // The quote opens its own block. An empty one hands the tail back.
+          state.listTailQuote = node as ElementNode
           state.listTailPending = false
           state.emptyListMarkerFragment = undefined
         }

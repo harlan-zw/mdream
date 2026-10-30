@@ -961,6 +961,8 @@ pub struct ConvertState {
   /// content follows it. `LIST_TAIL_PENDING`: a nested list ended and the
   /// parent item's text, if any, needs its own paragraph.
   list_pending: u8,
+  /// `blockquotes` depth of the quote that took a pending tail, 0 for none.
+  list_tail_quote_depth: usize,
   /// Actual built-in item marker end, distinct from marker-like source text.
   empty_list_marker_end: usize,
   /// `<li>` nesting level of the latest built-in item marker.
@@ -1221,6 +1223,7 @@ impl ConvertState {
       #[cfg(test)]
       parent_marker_scans: 0,
       list_pending: 0,
+      list_tail_quote_depth: 0,
       empty_list_marker_end: usize::MAX,
       empty_list_marker_depth: 0,
       list_tail_start: usize::MAX,

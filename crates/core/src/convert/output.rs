@@ -645,6 +645,10 @@ impl ConvertState {
     let Some(frame) = self.blockquotes.pop() else {
       return;
     };
+    let took_list_tail = self.list_tail_quote_depth == self.blockquotes.len() + 1;
+    if took_list_tail {
+      self.list_tail_quote_depth = 0;
+    }
     let content_end = trim_ascii_whitespace_end(&self.buffer);
     // An empty range means "no content" only while none of it has left the
     // buffer. `has_streamed_output` is global, so reading it here drops the `>`
@@ -653,6 +657,11 @@ impl ConvertState {
     if content_end < frame.content_start
       || (content_end == frame.content_start && content_left_buffer)
     {
+      // Nothing is left to quote, so the parent's next content still needs the
+      // blank line that ends the nested list above it.
+      if took_list_tail {
+        self.list_pending |= LIST_TAIL_PENDING;
+      }
       return;
     }
     let content = &self.buffer[frame.content_start..content_end];
@@ -4398,7 +4407,8 @@ impl ConvertState {
 
   /// Write the separators `list_pending` deferred, now that visible content
   /// follows: a nested list's tail first, then an item rule's. A blockquote
-  /// opening its own block drops the tail instead.
+  /// opening its own block takes the tail instead, and an empty one hands it
+  /// back at its exit.
   #[cold]
   #[inline(never)]
   fn flush_list_pending(&mut self, tag_id: Option<u8>) {
@@ -4406,6 +4416,18 @@ impl ConvertState {
       if matches!(tag_id, Some(TAG_BLOCKQUOTE)) {
         self.list_pending &= !LIST_TAIL_PENDING;
         self.empty_list_marker_end = usize::MAX;
+        // A literal quote pushes no frame to hand the tail back.
+        let overrides = self
+          .options
+          .plugins
+          .as_ref()
+          .and_then(|p| p.tag_overrides.as_ref());
+        let node = &self.stack[self.stack.len() - 1];
+        if Self::override_for_node(overrides, self.override_idx.as_deref(), node)
+          .is_none_or(|config| config.enter.is_none())
+        {
+          self.list_tail_quote_depth = self.blockquotes.len() + 1;
+        }
       } else {
         self.flush_list_tail();
       }

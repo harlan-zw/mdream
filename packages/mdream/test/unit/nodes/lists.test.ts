@@ -84,6 +84,30 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 
+  it.each([
+    ['<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>', '- A\n  - inner\n\n  parent'],
+    ['<ul><li>A<ul><li>inner</li></ul><blockquote> </blockquote><p>parent</p></li></ul>', '- A\n  - inner\n\n  parent'],
+    ['<ul><li>A<ul><li>inner</li></ul><blockquote><blockquote></blockquote></blockquote>parent</li></ul>', '- A\n  - inner\n\n  parent'],
+    ['<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote></blockquote>parent</li></ul>', '- A\n  - inner\n\n  parent'],
+    ['<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><h2>h</h2></li></ul>', '- A\n  - inner\n\n  ## h'],
+    ['<ul><li>A<ul><li></li></ul><blockquote></blockquote>parent</li></ul>', '- A\n\n  - \n\n  parent'],
+    ['<ol><li>A<ol><li>inner</li></ol><blockquote></blockquote>parent</li></ol>', '1. A\n   1. inner\n\n   parent'],
+    ['<blockquote><ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul></blockquote>', '> - A\n>   - inner\n>\n>   parent'],
+    ['<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote></li><li>n</li></ul>', '- A\n  - inner\n- n'],
+    ['<ul><li>A<ul><li>inner</li></ul><blockquote>q</blockquote></li></ul>', '- A\n  - inner\n  > q'],
+    ['<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote>q</blockquote></li></ul>', '- A\n  - inner\n\n  > q'],
+  ])('keeps a nested list tail across an empty quote: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it('drops a nested list tail at a literal quote', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<ul><li>A<ul><li>inner</li></ul><blockquote>x</blockquote><p>k</p><my-q></my-q>t</li></ul>'
+    const tagOverrides = { 'blockquote': { enter: 'Q:', exit: ':Q' }, 'my-q': 'blockquote' }
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe('- A\n  - innerQ: x:Q\n\n  k\nt')
+  })
+
   it.each([{ id: 'F1-1', html: '<ul><li>lead<ul><li></li></ul>text</li></ul>', expected: '- lead\n\n  -\n\n  text' }, { id: 'F1-2', html: '<ul><li><p>lead</p><ul><li></li></ul>text</li></ul>', expected: '- lead\n\n  -\n\n  text' }, { id: 'F1-3', html: '<ul><li><blockquote><ul><li></li></ul>text</blockquote></li></ul>', expected: '- \n  >\n  > -\n  >\n  > text' }, { id: 'F1-4', html: '<ul><li><ul><li></li></ul>a<ul><li></li></ul>b</li></ul>', expected: '-\n  -\n\n  a\n\n  -\n\n  b' }, { id: 'F2-1', html: '<ul><li><ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>text</li></ul>', expected: '-\n  -\n    -\n      -\n\n  text' }, { id: 'F2-2', html: '<ol><li><ol><li><ol><li><ol><li></li></ol></li></ol></li></ol>t</li></ol>', expected: '1.\n   1.\n      1.\n         1.\n\n   t' }, { id: 'F3-1', html: '<ul><li><ul><li></li></ul><span>t</span></li></ul>', expected: '-\n  -\n\n  XtY', overrides: { span: { enter: 'X', exit: 'Y' } } }, { id: 'F3-2', html: '<ul><li><ul><li></li></ul><span></span></li><li>n</li></ul>', expected: '-\n  -\n\n  XY\n- n', overrides: { span: { enter: 'X', exit: 'Y' } } }, { id: 'F3-3', html: '<ul><li><ul><li></li></ul><em></em></li><li>n</li></ul>', expected: '-\n  -\n- n', overrides: { em: { enter: '', exit: '' } } }, { id: 'F4-1', html: '<ul><li><hr><br>text</li></ul>', expected: '- ***\n\n    \n  text' }, { id: 'F4-2', html: '<ul><li><ul><li></li></ul><br>text</li></ul>', expected: '-\n  -\n\n    \n  text' }, { id: 'F4-3', html: '<ul><li><ul><li></li></ul><br></li><li>n</li></ul>', expected: '-\n  -\n- n' }, { id: 'F5-1', html: '<ul><li><ul><li></li></ul><div></div></li><li>n</li></ul>', expected: '-\n  -\n- n' }, { id: 'F5-2', html: '<ul><li><ul><li></li></ul><p></p></li><li>n</li></ul>', expected: '-\n  -\n- n' }, { id: 'F5-3', html: '<ul><li><ul><li></li></ul><em></em></li><li>next</li></ul>', expected: '-\n  -\n- next' }, { id: 'F5-4', html: '<ul><li><ul><li></li></ul><code></code></li><li>n</li></ul>', expected: '-\n  -\n- n' }, { id: 'F6-1', html: '<ul><li><ul><li>a<br>-</li></ul>text</li></ul>', expected: '-\n  - a  \n    -\n\n  text' }, { id: 'F6-2', html: '<ul><li><ul><li>a<br>1.</li></ul>text</li></ul>', expected: '-\n  - a  \n    1.\n\n  text' }, { id: 'F7-1', html: '<ul><li><ul><li></li></ul><blockquote>q</blockquote></li></ul>', expected: '-\n  - \n  > q' }])('preserves empty list review case $id', async ({ html, expected, overrides }) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine, plugins: overrides ? { tagOverrides: overrides } : undefined })).toBe(expected)

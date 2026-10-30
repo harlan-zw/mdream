@@ -3951,3 +3951,61 @@ fn empty_ancestor_list_markers_match_every_split() {
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
+
+#[test]
+fn empty_quote_keeps_nested_list_tail() {
+  for (html, expected) in [
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote> </blockquote><p>parent</p></li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote><blockquote></blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><h2>h</h2></li></ul>",
+      "- A\n  - inner\n\n  ## h",
+    ),
+    (
+      "<ul><li>A<ul><li></li></ul><blockquote></blockquote>parent</li></ul>",
+      "- A\n\n  - \n\n  parent",
+    ),
+    (
+      "<ol><li>A<ol><li>inner</li></ol><blockquote></blockquote>parent</li></ol>",
+      "1. A\n   1. inner\n\n   parent",
+    ),
+    (
+      "<blockquote><ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul></blockquote>",
+      "> - A\n>   - inner\n>\n>   parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote></li><li>n</li></ul>",
+      "- A\n  - inner\n- n",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote>q</blockquote></li></ul>",
+      "- A\n  - inner\n  > q",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+      "- A\n  - inner\n\n  > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
