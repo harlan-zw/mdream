@@ -931,6 +931,91 @@ fn relative_path_with_origin() {
 }
 
 #[test]
+fn base_href_ignores_empty_host_and_template_bases() {
+  let origin = HtmlToMarkdownOptions {
+    origin: Some("https://example.com/article/".into()),
+    ..Default::default()
+  };
+  for href in ["https://:80/docs/", "http://user@/docs/", "http://@/docs/"] {
+    let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
+    assert_eq!(
+      html_to_markdown(&html, origin.clone()),
+      "[Link](https://example.com/article/page)",
+      "{href}"
+    );
+  }
+  let html = r#"<template><base href="https://other.example/"></template><a href="page">Link</a>"#;
+  assert_eq!(
+    html_to_markdown(html, origin.clone()),
+    "[Link](https://example.com/article/page)"
+  );
+  // A template at the depth limit is opaque and must not set the base either.
+  let deep = format!(
+    "{}<template><base href=\"https://other.example/\"></template>{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(!html_to_markdown(&deep, origin.clone()).contains("other.example"));
+  // An anchor flattened at the depth limit must not let its <base> replace the origin.
+  let deep_anchor = format!(
+    "{}<a href=\"/start\"><base href=\"https://other.example/\">X</a>{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(
+    html_to_markdown(&deep_anchor, origin.clone())
+      .ends_with("[Link](https://example.com/article/page)")
+  );
+  // Same for a base directly under a flattened div.
+  let deep_div = format!(
+    "{}<base href=\"https://other.example/\">X{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(
+    html_to_markdown(&deep_div, origin.clone())
+      .ends_with("[Link](https://example.com/article/page)")
+  );
+  // Userinfo with a real host is a valid base: the host follows the last '@'.
+  for href in ["http://@host.example/", "http://:pw@host.example/"] {
+    let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
+    assert_eq!(
+      html_to_markdown(&html, origin.clone()),
+      format!("[Link]({href}page)"),
+      "{href}"
+    );
+  }
+}
+
+#[test]
+fn base_href_replaces_origin_for_later_urls() {
+  let origin = "https://example.com/article/current.html";
+  assert_eq!(
+    convert_with_origin(
+      r#"<a href="a">A</a> <base href="/docs/"><base href="https://ignored.example/"><a href="b">B</a> <img src="c.png" alt="C">"#,
+      origin
+    ),
+    "[A](https://example.com/article/a) [B](https://example.com/docs/b) ![C](https://example.com/docs/c.png)"
+  );
+  for href in [
+    "javascript:alert(1)",
+    "ftp://cdn.example/",
+    "https:///x/",
+    "",
+  ] {
+    assert_eq!(
+      convert_with_origin(&format!(r#"<base href="{href}"><a href="b">B</a>"#), origin),
+      "[B](https://example.com/article/b)",
+      "{href:?}"
+    );
+  }
+  assert_eq!(
+    convert(r#"<a href="a">A<base href="https://cdn.example/">x</a> <a href="b">B</a>"#),
+    "[Ax](a) [B](b)"
+  );
+}
+
+#[test]
 fn relative_path_without_origin() {
   assert_eq!(
     convert(r#"<a href="/page#section">Link</a>"#),
