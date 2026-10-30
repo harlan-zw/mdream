@@ -3329,6 +3329,10 @@ impl ConvertState {
       return;
     }
     self.empty_item_hazard = false;
+    // Inserting before the marker moves a trailing hard break without removing
+    // it. Preserve its boundary so a following parent paragraph resets the
+    // child item's continuation indent, just as it does without this guard.
+    let break_at_end = self.hard_break_end == self.buffer.len();
     if !self.replace_code_span_content(self.empty_item_line_start..self.empty_item_line_start, "\n")
     {
       return;
@@ -3345,6 +3349,9 @@ impl ConvertState {
 
     let at = self.empty_item_line_start;
     self.shift_offsets_at_or_after(at);
+    if break_at_end {
+      self.hard_break_end = self.buffer.len();
+    }
 
     self.invalidate_line_start();
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
@@ -4210,6 +4217,12 @@ impl ConvertState {
     self.list_rule_pending = false;
   }
 
+  #[cold]
+  fn is_setext_marker_run(word: &str) -> bool {
+    let bytes = word.as_bytes();
+    matches!(bytes[0], b'-' | b'=') && bytes.iter().all(|&byte| byte == bytes[0])
+  }
+
   /// Push `text` into the buffer, hard-wrapping on spaces so no output line
   /// exceeds `self.wrap_width` characters. Words are never split, so a single
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
@@ -4239,7 +4252,11 @@ impl ConvertState {
       let word_len = word.chars().count();
       let need_space = if first { first_needs_space } else { true };
 
-      if need_space && col > prefix_len && col + 1 + word_len > width {
+      if need_space
+        && col > prefix_len
+        && col + 1 + word_len > width
+        && (plain_text!(self) || !Self::is_setext_marker_run(word))
+      {
         self.push_code_span_content("\n", true);
         self.push_code_span_content(&prefix, true);
         col = prefix_len;

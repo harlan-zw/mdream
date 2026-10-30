@@ -6128,6 +6128,36 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 }
 
 #[test]
+fn scout9_wrap_setext_boundary() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
+fn scout9_wrap_setext_plain_text_still_wraps() {
+  assert_eq!(
+    html_to_text(
+      "<p>aaaaaaaaaa --</p>",
+      HtmlToMarkdownOptions::default().with_wrap_width(10)
+    ),
+    "aaaaaaaaaa\n--"
+  );
+}
+
+#[test]
 fn scout9_excluded_list_spacing() {
   for (html, expected) in [
     (
@@ -6280,4 +6310,12 @@ fn link_trailing_spaces_across_empty_elements() {
   ] {
     assert_eq!(convert(html), expected, "html={html}");
   }
+}
+
+#[test]
+fn paragraph_after_empty_nested_quote() {
+  assert_eq!(
+    convert("<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>"),
+    "- x\n\n  - \n  \n\n  y"
+  );
 }
