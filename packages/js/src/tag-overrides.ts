@@ -21,7 +21,8 @@ export function buildTagOverrideHandlers(
 
     const baseId = TagIdMap[tagName as keyof typeof TagIdMap]
     const baseHandler = baseId === undefined ? undefined : tagHandlers[baseId]
-    const handler: TagHandler = baseHandler ? { ...baseHandler } : {}
+    // A custom element stays inline, as without an override and in the Rust engine.
+    const handler: TagHandler = baseHandler ? { ...baseHandler } : baseId === undefined ? { isInline: true } : {}
 
     if (override.enter !== undefined) {
       const output = override.enter
