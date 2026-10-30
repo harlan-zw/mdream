@@ -6487,6 +6487,36 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 }
 
 #[test]
+fn scout9_wrap_setext_boundary() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
+fn scout9_wrap_setext_plain_text_still_wraps() {
+  assert_eq!(
+    html_to_text(
+      "<p>aaaaaaaaaa --</p>",
+      HtmlToMarkdownOptions::default().with_wrap_width(10)
+    ),
+    "aaaaaaaaaa\n--"
+  );
+}
+
+#[test]
 fn a_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
   for (html, expected) in [
     (

@@ -3540,6 +3540,28 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
 }
 
 #[test]
+fn scout9_wrap_setext_boundary_streaming() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    let opts = HtmlToMarkdownOptions::default().with_wrap_width(10);
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
 fn streaming_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
   for html in [
     r#"<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>"#,
