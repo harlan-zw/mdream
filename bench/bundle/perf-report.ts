@@ -22,6 +22,7 @@ export interface PerfBench {
   comparisonRatio?: number
   // reported for reference but excluded from the verdict (e.g. wall time)
   informational?: boolean
+  outputChanged?: boolean
 }
 
 export interface PerfRun {
@@ -124,6 +125,8 @@ export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
   const inconclusive = rows.filter(r => r.informational && !r.bench.informational && (r.status === 'slower' || r.status === 'faster'))
 
   const out: string[] = ['### ⚡ Performance _(directional)_', '']
+  if (rows.some(row => row.bench.outputChanged || row.base?.outputChanged))
+    out.push('Measurements marked "output changed" compare different output or metadata between base and PR.', '')
   if (slower.length)
     out.push(`⚠️ **${slower.length} slower** · past the per-metric noise gate`)
   else if (changed.length)
@@ -138,7 +141,7 @@ export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
   if (changed.length) {
     out.push('', '| Benchmark | base → PR | Δ |', '|---|---|---|')
     for (const row of changed)
-      out.push(`| **${row.bench.name}** | ${fmtValue(row.base!)} → ${fmtValue(row.bench)} | ${deltaCell(row)} |`)
+      out.push(`| **${row.bench.name}${row.bench.outputChanged || row.base?.outputChanged ? ' (output changed)' : ''}** | ${fmtValue(row.base!)} → ${fmtValue(row.bench)} | ${deltaCell(row)} |`)
   }
 
   out.push('', `<details><summary>All benchmarks (${rows.length})</summary>`, '')
@@ -147,7 +150,7 @@ export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
     const rme = row.bench.comparisonRme != null
       ? `±${row.bench.comparisonRme.toFixed(1)}% paired`
       : row.bench.rme != null ? `±${row.bench.rme.toFixed(1)}%` : '—'
-    out.push(`| ${row.bench.name} | ${fmtValue(row.bench)} | ${deltaCell(row)} | ${rme} |`)
+    out.push(`| ${row.bench.name}${row.bench.outputChanged || row.base?.outputChanged ? ' (output changed)' : ''} | ${fmtValue(row.bench)} | ${deltaCell(row)} | ${rme} |`)
   }
   out.push('', '</details>')
 
