@@ -4130,7 +4130,7 @@ impl ConvertState {
       && !self.in_table_cell()
       && self.depth_map[TAG_PRE as usize] == 0
       && has_output
-      && (self.pending_raw_html_boundary || new_lines > 0 || self.block_open_prefix("").is_none())
+      && (self.pending_raw_html_boundary || new_lines > 0 || !self.block_open_needs_break())
     {
       self.raw_html_needs_boundary = true;
       self.raw_html_markdown = false;
@@ -4145,7 +4145,7 @@ impl ConvertState {
     if self.raw_html_needs_boundary && self.raw_html_markdown && !self.line_opens_raw_html_block() {
       self.raw_html_needs_boundary = false;
     }
-    if !has_override && has_output && self.block_open_prefix("").is_none() {
+    if !has_override && has_output && !self.block_open_needs_break() {
       self.raw_html_needs_boundary = true;
     }
     if self.raw_html_block_depth() == 1 {
@@ -4199,6 +4199,18 @@ impl ConvertState {
   /// Separation a block needs to open at the content column `prefix` describes,
   /// or `None` when the buffer already sits there.
   fn block_open_prefix(&self, prefix: &str) -> Option<Cow<'static, str>> {
+    if self.block_open_needs_break() {
+      Some(Cow::Owned(format!("\n\n{prefix}")))
+    } else if !prefix.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') {
+      Some(Cow::Owned(prefix.to_string()))
+    } else {
+      None
+    }
+  }
+
+  /// Whether a block opening here has to break the paragraph with a blank line
+  /// first. Builds nothing, for callers that only need the answer.
+  fn block_open_needs_break(&self) -> bool {
     let bytes = self.buffer.as_bytes();
     // An emptied buffer is the start of the output only while no drain has taken
     // this line away; afterwards `flushed_tail` holds what the block would be
@@ -4208,8 +4220,7 @@ impl ConvertState {
     let drained_onto_content =
       self.has_flushed_tail() && !matches!(self.flushed_tail[1], b'\n' | b' ');
     match bytes.last() {
-      None if drained_onto_content => Some(Cow::Owned(format!("\n\n{prefix}"))),
-      None => None,
+      None => drained_onto_content,
       Some(b' ') => {
         // A trailing space can be a pending list marker already at the content
         // column, or ordinary text (`"item "`) that still has to break as a
@@ -4218,18 +4229,14 @@ impl ConvertState {
         if end == 0 {
           // Every retained byte is a space, so the line's content — and the
           // marker scan's starting point — left with the drain.
-          return drained_onto_content.then(|| Cow::Owned(format!("\n\n{prefix}")));
+          return drained_onto_content;
         }
-        if bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end) {
-          Some(Cow::Owned(format!("\n\n{prefix}")))
-        } else {
-          None
-        }
+        bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end)
       }
-      Some(b'\n') => (!prefix.is_empty()).then(|| Cow::Owned(prefix.to_string())),
+      Some(b'\n') => false,
       // Directly under text the block reads as a setext underline or a lazy
       // continuation, so it has to break the paragraph first.
-      _ => Some(Cow::Owned(format!("\n\n{prefix}"))),
+      _ => true,
     }
   }
 
