@@ -885,6 +885,41 @@ function isBreakWhitespace(code: number): boolean {
   return code === 32 || code === 9 || code === 12 || code === 13
 }
 
+/**
+ * Whether the text ending at `end` in `buffer[fragment]` is a list marker that
+ * opens its line or follows a space: `-`, `*`, `+`, or digits then `.` or `)`.
+ */
+function followsItemMarker(buffer: readonly string[], fragment: number, end: number): boolean {
+  let index = fragment
+  let offset = end
+  const previous = (): number => {
+    while (offset === 0) {
+      if (--index < 0)
+        return -1
+      offset = buffer[index]!.length
+    }
+    return buffer[index]!.charCodeAt(--offset)
+  }
+  let code = previous()
+  if (code === 46 || code === 41) {
+    let digits = 0
+    code = previous()
+    while (code >= 48 && code <= 57) {
+      digits++
+      code = previous()
+    }
+    if (digits === 0 || digits > 9)
+      return false
+  }
+  else if (code === 45 || code === 42 || code === 43) {
+    code = previous()
+  }
+  else {
+    return false
+  }
+  return code === -1 || code === 32 || code === 10
+}
+
 /** HTML's ASCII whitespace, as in Rust: U+000B is content. */
 export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13 && code !== 11)
@@ -1543,8 +1578,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   // A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
-  // line feed, which ends block spacing or an earlier break and so stays.
-  function trimBeforeBreak(buff: string[]): void {
+  // line feed, which ends block spacing or an earlier break and so stays. A
+  // run that opens a line keeps the `indent` the break writes after its own
+  // line feed, an earlier break's or a block's, and a run right after a list
+  // item's marker stays whole, the marker's own space included.
+  function trimBeforeBreak(buff: string[], indent: number): void {
     let floor = state.codeFence ? state.codeFence.fragment + 1 : 0
     const span = gfmLifecycle.openCodeSpans.at(-1)
     if (span && span.fragment >= floor)
@@ -1552,17 +1590,31 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const quote = state.blockquotes.at(-1)
     if (quote && quote.fragment > floor)
       floor = quote.fragment
+    let run = 0
+    let opensLine = false
     for (let index = buff.length - 1; index >= floor; index--) {
       const fragment = buff[index]!
       let end = fragment.length
       while (end > 0 && isBreakWhitespace(fragment.charCodeAt(end - 1)))
         end--
-      if (end !== fragment.length) {
-        state.outputPositions?.replace(index, index + 1, [fragment.slice(0, end)])
-        buff[index] = fragment.slice(0, end)
-      }
-      if (end > 0)
+      run += fragment.length - end
+      if (end > 0) {
+        opensLine = fragment.charCodeAt(end - 1) === 10
+        if (!opensLine && state.depthMap[TAG_LI] && followsItemMarker(buff, index, end))
+          return
         break
+      }
+    }
+    let remove = opensLine ? run - Math.min(indent, run) : run
+    for (let index = buff.length - 1; remove > 0; index--) {
+      const fragment = buff[index]!
+      const cut = Math.min(remove, fragment.length)
+      if (cut !== 0) {
+        const trimmed = fragment.slice(0, fragment.length - cut)
+        state.outputPositions?.replace(index, index + 1, [trimmed])
+        buff[index] = trimmed
+      }
+      remove -= cut
     }
   }
 
@@ -1928,9 +1980,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastTextNode = undefined
       }
       // Whitespace before a line break has no visual effect, even when an
-      // emptied inline element left it, so the break subsumes it as in Rust.
-      if (!inPre && breakOutput?.endsWith('\n') && isBreakWhitespace(lastOutputChar(buff)))
-        trimBeforeBreak(buff)
+      // emptied inline element left it or a list item's indent follows the line
+      // feed, so the break subsumes it as in Rust.
+      const breakLineEnd = breakOutput ? breakOutput.lastIndexOf('\n') : -1
+      if (!inPre && breakLineEnd !== -1 && isBreakWhitespace(lastOutputChar(buff)))
+        trimBeforeBreak(buff, breakOutput!.length - breakLineEnd - 1)
 
       const pendingCaption = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
@@ -2374,8 +2428,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An overridden <br> skips the break fast path, but its line break still
     // subsumes the whitespace before it.
     if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
-      && !handler?.literalEnter && output?.at(-1)?.endsWith('\n') && isBreakWhitespace(lastOutputChar(buff))) {
-      trimBeforeBreak(buff)
+      && !handler?.literalEnter && output?.length && isBreakWhitespace(lastOutputChar(buff))) {
+      const breakText = output.join('')
+      const breakLineEnd = breakText.lastIndexOf('\n')
+      if (breakLineEnd !== -1)
+        trimBeforeBreak(buff, breakText.length - breakLineEnd - 1)
     }
 
     // Add all output fragments
