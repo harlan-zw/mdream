@@ -2,6 +2,52 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('blockquotes $name', (engineConfig) => {
+  it.each([510, 511, 512, 513])('normalizes aliased closing names at depth %s', async (depth) => {
+    const prefix = '<span>'.repeat(depth)
+    const suffix = `${'</span>'.repeat(depth)}<p>end</p>`
+    const expected = depth === 510 ? 'x\n\ntail\n\nend' : 'x tail\n\nend'
+    for (const [open, close] of [['BLOCKQUOTE', 'BLOCKQUOTE'], ['BlOcKqUoTe', 'bLoCkQuOtE']]) {
+      const body = `<blockquote><${open}>x</${close}>tail</blockquote>`
+      const html = `${prefix}${body}${suffix}`
+      const options = { plugins: { tagOverrides: { blockquote: 'div' } } }
+      expect(engineConfig.engine.htmlToMarkdown(html, options)).toBe(expected)
+      for (let split = 0; split <= body.length; split++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (const chunk of [prefix, body.slice(0, split), body.slice(split), suffix])
+              controller.enqueue(chunk)
+            controller.close()
+          },
+        })
+        let actual = ''
+        for await (const chunk of engineConfig.engine.streamHtmlToMarkdown(input, options))
+          actual += chunk
+        expect(actual, `depth=${depth} split=${split}`).toBe(expected)
+      }
+    }
+  })
+
+  it.each([
+    ['<blockquote>x</blockquote><p>tail</p>', 'x\n\ntail'],
+    ['<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>', 'x\n\ntail'],
+    ['<blockquote>x</div>tail</blockquote><p>end</p>', 'xtail\n\nend'],
+    ['<div>x</blockquote>tail</div><p>end</p>', 'xtail\n\nend'],
+    ['<blockquote><p>a</p><p>b</p></blockquote>', 'a\n\nb'],
+    ['<blockquote><div>x</div>tail</blockquote>', 'x\n\ntail'],
+    ['<ul><li><blockquote>x</blockquote></li></ul>', '- x'],
+  ])('aliases a built-in blockquote to div: %s', (html, expected) => {
+    expect(engineConfig.engine.htmlToMarkdown(html, { plugins: { tagOverrides: { blockquote: 'div' } } })).toBe(expected)
+  })
+
+  it.each([
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'script', 'tail'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'style', 'tail'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'textarea', 'x\n\ntail'],
+    ['<script><b>x</b></script><p>tail</p>', 'script', 'div', '**x**\n\ntail'],
+  ])('preserves raw-text alias boundaries: %s (%s to %s)', (html, source, target, expected) => {
+    expect(engineConfig.engine.htmlToMarkdown(html, { plugins: { tagOverrides: { [source]: target } } })).toBe(expected)
+  })
+
   it('converts blockquotes', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote>This is a quote</blockquote>'
