@@ -6335,6 +6335,82 @@ fn nested_ordered_start_separates_parent_paragraph() {
 }
 
 #[test]
+fn nested_ordered_start_stays_tight_inside_an_open_delimiter() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<a href=\"u\"><ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- x [  10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\">x<br><ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- [x  \n    10. y](u)",
+    ),
+    (
+      "<a href=\"u\"><ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul></a>",
+      "[- x  10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\"><small>x<ol start=\"10\"><li>y</li></ol></small></a></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><span><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></span></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><strong>x<ol start=\"10\"><li>y</li></ol></strong></li></ul>",
+      "- **x  10. y**",
+    ),
+    (
+      "<ul><li><em>x<ol start=\"10\"><li>y</li></ol></em></li></ul>",
+      "- *x  10. y*",
+    ),
+    (
+      "<ul><li><del>x<ol start=\"10\"><li>y</li></ol></del></li></ul>",
+      "- ~~x  10. y~~",
+    ),
+    (
+      "<ul><li><code>x<ol start=\"10\"><li>y</li></ol></code></li></ul>",
+      "- `x  10. y`",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn nested_ordered_start_separates_inside_a_wrapper_a_blank_line_cannot_break() {
+  for (html, expected) in [
+    (
+      "<ul><li><a>x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><span>x<ol start=\"10\"><li>y</li></ol></span></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><small>x<ol start=\"10\"><li>y</li></ol></small></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><mark>x<ol start=\"10\"><li>y</li></ol></mark></li></ul>",
+      "- <mark>x\n\n  10. y</mark>",
+    ),
+    (
+      "<details><ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul></details>",
+      "<details>\n\n- <a href=\"u\">x\n\n  10. y</a>\n\n</details>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn nested_ordered_start_wraps_at_content_columns() {
   assert_eq!(
     html_to_markdown(

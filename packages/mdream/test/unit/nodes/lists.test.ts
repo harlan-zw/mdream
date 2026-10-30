@@ -37,6 +37,33 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li>x<a href="u"><ol start="10"><li>y</li></ol></a></li></ul>', '- x [  10. y](u)'],
+    ['<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>', '- [x  10. y](u)'],
+    ['<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>', '- [x  \n    10. y](u)'],
+    ['<a href="u"><ul><li>x<ol start="10"><li>y</li></ol></li></ul></a>', '[- x  10. y](u)'],
+    ['<ul><li><a href="u"><small>x<ol start="10"><li>y</li></ol></small></a></li></ul>', '- [x  10. y](u)'],
+    ['<ul><li><span><a href="u">x<ol start="10"><li>y</li></ol></a></span></li></ul>', '- [x  10. y](u)'],
+    ['<ul><li><strong>x<ol start="10"><li>y</li></ol></strong></li></ul>', '- **x  10. y**'],
+    ['<ul><li><em>x<ol start="10"><li>y</li></ol></em></li></ul>', '- *x  10. y*'],
+    ['<ul><li><del>x<ol start="10"><li>y</li></ol></del></li></ul>', '- ~~x  10. y~~'],
+    ['<ul><li><code>x<ol start="10"><li>y</li></ol></code></li></ul>', '- `x  10. y`'],
+  ])('keeps a nested ordered start tight inside an open delimiter: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li><a>x<ol start="10"><li>y</li></ol></a></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li><span>x<ol start="10"><li>y</li></ol></span></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li><small>x<ol start="10"><li>y</li></ol></small></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li><mark>x<ol start="10"><li>y</li></ol></mark></li></ul>', '- <mark>x\n\n  10. y</mark>'],
+    ['<details><ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul></details>', '<details>\n\n- <a href="u">x\n\n  10. y</a>\n\n</details>'],
+  ])('separates a nested ordered start inside a wrapper a blank line cannot break: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ol><script>s</script><li>y</li></ol>', '1. y'],
     ['<ol start="3"><li>a</li><template>t</template><li>b</li></ol>', '3. a\n4. b'],
     ['<ul><li>a<ul><script>s</script><li></li></ul></li></ul>', '- a\n\n  -'],

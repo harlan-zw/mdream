@@ -3424,6 +3424,48 @@ fn nested_ordered_start_separates_parent_paragraph() {
 }
 
 #[test]
+fn nested_ordered_start_inside_inline_wrappers_matches_one_shot() {
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\">x<br><ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- [x  \n    10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\"><small>x<ol start=\"10\"><li>y</li></ol></small></a></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><strong>x<ol start=\"10\"><li>y</li></ol></strong></li></ul>",
+      "- **x  10. y**",
+    ),
+    (
+      "<ul><li><a>x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><mark>x<ol start=\"10\"><li>y</li></ol></mark></li></ul>",
+      "- <mark>x\n\n  10. y</mark>",
+    ),
+    (
+      "<details><ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul></details>",
+      "<details>\n\n- <a href=\"u\">x\n\n  10. y</a>\n\n</details>",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn nested_ordered_start_wraps_at_content_columns() {
   let html = "<ul><li>alpha beta gamma delta<ol start=\"10\"><li>one two three four five</li></ol></li></ul>";
   let opts = HtmlToMarkdownOptions::default().with_wrap_width(12);

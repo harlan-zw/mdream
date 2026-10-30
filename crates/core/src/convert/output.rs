@@ -5184,7 +5184,8 @@ impl ConvertState {
       return NO_SPACING;
     }
     // Only a list starting at 1 may interrupt its parent's paragraph. A bare
-    // parent marker has no paragraph to separate, so keep that list tight.
+    // parent marker has no paragraph to separate, so keep that list tight, and
+    // so does an open link or emphasis, which a blank line would never close.
     if self.depth_map[TAG_LI as usize] > 1
       && tag_id == Some(TAG_LI)
       && is_enter
@@ -5198,6 +5199,7 @@ impl ConvertState {
         .is_some_and(|node| node.tag_id == Some(TAG_OL))
       && self.ordered_item_number(0) != 1
       && !self.in_table_cell()
+      && !self.inside_open_inline_delimiter()
       && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
     {
       return DEFAULT_BLOCK_SPACING;
@@ -5313,6 +5315,26 @@ impl ConvertState {
           && node.tag_id != Some(TAG_SPAN)
       })
       .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
+  }
+
+  /// Whether an ancestor of the node just entered left a Markdown delimiter
+  /// open, which has to close in the same paragraph. Raw tags survive a blank
+  /// line and a marker-less wrapper has nothing to close, so neither counts.
+  fn inside_open_inline_delimiter(&self) -> bool {
+    if self.collapse_non_span_depth == 0 && self.collapse_span_depth == 0 {
+      return false;
+    }
+    let raw_html = self.in_raw_html_block();
+    self.stack.iter().rev().skip(1).any(|node| {
+      node.collapses_inner_white_space
+        && !node.excluded_from_markdown
+        && !matches!(
+          node.tag_id,
+          Some(TAG_INS | TAG_SUB | TAG_SUP | TAG_MARK | TAG_U)
+        )
+        && !(raw_html && node.tag_id == Some(TAG_A))
+        && self.wrapper_emits_inline_markdown(node)
+    })
   }
 
   #[inline]
