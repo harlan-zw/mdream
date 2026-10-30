@@ -1630,7 +1630,7 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
-      self.trim_trailing_spaces();
+      self.trim_before_break();
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
@@ -3702,6 +3702,26 @@ impl ConvertState {
       // buffer wherever a drain has already cut the front, and the reach-back
       // trim's `cache_len <= buf_len` guard then skips a retraction one-shot
       // performs, keeping block spacing an empty element wrote.
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
+      self.truncate_buffer(trimmed_len);
+    }
+  }
+
+  /// A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+  /// line feed, which ends block spacing or an earlier break and so stays. The
+  /// run is the same whatever the text's source whitespace; U+000B is content.
+  fn trim_before_break(&mut self) {
+    let floor = self.trim_floor();
+    if self.buffer.len() > floor {
+      let bytes = self.buffer.as_bytes();
+      let mut trimmed_len = bytes.len();
+      while trimmed_len > floor && matches!(bytes[trimmed_len - 1], b' ' | b'\t' | b'\x0C' | b'\r')
+      {
+        trimmed_len -= 1;
+      }
       self.last_content_cache_len = self
         .last_content_cache_len
         .saturating_sub(self.buffer.len() - trimmed_len);

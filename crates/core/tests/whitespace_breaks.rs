@@ -1,6 +1,6 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{CleanConfig, HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig};
-use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
+use mdream::{MarkdownStreamProcessor, OutputFormat, html_to_markdown, html_to_text};
 
 fn md(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
@@ -165,6 +165,23 @@ fn assert_every_chunking(html: &str, options: &HtmlToMarkdownOptions, expected: 
   }
 }
 
+/// Text output one-shot, and streamed at every chunk size, equal `expected`.
+fn assert_every_text_chunking(html: &str, expected: &str) {
+  assert_eq!(text(html), expected, "html={html}");
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HtmlToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} chunk={chunk}");
+  }
+}
+
 #[test]
 fn whitespace_before_a_final_break_never_reaches_the_stream() {
   // End-of-output trimming takes the whole ASCII set, so none of it can be
@@ -181,15 +198,42 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
     ("<li>a&#9;<br></li>", "- a"),
     ("<blockquote><p>a&#9;<br></p></blockquote>", "> a"),
     ("<h2>a #&#9;</h2>", "## a \\#"),
-    // Content after the break settles the tail: the break subsumes a space
-    // run and nothing else.
-    ("<p>a&#9;<br>b</p>", "a\t  \nb"),
-    ("<p>a&#12;<br>b</p>", "a\u{c}  \nb"),
+    // Content after the break settles the tail; see
+    // `a_break_subsumes_the_whitespace_run_before_it`.
+    ("<p>a&#9;<br>b</p>", "a  \nb"),
+    ("<p>a&#12;<br>b</p>", "a  \nb"),
     ("<p>a <br>b</p>", "a  \nb"),
     ("<li>a&#9;<br>b</li>", "- a\t  \n  b"),
-    ("<blockquote>a&#9;<br>b</blockquote>", "> a\t  \n> b"),
+    ("<blockquote>a&#9;<br>b</blockquote>", "> a  \n> b"),
   ] {
     assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn a_break_subsumes_the_whitespace_run_before_it() {
+  // HTML's ASCII whitespace, whatever the text's source whitespace, as the JS
+  // engine does. A line feed stops the run: block spacing and an earlier break
+  // end in one.
+  let markdown = HtmlToMarkdownOptions::default();
+  for (html, expected_markdown, expected_text) in [
+    ("<p>a&#9;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>x y&#9;<br>b</p>", "x y  \nb", "x y\nb"),
+    ("<p>a&#12;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a&#13;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a &#9; &#12;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a&#9;<i></i>&#9;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a<br>&#9;<br>b</p>", "a  \n  \nb", "a\n\nb"),
+    ("<p>a</p>&#9;<br>b", "a\n\n  \nb", "a\n\nb"),
+    ("<p>x y&#10;<br>b</p>", "x y\n  \nb", "x y\n\nb"),
+    ("<p>x y&#11;<br>b</p>", "x y\u{b}  \nb", "x y\u{b}\nb"),
+    ("<code>x y&#9;<br>b</code>", "`x y\nb`", "x y\nb"),
+    ("<a href=\"x\">x y&#9;<br>b</a>", "[x y  \nb](x)", "x y\nb"),
+    ("<blockquote>a&#9;<br>b</blockquote>", "> a  \n> b", "a\nb"),
+    ("<pre>a&#9;<br>b</pre>", "```\na\t\nb\n```", "a\t\nb"),
+  ] {
+    assert_every_chunking(html, &markdown, expected_markdown);
+    assert_every_text_chunking(html, expected_text);
   }
 }
 

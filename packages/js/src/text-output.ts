@@ -48,6 +48,27 @@ function trimAsciiWhitespaceEnd(value: string): string {
   return end === value.length ? value : value.slice(0, end)
 }
 
+/**
+ * A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+ * line feed, which ends block spacing or an earlier break and so stays.
+ */
+function trimBeforeBreak(buffer: string[]): void {
+  for (let index = buffer.length - 1; index >= 0; index--) {
+    const fragment = buffer[index]!
+    let end = fragment.length
+    while (end > 0) {
+      const code = fragment.charCodeAt(end - 1)
+      if (code !== 32 && code !== 9 && code !== 12 && code !== 13)
+        break
+      end--
+    }
+    if (end !== fragment.length)
+      buffer[index] = fragment.slice(0, end)
+    if (end > 0)
+      break
+  }
+}
+
 function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | TextNode | undefined, textNode: TextNode): boolean {
   // Parity with the Rust engine's `should_add_spacing_before_text`.
   if (!lastChar || '\n \t[>'.includes(lastChar) || textNode.value[0] === ' ')
@@ -328,8 +349,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
     const collapses = element.tagHandler?.collapsesInnerWhiteSpace
     const hasSpacing = Array.isArray(element.tagHandler?.spacing)
     // A block boundary owns the line, so the space before it goes too.
-    const trim = (element.tagId === TAG_BR && output?.endsWith('\n'))
-      || isBlock
+    const trim = isBlock
       || ((!isInline || eventType === NodeEventExit) && !(collapses && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
     if (trim && !keepsOwnSpaces) {
       const last = buffer.at(-1)!
@@ -524,17 +544,14 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
 
     if (element.tagId === TAG_BR && event.type === NodeEventEnter && output) {
+      // The break owns the line end, so the whitespace before it goes too,
+      // before the line ends it would add are counted, as in Rust.
+      if (!state.depthMap[TAG_PRE] && output.endsWith('\n'))
+        trimBeforeBreak(state.buffer)
       const currentNewlines = trailingNewlines(state.buffer)
       if (!state.depthMap[TAG_PRE] && currentNewlines >= 2)
         output = undefined
       state.pendingInlineWhitespace = false
-      // The break owns the line end, so the space before it goes too.
-      if (output && !state.depthMap[TAG_PRE] && state.buffer.length > 0) {
-        const tail = state.buffer[state.buffer.length - 1]!
-        const trimmed = trimSpacesEnd(tail)
-        if (trimmed.length !== tail.length)
-          state.buffer[state.buffer.length - 1] = trimmed
-      }
       // A break inside an unopened caption serves as its boundary.
       if (output && captionOpen > 0 && !captionContent)
         captionBreakRun++
