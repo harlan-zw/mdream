@@ -4,6 +4,80 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 describe.each(engines)('links $name', (engineConfig) => {
   it.each([
     [
+      '<a href="x"><ul><li></li></ul></a>',
+      '[-](x)',
+    ],
+    [
+      '<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>',
+      '- [  -](x)\n  - \\# h',
+    ],
+    [
+      '<a href="x"><ul><li></li><li></li></ul></a>',
+      '[- -](x)',
+    ],
+    [
+      '<a href="x"><ol start="10"><li></li></ol></a>',
+      '[10.](x)',
+    ],
+    [
+      '<a href="x"><ul><li><ul><li></li></ul></li></ul></a>',
+      '[-   -](x)',
+    ],
+    [
+      '<a href="x"><ul><li>one</li><li>two</li></ul></a>',
+      '[- one - two](x)',
+    ],
+    [
+      '<a href="x">before<ul><li></li></ul>after</a>',
+      '[before - after](x)',
+    ],
+    [
+      '<a href="x">text <span></span></a>tail',
+      '[text](x) tail',
+    ],
+    [
+      '<a href="x" title="Title"><ul><li></li></ul></a>tail',
+      '[- Title](x)tail',
+    ],
+    [
+      '<a href="x"><ul><li></li></ul></a><em>tail</em>',
+      '[-](x) *tail*',
+    ],
+    [
+      '<a href="x"><img src="i" alt="A"> <span></span></a>tail',
+      '[![A](i)](x) tail',
+    ],
+    [
+      '<a href="x" title="text">text <span></span></a>',
+      '[text](x)',
+    ],
+    [
+      '<a href="x" title="Title">text <span></span></a>',
+      '[text](x "Title")',
+    ],
+    [
+      '<a href="x"> </a>tail',
+      '[](x)tail',
+    ],
+    [
+      '<code><a href="x"><ul><li></li></ul></a></code>',
+      '`[- ](x)`',
+    ],
+    [
+      '<a href="x"><ul><li><code>a </code></li></ul></a>',
+      '[- `a`](x)',
+    ],
+    [
+      '<details><a href="x"><ul><li></li></ul></a></details>',
+      '<details><a href="x">- </a></details>',
+    ],
+  ])('trims trailing label spaces across empty elements: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    [
       String.raw`<a href="x\" onclick=alert(1)">link</a>`,
       String.raw`[link](<x\\>)`,
     ],
