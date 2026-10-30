@@ -576,3 +576,30 @@ describe('scout9_excluded_list_spacing option streaming', () => {
     }
   })
 })
+describe('paragraph after empty nested quote', () => {
+  it.each(engines)('stays in the parent item for $name at every split and chunk width', async ({ engine }) => {
+    const html = '<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>'
+    const expected = '- x\n\n  - \n  \n\n  y'
+    expect(engine.htmlToMarkdown(html)).toBe(expected)
+    const chunks: string[][] = []
+    for (let width = 1; width <= html.length; width++) {
+      const parts: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        parts.push(html.slice(offset, offset + width))
+      chunks.push(parts)
+    }
+    for (let split = 1; split < html.length; split++)
+      chunks.push([html.slice(0, split), html.slice(split)])
+    for (const parts of chunks) {
+      const stream = new ReadableStream<string>({ start(controller) {
+        for (const part of parts)
+          controller.enqueue(part)
+        controller.close()
+      } })
+      let actual = ''
+      for await (const part of engine.streamHtmlToMarkdown(stream))
+        actual += part
+      expect(actual, JSON.stringify(parts)).toBe(expected)
+    }
+  })
+})

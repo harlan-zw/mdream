@@ -3405,3 +3405,14 @@ fn scout9_excluded_list_spacing_options_streaming() {
     assert_stream_matches_every_split(html, opts);
   }
 }
+
+#[test]
+fn paragraph_after_empty_nested_quote() {
+  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "- x\n\n  - \n  \n\n  y"
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}

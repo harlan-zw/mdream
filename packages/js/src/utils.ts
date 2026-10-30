@@ -284,6 +284,18 @@ export function trimTextAtLineStart(node: TextNode, buffer: readonly string[]): 
 }
 
 /**
+ * Whether inline output starting with `firstChar` needs a space after
+ * `lastChar`. Parity with the Rust engine's `needs_spacing`.
+ */
+export function needsSpacing(lastChar: string, firstChar: string): boolean {
+  if (!lastChar || ' \n\t'.includes(lastChar) || ' \n\t'.includes(firstChar))
+    return false
+  if (lastChar === '|' && firstChar === '<')
+    return true
+  return !'[(>*_`'.includes(lastChar) && !'])<.,!?:;*_`'.includes(firstChar)
+}
+
+/**
  * Code unit last written to the buffer, or -1 when nothing has been. Handlers
  * legitimately return `''`, so the last *fragment* is not always the last
  * character.
