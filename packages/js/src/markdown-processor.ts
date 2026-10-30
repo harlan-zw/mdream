@@ -2318,7 +2318,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // Also don't trim before block elements that have their own spacing configuration
           // At a quote's content start the last fragment is the sibling separator,
           // not trailing whitespace; trimming it would glue adjacent quotes.
+          // A raw `</pre>` in a table cell closes preformatted text, so the
+          // whitespace before it is content, as in Rust.
           const shouldTrim = !quoteAtStart
+            && !(tagId === TAG_PRE && eventType === NodeEventExit && isInsideTableCell(state))
             && ((tagId === TAG_BR && output?.[0]?.endsWith('\n') && !parentInPre)
               || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)))
 

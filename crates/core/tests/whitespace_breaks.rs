@@ -236,6 +236,51 @@ fn br_after_whitespace_in_pre_stays_a_line_break() {
   assert_eq!(md("<pre>a<br>b</pre>"), "```\na\nb\n```");
 }
 
+// ── Raw <pre> in a table cell ──
+
+/// Like `assert_every_chunking`, plus every two-piece split.
+fn assert_every_split(html: &str, options: &HtmlToMarkdownOptions, expected: &str) {
+  assert_every_chunking(html, options, expected);
+  for split in (1..html.len()).filter(|&split| html.is_char_boundary(split)) {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} split={split}");
+  }
+}
+
+#[test]
+fn raw_pre_in_a_table_cell_keeps_its_trailing_whitespace() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    (
+      "<table><tr><td><pre>a </pre></td></tr></table>",
+      "| <pre>a </pre> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><pre>  a  </pre>x</td></tr></table>",
+      "| <pre>  a  </pre>x |\n| --- |",
+    ),
+    (
+      "<table><tr><td><pre>a <b>x</b> </pre></td></tr></table>",
+      "| <pre>a x </pre> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><pre>a &#10; </pre></td></tr></table>",
+      "| <pre>a <br> </pre> |\n| --- |",
+    ),
+    (
+      "<table><tr><th><pre>* </pre></th><td>z</td></tr></table>",
+      "| <pre>* </pre> | z |\n| --- | --- |",
+    ),
+    // Outside a cell the fence still drops the trailing spaces.
+    ("<pre>a </pre>", "```\na\n```"),
+  ] {
+    assert_every_split(html, &options, expected);
+  }
+}
+
 // ── Empty figcaption ──
 
 #[test]
