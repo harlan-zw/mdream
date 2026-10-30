@@ -1695,9 +1695,9 @@ impl ConvertState {
       self.flush_streaming_blockquote_lines();
     }
 
-    // Plain text neither arms a boundary nor escapes, so it skips both raw-tag steps.
-    let raw_html_block_tag = !plain_text!(self) && tag_id.is_some_and(Self::is_raw_html_block_tag);
-    if raw_html_block_tag {
+    // Plain text never arms a boundary. The tag is tested again after
+    // `write_output`: a flag kept live across it cost more instructions.
+    if !plain_text!(self) && tag_id.is_some_and(Self::is_raw_html_block_tag) {
       self.enter_raw_html_boundary(enter_is_literal, output.is_some(), configured_new_lines);
     }
 
@@ -1750,7 +1750,10 @@ impl ConvertState {
     // before the region began and earlier block spacing is read as if inside,
     // escaping text that is passed through verbatim: `\*` reaches the reader as a
     // literal backslash.
-    if raw_html_block_tag && self.raw_html_block_depth() == 1 {
+    if !plain_text!(self)
+      && tag_id.is_some_and(Self::is_raw_html_block_tag)
+      && self.raw_html_block_depth() == 1
+    {
       self.raw_html_markdown = false;
       self.raw_html_scanned_to = self.buffer.len();
     }
