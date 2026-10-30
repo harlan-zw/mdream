@@ -6290,3 +6290,11 @@ fn scout9_excluded_list_spacing_options() {
     );
   }
 }
+
+#[test]
+fn paragraph_after_empty_nested_quote() {
+  assert_eq!(
+    convert("<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>"),
+    "- x\n\n  - \n  \n\n  y"
+  );
+}

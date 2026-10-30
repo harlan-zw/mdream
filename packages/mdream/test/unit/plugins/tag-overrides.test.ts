@@ -83,6 +83,21 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     expect(markdown).toBe('> **Note:** important')
   })
 
+  it.each([
+    ['<p>a<x-y>2</x-y>z</p>', 'a**2**z', 'markdown'],
+    ['<p>a <x-y>2</x-y> z</p>', 'a **2** z', 'markdown'],
+    ['<p><em>a </em><x-y>2</x-y>z</p>', '*a* **2**z', 'markdown'],
+    ['<p><em>a </em><x-y>2</x-y>z</p>', 'a **2**z', 'text'],
+  ] as const)('keeps a custom element inline when its override leaves isInline unset: %s (%s)', async (html, expected, format) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(html, {
+      plugins: { tagOverrides: { 'x-y': { enter: '**', exit: '**' } } },
+      engine,
+      format,
+    })
+    expect(markdown).toBe(expected)
+  })
+
   it('aliases unknown tag to em', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const markdown = htmlToMarkdown('<p><x-italic>text</x-italic></p>', {
