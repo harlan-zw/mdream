@@ -3525,6 +3525,60 @@ fn streaming_escapes_block_markers_after_a_decoded_bare_cr() {
 }
 
 #[test]
+fn streaming_settles_a_lone_list_marker_after_a_decoded_bare_cr() {
+  for (html, expected) in [
+    ("<small>a&#13;<ul><li></li></ul></small>", "a\r\n\n-"),
+    ("<small>a&#13;<ol><li></li></ol></small>", "a\r\n\n1."),
+    (
+      "<b>a&#13;<ul><li><blockquote>x</blockquote></li></ul></b>",
+      "**a\r\n\n- \n  > x**",
+    ),
+    ("<small>a&#13;<ul><li><b></b></li></ul></small>", "a\r\n\n-"),
+    (
+      "<small>a&#13;<ul><li>&#13;x</li></ul></small>",
+      "a\r\n\n- \rx",
+    ),
+    (
+      "<small>a&#10;<ul><li>&#13;x</li></ul></small>",
+      "a\n\n- \rx",
+    ),
+    (
+      "<ul><li>z<small>a&#13;<ul><li></li></ul></small></li></ul>",
+      "- za\r\n\n  -",
+    ),
+    (
+      "<ul><li>z<small>a&#13;<ul><li><blockquote>x</blockquote></li></ul></small></li></ul>",
+      "- za\r\n\n  - \n    > x",
+    ),
+    (
+      "<blockquote><small>a&#13;<ul><li></li></ul></small></blockquote>",
+      "> a\r\n>\n> -",
+    ),
+    (
+      "<a href=\"/x\">a&#13;<ul><li><blockquote>x</blockquote></li></ul></a>",
+      "[a\r\n\n- \n  > x](/x)",
+    ),
+    ("<small>a&#13;&#10;<ul><li></li></ul></small>", "a\r\n\n-"),
+    ("<small>a&#13;&#13;<ul><li></li></ul></small>", "a\r\r -"),
+    ("<small>a&#10;&#13;<ul><li></li></ul></small>", "a\n\r -"),
+    ("<small>a&#13;<ul><li>x</li></ul></small>", "a\r - x"),
+    ("<a href=\"/x\">a&#13;<ul><li></li></ul></a>", "[a\r -](/x)"),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+    let wrapped = HtmlToMarkdownOptions::default().with_wrap_width(10);
+    assert_stream_matches(html, wrapped.clone());
+    assert_stream_matches_every_split(html, wrapped);
+  }
+}
+
+#[test]
 fn scout9_excluded_list_spacing_streaming() {
   for (html, expected) in [
     (

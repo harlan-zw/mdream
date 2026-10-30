@@ -396,3 +396,59 @@ describe.each(engines)('block markers after a decoded bare CR $name', (engineCon
     }
   })
 })
+
+describe.each(engines)('list markers alone on their line after a decoded bare CR $name', (engineConfig) => {
+  // A `\n` after the `\r` would only complete one `\r\n` line ending, which still
+  // reads the marker as a setext underline.
+  it.each([
+    ['<small>a&#13;<ul><li></li></ul></small>', 'a\r\n\n-'],
+    ['<small>a&#13;<ol><li></li></ol></small>', 'a\r\n\n1.'],
+    ['<b>a&#13;<ul><li><blockquote>x</blockquote></li></ul></b>', '**a\r\n\n- \n  > x**'],
+    ['<small>a&#13;<ol><li><blockquote>x</blockquote></li></ol></small>', 'a\r\n\n1. \n   > x'],
+    ['<small>a&#13;<ul><li><b></b></li></ul></small>', 'a\r\n\n-'],
+    ['<small>a&#13;<span> </span><ul><li></li></ul></small>', 'a\r\n\n-'],
+    ['<small><b>a</b>&#13;<ul><li></li></ul></small>', '**a**\r\n\n-'],
+    ['<small>a&#13;<ul><li>&#13;x</li></ul></small>', 'a\r\n\n- \rx'],
+    ['<small>a&#13;<ul><li>&#10;x</li></ul></small>', 'a\r\n\n- \nx'],
+    ['<small>a&#10;<ul><li>&#13;x</li></ul></small>', 'a\n\n- \rx'],
+    ['<ul><li>z<small>a&#13;<ul><li></li></ul></small></li></ul>', '- za\r\n\n  -'],
+    ['<ul><li>z<small>a&#13;<ul><li><blockquote>x</blockquote></li></ul></small></li></ul>', '- za\r\n\n  - \n    > x'],
+    ['<blockquote><small>a&#13;<ul><li></li></ul></small></blockquote>', '> a\r\n>\n> -'],
+    ['<blockquote><small>a&#13;<ul><li><blockquote>x</blockquote></li></ul></small></blockquote>', '> a\r\n>\n> - \n>   > x'],
+    ['<a>a&#13;<ul><li></li></ul></a>', 'a\r\n\n-'],
+    ['<a href="/x">a&#13;<ul><li><blockquote>x</blockquote></li></ul></a>', '[a\r\n\n- \n  > x](/x)'],
+  ])('opens the list with a blank line: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (const width of [1, 2, 3, 5]) {
+      const chunks = html.match(new RegExp(`[\\s\\S]{1,${width}}`, 'g'))!
+      expect(await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine })), `width ${width}`).toBe(expected)
+    }
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+
+  it.each([
+    ['<small>a&#13;&#10;<ul><li></li></ul></small>', 'a\r\n\n-'],
+    ['<small>a&#13;&#13;<ul><li></li></ul></small>', 'a\r\r -'],
+    ['<small>a&#10;&#13;<ul><li></li></ul></small>', 'a\n\r -'],
+    ['<small>a&#13;<ul><li>x</li></ul></small>', 'a\r - x'],
+    ['<a href="/x">a&#13;<ul><li></li></ul></a>', '[a\r -](/x)'],
+    ['<a href="/x">a&#13;<ol><li></li></ol></a>', '[a\r 1.](/x)'],
+  ])('leaves a line that needs no separator: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+
+  it('keeps a literal item override out of the guard', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const plugins = { tagOverrides: { li: { enter: '<li>' } } }
+    expect(htmlToMarkdown('<small>a&#13;<ul><li></li></ul></small>', { engine, plugins })).toBe('a\r<li>')
+  })
+})

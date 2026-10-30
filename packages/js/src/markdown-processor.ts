@@ -124,6 +124,8 @@ export interface MarkdownState {
   bufferedBlockquoteDepth: number
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
+  /** That line follows a decoded CR, which a single LF only turns into one CRLF. */
+  emptyItemAfterCr?: boolean
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
 }
@@ -210,6 +212,25 @@ function newlineRunBefore(buffer: string[], index: number): number {
   return run
 }
 
+/**
+ * Whether a line ending sits before the CR that closes the output ahead of
+ * fragment `index`, which leaves a blank line.
+ */
+function crFollowsLineEnding(buffer: string[], index: number): boolean {
+  let skippedCr = false
+  for (let i = index - 1; i >= 0; i--) {
+    const fragment = buffer[i]!
+    for (let j = fragment.length - 1; j >= 0; j--) {
+      if (skippedCr) {
+        const code = fragment.charCodeAt(j)
+        return code === 10 || code === 13
+      }
+      skippedCr = true
+    }
+  }
+  return false
+}
+
 function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string): number {
   let fragment = index - 1
   let offset = fragment >= 0 ? buffer[fragment]!.length : 0
@@ -241,14 +262,21 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
  * underline: the text becomes a heading and the item disappears. A blank line, or
  * a sibling marker, opens its own block instead.
  */
-function recordItemMarker(state: MarkdownState, index: number): void {
+function recordItemMarker(state: MarkdownState, index: number, lastChar: string): void {
   // Only a list's first item can follow a paragraph, so every later sibling
   // skips the scan below.
-  if (index !== 0 || newlineRunBefore(state.buffer, state.buffer.length - 1) !== 1) {
+  const buffer = state.buffer
+  const marker = buffer.length - 1
+  const run = index === 0 ? newlineRunBefore(buffer, marker) : -1
+  // CRLF is a single line ending, so it opens no blank line by itself. `run`
+  // stops at the space `needsSpacing` puts between a CR and the marker.
+  const afterCr = run === 0 && lastChar === '\r'
+  if (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1) {
     state.emptyItemFragment = undefined
     return
   }
-  state.emptyItemFragment = state.buffer.length - 1
+  state.emptyItemFragment = marker
+  state.emptyItemAfterCr = afterCr
 }
 
 /**
@@ -257,7 +285,7 @@ function recordItemMarker(state: MarkdownState, index: number): void {
  * been written since the marker the answer is still open, so only the `<li>` exit
  * forces one.
  */
-function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCaptionFragment = -1): void {
+function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCaptionFragment = -1, linkOpen = false): void {
   const fragment = state.emptyItemFragment
   if (fragment === undefined)
     return
@@ -277,7 +305,8 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
     return
   // A later nested item can replace this guard before its owner closes.
   // A newline alone cannot commit the separator during a stream drain.
-  if (first === 10 && !atExit)
+  const lineEnds = first === 10 || first === 13
+  if (lineEnds && !atExit)
     return
   if (!atExit && unresolvedCaptionFragment !== -1) {
     let captionOpensItem = true
@@ -291,10 +320,24 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
       return
   }
   state.emptyItemFragment = undefined
-  if (first !== -1 && first !== 10)
+  if (first !== -1 && !lineEnds)
     return
-  const replacement = `\n${buffer[fragment]}`
-  state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + 1)
+  const afterCr = state.emptyItemAfterCr
+  // A link's `](url)` will share the marker's line, so nothing reads as an
+  // underline there, and a blank line would split the link across two blocks.
+  if (first === -1 && afterCr && linkOpen)
+    return
+  // An LF after a decoded CR only completes one CRLF line ending, so the blank
+  // line takes two. They replace the space `needsSpacing` put after the CR: it
+  // moves the item's content column past the indent of its next lines.
+  const spaced = afterCr && buffer[fragment - 1] === ' '
+  if (spaced) {
+    state.outputPositions?.replace(fragment - 1, fragment, ['\n'])
+    buffer[fragment - 1] = '\n'
+  }
+  const separator = afterCr && !spaced ? '\n\n' : '\n'
+  const replacement = separator + buffer[fragment]
+  state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + separator.length)
   buffer[fragment] = replacement
 }
 
@@ -1372,6 +1415,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
+    emptyItemAfterCr: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -2400,9 +2444,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
-        recordItemMarker(state, element.index)
+        recordItemMarker(state, element.index, handler?.literalEnter ? '' : lastChar)
       else
-        resolveItemMarker(state, true)
+        resolveItemMarker(state, true, -1, openLinkFragment !== -1)
     }
 
     if (eventType === NodeEventEnter

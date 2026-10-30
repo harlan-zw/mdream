@@ -3262,8 +3262,15 @@ impl ConvertState {
       }
     };
     let starts_document = line_start == 0 && !self.has_streamed_output;
-    let blank_above = before(1) != b'\n' || before(2) == b'\n';
+    // `\r\n` is a single line ending, so it opens no blank line by itself.
+    let line_ending = before(1);
+    let blank_above = match line_ending {
+      b'\n' => before(2) == b'\n',
+      b'\r' => matches!(before(2), b'\n' | b'\r'),
+      _ => true,
+    };
     self.empty_item_hazard = !starts_document && !blank_above;
+    self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
   }
@@ -3330,7 +3337,7 @@ impl ConvertState {
     }
 
     // Content on the marker's own line settles it: no blank line is owed.
-    if !tail.is_empty() && !tail.starts_with('\n') {
+    if !tail.is_empty() && !tail.starts_with(['\n', '\r']) {
       self.empty_item_hazard = false;
       return;
     }
@@ -3342,12 +3349,29 @@ impl ConvertState {
       return;
     }
     self.empty_item_hazard = false;
+    // A link's `](url)` will share the marker's line, so nothing reads as an
+    // underline there, and a blank line would split the link across two blocks.
+    if tail.is_empty() && self.empty_item_after_cr && self.link.open && self.link.bracket_emitted {
+      return;
+    }
     // Inserting before the marker moves a trailing hard break without removing
     // it. Preserve its boundary so a following parent paragraph resets the
     // child item's continuation indent, just as it does without this guard.
     let break_at_end = self.hard_break_end == self.buffer.len();
-    if !self.replace_code_span_content(self.empty_item_line_start..self.empty_item_line_start, "\n")
-    {
+    let at = self.empty_item_line_start;
+    // A `\n` after a decoded `\r` only completes one `\r\n` line ending, so the
+    // blank line takes two. They replace the space `needs_spacing` put after the
+    // `\r`: it moves the item's content column past the indent of its next lines.
+    let bytes = self.buffer.as_bytes();
+    let spaced =
+      self.empty_item_after_cr && bytes.get(at) == Some(&b' ') && bytes.get(at + 1) != Some(&b' ');
+    let replaced = usize::from(spaced);
+    let separator = if self.empty_item_after_cr {
+      "\n\n"
+    } else {
+      "\n"
+    };
+    if !self.replace_code_span_content(at..at + replaced, separator) {
       return;
     }
     // The insertion moves cached offsets at or past the line: an inline marker
@@ -3360,8 +3384,9 @@ impl ConvertState {
     // rather than its child. `link_bracket_pos` needs no shift either — a pending
     // `[` is the tail this function has already returned on.
 
-    let at = self.empty_item_line_start;
-    self.shift_offsets_at_or_after(at);
+    for _ in replaced..separator.len() {
+      self.shift_offsets_at_or_after(at);
+    }
     if break_at_end {
       self.hard_break_end = self.buffer.len();
     }
