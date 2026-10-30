@@ -160,6 +160,8 @@ export interface BlockquoteFrame {
 
 interface GfmLifecycleState {
   openCodeSpans: CodeSpan[]
+  /** The latest quote exit wrote its quoted content. */
+  quoteWritten: boolean
 }
 
 // Marker kind per tag id for inline tags that wrap content in a symmetric
@@ -1069,10 +1071,11 @@ function quotedOffset(content: string, listIndent: string, offset: number): numb
   }
 }
 
-function finalizeBlockquote(state: MarkdownState): void {
+/** Prefix the closing quote's content, returning whether anything was written. */
+function finalizeBlockquote(state: MarkdownState): boolean {
   const frame = state.blockquotes.pop()
   if (!frame)
-    return
+    return false
   state.bufferedBlockquoteDepth = state.blockquotes.length
 
   const buffer = state.buffer
@@ -1081,7 +1084,7 @@ function finalizeBlockquote(state: MarkdownState): void {
   // The context is the enter-time snapshot: streaming may have already
   // yielded and compacted the characters this decision used to read back.
   if (!content && frame.followsWhitespace)
-    return
+    return false
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -1146,12 +1149,13 @@ function finalizeBlockquote(state: MarkdownState): void {
     if (end < quoted.length)
       buffer.push(quoted.slice(end))
     state.lastContentCache = buffer.at(-1)
-    return
+    return true
   }
 
   state.outputPositions?.replace(frame.fragment, buffer.length, [quoted], mapPosition)
   buffer.splice(frame.fragment, buffer.length - frame.fragment, quoted)
   state.lastContentCache = quoted
+  return true
 }
 
 function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputPositions): void {
@@ -1223,7 +1227,7 @@ function consumeGfmAction(action: GfmAction, state: MarkdownState, lifecycle: Gf
     case 'BlockquoteEnter':
       return action.output
     case 'BlockquoteExit':
-      finalizeBlockquote(state)
+      lifecycle.quoteWritten = finalizeBlockquote(state)
       return undefined
     case 'PreEnter':
       // A nested <pre> stays inside its ancestor's open or pending fence.
@@ -1372,11 +1376,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     lastItemStar: false,
   }
   // Marker character code of the list that last closed with items, or 0 once
-  // visible output follows it. CommonMark joins the next list of the same type
-  // into it, blank line or not, so that list takes the other character.
+  // visible output, or the close of a quote around it, ends its run. CommonMark
+  // joins the next list of the same type into it, blank line or not, so that
+  // list takes the other character.
   let siblingListMarker = 0
   // `<li>` depth that list closed at: a list opening at another one is no sibling.
   let siblingListDepth = 0
+  // Quote frames open around that list. A list under other `>` prefixes is no
+  // sibling, while a quote that writes nothing leaves the run to its output.
+  let siblingListQuotes = 0
   // Plugins may suppress only one edge of a list; retain ownership for cleanup.
   const listMarkerOwners: ElementNode[] | undefined = (options as EngineOptions & { plugins?: unknown[] }).plugins?.length ? [] : undefined
   const listMarkerDepths: number[] | undefined = listMarkerOwners ? [] : undefined
@@ -1397,7 +1405,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let captionBoundary = 0
   let captionBoundarySpacing = 0
   let captionBreakRun = 0
-  const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
+  const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [], quoteWritten: false }
   let openLinkFragment = -1
   let openLinkCaptionBreakRun = 0
   let openLinkCaptionFlags: Uint8Array | undefined
@@ -1748,12 +1756,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
   /**
    * Marker character code for a list opening here: the other one of its kind
-   * when the list before it has the same type, sits at the same depth and
-   * nothing visible came between, since CommonMark would join the two.
+   * when the list before it has the same type, sits at the same depth under
+   * the same quotes and nothing visible came between, since CommonMark would
+   * join the two.
    */
   function nextListMarker(ordered: boolean): number {
     const sibling = siblingListMarker
     if (sibling !== 0 && siblingListDepth === state.depthMap[TAG_LI]
+      && siblingListQuotes === state.blockquotes.length
       && (sibling === 46 || sibling === 41) === ordered) {
       // - * . )
       return sibling === 45 ? 42 : sibling === 42 ? 45 : sibling === 46 ? 41 : 46
@@ -1782,6 +1792,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
             siblingListMarker = marker ^ LIST_HAS_ITEM
             siblingListDepth = depth
+            siblingListQuotes = state.blockquotes.length
           }
         }
         top = path.at(-1)
@@ -1815,6 +1826,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
       siblingListMarker = marker ^ LIST_HAS_ITEM
       siblingListDepth = state.depthMap[TAG_LI]!
+      siblingListQuotes = state.blockquotes.length
       listClosedInGap = true
     }
   }
@@ -1965,16 +1977,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const element = node as ElementNode
     const handler = node.tagHandler
     const tagId = element.tagId!
-    if (tagId === TAG_UL || tagId === TAG_OL) {
-      if (eventType === NodeEventEnter) {
-        state.listMarkers.push(nextListMarker(tagId === TAG_OL))
-        listMarkerOwners?.push(element)
-        listMarkerDepths?.push(state.depthMap[TAG_LI]!)
-      }
-    }
-    else if (tagId === TAG_BLOCKQUOTE) {
-      // A quote boundary ends the list before it, written or not.
-      siblingListMarker = 0
+    if ((tagId === TAG_UL || tagId === TAG_OL) && eventType === NodeEventEnter) {
+      state.listMarkers.push(nextListMarker(tagId === TAG_OL))
+      listMarkerOwners?.push(element)
+      listMarkerDepths?.push(state.depthMap[TAG_LI]!)
     }
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
     // A hard break ends a line, while a following block also ends the
@@ -2177,8 +2183,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         if (handlerOutput)
           output = [handlerOutput]
-        if (res._tag === 'BlockquoteExit')
+        if (res._tag === 'BlockquoteExit') {
           captionBufferChanged = true
+          // The `>` ends a list run, even inside an inline opener that keeps
+          // the gap from reading it yet. A quote that wrote nothing ends only
+          // the run of a list inside it.
+          if (gfmLifecycle.quoteWritten || siblingListQuotes > state.blockquotes.length)
+            siblingListMarker = 0
+        }
       }
     }
     // The row owns its deferred opener. Cell overrides and plugin output

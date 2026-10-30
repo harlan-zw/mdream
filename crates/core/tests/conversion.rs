@@ -6316,6 +6316,68 @@ fn excluded_quote_preserves_adjacent_list_markers() {
   );
 }
 
+// A quote that writes nothing leaves the lists around it adjacent. One that
+// writes its `>`, or holds a list, ends the run, and lists inside a quote are
+// under other prefixes than the list before it.
+#[test]
+fn empty_quotes_preserve_adjacent_list_markers() {
+  for (html, expected) in [
+    (
+      "<ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ol><li>a</li></ol><blockquote> </blockquote><ol><li>b</li></ol>",
+      "1. a\n\n1) b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote><p></p></blockquote><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote><blockquote></blockquote></blockquote><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ol><li>a</li></ol><blockquote><ul></ul></blockquote><ol><li>b</li></ol>",
+      "1. a\n\n1) b",
+    ),
+    (
+      "<blockquote><ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul></blockquote>",
+      "> - a\n>\n> * b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote>x</blockquote><ul><li>b</li></ul>",
+      "- a\n\n> x\n\n- b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote><ul><li>c</li></ul>",
+      "- a\n\n> - b\n\n- c",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // An override that writes no quote leaves its list next to the one before.
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig::default().with_tag_override(
+      "blockquote",
+      TagOverrideConfig {
+        enter: Some(String::new()),
+        exit: Some(String::new()),
+        ..Default::default()
+      },
+    )),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(
+      "<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote>",
+      options
+    ),
+    "- a\n\n* b"
+  );
+}
+
 #[test]
 fn cleaned_empty_links_preserve_adjacent_list_markers() {
   let options = HtmlToMarkdownOptions {
@@ -6391,6 +6453,11 @@ fn inline_overridden_lists_keep_adjacent_list_markers() {
     (
       "<ul><li>a</li></ul><blockquote>q</blockquote><ul><li>b</li></ul>",
       "- a\n\n> q\n\n- b",
+    ),
+    // The quote's `>` lands inside an emphasis opener that could still retract.
+    (
+      "<ul><li>a</li></ul><em><blockquote></blockquote><ul><li>b</li></ul></em>",
+      "- a\n\n*>- b*",
     ),
   ] {
     assert_eq!(

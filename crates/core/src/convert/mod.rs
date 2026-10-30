@@ -931,13 +931,16 @@ pub struct ConvertState {
   /// Marker character of each open `<ul>`/`<ol>`, innermost last, with
   /// [`LIST_HAS_ITEM`] set once one of its items wrote a marker.
   list_markers: Vec<u8>,
-  /// Marker character of the list that last closed with items, or 0 once a
-  /// quote or visible output leaving the buffer ends its run. CommonMark joins
-  /// the next list of the same type into it, blank line or not, so that list
-  /// takes the other character.
+  /// Marker character of the list that last closed with items, or 0 once
+  /// visible output leaving the buffer, or the close of a quote around it, ends
+  /// its run. CommonMark joins the next list of the same type into it, blank
+  /// line or not, so that list takes the other character.
   sibling_list_marker: u8,
   /// `<li>` depth that list closed at: a list opening at another one is no sibling.
   sibling_list_depth: u16,
+  /// Quote frames open around that list. A list under other `>` prefixes is no
+  /// sibling, while a quote that writes nothing leaves the run to its output.
+  sibling_list_quotes: usize,
   /// Buffer offset where output after that list starts, lowered by rewrites
   /// and shifted by drains. Read only while `sibling_list_marker` is set.
   list_gap_from: usize,
@@ -1205,6 +1208,7 @@ impl ConvertState {
       list_markers: Vec::new(),
       sibling_list_marker: 0,
       sibling_list_depth: 0,
+      sibling_list_quotes: 0,
       list_gap_from: 0,
       last_item_star: false,
 

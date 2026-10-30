@@ -777,6 +777,9 @@ impl ConvertState {
     {
       self.quoted_bytes += quoted.len();
     }
+    // The `>` ends a list run, even inside an inline opener that keeps the gap
+    // from reading it yet.
+    self.sibling_list_marker = 0;
     self.scan_before_requote(content_end);
     self.truncate_buffer(frame.content_start);
     self.buffer.push_str(&quoted);
@@ -3250,12 +3253,14 @@ impl ConvertState {
   }
 
   /// Marker character for a list opening here: the other one of its kind when
-  /// the list before it has the same type, sits at the same depth and nothing
-  /// visible came between, since CommonMark would join the two.
+  /// the list before it has the same type, sits at the same depth under the
+  /// same quotes and nothing visible came between, since CommonMark would join
+  /// the two.
   pub(crate) fn next_list_marker(&self, ordered: bool) -> u8 {
     let sibling = self.sibling_list_marker;
     if sibling != 0
       && self.sibling_list_depth == self.depth_map[TAG_LI as usize]
+      && self.sibling_list_quotes == self.blockquotes.len()
       && matches!(sibling, b'.' | b')') == ordered
       && !self.list_gap_visible()
     {

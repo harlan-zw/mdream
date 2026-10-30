@@ -53,6 +53,12 @@ describe.each(engines)('lists $name', (engineConfig) => {
     // A block makes the enclosing opener permanent without visible output.
     ['<ol><li>a</li></ol><em><div></div><ol><li>b</li></ol></em>', '1. a\n\n*1) b*'],
     ['<ol><li>a</li></ol><strong><p></p><ol><li>b</li></ol></strong><ol><li>c</li></ol>', '1. a\n\n**1) b**\n\n1. c'],
+    // A quote that writes nothing leaves the lists around it adjacent.
+    ['<ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ol><li>a</li></ol><blockquote> </blockquote><ol><li>b</li></ol>', '1. a\n\n1) b'],
+    ['<ul><li>a</li></ul><blockquote><p></p></blockquote><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><blockquote><blockquote></blockquote></blockquote><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<blockquote><ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul></blockquote>', '> - a\n>\n> * b'],
   ])('alternates the marker of an adjacent same-type list: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
@@ -63,9 +69,19 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<ul><li>a</li></ul><ol><li>b</li></ol>', '- a\n\n1. b'],
     ['<blockquote><ul><li>a</li></ul></blockquote><blockquote><ul><li>b</li></ul></blockquote>', '> - a\n\n> - b'],
     ['<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote>', '- a\n\n> - b'],
+    ['<ul><li>a</li></ul><blockquote>x</blockquote><ul><li>b</li></ul>', '- a\n\n> x\n\n- b'],
+    ['<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote><ul><li>c</li></ul>', '- a\n\n> - b\n\n- c'],
   ])('keeps the default marker when content separates the lists: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote>', { blockquote: { enter: '', exit: '' } }, '- a\n\n* b'],
+    ['<ul><li>a</li></ul><em><blockquote></blockquote><ul><li>b</li></ul></em>', { ul: { isInline: true }, blockquote: { isInline: true } }, '- a\n\n*>- b*'],
+  ])('follows the quote prefixes an override writes: %s', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
   })
 
   it('handles nested unordered lists', async () => {

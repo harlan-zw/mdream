@@ -3266,6 +3266,21 @@ fn adjacent_list_markers_match_one_shot_at_every_chunk() {
 }
 
 #[test]
+fn empty_quotes_keep_adjacent_list_markers_at_every_split() {
+  for html in [
+    "<ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul>",
+    "<ol><li>a</li></ol><blockquote> <p></p> </blockquote><ol><li>b</li></ol>",
+    "<ul><li>a</li></ul><blockquote><blockquote></blockquote></blockquote><ul><li>b</li></ul>",
+    "<blockquote><ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul></blockquote>",
+    "<ul><li>a</li></ul><blockquote>x</blockquote><ul><li>b</li></ul>",
+    "<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote><ul><li>c</li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn quote_long_line_waits_for_a_completed_line() {
   let span = format!("<span>{}</span>", "x".repeat(1024));
   let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
