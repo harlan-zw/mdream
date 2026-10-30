@@ -2313,6 +2313,72 @@ fn blockquote_parent_continuation_keeps_sibling_quotes_inside_a_quote() {
 }
 
 #[test]
+fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
+  // A wrapper that stays in the output took the separator, so the next block
+  // spaces itself. One that writes nothing leaves the boundary pending.
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><blockquote>next</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"><em></em></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><a href=\"/x\"></a></em><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  *[](/x)*\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em></em><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><div>d</div></li></ul>",
+      "- \n  > q\n\n  [](/x) d",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><br><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)  \n  \n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><br></li><li>b</li></ul>",
+      "- \n  > q\n\n  [](/x)  \n- b",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><div>d</div></em></li></ul>",
+      "- \n  > q\n\n  *d*",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><blockquote>next</blockquote></em></li></ul>",
+      "- \n  > q\n\n  *\n  > next\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a>tail</a></li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a><h2>h</h2></li></ul>",
+      "- \n  > q\n\n  ## h",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn sibling_blockquotes_separated_by_blank_line() {
   for (name, html, expected) in [
     (

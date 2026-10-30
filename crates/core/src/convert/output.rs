@@ -1572,14 +1572,27 @@ impl ConvertState {
 
     // Empty list containers emit nothing. Only an actual item replaces the
     // quote's pending continuation with list structure.
-    if tag_id == Some(TAG_LI)
-      && matches!(
-        self.caption_boundary,
-        CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
-      )
-    {
-      self.restore_quote_parent_boundary();
-      self.caption_boundary = CaptionBoundary::None;
+    if matches!(
+      self.caption_boundary,
+      CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+    ) {
+      if tag_id == Some(TAG_LI) {
+        self.restore_quote_parent_boundary();
+        self.caption_boundary = CaptionBoundary::None;
+      } else if !is_inline && self.open_markers.is_empty() {
+        // Once its wrappers closed, a block settles the tentative spacing. One
+        // that survived took the separator, so the block spaces itself; if all
+        // dropped, the boundary is pending again and writes the quote's break.
+        self.restore_quote_parent_boundary();
+        if matches!(self.caption_boundary, CaptionBoundary::QuoteTentative(_)) {
+          self.caption_boundary = CaptionBoundary::None;
+        } else if tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal {
+          output = None;
+        }
+      } else if tag_id == Some(TAG_BR) && self.caption_boundary != CaptionBoundary::QuoteParent {
+        // The break's whitespace would pass for the spacing at the buffer tail.
+        self.caption_boundary = CaptionBoundary::QuoteTentative(0);
+      }
     }
     let caption_active =
       self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
@@ -1593,7 +1606,8 @@ impl ConvertState {
       default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
     let structural_quote = tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal;
     let quote_parent = self.caption_boundary == CaptionBoundary::QuoteParent;
-    let tentative_quote_boundary = quote_parent && tentative_caption_output;
+    // An anchor without an href writes nothing, so it cannot carry the boundary.
+    let tentative_quote_boundary = quote_parent && tentative_caption_output && visible_output;
     // A sibling quote keeps the separator after a closed quote's content. An
     // empty quote left the item's opening line, where a blank would end it.
     let quote_sibling_separator =
@@ -4486,9 +4500,7 @@ impl ConvertState {
         (self.depth_map[TAG_LI as usize] > 0
           && !matches!(
             self.caption_boundary,
-            CaptionBoundary::Pending(_)
-              | CaptionBoundary::QuoteParent
-              | CaptionBoundary::QuoteTentative(_)
+            CaptionBoundary::Pending(_) | CaptionBoundary::QuoteParent
           ))
         .then_some(Cow::Borrowed("\n"))
       }

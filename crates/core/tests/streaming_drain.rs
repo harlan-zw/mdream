@@ -3380,6 +3380,73 @@ fn blockquote_parent_continuation_matches_every_width_and_split() {
 }
 
 #[test]
+fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><blockquote>next</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"><em></em></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><a href=\"/x\"></a></em><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  *[](/x)*\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em></em><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><div>d</div></li></ul>",
+      "- \n  > q\n\n  [](/x) d",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><br><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)  \n  \n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><br></li><li>b</li></ul>",
+      "- \n  > q\n\n  [](/x)  \n- b",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><div>d</div></em></li></ul>",
+      "- \n  > q\n\n  *d*",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><blockquote>next</blockquote></em></li></ul>",
+      "- \n  > q\n\n  *\n  > next\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a>tail</a></li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a><h2>h</h2></li></ul>",
+      "- \n  > q\n\n  ## h",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
 fn blockquote_parent_continuation_after_drains_and_inside_capped_code() {
   let paragraph = "<p>streamed quote paragraph</p>".repeat(512);
   let html = format!(
