@@ -2389,7 +2389,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Add spacing between inline elements if needed
-    if (!captionTransition && tagId !== TAG_BR && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsMarkdownSpacing(lastChar, output[0][0], openMarkerCount)) {
+    if (!captionTransition && output?.[0]?.[0] && (tagId !== TAG_BR || output[0][0] === '<') && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsMarkdownSpacing(lastChar, output[0][0], openMarkerCount)) {
       pendingCloser = 0
       state.buffer.push(' ')
       state.lastContentCache = ' '
