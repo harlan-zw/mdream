@@ -6128,6 +6128,36 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 }
 
 #[test]
+fn scout9_wrap_setext_boundary() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
+fn scout9_wrap_setext_plain_text_still_wraps() {
+  assert_eq!(
+    html_to_text(
+      "<p>aaaaaaaaaa --</p>",
+      HtmlToMarkdownOptions::default().with_wrap_width(10)
+    ),
+    "aaaaaaaaaa\n--"
+  );
+}
+
+#[test]
 fn scout9_excluded_list_spacing() {
   for (html, expected) in [
     (
@@ -6209,6 +6239,85 @@ fn scout9_excluded_list_spacing_options() {
       "html={html}"
     );
   }
+}
+
+#[test]
+fn link_trailing_spaces_across_empty_elements() {
+  for (html, expected) in [
+    (r#"<a href="x"><ul><li></li></ul></a>"#, r#"[-](x)"#),
+    (
+      r#"<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>"#,
+      r#"- [  -](x)
+  - \# h"#,
+    ),
+    (
+      r#"<a href="x"><ul><li></li><li></li></ul></a>"#,
+      r#"[- -](x)"#,
+    ),
+    (
+      r#"<a href="x"><ol start="10"><li></li></ol></a>"#,
+      r#"[10.](x)"#,
+    ),
+    (
+      r#"<a href="x"><ul><li><ul><li></li></ul></li></ul></a>"#,
+      r#"[-   -](x)"#,
+    ),
+    (
+      r#"<a href="x"><ul><li>one</li><li>two</li></ul></a>"#,
+      r#"[- one - two](x)"#,
+    ),
+    (
+      r#"<a href="x">before<ul><li></li></ul>after</a>"#,
+      r#"[before - after](x)"#,
+    ),
+    (
+      r#"<a href="x">text <span></span></a>tail"#,
+      r#"[text](x) tail"#,
+    ),
+    (
+      r#"<a href="x" title="Title"><ul><li></li></ul></a>tail"#,
+      r#"[- Title](x)tail"#,
+    ),
+    (
+      r#"<a href="x"><ul><li></li></ul></a><em>tail</em>"#,
+      r#"[-](x) *tail*"#,
+    ),
+    (
+      r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+      r#"[![A](i)](x) tail"#,
+    ),
+    (
+      r#"<a href="x" title="text">text <span></span></a>"#,
+      r#"[text](x)"#,
+    ),
+    (
+      r#"<a href="x" title="Title">text <span></span></a>"#,
+      r#"[text](x "Title")"#,
+    ),
+    (r#"<a href="x"> </a>tail"#, r#"[](x)tail"#),
+    (
+      r#"<code><a href="x"><ul><li></li></ul></a></code>"#,
+      r#"`[- ](x)`"#,
+    ),
+    (
+      r#"<a href="x"><ul><li><code>a </code></li></ul></a>"#,
+      r#"[- `a`](x)"#,
+    ),
+    (
+      r#"<details><a href="x"><ul><li></li></ul></a></details>"#,
+      r#"<details><a href="x">- </a></details>"#,
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn paragraph_after_empty_nested_quote() {
+  assert_eq!(
+    convert("<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>"),
+    "- x\n\n  - \n  \n\n  y"
+  );
 }
 
 #[test]
