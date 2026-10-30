@@ -2848,12 +2848,7 @@ impl ConvertState {
     }
 
     // Open a deferred <pre> fence before its first non-whitespace text.
-    if self.pre_fence_pending
-      && text
-        .as_bytes()
-        .iter()
-        .any(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r')
-    {
+    if self.pre_fence_pending && !text.trim_ascii().is_empty() {
       self.flush_pre_fence();
     }
     // Still pending means this <pre> has only seen whitespace so far; drop it

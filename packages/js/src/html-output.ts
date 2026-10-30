@@ -43,7 +43,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { escapeHtml, getLanguageFromAttributes, isSafeHtmlUrl, markRenderedChildContent, parseUnsignedInteger } from './utils'
+import { escapeHtml, getLanguageFromAttributes, hasNonWhitespace, isSafeHtmlUrl, markRenderedChildContent, parseUnsignedInteger, suppressesFormattingInPre } from './utils'
 
 interface HeadingFrame {
   _tag: 0
@@ -56,7 +56,11 @@ interface PreFrame {
   _tag: 1
   depth: number
   language: string
-  codeLanguageSelected: boolean
+  /**
+   * Mirrors the Markdown fence owner: a `<code>` can still supply the language
+   * until text or another element opens the `<pre>`'s own fence.
+   */
+  languagePending: boolean
   output: string
 }
 
@@ -176,6 +180,9 @@ function processText(node: TextNode, state: HtmlOutputState, output: string[]): 
         return
     }
   }
+  const top = state.frames.at(-1)
+  if (top?._tag === 1 && top.languagePending && hasNonWhitespace(value))
+    top.languagePending = false
   for (let index = state.frames.length - 1; index >= 0; index--) {
     const frame = state.frames[index]!
     if (frame._tag === 0) {
@@ -217,17 +224,20 @@ export function processHtmlOutputEvent(
   const tagId = resolveTagId(element)
   const frame = state.frames.at(-1)
   if (frame?._tag === 1) {
-    if (type === NodeEventEnter && tagId === TAG_CODE && !frame.codeLanguageSelected) {
-      const codeLanguage = getLanguageFromAttributes(element.attributes)
-      if (codeLanguage) {
-        frame.language = codeLanguage
-        frame.codeLanguageSelected = true
+    if (type === NodeEventEnter) {
+      if (frame.languagePending && tagId !== TAG_PRE && !suppressesFormattingInPre(tagId!)) {
+        frame.languagePending = false
+        const parent = element.parent
+        if (tagId === TAG_CODE && parent?.tagId === TAG_PRE && parent.depth === frame.depth) {
+          const codeLanguage = getLanguageFromAttributes(element.attributes)
+          if (codeLanguage)
+            frame.language = codeLanguage
+        }
       }
+      if (tagId === TAG_BR)
+        frame.output += '\n'
     }
-    else if (type === NodeEventEnter && tagId === TAG_BR) {
-      frame.output += '\n'
-    }
-    else if (type !== NodeEventEnter && tagId === TAG_PRE && element.depth === frame.depth) {
+    else if (tagId === TAG_PRE && element.depth === frame.depth) {
       closeFrame(state, output, frame)
     }
     return
@@ -246,7 +256,7 @@ export function processHtmlOutputEvent(
       _tag: 1,
       depth: element.depth,
       language: getLanguageFromAttributes(element.attributes),
-      codeLanguageSelected: false,
+      languagePending: true,
       output: '',
     })
     return

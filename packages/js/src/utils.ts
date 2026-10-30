@@ -1,5 +1,5 @@
 import type { ElementNode, Node, TextNode } from './types'
-import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_BLOCKQUOTE, TAG_H1, TAG_H6, TAG_LI, TAG_SPAN, TAG_TD, TAG_TH } from './const'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_ABBR, TAG_BDO, TAG_BLOCKQUOTE, TAG_FIGCAPTION, TAG_H1, TAG_H6, TAG_INS, TAG_KBD, TAG_LI, TAG_S, TAG_SMALL, TAG_SPAN, TAG_STRIKE, TAG_STRONG, TAG_TD, TAG_TH, TAG_U } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
@@ -278,6 +278,34 @@ export function getLanguageFromAttributes(attributes: ElementNode['attributes'] 
   return getLanguageFromClass(attributes?.class)
     || getLanguageFromDataAttribute(attributes?.['data-language'])
     || getLanguageFromDataAttribute(attributes?.['data-lang'])
+}
+
+/**
+ * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
+ * Used to decide if a <pre>'s content warrants opening a fenced code block.
+ */
+export function hasNonWhitespace(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c !== 32 && c !== 9 && c !== 10 && c !== 12 && c !== 13) {
+      return true
+    }
+  }
+  return false
+}
+
+// Inline tags whose Markdown delimiters are literal text inside a `<pre>`, so
+// only their content is emitted there. `<code>` and `<br>` are absent: both
+// already have `<pre>`-aware handlers.
+export function suppressesFormattingInPre(tagId: number): boolean {
+  return tagId === TAG_A
+    || tagId === TAG_KBD
+    || tagId === TAG_S
+    || tagId === TAG_STRIKE
+    || tagId === TAG_FIGCAPTION
+    || (tagId >= TAG_STRONG && tagId <= TAG_INS)
+    || (tagId >= TAG_ABBR && tagId <= TAG_SMALL)
+    || (tagId >= TAG_U && tagId <= TAG_BDO)
 }
 
 // Strict u32 parsing shared by numeric HTML attributes. Partial reads such as

@@ -145,6 +145,7 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
   it('strips a whitespace-only <pre> (no fence)', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre>   \n  </pre>', { engine })).toBe('')
+    expect(htmlToMarkdown('<pre>\f\t\r\n </pre>', { engine })).toBe('')
   })
 
   it('does not leak a whitespace-only <pre> between surrounding blocks', async () => {
@@ -346,5 +347,22 @@ describe.each(engines)('code block language data attributes $name', (engineConfi
     const html = '<pre data-language="Rust"><code data-language="TypeScript">code</code></pre>'
     expect(htmlToMarkdown(html, { engine, format: 'html' }))
       .toBe('<pre tabindex="0"><code class="language-TypeScript">code</code></pre>')
+  })
+
+  // HTML output takes a <code> language only where Markdown lets that <code> own the fence.
+  it.each([
+    ['text before the code', '<pre data-language="rust">intro <code data-language="js">x</code></pre>', 'rust'],
+    ['an unlabelled code before a labelled one', '<pre><code>a</code><code data-language="js">b</code></pre>', ''],
+    ['a code nested in a span', '<pre data-language="rust"><span><code data-language="js">x</code></span></pre>', 'rust'],
+    ['whitespace before the code', '<pre data-language="rust">\n <code data-language="js">x</code></pre>', 'js'],
+    ['a form feed before the code', '<pre data-language="rust">\f<code data-language="js">x</code></pre>', 'js'],
+    ['an empty formatting element before the code', '<pre data-language="rust"><b></b><code data-language="js">x</code></pre>', 'js'],
+  ])('matches the Markdown fence language with %s', async (_, html, language) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown.startsWith(`\`\`\`${language}\n`), markdown).toBe(true)
+    const rendered = htmlToMarkdown(html, { engine, format: 'html' })
+    const htmlClass = language ? ` class="language-${language}"` : ''
+    expect(rendered.startsWith(`<pre tabindex="0"><code${htmlClass}>`), rendered).toBe(true)
   })
 })
