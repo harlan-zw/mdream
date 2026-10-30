@@ -30,61 +30,6 @@ describe('performance report', () => {
     expect(report).toContain('No significant change')
     expect(report).toContain('4.00×')
   })
-  it('keeps comparable regressions visible beside changed outputs', () => {
-    const changed = { id: 'changed', name: 'Changed output', kind: 'time' as const, value: 100, rme: 1 }
-    const comparable = { id: 'same-output', name: 'Equivalent output', kind: 'time' as const, value: 100, rme: 1 }
-    const report = renderPerfReport({ benches: [changed, comparable] }, {
-      benches: [
-        { ...changed, value: 1, comparisonRme: 0.1, comparisonUnavailableReason: 'output changed' },
-        { ...comparable, value: 120 },
-      ],
-    })
-    expect(report).toContain('1 slower')
-    expect(report).toContain('1 benchmark not comparable')
-    expect(report).toContain('| Changed output | 100.00 ms | 1.00 ms | not comparable: output changed | n/a |')
-    expect(report).toContain('+20.0%')
-    expect(report).not.toContain('-99.0%')
-    expect(report).not.toContain('paired')
-  })
-  it('does not claim unchanged performance when all outputs changed', () => {
-    const row = { id: 'cpu', name: 'CPU', kind: 'time' as const, value: 100 }
-    const report = renderPerfReport({ benches: [row] }, {
-      benches: [{ ...row, value: 100, comparisonUnavailableReason: 'output changed', comparisonRme: 0.1 }],
-    })
-    expect(report).toContain('No comparable benchmarks')
-    expect(report).toContain('1 benchmark not comparable')
-    expect(report).not.toMatch(/No significant change|within noise|paired|[+-]\d+\.\d+%|faster|slower/)
-  })
-  it('respects a comparison marker supplied only by the base', () => {
-    const row = { id: 'calls', name: 'Calls', kind: 'count' as const, value: 0 }
-    const report = renderPerfReport({ benches: [{ ...row, comparisonUnavailableReason: 'output changed' }] }, {
-      benches: [{ ...row, value: 50 }],
-    })
-    expect(report).toContain('| Calls | 0 calls | 50 calls | not comparable: output changed | n/a |')
-    expect(report).toContain('No comparable benchmarks')
-    expect(report).not.toContain('+50 calls')
-  })
-  it('keeps normalized and scaling measurements incomparable when marked', () => {
-    const rows = [
-      { id: 'normalized', name: 'CPU per MiB', kind: 'time' as const, value: 50, informational: true },
-      { id: 'scaling', name: 'Doubling', kind: 'ratio' as const, value: 2, informational: true },
-    ]
-    const report = renderPerfReport({ benches: rows }, {
-      benches: rows.map(row => ({ ...row, value: row.value * 2, comparisonUnavailableReason: 'output changed', comparisonRme: 1 })),
-    })
-    expect(report).toContain('2 benchmarks not comparable')
-    expect(report).toContain('| CPU per MiB | 50.00 ms | 100.00 ms | not comparable: output changed | n/a |')
-    expect(report).toContain('| Doubling | 2.00× | 4.00× | not comparable: output changed | n/a |')
-    expect(report).not.toMatch(/No significant change|within noise|paired|[+-]\d+\.\d+%|faster|slower/)
-  })
-  it('shows the reason even when no base measurement exists', () => {
-    const report = renderPerfReport(null, {
-      benches: [{ id: 'cpu', name: 'CPU', kind: 'time', value: 100, comparisonUnavailableReason: 'output changed' }],
-    })
-    expect(report).toContain('not comparable: output changed')
-    expect(report).toContain('No comparable benchmarks')
-    expect(report).not.toContain('🆕 new')
-  })
   describe('retained heap with unstable samples', () => {
     // Bundle Size Analysis run 39367804677 (PR #398): the base minimum came from
     // one low sample while the first samples of both sides agreed.
@@ -98,7 +43,7 @@ describe('performance report', () => {
       expect(report).not.toContain('within CI noise')
       expect(report).toContain('ℹ️ **1 inconclusive** · past the gate, but the base measurement is informational')
       expect(report).not.toContain('slower')
-      expect(report).toContain(`| ${name} | 19.2 KiB | 90.6 KiB | ℹ️ +371.5% (base informational) | — |`)
+      expect(report).toContain(`| ${name} | 90.6 KiB | ℹ️ +371.5% (base informational) | — |`)
     })
     it('does not gate a reduction against an informational base', () => {
       const report = renderPerfReport(
@@ -129,25 +74,14 @@ describe('performance report', () => {
       expect(report).not.toContain('inconclusive')
       expect(report).toContain(`| **${name}** | 19.2 KiB → 90.6 KiB | 🔴 +71.4 KiB (+371.5%) |`)
     })
-    it('reports inconclusive and not comparable rows separately', () => {
-      const cpu = { id: 'cpu', name: 'CPU', kind: 'time' as const, value: 100 }
-      const report = renderPerfReport(
-        { benches: [unstable, cpu] },
-        { benches: [stable, { ...cpu, value: 1, comparisonUnavailableReason: 'output changed' }] },
-      )
-      expect(report).toContain('✅ **No gated significant change** _(inconclusive comparisons are excluded, comparable benchmarks only)_')
-      expect(report).toContain('ℹ️ **1 inconclusive** · past the gate, but the base measurement is informational')
-      expect(report).toContain('ℹ️ **1 benchmark not comparable**')
-      expect(report).toContain(`| ${name} | 19.2 KiB | 90.6 KiB | ℹ️ +371.5% (base informational) | — |`)
-      expect(report).toContain('| CPU | 100.00 ms | 1.00 ms | not comparable: output changed | n/a |')
-      expect(report).not.toMatch(/faster|slower|-99\.0%/)
-    })
-    it('does not count an unavailable comparison against an informational base as inconclusive', () => {
-      const report = renderPerfReport({ benches: [unstable] }, { benches: [{ ...stable, comparisonUnavailableReason: 'output changed' }] })
-      expect(report).toContain('No comparable benchmarks')
-      expect(report).toContain('1 benchmark not comparable')
-      expect(report).toContain(`| ${name} | 19.2 KiB | 90.6 KiB | not comparable: output changed | n/a |`)
-      expect(report).not.toMatch(/inconclusive|base informational|No gated significant change/)
-    })
   })
+})
+
+it('marks changed output while retaining the measurements and verdict', () => {
+  const row = { id: 'cpu', name: 'Page CPU', kind: 'time' as const, value: 100 }
+  const report = renderPerfReport({ benches: [row] }, { benches: [{ ...row, value: 150, outputChanged: true }] })
+  expect(report).toContain('Page CPU (output changed)')
+  expect(report).toContain('150.00 ms')
+  expect(report).toContain('1 slower')
+  expect(report).toContain('Measurements marked "output changed" compare different output or metadata between base and PR.')
 })

@@ -20,10 +20,9 @@ export interface PerfBench {
   comparisonRme?: number
   // Mean paired PR/base ratio used to express comparisonRme against the base.
   comparisonRatio?: number
-  // Absolute measurements remain valid, but the base and PR did different work.
-  comparisonUnavailableReason?: string
   // reported for reference but excluded from the verdict (e.g. wall time)
   informational?: boolean
+  outputChanged?: boolean
 }
 
 export interface PerfRun {
@@ -34,7 +33,7 @@ const TIME_FLOOR_PCT = 5
 const ALLOC_FLOOR_PCT = 2
 const ALLOC_FLOOR_BYTES = 64 * 1024
 
-type Status = 'new' | 'slower' | 'faster' | 'same' | 'unavailable'
+type Status = 'new' | 'slower' | 'faster' | 'same'
 
 interface Row {
   bench: PerfBench
@@ -42,7 +41,6 @@ interface Row {
   status: Status
   deltaPct: number
   informational: boolean
-  comparisonUnavailableReason?: string
 }
 
 function fmtBytes(bytes: number): string {
@@ -68,9 +66,6 @@ function fmtPct(pct: number): string {
 
 function classify(pr: PerfBench, base?: PerfBench): Row {
   const informational = pr.informational === true || base?.informational === true
-  const comparisonUnavailableReason = pr.comparisonUnavailableReason ?? base?.comparisonUnavailableReason
-  if (comparisonUnavailableReason != null)
-    return { bench: pr, base, status: 'unavailable', deltaPct: 0, informational, comparisonUnavailableReason }
   if (!base)
     return { bench: pr, base, status: 'new', deltaPct: 0, informational }
   const delta = pr.value - base.value
@@ -101,8 +96,6 @@ function classify(pr: PerfBench, base?: PerfBench): Row {
 }
 
 function deltaCell(row: Row): string {
-  if (row.status === 'unavailable')
-    return `not comparable: ${row.comparisonUnavailableReason}`
   if (row.status === 'new')
     return '🆕 new'
   if (row.bench.kind === 'ratio')
@@ -130,42 +123,34 @@ export function renderPerfReport(base: PerfRun | null, pr: PerfRun): string {
   const slower = changed.filter(r => r.status === 'slower')
   // Past the gate, but only the base flag keeps them out of the verdict.
   const inconclusive = rows.filter(r => r.informational && !r.bench.informational && (r.status === 'slower' || r.status === 'faster'))
-  const unavailable = rows.filter(r => r.status === 'unavailable')
-  const comparable = rows.filter(r => r.status !== 'unavailable' && r.status !== 'new')
-  const comparableOnly = unavailable.length ? ', comparable benchmarks only' : ''
 
   const out: string[] = ['### ⚡ Performance _(directional)_', '']
-  if (!comparable.length)
-    out.push('ℹ️ **No comparable benchmarks**')
-  else if (slower.length)
+  if (rows.some(row => row.bench.outputChanged || row.base?.outputChanged))
+    out.push('Measurements marked "output changed" compare different output or metadata between base and PR.', '')
+  if (slower.length)
     out.push(`⚠️ **${slower.length} slower** · past the per-metric noise gate`)
   else if (changed.length)
     out.push(`🟢 **${changed.length} faster**`)
   else if (inconclusive.length)
-    out.push(`✅ **No gated significant change** _(inconclusive comparisons are excluded${comparableOnly})_`)
+    out.push('✅ **No gated significant change** _(inconclusive comparisons are excluded)_')
   else
-    out.push(`✅ **No significant change** _(within CI noise${comparableOnly})_`)
-
+    out.push('✅ **No significant change** _(within CI noise)_')
   if (inconclusive.length)
     out.push(`ℹ️ **${inconclusive.length} inconclusive** · past the gate, but the base measurement is informational`)
-  if (unavailable.length)
-    out.push(`ℹ️ **${unavailable.length} benchmark${unavailable.length === 1 ? '' : 's'} not comparable** · absolute measurements and reasons below`)
 
   if (changed.length) {
     out.push('', '| Benchmark | base → PR | Δ |', '|---|---|---|')
     for (const row of changed)
-      out.push(`| **${row.bench.name}** | ${fmtValue(row.base!)} → ${fmtValue(row.bench)} | ${deltaCell(row)} |`)
+      out.push(`| **${row.bench.name}${row.bench.outputChanged || row.base?.outputChanged ? ' (output changed)' : ''}** | ${fmtValue(row.base!)} → ${fmtValue(row.bench)} | ${deltaCell(row)} |`)
   }
 
   out.push('', `<details><summary>All benchmarks (${rows.length})</summary>`, '')
-  out.push('| Benchmark | Base | PR | Δ | RME |', '|---|---|---|---|---|')
+  out.push('| Benchmark | PR | Δ | RME |', '|---|---|---|---|')
   for (const row of rows) {
-    const rme = row.status === 'unavailable'
-      ? 'n/a'
-      : row.bench.comparisonRme != null
-        ? `±${row.bench.comparisonRme.toFixed(1)}% paired`
-        : row.bench.rme != null ? `±${row.bench.rme.toFixed(1)}%` : '—'
-    out.push(`| ${row.bench.name} | ${row.base ? fmtValue(row.base) : 'n/a'} | ${fmtValue(row.bench)} | ${deltaCell(row)} | ${rme} |`)
+    const rme = row.bench.comparisonRme != null
+      ? `±${row.bench.comparisonRme.toFixed(1)}% paired`
+      : row.bench.rme != null ? `±${row.bench.rme.toFixed(1)}%` : '—'
+    out.push(`| ${row.bench.name}${row.bench.outputChanged || row.base?.outputChanged ? ' (output changed)' : ''} | ${fmtValue(row.bench)} | ${deltaCell(row)} | ${rme} |`)
   }
   out.push('', '</details>')
 
