@@ -3565,6 +3565,19 @@ fn inline_wrapper_around_blockquote_in_list_item_streams() {
       "- \n  > | > n |\n  > | --- |\n\n  tail",
     ),
     (
+      "<table><tr><td><ul><li><code><blockquote>q</blockquote></code></li></ul></td></tr></table>",
+      "| <ul><li>`>  q`</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li>pre <code><blockquote>q</blockquote> mid</code></li></ul></td></tr></table>",
+      "| <ul><li>pre `>  q mid`</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><code><blockquote>q`x</blockquote></code></li></ul></td></tr></table>",
+      "| <ul><li>``>  q`x``</li></ul> |\n| --- |",
+    ),
+    ("<code><blockquote>q</blockquote></code>", "`>  q`"),
+    (
       "<ul><li><strong><blockquote>next</blockquote></strong></li><li>x</li></ul>",
       "- **\n  > next\n\n  **\n- x",
     ),

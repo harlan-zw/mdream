@@ -741,6 +741,11 @@ impl ConvertState {
       }
     };
     for span in &mut self.code_spans {
+      // A span opened before the quote holds the prefix written at its content
+      // start, as in JS, so `<code><blockquote>` keeps its opener in place.
+      if span.output_start < frame.content_start && span.content_start == frame.content_start {
+        continue;
+      }
       for offset in [&mut span.output_start, &mut span.content_start] {
         *offset = remap(*offset);
       }

@@ -2559,6 +2559,19 @@ fn inline_wrapper_around_blockquote_in_list_item() {
       "- \n  > | > n |\n  > | --- |\n\n  tail",
     ),
     (
+      "<table><tr><td><ul><li><code><blockquote>q</blockquote></code></li></ul></td></tr></table>",
+      "| <ul><li>`>  q`</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li>pre <code><blockquote>q</blockquote> mid</code></li></ul></td></tr></table>",
+      "| <ul><li>pre `>  q mid`</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><code><blockquote>q`x</blockquote></code></li></ul></td></tr></table>",
+      "| <ul><li>``>  q`x``</li></ul> |\n| --- |",
+    ),
+    ("<code><blockquote>q</blockquote></code>", "`>  q`"),
+    (
       "<ul><li><strong><blockquote>next</blockquote></strong></li><li>x</li></ul>",
       "- **\n  > next\n\n  **\n- x",
     ),
@@ -6553,7 +6566,7 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
   );
   assert_eq!(
     convert_with_origin(html, "https://example.com/docs/page"),
-    "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
+    "A & B  \n\n| [`>  &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
 
