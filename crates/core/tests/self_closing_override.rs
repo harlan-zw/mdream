@@ -145,6 +145,13 @@ fn cdata_section_closes_without_its_content() {
 }
 
 #[test]
+fn reopened_rule_separates_its_children_in_a_list_item() {
+  let config = [("hr", flag(false))];
+  assert_converts("<ul><li><hr>x</hr></li></ul>", &config, "- ***\n\n  x");
+  assert_converts("<ul><li><hr></hr>x</li></ul>", &config, "- ***\n\n  x");
+}
+
+#[test]
 fn heading_in_reopened_break_continues_its_line() {
   let config = [("br", flag(false))];
   assert_converts("<br><h1></h1></br>b c", &config, "# b c");
