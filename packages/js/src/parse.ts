@@ -853,6 +853,40 @@ export function parseHtml(html: string, options: ParseOptions = {}): ParseResult
 }
 
 /**
+ * Stream-owned opt-in: commit only an ordinary ASCII prose prefix. Public
+ * parser calls keep the complete text-node event contract by never calling it.
+ */
+export function commitPlainTextPrefix(
+  remainingHtml: string,
+  state: ParseState,
+  onEvent: (event: NodeEvent) => void,
+): string {
+  const text = state.trailingText
+  if (!state.textBufferContainsWhitespace || remainingHtml.length < 65536 || !text || text.length < 65536
+    || (state.currentNode?.tagId !== TAG_P && state.currentNode?.tagId !== TAG_LI)
+    || state.hasEncodedHtmlEntity || state.flattenedTagName
+    || state.depthMap[TAG_PRE] || state.depthMap[TAG_CODE]
+    || state.depthMap[TAG_TABLE] || isInsideRawHtmlBlock(state.depthMap)) {
+    return remainingHtml
+  }
+  const boundary = text.lastIndexOf(' ') + 1
+  if (!boundary)
+    return remainingHtml
+  for (let offset = 0; offset < remainingHtml.length; offset++) {
+    const code = remainingHtml.charCodeAt(offset)
+    if (code !== SPACE_CHAR && !isAsciiAlpha(code) && code !== 44 /* comma */)
+      return remainingHtml
+  }
+  const suffix = text.substring(boundary)
+  processTextBuffer(text.substring(0, boundary), state, onEvent)
+  state.trailingText = suffix
+  state.textBufferContainsWhitespace = false
+  state.textBufferContainsNonWhitespace = suffix.length > 0
+  state.lastCharWasWhitespace = true
+  return suffix
+}
+
+/**
  * Streaming HTML parser - calls onEvent for each DOM event
  */
 export function parseHtmlStream(
