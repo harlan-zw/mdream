@@ -1559,7 +1559,12 @@ impl ConvertState {
       let tag_handler = pending.tag_id.and_then(get_tag_handler);
       let resume = resume_tag_attributes(
         chunk,
-        tag_handler.is_some_and(|handler| handler.is_self_closing),
+        self.tag_is_self_closing(
+          pending.name(),
+          pending.tag_id,
+          pending.is_builtin,
+          tag_handler,
+        ),
         self.attr_mask(tag_handler),
         &mut pending.carry,
         &mut pending.attrs,

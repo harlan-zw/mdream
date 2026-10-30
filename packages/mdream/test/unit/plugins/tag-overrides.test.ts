@@ -1,5 +1,49 @@
+import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it } from 'vitest'
-import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
+
+const MARKED = { enter: '[', exit: ']' }
+const VOID_MARKED = { ...MARKED, isSelfClosing: true }
+const OPEN_MARKED = { ...MARKED, isSelfClosing: false }
+
+const SELF_CLOSING_CASES: [string, Record<string, any>, string][] = [
+  ['<p>a <x-y> 2</p>', { 'x-y': { isSelfClosing: true } }, 'a  2'],
+  ['<p>a <x-y>text</x-y> b</p>', { 'x-y': VOID_MARKED }, 'a []text b'],
+  ['<p>a <x-y><x-y>in</x-y></x-y> b</p>', { 'x-y': VOID_MARKED }, 'a [][]in b'],
+  ['<p>a <x-y title="1>2">text</x-y> b</p>', { 'x-y': VOID_MARKED }, 'a []text b'],
+  ['<p>a <X-Y>text</X-Y> b</p>', { 'x-y': VOID_MARKED }, 'a []text b'],
+  ['<p>a<em>b</em>c</p>', { em: VOID_MARKED }, 'a[]bc'],
+  ['<p>a<EM>b</EM>c</p>', { em: VOID_MARKED }, 'a[]bc'],
+  ['<p>a<br>b</br>c</p>', { br: OPEN_MARKED }, 'a[b]c'],
+  ['<p>a<BR>b</BR>c</p>', { br: OPEN_MARKED }, 'a[b]c'],
+  ['<p>a<br/>b</p>', { br: OPEN_MARKED }, 'a[]b'],
+  ['<p>a<br>b</p>', { br: MARKED }, 'a[]b'],
+  ['<p>a<x-y>b</x-y>c</p>', { 'x-y': 'br' }, 'a  \nbc'],
+  ['<p>a<x-y>b</x-y>c</p>', { 'x-y': 'br', 'br': { isSelfClosing: false } }, 'a  \nbc'],
+  ['<p>a <![CDATA[x]]> c</p><p>d</p>', { '#cdata-section': VOID_MARKED }, 'a [] c\n\nd'],
+  ['<p>a <![CDATA[x]]> c</p><p>d</p>', { '#cdata-section': 'br' }, 'a  \n c\n\nd'],
+  ['<ul><li><hr>x</hr></li></ul>', { hr: { isSelfClosing: false } }, '- ***\n\n  x'],
+  ['<ul><li>a<hr>x</hr>b</li></ul>', { hr: { isSelfClosing: false } }, '- a\n\n  ---\n\n  x b'],
+  ['<br><h1></h1></br>b c', { br: { isSelfClosing: false } }, '# b c'],
+]
+
+function streamInChunksOf(html: string, width: number, engine: any, tagOverrides: Record<string, any>, format?: 'text' | 'html') {
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < html.length; i += width)
+        controller.enqueue(html.slice(i, i + width))
+      controller.close()
+    },
+  })
+  return streamHtmlToMarkdown(stream as any, { engine, format, plugins: { tagOverrides } })
+}
+
+async function collect(chunks: AsyncIterable<string>): Promise<string> {
+  let output = ''
+  for await (const chunk of chunks)
+    output += chunk
+  return output
+}
 
 describe.each(engines)('tagOverrides $name', (engineConfig) => {
   it('overrides enter/exit strings for existing tag', async () => {
@@ -204,5 +248,33 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
       engine,
     })
     expect(markdown).toBe('__keep__')
+  })
+})
+
+describe.each(engines)('tagOverrides isSelfClosing $name', (engineConfig) => {
+  it.each(SELF_CLOSING_CASES)('%s %j', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamInChunksOf(html, width, engine, tagOverrides)), `width ${width}`).toBe(expected)
+  })
+
+  it.each([
+    ['text', 'a  2'],
+    ['html', '<p>a  2</p>'],
+  ] as const)('applies to %s output', async (format, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>a <x-y> 2</p>'
+    const tagOverrides = { 'x-y': { isSelfClosing: true } }
+    expect(htmlToMarkdown(html, { engine, format, plugins: { tagOverrides } })).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamInChunksOf(html, width, engine, tagOverrides, format)), `width ${width}`).toBe(expected)
+  })
+
+  it('closes a reopened void tag past the depth limit', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `${'<div>'.repeat(512)}<br>a</br><div>b</div><p>c</p>${'</div>'.repeat(512)}<p>d</p>`
+    const markdown = htmlToMarkdown(html, { engine, plugins: { tagOverrides: { br: { isSelfClosing: false } } } })
+    expect(markdown).toBe('a b c\n\nd')
   })
 })

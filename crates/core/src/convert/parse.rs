@@ -906,11 +906,14 @@ impl ConvertState {
     if !is_builtin && tag_name.as_bytes().first() != Some(&b'#') {
       budget.charge(tag_name.len());
     }
+    // Read after the mask: the other order costs every start tag a spill.
+    let attr_mask = self.attr_mask(tag_handler);
+    let self_closing = self.tag_is_self_closing(tag_name, tag_id, is_builtin, tag_handler);
     let scan = process_tag_attributes(
       html_chunk,
       position,
-      tag_handler,
-      self.attr_mask(tag_handler),
+      self_closing,
+      attr_mask,
       budget,
       &mut self.attr_scratch,
     );
@@ -941,6 +944,55 @@ impl ConvertState {
       scan.self_closing,
       scan.overflow,
     )
+  }
+
+  /// Whether a start tag of this element has no content. An `isSelfClosing`
+  /// override decides; without one the handler does, aliases included.
+  #[inline(always)]
+  pub(crate) fn tag_is_self_closing(
+    &self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    tag_handler: Option<&crate::types::TagHandler>,
+  ) -> bool {
+    let self_closing = tag_handler.is_some_and(|handler| handler.is_self_closing);
+    if self.has_tag_overrides {
+      self
+        .self_closing_override(tag_name, tag_id, is_builtin)
+        .unwrap_or(self_closing)
+    } else {
+      self_closing
+    }
+  }
+
+  /// Only a void handler skips the depth-limit recovery. An override that makes
+  /// any other tag void needs no skip, and one that reopens this tag needs it.
+  #[cold]
+  fn end_tag_is_void(&self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool) -> bool {
+    let tag_handler = tag_id.and_then(get_tag_handler);
+    tag_handler.is_some_and(|handler| handler.is_self_closing)
+      && self.tag_is_self_closing(tag_name, tag_id, is_builtin, tag_handler)
+  }
+
+  /// A built-in name is looked up by id: the source spelling can be `<BR>`, and
+  /// the id of an aliased custom name would find the target's override instead.
+  #[cold]
+  fn self_closing_override(
+    &self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+  ) -> Option<bool> {
+    let overrides = self.options.plugins.as_ref()?.tag_overrides.as_ref()?;
+    let tag_override = match tag_id.filter(|_| is_builtin) {
+      Some(id) => Self::override_by_id(Some(overrides), self.override_idx.as_deref(), id),
+      None => overrides
+        .iter()
+        .find(|(name, _)| name == tag_name)
+        .map(|(_, config)| config),
+    };
+    tag_override?.is_self_closing
   }
 
   /// The attributes this tag's handler asks for, or all of them when a plugin
@@ -1872,10 +1924,7 @@ impl ConvertState {
     }
 
     if self.overflow_same_name_depth > 0 {
-      let is_self_closing = tag_id
-        .and_then(get_tag_handler)
-        .is_some_and(|handler| handler.is_self_closing);
-      if is_self_closing {
+      if self.end_tag_is_void(tag_name.as_ref(), tag_id, builtin_tag_id.is_some()) {
         self.just_closed_tag = true;
         return true;
       }
@@ -2001,8 +2050,13 @@ impl ConvertState {
       }
       return;
     }
+    if result.self_closing {
+      self.close_node();
+      self.just_closed_tag = true;
+      return;
+    }
 
-    if !result.self_closing && !content.is_empty() {
+    if !content.is_empty() {
       let excluded = self
         .stack
         .last()
@@ -2017,9 +2071,7 @@ impl ConvertState {
         parent.child_text_node_index += 1;
       }
     }
-    if !result.self_closing {
-      self.close_node();
-    }
+    self.close_node();
   }
 
   #[inline]
