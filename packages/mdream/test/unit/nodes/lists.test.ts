@@ -95,6 +95,16 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
   })
 
+  // A list's exit output continues its last item, so it separates nothing:
+  // `- aEND` then `- bEND` would read as one list.
+  it.each([
+    ['<ul><li>a</li></ul><ul><li>b</li></ul>', { ul: { exit: 'END' } }, '- aEND\n\n* bEND'],
+    ['<ol><li>a</li></ol><ol><li>b</li></ol>', { ol: { exit: 'END' } }, '1. aEND\n\n1) bEND'],
+  ])('alternates after a list whose exit writes output: %s', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
   it('handles nested unordered lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Level 1<ul><li>Level 2</li></ul></li><li>Another Level 1</li></ul>'
