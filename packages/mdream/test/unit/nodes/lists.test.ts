@@ -64,6 +64,43 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 
+  // A bullet that does not start its line opens no list, so nothing needs
+  // keeping apart, and a `*` there would read as a delimiter.
+  it.each([
+    ['<ul><li>a</li></ul><em><ul><li>b</li></ul></em>', '- a\n\n*- b*'],
+    ['<ul><li>a</li></ul><strong><ul><li>b</li></ul></strong>', '- a\n\n**- b**'],
+    ['<ul><li>a</li></ul><b><i><ul><li>b</li></ul></i></b>', '- a\n\n***- b***'],
+    ['<ul><li>a</li></ul><code><ul><li>b</li></ul></code>', '- a\n\n`- b`'],
+    ['<ul><li>a</li></ul><em><ul><li>b</li></ul>c</em>', '- a\n\n*- b c*'],
+    ['<ul><li>a</li></ul><em><div></div><ul><li>b</li></ul></em>', '- a\n\n*- b*'],
+    ['<ul><li>a</li></ul><em><ul><li>b</li></ul></em><ul><li>c</li></ul>', '- a\n\n*- b*\n\n- c'],
+    ['<em><ul><li>a</li></ul><ul><li>b</li></ul></em>', '*- a - b*'],
+    ['<small><ul><li>a</li></ul><ul><li>b</li></ul></small>', '- a - b'],
+    ['<h1><ul><li>a</li></ul><ul><li>b</li></ul></h1>', '# - a - b'],
+    ['<blockquote><ul><li>a</li></ul><em><ul><li>b</li></ul></em></blockquote>', '> - a\n>\n> *- b*'],
+    ['<ul><li>x<ul><li>a</li></ul><em><ul><li>b</li></ul></em></li></ul>', '- x\n  - a*  - b*'],
+    // A caption writes its `*` only once its first output arrives.
+    ['<ul><li>a</li></ul><figcaption><ul><li>b</li></ul></figcaption>', '- a\n\n*- b*'],
+    ['<ul><li>a</li></ul><figure><figcaption><small><ul><li>b</li></ul></small></figcaption></figure>', '- a\n\n*- b*'],
+  ])('keeps the default marker of a bullet inside a line: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<span><ul><li>a</li></ul><ul><li>b</li></ul></span>', '- a\n* b'],
+    ['<ul><li>a</li></ul><span><ul><li>b</li></ul></span>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><small><ul><li>b</li></ul></small>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul>\n<label>\n<ul><li>b</li></ul>\n</label>', '- a\n\n* b'],
+    ['<blockquote><ul><li>a</li></ul><small><ul><li>b</li></ul></small></blockquote>', '> - a\n>\n> * b'],
+    // `)` forms no delimiter run, so an ordered list alternates wherever it sits.
+    ['<ol><li>a</li></ol><em><ol><li>b</li></ol></em>', '1. a\n\n*1) b*'],
+    ['<ol><li>a</li></ol><figcaption><ol><li>b</li></ol></figcaption>', '1. a\n\n*1) b*'],
+  ])('alternates a marker that forms no delimiter: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it.each([
     ['<ul><li>a</li></ul><p>x</p><ul><li>b</li></ul>', '- a\n\nx\n\n- b'],
     ['<ul><li>a</li></ul><ol><li>b</li></ol>', '- a\n\n1. b'],

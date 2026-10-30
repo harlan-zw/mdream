@@ -3280,6 +3280,28 @@ fn empty_quotes_keep_adjacent_list_markers_at_every_split() {
   }
 }
 
+// Whether a bullet starts its line reads the output tail, which a drain can move
+// behind `buffer[0]` right before the list opens.
+#[test]
+fn bullets_beside_a_delimiter_match_one_shot_at_every_split() {
+  for html in [
+    "<ul><li>a</li></ul><em><ul><li>b</li></ul></em>",
+    "<ul><li>a</li></ul><strong><ul><li>b</li></ul></strong><ul><li>c</li></ul>",
+    "<em><ul><li>a</li></ul><ul><li>b</li></ul></em>",
+    "<ul><li>a</li></ul><small><ul><li>b</li></ul><ul><li>c</li></ul></small>",
+    "<ul><li>a</li></ul>\n<small>\n<ul><li>b</li></ul>\n</small>",
+    "<span><ul><li>a</li></ul><ul><li>b</li></ul></span>",
+    "<blockquote><ul><li>a</li></ul><small><ul><li>b</li></ul></small></blockquote>",
+    "<blockquote><ul><li>a</li></ul><em><ul><li>b</li></ul></em></blockquote>",
+    "<ul><li>a</li></ul><figcaption><ul><li>b</li></ul></figcaption>",
+    "<ul><li>a</li></ul><figure><figcaption><small><ul><li>b</li></ul></small></figcaption></figure>",
+    "<ol><li>a</li></ol><em><ol><li>b</li></ol></em>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 #[test]
 fn overridden_item_markers_match_one_shot_at_every_split() {
   for enter in ["", " ", "+ ", "* ", "- ", "1) "] {

@@ -3314,7 +3314,8 @@ impl ConvertState {
   /// Marker character for a list opening here: the other one of its kind when
   /// the list before it ended on the default one, sits at the same depth under
   /// the same quotes and nothing visible came between, since CommonMark would
-  /// join the two.
+  /// join the two. `*` also has to start its line, as anywhere else it joins
+  /// nothing and reads as an emphasis delimiter.
   pub(crate) fn next_list_marker(&mut self, ordered: bool) -> u8 {
     let sibling = self.sibling_list_marker;
     if sibling != 0
@@ -3324,12 +3325,22 @@ impl ConvertState {
       && !self.list_gap_visible()
     {
       match sibling {
-        b'-' => return b'*',
+        b'-' if self.list_items_open_lines() => return b'*',
         b'.' => return b')',
         _ => {}
       }
     }
     if ordered { b'.' } else { b'-' }
+  }
+
+  /// Whether the items of a list opening here start their lines. An item keeps
+  /// its newline unless an ancestor collapses whitespace; under one, only a line
+  /// the output already started takes its marker. A caption writes its `*` with
+  /// its first output, which the marker would be.
+  fn list_items_open_lines(&self) -> bool {
+    self.caption_frames.is_empty()
+      && (self.collapse_non_span_depth == 0
+        || matches!(self.last_output_byte(), None | Some(b'\n')))
   }
 
   /// Whether output since the closed list ends its run. An empty inline

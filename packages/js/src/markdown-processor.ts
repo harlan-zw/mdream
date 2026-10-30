@@ -1788,19 +1788,38 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    * Marker character code for a list opening here: the other one of its kind
    * when the list before it ended on the default one, sits at the same depth
    * under the same quotes and nothing visible came between, since CommonMark
-   * would join the two.
+   * would join the two. `*` also has to start its line, as anywhere else it
+   * joins nothing and reads as an emphasis delimiter.
    */
-  function nextListMarker(ordered: boolean): number {
+  function nextListMarker(list: ElementNode, ordered: boolean): number {
     const sibling = siblingListMarker
     if (sibling !== 0 && siblingListDepth === state.depthMap[TAG_LI]
       && siblingListQuotes === state.blockquotes.length
       && (sibling === 46 || sibling === 41) === ordered) {
-      if (sibling === 45) // -
+      if (sibling === 45 && listItemsOpenLines(list)) // -
         return 42 // *
       if (sibling === 46) // .
         return 41 // )
     }
     return ordered ? 46 : 45
+  }
+
+  /**
+   * Whether the items of a list opening here start their lines. An item keeps
+   * its newline unless an ancestor collapses whitespace; under one, only a line
+   * the output already started takes its marker. A caption writes its `*` with
+   * its first output, which the marker would be.
+   */
+  function listItemsOpenLines(list: ElementNode): boolean {
+    if (captionFrameCount !== 0)
+      return false
+    let ancestor: ElementNode | null | undefined = list
+    while (ancestor && (!ancestor.tagHandler?.collapsesInnerWhiteSpace || ancestor.tagId === TAG_SPAN))
+      ancestor = ancestor.parent
+    if (!ancestor)
+      return true
+    const last = lastOutputChar(state.buffer)
+    return last === 10 || last === -1
   }
 
   /**
@@ -2010,7 +2029,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     if ((tagId === TAG_UL || tagId === TAG_OL) && eventType === NodeEventEnter) {
-      state.listMarkers.push(nextListMarker(tagId === TAG_OL))
+      state.listMarkers.push(nextListMarker(element, tagId === TAG_OL))
       listMarkerOwners?.push(element)
       listMarkerDepths?.push(state.depthMap[TAG_LI]!)
     }

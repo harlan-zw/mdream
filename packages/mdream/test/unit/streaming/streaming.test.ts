@@ -126,6 +126,18 @@ const BYTE_PARITY_CASES = [
   '<ol><li>a</li></ol><ol start="3"><li><hr></li></ol><ul><li>b</li></ul><ul><li><hr></li></ul>',
   '<ul><li>a</li></ul><br><ul></ul><br><ul></ul><ul><li>b</li></ul>',
   '<ul><li>a</li></ul><br><ul></ul>x<ul></ul><ul><li>b</li></ul>',
+  // A bullet keeps its marker when it would land on a delimiter.
+  '<ul><li>a</li></ul><em><ul><li>b</li></ul></em>',
+  '<ul><li>a</li></ul><strong><ul><li>b</li></ul></strong><ul><li>c</li></ul>',
+  '<em><ul><li>a</li></ul><ul><li>b</li></ul></em>',
+  '<ul><li>a</li></ul><small><ul><li>b</li></ul><ul><li>c</li></ul></small>',
+  '<ul><li>a</li></ul>\n<small>\n<ul><li>b</li></ul>\n</small>',
+  '<span><ul><li>a</li></ul><ul><li>b</li></ul></span>',
+  '<blockquote><ul><li>a</li></ul><small><ul><li>b</li></ul></small></blockquote>',
+  '<blockquote><ul><li>a</li></ul><em><ul><li>b</li></ul></em></blockquote>',
+  '<ul><li>a</li></ul><figcaption><ul><li>b</li></ul></figcaption>',
+  '<ul><li>a</li></ul><figure><figcaption><small><ul><li>b</li></ul></small></figcaption></figure>',
+  '<ol><li>a</li></ol><em><ol><li>b</li></ol></em>',
 ]
 
 describe('cross-engine streaming byte parity', () => {
@@ -159,6 +171,31 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          output += chunk
+        expect(output, `${name} split=${split}`).toBe(expected)
+      }
+    }
+  })
+
+  // Whether a bullet starts its line reads the output tail, which can leave the
+  // buffer right before the list opens.
+  it.each([
+    ['<ul><li>a</li></ul><em><ul><li>b</li></ul></em>', '- a\n\n*- b*'],
+    ['<ul><li>a</li></ul><figcaption><ul><li>b</li></ul></figcaption>', '- a\n\n*- b*'],
+    ['<ul><li>a</li></ul><small><ul><li>b</li></ul></small>', '- a\n\n* b'],
+    ['<blockquote><ul><li>a</li></ul><small><ul><li>b</li></ul></small></blockquote>', '> - a\n>\n> * b'],
+  ])('settles a bullet beside a delimiter at every split: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      for (let split = 0; split <= html.length; split++) {
+        let output = ''
+        const input = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        for await (const chunk of engine.streamHtmlToMarkdown(input))
           output += chunk
         expect(output, `${name} split=${split}`).toBe(expected)
       }
