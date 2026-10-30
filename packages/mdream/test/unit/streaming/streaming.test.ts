@@ -76,7 +76,7 @@ const LINK_SPACE_CASES: [string, string][] = [
   ],
 ]
 
-const BYTE_PARITY_CASES = [
+const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { tagOverrides: Record<string, string> } } }> = [
   ...LINK_SPACE_CASES.map(([html]) => html),
   '<ul><li><blockquote>q</blockquote><pre><code></code></pre></li><li>x</li></ul>',
   '<ul><li><pre><code></code></pre></li></ul>',
@@ -93,6 +93,21 @@ const BYTE_PARITY_CASES = [
   '<ul><li><blockquote>q</blockquote><br>tail</li></ul>',
   '<ul><li><blockquote>q</blockquote><ul></ul>tail</li></ul>',
   '<ul><li><blockquote>q</blockquote><figcaption><br></figcaption>tail</li></ul>',
+  ...[
+    '<blockquote>x</blockquote><p>tail</p>',
+    '<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>',
+    '<blockquote>x</div>tail</blockquote><p>end</p>',
+    '<div>x</blockquote>tail</div><p>end</p>',
+    '<blockquote><p>a</p><p>b</p></blockquote>',
+    '<blockquote><div>x</div>tail</blockquote>',
+    '<ul><li><blockquote>x</blockquote></li></ul>',
+  ].map(html => ({ html, options: { plugins: { tagOverrides: { blockquote: 'div' } } } })),
+  ...([
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'script'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'style'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'textarea'],
+    ['<script><b>x</b></script><p>tail</p>', 'script', 'div'],
+  ] as const).map(([html, source, target]) => ({ html, options: { plugins: { tagOverrides: { [source]: target } } } })),
   '<p>aaaaaaaaaa --</p>',
   '<p>aaaaaaaaaa ==</p>',
   '<p>aaaaaaaaaa -</p>',
@@ -151,11 +166,12 @@ describe('cross-engine streaming byte parity', () => {
     }
   })
 
-  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (html) => {
+  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (testCase) => {
+    const { html, options } = typeof testCase === 'string' ? { html: testCase, options: undefined } : testCase
     const engineOutputs: string[] = []
 
     for (const { engine, name } of engines) {
-      const expected = engine.htmlToMarkdown(html)
+      const expected = engine.htmlToMarkdown(html, options)
       engineOutputs.push(expected)
 
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
@@ -167,9 +183,22 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
           streamed += chunk
         expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
+      }
+      for (let split = 1; split < html.length; split++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(expected)
       }
     }
 
