@@ -387,9 +387,29 @@ describe.each(engines)('links $name', (engineConfig) => {
     ['<a href="/a" title="A"><p>x</p></a><a href="/b" title="B"><p>y</p></a>', '[x](/a "A") [y](/b "B")'],
     ['<a href="/a"><div>x<a href="/b" title="B"><p>y</p></a></div></a>', '[x [y](/b "B")](/a)'],
     ['<a href="/a" title="A"><ul><li>x<ul><li>y<ul><li>z</li></ul></li></ul></li></ul></a>', '[- x  - y    - z](/a "A")'],
+    ['<a href="/a" title="A"><div><p>x</p><p>y</p></div></a>', '[x y](/a "A")'],
+    ['<a href="/a" title="A"><p>x</a><a href="/b" title="B"><p>y</a>', '[x](/a "A") [y](/b "B")'],
+    ['<a href="/a" title="A"><div><a href="/b" title="B"><p>y</p>z</a>w</div></a>', '[[y z](/b "B")w](/a "A")'],
+    ['<a href="/a" title="A"><div><a href="/b"><p>y</p></a></div><p>z</p></a>', '[[y](/b) z](/a "A")'],
+    ['<a href="/a" title="A"><div><img src="/i" alt="I"></div></a><a href="/b" title="B"><div><img src="/i" alt="J"></div></a>', '[![I](/i)](/a "A") [![J](/i)](/b "B")'],
+    ['<a href="/a" title="A"><div><img src="/i" alt="I"><a href="/b" title="B"><p>y</p></a></div></a>', '[![I](/i) [y](/b "B")](/a "A")'],
+    ['<div><p><img src="/i" alt="I"></p><a href="/b" title="B"><p>y</p></a></div>', '![I](/i)\n\n[y](/b "B")'],
   ])('counts text in a nested block for its own link in %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
   })
 
   // Whitespace in a `<pre>` nested in a link shows nothing, so the link keeps its label.

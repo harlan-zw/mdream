@@ -199,6 +199,8 @@ export interface ElementNode extends Node {
   pluginOutput?: string[]
   /** Whether this element's enter event wrote an inline wrapper. */
   hasEnterOutput?: boolean
+  /** Content below this node already counts for the nearest link at or above it. */
+  linkContentCounted?: boolean
   /** A plugin skipped this link's start, so it takes no title or aria-label text. */
   enterSkipped?: boolean
   /** Text counted in this link that never shows: excluded text and the blank text after it. */

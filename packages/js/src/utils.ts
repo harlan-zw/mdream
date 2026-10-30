@@ -667,20 +667,24 @@ export function markRenderedChildContent(node: Node): void {
 
 /**
  * Content inside a block nested in a link is link content too: count it for
- * the nearest link above `block` and the inline nodes up to its block.
+ * the nearest link above `block` and the inline nodes up to its block. Only the
+ * first count matters, since a link with content stays above 0 and above its
+ * hidden count, so each node walked is marked and the next walk stops there.
+ * A node's ancestors never change, so its mark holds for as long as it is open.
  */
 export function countContentInEnclosingLink(block: ElementNode | null | undefined): void {
   let parent = block
-  let anchorFound = false
-  while (parent?.parent) {
-    parent = parent.parent
-    if (!anchorFound) {
-      if (parent.tagId !== TAG_A)
-        continue
-      anchorFound = true
+  while (parent && !parent.linkContentCounted) {
+    parent.linkContentCounted = true
+    if (parent.tagId !== TAG_A) {
+      parent = parent.parent
+      continue
     }
-    parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
-    if (!isInlineNode(parent))
-      return
+    while (parent) {
+      parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+      if (!isInlineNode(parent))
+        return
+      parent = parent.parent
+    }
   }
 }

@@ -566,9 +566,9 @@ class ParsedElementNode implements ElementNode {
   tagHandler: TagHandler | undefined
   currentWalkIndex?: number
   childTextNodeIndex?: number
-  containsWhitespace?: boolean
   declare excludedFromMarkdown?: boolean
   // Link state, set on few nodes. Fields keep those nodes on the shared shape.
+  linkContentCounted?: boolean
   enterSkipped?: boolean
   hiddenTextNodes?: number
   trailingBlankAt?: number

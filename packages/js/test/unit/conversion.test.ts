@@ -1,12 +1,13 @@
 import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
+import { ELEMENT_NODE, NodeEventEnter, TAG_A, TAG_DIV, TAG_P } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
 import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText } from '../../src/text'
+import { countContentInEnclosingLink } from '../../src/utils'
 
 describe('root conversion', () => {
   it.each([0, 1, 7])('supports mutable processAttributes with chunk size %i', async (chunkSize) => {
@@ -508,5 +509,28 @@ describe('writer ownership', () => {
         output += chunk
       expect(output, `size=${size}`).toBe(expected)
     }
+  })
+})
+
+describe('content in blocks nested in a link', () => {
+  it('walks each node up to the link once, however many blocks sit below them', () => {
+    let walked = 0
+    const node = (tagId: number, parent: ElementNode | null) => ({
+      tagId,
+      get parent() {
+        walked++
+        return parent
+      },
+    }) as unknown as ElementNode
+    const link = node(TAG_A, null)
+    let wrapper = link
+    for (let depth = 0; depth < 500; depth++)
+      wrapper = node(TAG_DIV, wrapper)
+    for (let block = 0; block < 500; block++) {
+      countContentInEnclosingLink(node(TAG_P, wrapper))
+      countContentInEnclosingLink(node(TAG_P, link))
+    }
+    expect(link.childTextNodeIndex).toBe(1)
+    expect(walked).toBeLessThan(3000)
   })
 })

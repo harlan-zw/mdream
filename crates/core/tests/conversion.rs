@@ -781,6 +781,34 @@ fn nested_block_text_counts_for_its_own_link() {
       r#"<a href="/a" title="A"><ul><li>x<ul><li>y<ul><li>z</li></ul></li></ul></li></ul></a>"#,
       r#"[- x  - y    - z](/a "A")"#,
     ),
+    (
+      r#"<a href="/a" title="A"><div><p>x</p><p>y</p></div></a>"#,
+      r#"[x y](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><p>x</a><a href="/b" title="B"><p>y</a>"#,
+      r#"[x](/a "A") [y](/b "B")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/b" title="B"><p>y</p>z</a>w</div></a>"#,
+      r#"[[y z](/b "B")w](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/b"><p>y</p></a></div><p>z</p></a>"#,
+      r#"[[y](/b) z](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><img src="/i" alt="I"></div></a><a href="/b" title="B"><div><img src="/i" alt="J"></div></a>"#,
+      r#"[![I](/i)](/a "A") [![J](/i)](/b "B")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><img src="/i" alt="I"><a href="/b" title="B"><p>y</p></a></div></a>"#,
+      r#"[![I](/i) [y](/b "B")](/a "A")"#,
+    ),
+    (
+      r#"<div><p><img src="/i" alt="I"></p><a href="/b" title="B"><p>y</p></a></div>"#,
+      "![I](/i)\n\n[y](/b \"B\")",
+    ),
   ];
   for (html, expected) in cases {
     assert_eq!(convert(html), expected, "{html}");
