@@ -907,6 +907,15 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
   return DEFAULT_BLOCK_SPACING
 }
 
+/** Whether an ancestor collapses block spacing, as `calculateNewLineConfig` does for `<li>`. */
+function insideInlineWrapper(node: ElementNode): boolean {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.tagHandler?.collapsesInnerWhiteSpace && parent.tagId !== TAG_SPAN)
+      return true
+  }
+  return false
+}
+
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
   const handler = node.tagHandler
   // Custom exits have not run yet. Treat them as wrappers unless a
@@ -1799,7 +1808,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     trimTrailingSpaces(state.buffer)
     state.listTailStart = state.buffer.length
     state.listTailScanFrom = state.listTailStart
-    state.buffer.push(`\n\n${state.listIndent}`)
+    // A hard break has already ended the line; write only the newlines the
+    // blank line still lacks.
+    state.buffer.push(`${'\n\n'.slice(newlineRunBefore(state.buffer, state.buffer.length))}${state.listIndent}`)
     state.lastContentCache = state.buffer.at(-1)
     state.lastTextNode = undefined
     state.listTailPending = false
@@ -1963,7 +1974,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && state.listIndent && !insideRawHtmlRegion && !isInsideTableCell(state)
         && !handler?.literalExit && !element.pluginOutput?.length) {
         // Any item of this list, filled or empty, ends before the parent's text.
-        state.listTailPending = true
+        // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+        // item line is left open for that text to continue.
+        if (!insideInlineWrapper(element))
+          state.listTailPending = true
         state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
         const marker = state.emptyListMarkerFragment
         if (marker !== undefined && (marker >= buff.length || hasNonWhitespaceFrom(buff, marker + 1)))

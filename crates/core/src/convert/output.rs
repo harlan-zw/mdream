@@ -4357,7 +4357,11 @@ impl ConvertState {
       && self.empty_list_marker_depth > self.depth_map[TAG_LI as usize] as usize
     {
       // Any item of this list, filled or empty, ends before the parent's text.
-      self.list_pending |= LIST_TAIL_PENDING;
+      // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+      // item line is left open for that text to continue.
+      if self.collapse_non_span_depth == 0 {
+        self.list_pending |= LIST_TAIL_PENDING;
+      }
       self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
       if self.empty_list_marker_end != usize::MAX {
         let end = self.empty_list_marker_end.min(self.buffer.len());
@@ -4377,7 +4381,10 @@ impl ConvertState {
     self.list_tail_scanned_to = self.list_tail_start;
     self.item_settle_pending = true;
     let prefix = self.continuation_prefix();
-    let separator = format!("\n\n{prefix}");
+    // A hard break has already ended the line; write only the newlines the
+    // blank line still lacks.
+    let new_lines = &"\n\n"[usize::from(self.trailing_new_lines())..];
+    let separator = format!("{new_lines}{prefix}");
     self.last_content_cache_len = self.push_code_span_content(&separator, true);
     self.list_pending &= !LIST_TAIL_PENDING;
   }

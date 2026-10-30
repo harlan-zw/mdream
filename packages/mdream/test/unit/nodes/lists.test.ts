@@ -65,6 +65,10 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<ul><li><ul><li>a</li></ul>1. x</li></ul>', '-\n  - a\n\n  1\\. x'],
     ['<ul><li><div><ul><li>a</li></ul></div><ul></ul>t</li></ul>', '-\n  - a\n\n  t'],
     ['<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>', '-\n  -\n- z'],
+    ['<ul><li>x<ul><li>z<br></li></ul>y</li></ul>', '- x\n  - z  \n\n  y'],
+    ['<ul><li><ul><li>a<br></li></ul>text</li></ul>', '-\n  - a  \n\n  text'],
+    ['<ul><li><a href="x"><ul><li>a</li></ul></a>t<ul></ul>u</li></ul>', '- [  - a](x)t u'],
+    ['<ul><li><em><ul><li>a</li></ul></em>t</li></ul>', '- *  - a*t'],
   ])('keeps filled nested list tails in their parent: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
