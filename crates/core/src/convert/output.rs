@@ -1050,6 +1050,18 @@ impl ConvertState {
     ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v)
   }
 
+  /// Whether an override keeps this `<hr>` open, so its enter armed the separator.
+  #[cold]
+  fn rule_held_open(&self, node: &ElementNode) -> bool {
+    let ovs = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|p| p.tag_overrides.as_ref());
+    Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+      .is_some_and(|ov| ov.is_self_closing == Some(false))
+  }
+
   /// Whether a code span marker applies: outside `<pre>` and raw HTML.
   #[inline(always)]
   fn code_span_marker_ok(&self) -> bool {
@@ -1416,7 +1428,17 @@ impl ConvertState {
           .plugins
           .as_ref()
           .and_then(|p| p.tag_overrides.as_ref());
-        Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+        let config = Self::override_for_node(ovs, self.override_idx.as_deref(), node);
+        // A rule an override keeps open owes the separator before its children.
+        if tag_id == Some(TAG_HR)
+          && config.is_some_and(|ov| ov.is_self_closing == Some(false) && ov.enter.is_none())
+          && !plain_text!(self)
+          && !self.in_table_cell()
+          && self.depth_map[TAG_LI as usize] > 0
+        {
+          self.list_rule_pending = true;
+        }
+        config
       } else {
         None
       };
@@ -2366,6 +2388,7 @@ impl ConvertState {
       && tag_id == Some(TAG_HR)
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
+      && !self.rule_held_open(node)
     {
       self.list_rule_pending = true;
     }
