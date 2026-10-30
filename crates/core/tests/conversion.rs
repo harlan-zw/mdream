@@ -814,6 +814,24 @@ fn nested_block_text_counts_for_its_own_link() {
       r#"<a href="/a" title="A"><div><div><p>x</p><p>y</p><a href="/b" title="B"><p>z</p></a></div></div></a>"#,
       r#"[x y [z](/b "B")](/a "A")"#,
     ),
+    // A link in a block of another link stays nested, and its content is content
+    // of the outer link too, so the outer link takes no label.
+    (
+      r#"<a href="/a" title="A"><div><a href="/b"><p>y</p></a></div></a>"#,
+      r#"[[y](/b)](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/b">y</a></div></a>"#,
+      r#"[[y](/b)](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/b"><img src="/i" alt="I"></a></div></a>"#,
+      r#"[[![I](/i)](/b)](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/c" title="C"><div><a href="/b"><p>y</p></a></div></a></div></a>"#,
+      r#"[[[y](/b)](/c "C")](/a "A")"#,
+    ),
   ];
   for (html, expected) in cases {
     assert_eq!(convert(html), expected, "{html}");

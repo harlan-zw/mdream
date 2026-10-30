@@ -1462,9 +1462,11 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     const hidden = textNode.excludedFromMarkdown || (isBlank && !wasBlank)
     if (hidden || isBlank)
       countHiddenLinkText(parentsToIncrement, hidden)
-    else if ((hasText || textNode.rewrittenBlank === false) && !hasAnchorParent(parentsToIncrement))
-      // Text in a block nested in the link, such as `<svg><text>`. Blank text
-      // there, as in `<pre> </pre>`, shows nothing.
+    else if ((hasText || textNode.rewrittenBlank === false)
+      && (state.depthMap[TAG_A] > 1 || !hasAnchorParent(parentsToIncrement)))
+      // Text in a block nested in the link, such as `<svg><text>`, or in a link
+      // nested in a block of another one. Blank text there, as in
+      // `<pre> </pre>`, shows nothing.
       countContentInEnclosingLink(firstBlockParent)
   }
   state.lastTextNode = textNode
@@ -1711,9 +1713,14 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
       } as TextNode
 
       emitLabel({ type: NodeEventEnter, node: textNode })
-      for (const parent of traverseUpToFirstBlockNode(node)) {
+      const parents = traverseUpToFirstBlockNode(node)
+      for (const parent of parents) {
         parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
       }
+      // The label is content of a link around this link's block too, as Rust
+      // counts it for every open node.
+      if (state.depthMap[TAG_A] > 1)
+        countContentInEnclosingLink(parents.at(-1))
     }
   }
 

@@ -652,25 +652,24 @@ export function traverseUpToFirstBlockNode(node: ElementNode) {
 
 export function markRenderedChildContent(node: Node): void {
   let parent = node.parent
-  let anchorInScope = false
   while (parent) {
     parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
-    if (parent.tagId === TAG_A)
-      anchorInScope = true
     if (!isInlineNode(parent))
       break
     parent = parent.parent
   }
-  if (!anchorInScope)
-    countContentInEnclosingLink(parent)
+  // A link in this block already counts it, but a link around the block, as in
+  // `<a><div><a><img></a></div></a>`, holds it too.
+  countContentInEnclosingLink(parent)
 }
 
 /**
  * Content inside a block nested in a link is link content too: count it for
- * the nearest link above `block` and the inline nodes up to its block. Only the
- * first count matters, since a link with content stays above 0 and above its
- * hidden count, so each node walked is marked and the next walk stops there.
- * A node's ancestors never change, so its mark holds for as long as it is open.
+ * each link above `block` and the inline nodes up to their blocks. A link in a
+ * block of another link is content of that one as well. Only the first count
+ * matters, since a link with content stays above 0 and above its hidden count,
+ * so each node walked is marked and the next walk stops there. A node's
+ * ancestors never change, so its mark holds for as long as it is open.
  */
 export function countContentInEnclosingLink(block: ElementNode | null | undefined): void {
   let parent = block
@@ -680,11 +679,13 @@ export function countContentInEnclosingLink(block: ElementNode | null | undefine
       parent = parent.parent
       continue
     }
-    while (parent) {
+    // The walk goes on from the link's block, which this loop counts too.
+    while (isInlineNode(parent)) {
       parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
-      if (!isInlineNode(parent))
+      if (!parent.parent)
         return
       parent = parent.parent
     }
+    parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
   }
 }

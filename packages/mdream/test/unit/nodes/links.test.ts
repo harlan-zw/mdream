@@ -412,6 +412,35 @@ describe.each(engines)('links $name', (engineConfig) => {
     }
   })
 
+  // A link in a block of another link stays nested, as the parser only closes
+  // an open link at a new one in the same block. Its content is content of the
+  // outer link too, so the outer link takes no label.
+  it.each([
+    ['<a href="/a" title="A"><div><a href="/b"><p>y</p></a></div></a>', '[[y](/b)](/a "A")', 'y'],
+    ['<a href="/a" title="A"><div><a href="/b">y</a></div></a>', '[[y](/b)](/a "A")', 'y'],
+    ['<a href="/a" title="A"><div><a href="/b" title="B"></a></div></a>', '[[B](/b)](/a "A")', 'B'],
+    ['<a href="/a" title="A"><div><a href="/b"><img src="/i" alt="I"></a></div></a>', '[[![I](/i)](/b)](/a "A")', 'I'],
+    ['<a href="/a" title="A"><div><a href="/c" title="C"><div><a href="/b"><p>y</p></a></div></a></div></a>', '[[[y](/b)](/c "C")](/a "A")', 'y'],
+    ['<div><a href="/a" title="A"><section><div><a href="/b">y</a></div></section></a> tail</div>', '[[y](/b)](/a "A") tail', 'y tail'],
+  ])('counts a link nested in a block for the link around it in %s', async (html, expected, text) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe(text)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
   // Whitespace in a `<pre>` nested in a link shows nothing, so the link keeps its label.
   it.each([
     ['<a href="/p" aria-label="L"><pre> </pre></a>', '[L](/p)'],

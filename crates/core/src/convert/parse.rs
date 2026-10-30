@@ -526,12 +526,14 @@ impl ConvertState {
   #[inline(never)]
   fn count_link_text(&mut self, up_to: usize, excluded: bool, text: &str) {
     if !excluded && (self.text_run_has_text || !text.bytes().all(is_whitespace)) {
-      if !self.stack[up_to..]
-        .iter()
-        .any(|node| node.tag_id == Some(TAG_A))
+      if self.depth_map[TAG_A as usize] > 1
+        || !self.stack[up_to..]
+          .iter()
+          .any(|node| node.tag_id == Some(TAG_A))
       {
-        // Text in a block nested in the link, such as `<svg><text>`. Blank text
-        // there, as in `<pre> </pre>`, shows nothing.
+        // Text in a block nested in the link, such as `<svg><text>`, or in a
+        // link nested in a block of another one. Blank text there, as in
+        // `<pre> </pre>`, shows nothing.
         self.count_content_in_enclosing_link(up_to);
       }
     } else if excluded || !self.in_pre {

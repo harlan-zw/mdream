@@ -344,24 +344,20 @@ impl ConvertState {
       };
     }
 
-    let mut anchor_in_scope = false;
     for parent in &mut self.stack[scope_start..image_index] {
       parent.child_text_node_index += 1;
-      if parent.tag_id == Some(TAG_A) {
-        anchor_in_scope = true;
-      }
     }
-    if !anchor_in_scope {
-      self.count_content_in_enclosing_link(scope_start);
-    }
+    // A link in this block already counts it, but a link around the block, as in
+    // `<a><div><a><img></a></div></a>`, holds it too.
+    self.count_content_in_enclosing_link(scope_start);
   }
 
   /// Content inside a block nested in a link is link content too: count it for
-  /// the nearest link before `scope_start` and the inline nodes up to its block.
-  /// Only the first count matters, since a link with content stays above 0 and
-  /// above its hidden count, so each node walked is marked and the next walk
-  /// stops there. A node's ancestors never change, so its mark holds for as long
-  /// as it is open.
+  /// each link before `scope_start` and the inline nodes up to their blocks. A
+  /// link in a block of another link is content of that one as well. Only the
+  /// first count matters, since a link with content stays above 0 and above its
+  /// hidden count, so each node walked is marked and the next walk stops there.
+  /// A node's ancestors never change, so its mark holds for as long as it is open.
   pub(super) fn count_content_in_enclosing_link(&mut self, scope_start: usize) {
     let mut index = scope_start;
     while index > 0 {
@@ -374,13 +370,19 @@ impl ConvertState {
       if node.tag_id != Some(TAG_A) {
         continue;
       }
-      for parent in self.stack[..=index].iter_mut().rev() {
-        parent.child_text_node_index += 1;
-        if !parent.is_inline {
+      // The walk goes on from the link's block, which this loop counts too.
+      loop {
+        let node = &mut self.stack[index];
+        node.child_text_node_index += 1;
+        if !node.is_inline {
+          break;
+        }
+        if index == 0 {
           return;
         }
+        index -= 1;
       }
-      return;
+      index += 1;
     }
   }
 
