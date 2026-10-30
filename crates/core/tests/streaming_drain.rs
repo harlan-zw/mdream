@@ -3297,6 +3297,29 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
 }
 
 #[test]
+fn builtin_blockquote_alias_streams_as_div() {
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("blockquote".into(), TagOverrideConfig::alias("div"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<blockquote>x</blockquote><p>tail</p>",
+    "<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>",
+    "<blockquote>x</div>tail</blockquote><p>end</p>",
+    "<div>x</blockquote>tail</div><p>end</p>",
+    "<blockquote><p>a</p><p>b</p></blockquote>",
+    "<blockquote><div>x</div>tail</blockquote>",
+    "<ul><li><blockquote>x</blockquote></li></ul>",
+  ] {
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+}
+
+#[test]
 fn empty_quote_after_rule_streaming() {
   assert_stream_matches_every_split(
     "<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>",
@@ -3444,5 +3467,87 @@ fn scout9_excluded_list_spacing_options_streaming() {
     );
     assert_stream_matches(html, opts.clone());
     assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn link_trailing_spaces_match_every_partition() {
+  for html in [
+    r#"<a href="x"><ul><li></li></ul></a>"#,
+    r#"<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>"#,
+    r#"<a href="x"><ul><li></li><li></li></ul></a>"#,
+    r#"<a href="x"><ol start="10"><li></li></ol></a>"#,
+    r#"<a href="x"><ul><li><ul><li></li></ul></li></ul></a>"#,
+    r#"<a href="x"><ul><li>one</li><li>two</li></ul></a>"#,
+    r#"<a href="x">before<ul><li></li></ul>after</a>"#,
+    r#"<a href="x">text <span></span></a>tail"#,
+    r#"<a href="x" title="Title"><ul><li></li></ul></a>tail"#,
+    r#"<a href="x"><ul><li></li></ul></a><em>tail</em>"#,
+    r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+    r#"<a href="x" title="text">text <span></span></a>"#,
+    r#"<a href="x" title="Title">text <span></span></a>"#,
+    r#"<a href="x"> </a>tail"#,
+    r#"<code><a href="x"><ul><li></li></ul></a></code>"#,
+    r#"<a href="x"><ul><li><code>a </code></li></ul></a>"#,
+    r#"<details><a href="x"><ul><li></li></ul></a></details>"#,
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn paragraph_after_empty_nested_quote() {
+  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "- x\n\n  - \n  \n\n  y"
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
+
+#[test]
+fn builtin_aliases_preserve_raw_source_boundaries_streaming() {
+  for (html, source, target, expected) in [
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "script",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "style",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "textarea",
+      "x\n\ntail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{source}:{target}"
+    );
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
   }
 }

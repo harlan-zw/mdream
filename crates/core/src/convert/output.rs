@@ -1012,7 +1012,7 @@ impl ConvertState {
   /// Override keyed by built-in tag id, via the precomputed table. `idx` is
   /// `None` only when the key list was too long to index, so every lookup scans.
   #[inline]
-  fn override_by_id<'a>(
+  pub(super) fn override_by_id<'a>(
     ovs: Option<&'a Vec<(String, TagOverrideConfig)>>,
     idx: Option<&[u8; MAX_TAG_ID]>,
     id: u8,
@@ -3347,6 +3347,10 @@ impl ConvertState {
       return;
     }
     self.empty_item_hazard = false;
+    // Inserting before the marker moves a trailing hard break without removing
+    // it. Preserve its boundary so a following parent paragraph resets the
+    // child item's continuation indent, just as it does without this guard.
+    let break_at_end = self.hard_break_end == self.buffer.len();
     if !self.replace_code_span_content(self.empty_item_line_start..self.empty_item_line_start, "\n")
     {
       return;
@@ -3363,6 +3367,9 @@ impl ConvertState {
 
     let at = self.empty_item_line_start;
     self.shift_offsets_at_or_after(at);
+    if break_at_end {
+      self.hard_break_end = self.buffer.len();
+    }
 
     self.invalidate_line_start();
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
