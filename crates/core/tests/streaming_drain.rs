@@ -3281,8 +3281,8 @@ fn empty_quotes_keep_adjacent_list_markers_at_every_split() {
 }
 
 #[test]
-fn items_without_a_visible_marker_match_one_shot_at_every_split() {
-  for enter in ["", " ", "+ "] {
+fn overridden_item_markers_match_one_shot_at_every_split() {
+  for enter in ["", " ", "+ ", "* ", "- ", "1) "] {
     let options = HtmlToMarkdownOptions {
       plugins: Some(
         PluginConfig::default()
@@ -3297,8 +3297,8 @@ fn items_without_a_visible_marker_match_one_shot_at_every_split() {
       ),
       ..Default::default()
     };
-    let html =
-      "<ul><li>a</li></ul><ul><x-li>b</x-li></ul><ol><li>c</li></ol><ol><x-li>d</x-li></ol>";
+    let html = "<ul><li>a</li></ul><ul><x-li>b</x-li></ul><ol><li>c</li></ol><ol><x-li>d</x-li></ol>\
+      <ul><x-li>e</x-li></ul><ul><li><hr></li></ul>";
     assert_stream_matches(html, options.clone());
     assert_stream_matches_every_split(html, options);
   }

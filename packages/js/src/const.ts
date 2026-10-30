@@ -251,9 +251,12 @@ export const MARKDOWN_HORIZONTAL_RULE = '---'
 // the whole line is a thematic break and the item is lost. A `*` bullet takes
 // MARKDOWN_HORIZONTAL_RULE there instead.
 export const MARKDOWN_HORIZONTAL_RULE_ALT = '***'
-// Set on a `listMarkers` entry once the list wrote an item. Marker characters
-// are ASCII, so the high bit is free.
-export const LIST_HAS_ITEM = 0x80
+// A `listMarkers` entry holds the character the built-in enter of the list's
+// items writes in its low byte and, above it, the one the latest marker in the
+// list actually used, which an override can make any other, or 0 before an item
+// wrote a marker.
+export const LIST_SELECTED_MASK = 0xFF
+export const LIST_WRITTEN_SHIFT = 8
 
 // Raw-HTML blocks whose text/code is emitted verbatim rather than as Markdown.
 export function isInsideRawHtmlBlock(depthMap: Uint16Array): boolean {

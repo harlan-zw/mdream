@@ -310,7 +310,10 @@ impl ConvertState {
     } else {
       self.next_list_marker(ordered)
     };
-    self.list_markers.push(marker);
+    self.list_markers.push(ListMarker {
+      selected: marker,
+      written: 0,
+    });
   }
 
   /// Close what [`Self::push_list_marker`] opened for the same element, or end
@@ -320,9 +323,9 @@ impl ConvertState {
     if id == TAG_UL || id == TAG_OL {
       // An empty list writes nothing, leaving the one before it in place.
       if let Some(marker) = self.list_markers.pop()
-        && marker & LIST_HAS_ITEM != 0
+        && marker.written != 0
       {
-        self.sibling_list_marker = marker & !LIST_HAS_ITEM;
+        self.sibling_list_marker = marker.written;
         self.sibling_list_depth = self.depth_map[TAG_LI as usize];
         self.sibling_list_quotes = self.blockquotes.len();
         self.list_gap_from = self.buffer.len();
@@ -1496,14 +1499,10 @@ impl ConvertState {
       && let Some(li) = self.stack.last()
     {
       let excluded = li.excluded_from_markdown;
-      // An override can leave the item no visible marker, which starts no run.
-      let wrote_marker = !excluded && (!self.has_tag_overrides || self.item_enter_is_visible(li));
-      let mut ordered = false;
       let width: usize = if !skip_node && !self.in_table_cell() && !plain_text!(self) {
         let stack_len = self.stack.len();
         let parent_is_ordered = stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
         if parent_is_ordered {
-          ordered = true;
           // Must match the marker actually written, `start` included, or the
           // item's continuation content drifts out of it.
           let n = self.ordered_item_number(li.index as usize).max(1);
@@ -1523,12 +1522,18 @@ impl ConvertState {
         self.list_indent.push(' ');
       }
       if width != 0 && !excluded {
-        let mut star = false;
-        if wrote_marker && let Some(marker) = self.list_markers.last_mut() {
-          *marker |= LIST_HAS_ITEM;
-          star = !ordered && *marker == LIST_HAS_ITEM | b'*';
+        let selected = self.list_markers.last().map_or(0, |m| m.selected);
+        let written = if self.has_tag_overrides {
+          self.item_written_marker(li, selected)
+        } else {
+          selected
+        };
+        if written != 0
+          && let Some(marker) = self.list_markers.last_mut()
+        {
+          marker.written = written;
         }
-        self.last_item_star = star;
+        self.last_item_star = written == b'*';
       }
     }
 

@@ -448,9 +448,15 @@ const MAX_CELL_SPAN: u8 = 64;
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;
 
-/// Set on a [`ConvertState::list_markers`] entry once the list wrote an item.
-/// Marker characters are ASCII, so the high bit is free.
-const LIST_HAS_ITEM: u8 = 0x80;
+/// The marker characters of an open `<ul>`/`<ol>`.
+#[derive(Clone, Copy)]
+struct ListMarker {
+  /// Character the built-in enter of its items writes.
+  selected: u8,
+  /// Character the latest marker in the list actually used, which an override
+  /// can make any other one, or 0 before an item wrote a marker.
+  written: u8,
+}
 
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
@@ -928,10 +934,9 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
-  /// Marker character of each open `<ul>`/`<ol>`, innermost last, with
-  /// [`LIST_HAS_ITEM`] set once one of its items wrote a marker.
-  list_markers: Vec<u8>,
-  /// Marker character of the list that last closed with items, or 0 once
+  /// Marker characters of each open `<ul>`/`<ol>`, innermost last.
+  list_markers: Vec<ListMarker>,
+  /// Last marker character of the list that last closed with items, or 0 once
   /// visible output leaving the buffer, or the close of a quote around it, ends
   /// its run. CommonMark joins the next list of the same type into it, blank
   /// line or not, so that list takes the other character.

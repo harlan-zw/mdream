@@ -76,6 +76,40 @@ fn has_visible(bytes: &[u8]) -> bool {
   bytes.iter().any(|&b| !is_whitespace(b))
 }
 
+/// List marker character opening the last visible line of `output`: a bullet,
+/// or the delimiter of an ordered marker. 0 when that line opens with neither.
+/// A marker ending `output` counts, as the item's text is spaced from it.
+fn written_list_marker(output: &[u8]) -> u8 {
+  let Some(last) = output.iter().rposition(|&b| !is_whitespace(b)) else {
+    return 0;
+  };
+  let line = output[..last]
+    .iter()
+    .rposition(|&b| b == b'\n')
+    .map_or(0, |i| i + 1);
+  let first = line
+    + output[line..]
+      .iter()
+      .take_while(|&&b| is_whitespace(b))
+      .count();
+  let digits = output[first..]
+    .iter()
+    .take_while(|b| b.is_ascii_digit())
+    .count();
+  let end = first + digits;
+  let marker = output.get(end).copied().unwrap_or(0);
+  let opens = if digits == 0 {
+    matches!(marker, b'-' | b'*' | b'+')
+  } else {
+    digits <= 9 && matches!(marker, b'.' | b')')
+  };
+  if opens && output.get(end + 1).copied().is_none_or(is_whitespace) {
+    marker
+  } else {
+    0
+  }
+}
+
 /// Marks a byte `escape_raw_html_text` may escape in [`RAW_TEXT_CLASS`].
 const RAW_TEXT_ESCAPABLE: u8 = 1;
 /// Markup bytes `](`, `)`, ` "`, `"` that a link close writes around its URL and title.
@@ -1047,11 +1081,11 @@ impl ConvertState {
     ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v)
   }
 
-  /// Whether an `<li>` override still writes something visible in place of
-  /// the marker, as the built-in enter always does.
+  /// Marker character an `<li>` wrote when overrides are in play: `selected`
+  /// from the built-in enter, or whatever an enter override wrote instead.
   #[cold]
   #[inline(never)]
-  pub(super) fn item_enter_is_visible(&self, li: &ElementNode) -> bool {
+  pub(super) fn item_written_marker(&self, li: &ElementNode, selected: u8) -> u8 {
     let overrides = self
       .options
       .plugins
@@ -1059,7 +1093,7 @@ impl ConvertState {
       .and_then(|p| p.tag_overrides.as_ref());
     Self::override_for_node(overrides, self.override_idx.as_deref(), li)
       .and_then(|ov| ov.enter.as_deref())
-      .is_none_or(|enter| has_visible(enter.as_bytes()))
+      .map_or(selected, |enter| written_list_marker(enter.as_bytes()))
   }
 
   /// Whether a code span marker applies: outside `<pre>` and raw HTML.
@@ -3268,9 +3302,9 @@ impl ConvertState {
   }
 
   /// Marker character for a list opening here: the other one of its kind when
-  /// the list before it has the same type, sits at the same depth under the
-  /// same quotes and nothing visible came between, since CommonMark would join
-  /// the two.
+  /// the list before it ended on the default one, sits at the same depth under
+  /// the same quotes and nothing visible came between, since CommonMark would
+  /// join the two.
   pub(crate) fn next_list_marker(&mut self, ordered: bool) -> u8 {
     let sibling = self.sibling_list_marker;
     if sibling != 0
@@ -3279,12 +3313,11 @@ impl ConvertState {
       && matches!(sibling, b'.' | b')') == ordered
       && !self.list_gap_visible()
     {
-      return match sibling {
-        b'-' => b'*',
-        b'*' => b'-',
-        b'.' => b')',
-        _ => b'.',
-      };
+      match sibling {
+        b'-' => return b'*',
+        b'.' => return b')',
+        _ => {}
+      }
     }
     if ordered { b'.' } else { b'-' }
   }
@@ -4626,7 +4659,7 @@ impl ConvertState {
         // is written to the buffer.
         let ordered = _ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
         // The innermost list's character; an item outside any list takes `-`.
-        let marker = self.list_markers.last().map_or(0, |m| m & !LIST_HAS_ITEM);
+        let marker = self.list_markers.last().map_or(0, |m| m.selected);
         if ordered.is_none() && self.list_indent.len() <= MAX_BORROWED_INDENT {
           debug_assert!(self.list_indent.bytes().all(|b| b == b' '));
           let bullets = if marker == b'*' {

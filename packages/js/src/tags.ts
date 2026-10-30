@@ -3,8 +3,8 @@ import type { HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
   isInsideRawHtmlBlock,
-  LIST_HAS_ITEM,
   LIST_ITEM_SPACING,
+  LIST_SELECTED_MASK,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
   MARKDOWN_HORIZONTAL_RULE,
@@ -643,7 +643,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       const isOrdered = node.parent?.tagId === TAG_OL
       // The innermost list's character; an item outside any list takes `-`.
       const markers = state.listMarkers
-      const character = markers && markers.length > 0 ? markers[markers.length - 1]! & ~LIST_HAS_ITEM : 0
+      const character = markers && markers.length > 0 ? markers[markers.length - 1]! & LIST_SELECTED_MASK : 0
       const marker = isOrdered
         ? `${orderedItemNumber(node.parent, node.index)}${character === 41 ? ') ' : '. '}`
         : character === 42 ? '* ' : '- '

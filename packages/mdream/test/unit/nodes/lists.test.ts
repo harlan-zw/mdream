@@ -84,15 +84,60 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
   })
 
-  // An item whose override writes nothing visible has no marker for the next
-  // list to join, so that list keeps the default character.
+  // The next list joins the marker an item wrote, whichever list selected it. An
+  // override that wrote none, or one no default collides with, leaves that list
+  // the default character.
   it.each([
-    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', { 'li': { enter: '' }, 'x-li': 'li' }, 'a\n\n- b'],
-    ['<ol><li>a</li></ol><ol><x-li>b</x-li></ol>', { 'li': { enter: ' ' }, 'x-li': 'li' }, 'a\n\n1. b'],
-    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', { 'li': { enter: '+ ' }, 'x-li': 'li' }, '+ a\n\n* b'],
-  ])('starts a run only from an item that wrote its marker: %s', async (html, tagOverrides, expected) => {
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '', 'a\n\n- b'],
+    ['<ol><li>a</li></ol><ol><x-li>b</x-li></ol>', ' ', 'a\n\n1. b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '+ ', '+ a\n\n- b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '• ', '• a\n\n- b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '**', '** a\n\n- b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '-', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '* ', '* a\n\n- b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '  - ', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '\n- ', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '- [ ] ', '- [ ] a\n\n* b'],
+    ['<ol><li>a</li></ol><ol><x-li>b</x-li></ol>', '1) ', '1) a\n\n1. b'],
+    ['<ol><li>a</li></ol><ol><x-li>b</x-li></ol>', '7. ', '7. a\n\n1) b'],
+    ['<ul><li>a</li></ul><ol><x-li>b</x-li></ol>', '1. ', '1. a\n\n1) b'],
+    ['<ol><li>a</li></ol><ul><x-li>b</x-li></ul>', '- ', '- a\n\n* b'],
+    // The override stays out of the list's own character, and only the last
+    // marker meets the next list.
+    ['<ul><li>a</li><x-li>b</x-li></ul><ul><x-li>c</x-li></ul>', '* ', '* a\n- b\n\n* c'],
+    ['<ul><x-li>a</x-li><li>b</li></ul><ul><x-li>c</x-li></ul>', '* ', '- a\n* b\n\n- c'],
+    ['<ul><x-li>a</x-li><li>b</li></ul><ul><x-li>c</x-li></ul>', '', '- a\nb\n\n* c'],
+  ])('starts a run from the marker an item wrote: %s with %j', async (html, enter, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
+    const tagOverrides = { 'li': { enter }, 'x-li': 'li' }
     expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  // A rule sharing the marker's line must differ from the marker that line
+  // holds, or the whole line reads as a thematic break and the item is lost.
+  it.each([
+    ['<ul><x-li>a</x-li></ul><ul><li><hr></li></ul>', '- ', '- a\n\n- ***'],
+    ['<ul><li><hr></li></ul>', '* ', '* ---'],
+    ['<ol><li><hr></li></ol>', '* ', '* ---'],
+    ['<ul><li><hr></li></ul>', '+ ', '+ ***'],
+    ['<ol><li><hr></li></ol>', '1) ', '1) ***'],
+    ['<ul><x-li>a</x-li></ul><ul><x-li><hr></x-li></ul>', '', '- a\n\n* ---'],
+  ])('keeps an item rule off the marker an override wrote: %s with %j', async (html, enter, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const tagOverrides = { 'li': { enter }, 'x-li': 'li' }
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  // Rereading the gap resumes after whitespace it already saw, so a run has to
+  // survive repeated empty lists and still end at the output that follows them.
+  it.each([
+    ['<ul><li>a</li></ul><br><ul></ul><br><ul></ul><ul><li>b</li></ul>', '* b'],
+    ['<ol><li>a</li></ol><br><ol></ol><ol><li>b</li></ol>', '1) b'],
+    ['<ul><li>a</li></ul><br><ul></ul>x<ul></ul><ul><li>b</li></ul>', 'x\n\n- b'],
+    ['<ul><li>a</li></ul><br><ul></ul><p>x</p><ul><li>b</li></ul>', 'x\n\n- b'],
+  ])('rereads a list gap across empty lists: %s', async (html, end) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine }).endsWith(end)).toBe(true)
   })
 
   // A list's exit output continues its last item, so it separates nothing:

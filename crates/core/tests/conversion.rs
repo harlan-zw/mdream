@@ -6395,21 +6395,80 @@ fn item_enter_overrides(enter: &str) -> HtmlToMarkdownOptions {
   }
 }
 
-// An item whose override writes nothing visible leaves no marker for the next
-// list to join, so that list keeps the default character.
+// The next list joins the marker an item wrote, whichever list selected it. An
+// override that wrote none, or one no default collides with, leaves that list
+// the default character.
 #[test]
-fn items_without_a_visible_marker_start_no_run() {
+fn a_run_follows_the_marker_an_item_wrote() {
+  let unordered = "<ul><li>a</li></ul><ul><x-li>b</x-li></ul>";
+  let ordered = "<ol><li>a</li></ol><ol><x-li>b</x-li></ol>";
   for (html, enter, expected) in [
-    ("<ul><li>a</li></ul><ul><x-li>b</x-li></ul>", "", "a\n\n- b"),
+    (unordered, "", "a\n\n- b"),
+    (ordered, " ", "a\n\n1. b"),
+    (unordered, "+ ", "+ a\n\n- b"),
+    (unordered, "\u{2022} ", "\u{2022} a\n\n- b"),
+    (unordered, "**", "** a\n\n- b"),
+    (unordered, "-", "- a\n\n* b"),
+    (unordered, "* ", "* a\n\n- b"),
+    (unordered, "  - ", "- a\n\n* b"),
+    (unordered, "\n- ", "- a\n\n* b"),
+    (unordered, "- [ ] ", "- [ ] a\n\n* b"),
+    (ordered, "1) ", "1) a\n\n1. b"),
+    (ordered, "7. ", "7. a\n\n1) b"),
     (
-      "<ol><li>a</li></ol><ol><x-li>b</x-li></ol>",
-      " ",
-      "a\n\n1. b",
+      "<ul><li>a</li></ul><ol><x-li>b</x-li></ol>",
+      "1. ",
+      "1. a\n\n1) b",
     ),
     (
-      "<ul><li>a</li></ul><ul><x-li>b</x-li></ul>",
-      "+ ",
-      "+ a\n\n* b",
+      "<ol><li>a</li></ol><ul><x-li>b</x-li></ul>",
+      "- ",
+      "- a\n\n* b",
+    ),
+    // The override stays out of the list's own character, and only the last
+    // marker meets the next list.
+    (
+      "<ul><li>a</li><x-li>b</x-li></ul><ul><x-li>c</x-li></ul>",
+      "* ",
+      "* a\n- b\n\n* c",
+    ),
+    (
+      "<ul><x-li>a</x-li><li>b</li></ul><ul><x-li>c</x-li></ul>",
+      "* ",
+      "- a\n* b\n\n- c",
+    ),
+    (
+      "<ul><x-li>a</x-li><li>b</li></ul><ul><x-li>c</x-li></ul>",
+      "",
+      "- a\nb\n\n* c",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, item_enter_overrides(enter)),
+      expected,
+      "html={html:?} enter={enter:?}"
+    );
+  }
+}
+
+// A rule sharing the marker's line must differ from the marker that line holds,
+// or the whole line reads as a thematic break and the item is lost.
+#[test]
+fn an_item_rule_avoids_the_marker_an_override_wrote() {
+  for (html, enter, expected) in [
+    (
+      "<ul><x-li>a</x-li></ul><ul><li><hr></li></ul>",
+      "- ",
+      "- a\n\n- ***",
+    ),
+    ("<ul><li><hr></li></ul>", "* ", "* ---"),
+    ("<ol><li><hr></li></ol>", "* ", "* ---"),
+    ("<ul><li><hr></li></ul>", "+ ", "+ ***"),
+    ("<ol><li><hr></li></ol>", "1) ", "1) ***"),
+    (
+      "<ul><x-li>a</x-li></ul><ul><x-li><hr></x-li></ul>",
+      "",
+      "- a\n\n* ---",
     ),
   ] {
     assert_eq!(

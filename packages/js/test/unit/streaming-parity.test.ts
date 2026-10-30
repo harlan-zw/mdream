@@ -194,6 +194,24 @@ describe('streaming parity with the Rust core', () => {
       expect(await streamConvert(html, size, options)).toBe(expected)
   })
 
+  it('follows the marker a plugin writes for an item', async () => {
+    const options = { plugins: [createPlugin({
+      onNodeEnter(node) {
+        return node.name === 'li' ? node.attributes.bullet : undefined
+      },
+    })] }
+    const cases: [string, string][] = [
+      ['<ul><li bullet="* ">a</li></ul><ul><li>b</li></ul>', '* a\n\n- b'],
+      ['<ul><li>a</li></ul><ul><li bullet="- "><hr></li></ul>', '- a\n\n- ***'],
+      ['<ul><li bullet="* "><hr></li></ul>', '* ---'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(convertOnce(html, options)).toBe(expected)
+      for (const size of [1, 7, html.length])
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+
   it('keeps adjacent list separation when a plugin skips a list exit', async () => {
     const html = '<ul id="first"><li>one</li></ul><ul><li>two</li></ul>'
     const options = { plugins: [createPlugin({

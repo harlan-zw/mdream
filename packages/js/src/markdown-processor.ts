@@ -6,7 +6,8 @@ import {
   FRAGMENT_LINK_CLOSE_CODE,
   FRAGMENT_LINK_OPEN_CODE,
   isInsideRawHtmlBlock,
-  LIST_HAS_ITEM,
+  LIST_SELECTED_MASK,
+  LIST_WRITTEN_SHIFT,
   MARKDOWN_CODE_BLOCK,
   MARKDOWN_EMPHASIS,
   MARKDOWN_INLINE_CODE,
@@ -312,7 +313,7 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
  * paragraphs, nested lists) lands in the correct column. On exit, pop.
  * Skip when the list item is rendered as literal `<li>` inside a table cell.
  */
-function updateListIndent(state: MarkdownState, element: ElementNode, eventType: number, output: string[] | undefined): void {
+function updateListIndent(state: MarkdownState, element: ElementNode, eventType: number, output: string[] | undefined, pluginWrote: boolean): void {
   if (element.tagId !== TAG_LI)
     return
   if (isInsideTableCell(state))
@@ -324,15 +325,15 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     state.listIndent += ' '.repeat(width)
     const markers = state.listMarkers
     const top = markers.length - 1
-    let star = false
-    // An empty override or plugin output leaves the item no visible marker,
-    // which starts no run.
-    if (top >= 0 && output?.some(hasNonWhitespace)) {
-      const marker = markers[top]! | LIST_HAS_ITEM
-      markers[top] = marker
-      star = !isOrdered && marker === (LIST_HAS_ITEM | 42) // *
-    }
-    state.lastItemStar = star
+    const selected = top >= 0 ? markers[top]! & LIST_SELECTED_MASK : 0
+    let written = 0
+    if (pluginWrote || element.tagHandler?.literalEnter)
+      written = output ? writtenListMarker(output.join('')) : 0
+    else if (output?.some(hasNonWhitespace))
+      written = selected
+    if (written !== 0 && top >= 0)
+      markers[top] = selected | written << LIST_WRITTEN_SHIFT
+    state.lastItemStar = written === 42 // *
   }
   else if (eventType === NodeEventExit) {
     const width = state.listIndentWidths.pop() ?? 0
@@ -897,6 +898,35 @@ function hasNonWhitespace(value: string): boolean {
     }
   }
   return false
+}
+
+/**
+ * List marker character code opening the last visible line of `output`: a
+ * bullet, or the delimiter of an ordered marker. 0 when that line opens with
+ * neither. A marker ending `output` counts, as the item's text is spaced from it.
+ */
+function writtenListMarker(output: string): number {
+  let last = output.length - 1
+  while (last >= 0 && isOutputSpace(output.charCodeAt(last)))
+    last--
+  if (last < 0)
+    return 0
+  let first = output.lastIndexOf('\n', last) + 1
+  while (isOutputSpace(output.charCodeAt(first)))
+    first++
+  let end = first
+  for (let code = output.charCodeAt(end); code >= 48 && code <= 57; code = output.charCodeAt(end))
+    end++
+  const digits = end - first
+  const marker = output.charCodeAt(end)
+  const opens = digits === 0
+    ? marker === 45 || marker === 42 || marker === 43 // - * +
+    : digits <= 9 && (marker === 46 || marker === 41) // . )
+  return opens && (end + 1 === output.length || isOutputSpace(output.charCodeAt(end + 1))) ? marker : 0
+}
+
+function isOutputSpace(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
 }
 
 export function isAsciiWhitespace(code: number): boolean {
@@ -1758,17 +1788,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
   /**
    * Marker character code for a list opening here: the other one of its kind
-   * when the list before it has the same type, sits at the same depth under
-   * the same quotes and nothing visible came between, since CommonMark would
-   * join the two.
+   * when the list before it ended on the default one, sits at the same depth
+   * under the same quotes and nothing visible came between, since CommonMark
+   * would join the two.
    */
   function nextListMarker(ordered: boolean): number {
     const sibling = siblingListMarker
     if (sibling !== 0 && siblingListDepth === state.depthMap[TAG_LI]
       && siblingListQuotes === state.blockquotes.length
       && (sibling === 46 || sibling === 41) === ordered) {
-      // - * . )
-      return sibling === 45 ? 42 : sibling === 42 ? 45 : sibling === 46 ? 41 : 46
+      if (sibling === 45) // -
+        return 42 // *
+      if (sibling === 46) // .
+        return 41 // )
     }
     return ordered ? 46 : 45
   }
@@ -1791,8 +1823,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           listMarkerOwners!.pop()
           const depth = listMarkerDepths!.pop()!
           const marker = state.listMarkers.pop()
-          if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
-            siblingListMarker = marker ^ LIST_HAS_ITEM
+          if (marker !== undefined && marker > LIST_SELECTED_MASK) {
+            siblingListMarker = marker >> LIST_WRITTEN_SHIFT
             siblingListDepth = depth
             siblingListQuotes = state.blockquotes.length
           }
@@ -1825,8 +1857,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       listMarkerDepths!.pop()
     }
     const marker = state.listMarkers.pop()
-    if (marker !== undefined && (marker & LIST_HAS_ITEM) !== 0) {
-      siblingListMarker = marker ^ LIST_HAS_ITEM
+    if (marker !== undefined && marker > LIST_SELECTED_MASK) {
+      siblingListMarker = marker >> LIST_WRITTEN_SHIFT
       siblingListDepth = state.depthMap[TAG_LI]!
       siblingListQuotes = state.blockquotes.length
       listClosedInGap = true
@@ -2425,7 +2457,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
         if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
           closeListMarker(element)
-        updateListIndent(state, element, eventType, output)
+        updateListIndent(state, element, eventType, output, hasPluginOutput)
         return
       }
 
@@ -2586,7 +2618,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
       closeListMarker(element)
-    updateListIndent(state, element, eventType, output)
+    updateListIndent(state, element, eventType, output, hasPluginOutput)
 
     if (!insideRawHtmlRegion && inRawHtmlRegion) {
       bufferScan[0] = false
