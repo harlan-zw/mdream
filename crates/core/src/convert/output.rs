@@ -1624,11 +1624,12 @@ impl ConvertState {
     }
 
     // Whitespace immediately before <br> has no visual effect in HTML. Let the
-    // explicit line boundary subsume it so the output has no trailing spaces.
+    // explicit line boundary subsume it so the output has no trailing spaces,
+    // also when a list or quote prefix follows the line feed.
     if tag_id == Some(TAG_BR)
       && !enter_is_literal
       && self.depth_map[TAG_PRE as usize] == 0
-      && output.as_deref().is_some_and(|value| value.ends_with('\n'))
+      && output.as_deref().is_some_and(|value| value.contains('\n'))
     {
       self.trim_before_break();
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {

@@ -168,7 +168,8 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<p>x y&#10;<br>b</p>', 'x y\n  \nb', 'x y\n\nb'],
   ['<code>x y&#9;<br>b</code>', '`x y\nb`', 'x y\nb'],
   ['<a href="x">x y&#9;<br>b</a>', '[x y  \nb](x)', 'x y\nb'],
-  ['<li>a&#9;<br>b</li>', '- a\t  \n  b', 'a\nb'],
+  ['<li>a&#9;<br>b</li>', '- a  \n  b', 'a\nb'],
+  ['<ul><li>a<ul><li>b&#9;<br>c</li></ul></li></ul>', '- a\n  - b  \n    c', 'a\nb\nc'],
   ['<blockquote>a&#9;<br>b</blockquote>', '> a  \n> b', 'a\nb'],
   // HTML's ASCII whitespace leaves out U+000B, so it is content and stops a trim.
   ['<p>a&#11;<br></p>', 'a\u000B', 'a\u000B'],

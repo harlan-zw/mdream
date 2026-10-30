@@ -1928,8 +1928,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastTextNode = undefined
       }
       // Whitespace before a line break has no visual effect, even when an
-      // emptied inline element left it, so the break subsumes it as in Rust.
-      if (!inPre && breakOutput?.endsWith('\n') && isBreakWhitespace(lastOutputChar(buff)))
+      // emptied inline element left it or a list prefix follows the line feed,
+      // so the break subsumes it as in Rust.
+      if (!inPre && breakOutput?.includes('\n') && isBreakWhitespace(lastOutputChar(buff)))
         trimBeforeBreak(buff)
 
       const pendingCaption = captionFrameCount !== 0
@@ -2374,7 +2375,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An overridden <br> skips the break fast path, but its line break still
     // subsumes the whitespace before it.
     if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
-      && !handler?.literalEnter && output?.at(-1)?.endsWith('\n') && isBreakWhitespace(lastOutputChar(buff))) {
+      && !handler?.literalEnter && output?.at(-1)?.includes('\n') && isBreakWhitespace(lastOutputChar(buff))) {
       trimBeforeBreak(buff)
     }
 
