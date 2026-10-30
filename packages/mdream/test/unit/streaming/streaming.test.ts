@@ -208,7 +208,7 @@ describe.each([undefined, 12])('cross-engine streaming byte parity wrapWidth=%s'
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        for await (const chunk of engine.streamHtmlToMarkdown(input, { wrapWidth, ...options }))
           streamed += chunk
         expect(streamed, `engine=${name} split=${split}`).toBe(expected)
       }
