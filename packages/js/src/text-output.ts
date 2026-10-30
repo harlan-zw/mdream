@@ -121,6 +121,8 @@ function columnAt(value: string, end: number, column: number): number {
 
 /** Yielded characters a stream keeps before its unstable tail, for `trailingNewlines` and `lastOutputChar`. */
 const YIELDED_CONTEXT = 2
+/** Held whitespace this long is no longer rejoined by every `takeOutput`. */
+const LONG_HELD_RUN = 1024
 
 function wrapText(value: string, column: number, width: number): string {
   const leading = value.charCodeAt(0) === 32
@@ -407,6 +409,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
   // matches its own element, and the final output drops the hold.
   const openQuotes: number[] = []
   const openQuoteNodes: ElementNode[] = []
+  // Fragment end of a long held whitespace run, 0 when there is none, and the
+  // fragment before it, which a rewrite of the run replaces.
+  let heldRunEnd = 0
+  let heldRunLast: string | undefined
 
   function pushCaptionBoundary(newlines: number): boolean {
     if (state.buffer.length === 0 || newlines === 0)
@@ -643,10 +649,33 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     yieldedLength = stableEnd - contextStart
   }
 
+  // Only fragments past a held run can settle it, so reading those keeps a run
+  // that grows from being rejoined and rescanned on every chunk. The bytes stay
+  // buffered: a later trim can still take them. Skipping a take is the same as
+  // merging two input chunks, so a missed rewrite only delays output.
+  function extendHeldRun(): boolean {
+    const buffer = state.buffer
+    const end = buffer.length
+    if (end < heldRunEnd || buffer[heldRunEnd - 1] !== heldRunLast || openQuotes.length !== 0)
+      return false
+    for (let index = heldRunEnd; index < end; index++) {
+      if (hasNonWhitespace(buffer[index]!))
+        return false
+    }
+    heldRunEnd = end
+    heldRunLast = buffer[end - 1]
+    return true
+  }
+
   return {
     state,
     processEvent,
     takeOutput(final) {
+      if (heldRunEnd !== 0) {
+        if (!final && extendHeldRun())
+          return ''
+        heldRunEnd = 0
+      }
       const content = state.buffer.join('')
       const leading = started || preserveLeadingWhitespace ? 0 : content.length - trimOutputStart(content).length
       // Hold back the tail a later event may still trim: trailing whitespace,
@@ -666,6 +695,8 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
           break
         stableEnd--
       }
+      // Leading whitespace not yet yielded is held as well.
+      const heldRunStart = stableEnd === leading ? 0 : stableEnd
       const yieldedEnd = started ? yieldedLength : leading
       if (stableEnd < yieldedEnd)
         stableEnd = yieldedEnd
@@ -674,6 +705,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
         started = true
         yieldedLength = stableEnd
         dropYielded(content, stableEnd)
+      }
+      if (!final && openQuotes.length === 0 && content.length - heldRunStart >= LONG_HELD_RUN) {
+        heldRunEnd = state.buffer.length
+        heldRunLast = state.buffer[heldRunEnd - 1]
       }
       return output
     },

@@ -241,29 +241,41 @@ const LONG_HELD_RUN_CASES = [
   `<p>a${longRun('&#9;<i></i>')}</p><blockquote>${'<p>line</p>'.repeat(1200)}</blockquote>`,
   `<p>a${longRun('&#9;<i></i>')}<a href="x"></a></p>`,
   `<p>a${longRun('&#9;<i></i>')}</p><pre>${longRun('&#9;<i></i>')}</pre><p>b</p>`,
+  `${longRun('&#9;<i></i>')}a`,
+  `${longRun('<span>&#9;</span>')}<p>a</p>`,
+  `<p>${longRun('&#9;<i></i>')}a</p>`,
+  `<p>a${longRun('&#9;<i></i>')}<q></q>b</p>`,
+  `<p>a${longRun('&#9;<i></i>')}<q>${longRun('&#9;<i></i>')}c</q>b</p>`,
+  `<p>a${longRun('&#9;<i></i>')}&#11;</p>`,
+  `<p>a${longRun('&#9;<i></i>')}<figure><figcaption>${longRun('&#9;<br>')}c</figcaption></figure></p>`,
 ]
 
 describe('long held whitespace run', () => {
   it.each(LONG_HELD_RUN_CASES.map(html => [`${html.slice(0, 24)}...${html.slice(-24)}`, html]))('matches one-shot output: %s', async (_, html) => {
-    const outputs: string[] = []
-    for (const { engine, name } of engines) {
-      const expected = engine.htmlToMarkdown(html)
-      outputs.push(expected)
-      for (const width of [1, 7, 11, 13, 64, 1024, html.length]) {
-        const stream = new ReadableStream<string>({
-          start(controller) {
-            for (let offset = 0; offset < html.length; offset += width)
-              controller.enqueue(html.slice(offset, offset + width))
-            controller.close()
-          },
-        })
-        let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(stream))
-          streamed += chunk
-        expect(streamed === expected, `engine=${name} width=${width}`).toBe(true)
+    // Text one-shot output still differs between the engines when a tab meets
+    // a block boundary, so only Markdown compares across them.
+    for (const format of ['markdown', 'text'] as const) {
+      const outputs: string[] = []
+      for (const { engine, name } of engines) {
+        const expected = engine.htmlToMarkdown(html, { format })
+        outputs.push(expected)
+        for (const width of [1, 7, 11, 13, 64, 1024, html.length]) {
+          const stream = new ReadableStream<string>({
+            start(controller) {
+              for (let offset = 0; offset < html.length; offset += width)
+                controller.enqueue(html.slice(offset, offset + width))
+              controller.close()
+            },
+          })
+          let streamed = ''
+          for await (const chunk of engine.streamHtmlToMarkdown(stream, { format }))
+            streamed += chunk
+          expect(streamed === expected, `engine=${name} format=${format} width=${width}`).toBe(true)
+        }
       }
+      if (format === 'markdown')
+        expect(outputs[1] === outputs[0]).toBe(true)
     }
-    expect(outputs[1] === outputs[0]).toBe(true)
   })
 })
 
