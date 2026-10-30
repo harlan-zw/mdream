@@ -762,6 +762,17 @@ function columnWidth(value: string, start: number): number {
   return width
 }
 
+function isSetextMarkerRun(word: string): boolean {
+  const first = word.charCodeAt(0)
+  if (first !== 45 && first !== 61)
+    return false
+  for (let index = 1; index < word.length; index++) {
+    if (word.charCodeAt(index) !== first)
+      return false
+  }
+  return true
+}
+
 /**
  * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
  * Words are never split, so an oversized token (e.g. a URL) overflows rather
@@ -786,7 +797,7 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
       const word = value.slice(i, next)
       const wordLen = [...word].length
       const needSpace = first ? leading : true
-      if (needSpace && col > prefixLen && col + 1 + wordLen > width) {
+      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !isSetextMarkerRun(word)) {
         out += `\n${prefix}`
         col = prefixLen
       }
