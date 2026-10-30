@@ -1784,6 +1784,39 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   /**
+   * Settle a pending heading break at the top of an event: visible text takes
+   * it as a prefix, and the item's exit drops it. Kept out of `processEvent`,
+   * which every event runs, since the break is only ever owed inside a list
+   * item. Returns true for text with nothing visible to write, which leaves
+   * the break to whatever follows.
+   */
+  function settleHeadingBreakAtEvent(node: Node, eventType: number): boolean {
+    if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
+      const textNode = node as TextNode
+      if (textNode.excludedFromMarkdown || !hasNonWhitespace(textNode.value))
+        return true
+      const separator = `\n\n${state.listIndent}`
+      state.buffer.push(separator)
+      state.lastContentCache = separator
+      state.headingBreakPending = false
+      // The text opens the item's next block, where a leading space indents it.
+      if (!state.depthMap[TAG_PRE]) {
+        const value = textNode.value
+        let start = 0
+        let code = value.charCodeAt(0)
+        while (code === 32 || code === 9 || code === 10 || code === 12 || code === 13)
+          code = value.charCodeAt(++start)
+        if (start !== 0)
+          textNode.value = value.slice(start)
+      }
+    }
+    else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
+      state.headingBreakPending = false
+    }
+    return false
+  }
+
+  /**
    * Process a DOM event and generate markdown
    */
   function processEvent(event: NodeEvent): void {
@@ -1837,30 +1870,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
-    if (state.headingBreakPending) {
-      if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
-        if ((node as TextNode).excludedFromMarkdown || !hasNonWhitespace((node as TextNode).value))
-          return
-        const separator = `\n\n${state.listIndent}`
-        state.buffer.push(separator)
-        state.lastContentCache = separator
-        state.headingBreakPending = false
-        // The text opens the item's next block, where a leading space indents it.
-        if (!state.depthMap[TAG_PRE]) {
-          const textNode = node as TextNode
-          const value = textNode.value
-          let start = 0
-          let code = value.charCodeAt(0)
-          while (code === 32 || code === 9 || code === 10 || code === 12 || code === 13)
-            code = value.charCodeAt(++start)
-          if (start !== 0)
-            textNode.value = value.slice(start)
-        }
-      }
-      else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
-        state.headingBreakPending = false
-      }
-    }
+    if (state.headingBreakPending && settleHeadingBreakAtEvent(node, eventType))
+      return
 
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
