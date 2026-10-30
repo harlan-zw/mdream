@@ -290,7 +290,10 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   // Self-closing inline elements
   t[TAG_LINK as usize] = Some(SELF_CLOSING_INLINE);
   t[TAG_AREA as usize] = Some(SELF_CLOSING_INLINE);
-  t[TAG_BASE as usize] = Some(SELF_CLOSING_INLINE);
+  t[TAG_BASE as usize] = Some(TagHandler {
+    wanted_attrs: ATTR_HREF,
+    ..SELF_CLOSING_INLINE
+  });
   t[TAG_WBR as usize] = Some(SELF_CLOSING_INLINE);
   t[TAG_INPUT as usize] = Some(SELF_CLOSING_INLINE);
   t[TAG_KEYGEN as usize] = Some(SELF_CLOSING_INLINE);

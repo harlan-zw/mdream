@@ -942,6 +942,29 @@ impl ConvertState {
     }
   }
 
+  /// The first `<base href>` replaces `origin` when it resolves to an HTTP(S)
+  /// URL. A `<base>` inside a link is ignored: the link's open and close must
+  /// resolve alike. Out of line: it runs at most once per document.
+  #[cold]
+  #[inline(never)]
+  fn capture_base_href(&mut self) {
+    // At MAX_ELEMENT_DEPTH the element is flattened, and so is everything below it.
+    if self.base_href_seen
+      || self.depth_map[TAG_A as usize] != 0
+      || self.depth_map[TAG_TEMPLATE as usize] != 0
+      || self.stack.len() >= MAX_ELEMENT_DEPTH
+    {
+      return;
+    }
+    let Some(href) = self.attr_scratch.get_bit(ATTR_HREF) else {
+      return;
+    };
+    self.base_href_seen = true;
+    if let Some(base) = resolve_base_href(href, self.options.origin.as_deref()) {
+      self.options.origin = Some(base);
+    }
+  }
+
   /// Open an element whose attributes are already scanned into `attr_scratch`:
   /// tree recovery, overflow handling and node creation.
   pub(crate) fn apply_opening_tag(
@@ -1163,6 +1186,10 @@ impl ConvertState {
       self.refresh_raw_html_block(id);
       if id == TAG_PRE {
         self.in_pre = true;
+      }
+      // Captured before filtering, so an excluded <head> still sets the base.
+      if id == TAG_BASE {
+        self.capture_base_href();
       }
     }
     self.depth += 1;
