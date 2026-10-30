@@ -3111,6 +3111,46 @@ fn filter_strips_hidden_content_and_subtree() {
 }
 
 #[test]
+fn extraction_preserves_spaces_at_line_starts() {
+  for (html, text, markdown) in [
+    ("w.<label>x<br> a</label>H", "x a", "w.x  \naH"),
+    ("w.<label>x<br> &amp; a</label>H", "x & a", "w.x  \n& aH"),
+    ("w.<label>x<br> a<br> b</label>H", "x a b", "w.x  \na  \nbH"),
+    ("w.<label>x<br><span> a</span></label>H", "x a", "w.x  \naH"),
+    ("w.<label>x<br>\n\t a</label>H", "x a", "w.x  \naH"),
+    ("<div>w.<label>x<br> a</label>H</div>", "x a", "w.x  \n aH"),
+    ("<label> a</label>", "a", "a"),
+    ("w.<label>x<br> &#32;a</label>H", "x  a", "w.x  \n aH"),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        extraction: Some(ExtractionConfig::new(&["label"])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let result = html_to_markdown_result(html, options.clone());
+    assert_eq!(result.markdown, markdown);
+    assert_eq!(result.extracted.unwrap()[0].text_content, text);
+
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options.clone());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, markdown, "chunk width {width}: {html}");
+      assert_eq!(
+        processor.take_extracted().unwrap()[0].text_content,
+        text,
+        "chunk width {width}: {html}"
+      );
+    }
+  }
+}
+
+#[test]
 fn extraction_by_tag() {
   let result = html_to_markdown_result(
     "<html><body><h1>Title</h1><p>Content</p><h2>Sub</h2></body></html>",
@@ -6085,4 +6125,118 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
     convert_with_origin(html, "https://example.com/docs/page"),
     "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
+}
+
+#[test]
+fn scout9_wrap_setext_boundary() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
+fn scout9_wrap_setext_plain_text_still_wraps() {
+  assert_eq!(
+    html_to_text(
+      "<p>aaaaaaaaaa --</p>",
+      HtmlToMarkdownOptions::default().with_wrap_width(10)
+    ),
+    "aaaaaaaaaa\n--"
+  );
+}
+
+#[test]
+fn scout9_excluded_list_spacing() {
+  for (html, expected) in [
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><style>hidden</style><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><template>hidden</template><li>b</li></ul>",
+      "- a\n- b",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
+fn scout9_excluded_list_spacing_options() {
+  let cases = [
+    (
+      "<ul><li>a</li><x-text>visible</x-text><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "x-text".to_string(),
+          TagOverrideConfig {
+            alias_tag_id: mdream::get_tag_id("em"),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a*visible*\n- b",
+    ),
+    (
+      "<ul><li>a</li><div class=hide>hidden</div><li>b</li></ul>",
+      PluginConfig {
+        filter: Some(FilterConfig {
+          exclude: Some(vec![".hide".to_string()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "script".to_string(),
+          TagOverrideConfig {
+            spacing: Some([2, 2]),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a\n\n- b",
+    ),
+  ];
+  for (html, plugins, expected) in cases {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+  }
 }

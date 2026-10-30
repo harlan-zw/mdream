@@ -111,7 +111,11 @@ fn title_metadata_decodes_entities_once_in_all_formats_and_streams() {
       ..Default::default()
     };
     let expected = Some(vec![("title".to_string(), decoded.to_string())]);
-    for format in [OutputFormat::Markdown, OutputFormat::Text, OutputFormat::Html] {
+    for format in [
+      OutputFormat::Markdown,
+      OutputFormat::Text,
+      OutputFormat::Html,
+    ] {
       let result = mdream::html_to_format_result(&html, options.clone(), format);
       assert_eq!(result.frontmatter, expected);
       assert_eq!(result.extracted.unwrap()[0].text_content, decoded);
