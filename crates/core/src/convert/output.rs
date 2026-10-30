@@ -1811,7 +1811,12 @@ impl ConvertState {
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
-        list_indent: self.list_indent.clone(),
+        // A quote in a table cell starts mid-row, past any list indent.
+        list_indent: if self.in_table_cell() {
+          String::new()
+        } else {
+          self.list_indent.clone()
+        },
       });
     }
 
@@ -2542,6 +2547,7 @@ impl ConvertState {
       && self.depth_map[TAG_LI as usize] > 0
       && self.depth_map[TAG_PRE as usize] == 0
       && !self.in_raw_html_block()
+      && !self.in_table_cell()
     {
       self.caption_boundary = CaptionBoundary::QuoteParent;
       // An HR inside this quote cannot own the parent's deferred separator.
@@ -4517,8 +4523,10 @@ impl ConvertState {
       }
       TAG_BLOCKQUOTE => {
         // The completed subtree receives quote prefixes once every structural
-        // newline is known. Preserve the list marker's trailing space here.
+        // newline is known. Preserve the list marker's trailing space here. A
+        // table cell renders its list as raw HTML on the row's own line.
         (self.depth_map[TAG_LI as usize] > 0
+          && !self.in_table_cell()
           && !matches!(
             self.caption_boundary,
             CaptionBoundary::Pending(_) | CaptionBoundary::QuoteParent

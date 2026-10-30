@@ -1264,7 +1264,8 @@ function commitGfmAction(
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
         fragment: state.buffer.length,
-        listIndent: state.listIndent,
+        // A quote in a table cell starts mid-row, past any list indent.
+        listIndent: isInsideTableCell(state) ? '' : state.listIndent,
         // Snapshot the pre-quote context now: streaming can flush these
         // characters before the quote's exit needs them. When the buffer is
         // empty the last written content stands in for compacted output.
@@ -2493,7 +2494,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // The existing deferred block boundary ignores invisible output and adds
     // the parent's list indentation only when a continuation actually arrives.
     if (closesQuote && state.depthMap[TAG_LI]
-      && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion) {
+      && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion && !isInsideTableCell(state)) {
       captionBoundary = 3
       captionBoundarySpacing = 2
       state.listRulePending = undefined

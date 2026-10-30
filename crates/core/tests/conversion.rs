@@ -2520,11 +2520,43 @@ fn inline_wrapper_around_blockquote_in_list_item() {
     ),
     (
       "<table><tr><td><ul><li><span><blockquote>next</blockquote></span></li></ul></td></tr></table>",
-      "| <ul><li>\n> next</li></ul> |\n| --- |",
+      "| <ul><li>> next</li></ul> |\n| --- |",
     ),
     (
       "<table><tr><td><ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ul></td></tr></table>",
-      "| <ul><li>[\n> next](/x)</li></ul> |\n| --- |",
+      "| <ul><li>[> next](/x)</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><blockquote>q</blockquote>tail</li></ul></td></tr></table>",
+      "| <ul><li>> q tail</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><blockquote>q</blockquote><blockquote>r</blockquote></li></ul></td></tr></table>",
+      "| <ul><li>> q>  r</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><strong><blockquote>next</blockquote></strong></li></ul></td></tr></table>",
+      "| <ul><li>**>  next**</li></ul> |\n| --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><blockquote>next</blockquote></td></tr></table></li></ul>",
+      "- | > next |\n  | --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><blockquote>q</blockquote>tail</td></tr></table></li></ul>",
+      "- | > q tail |\n  | --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><ul><li><blockquote>next</blockquote></li></ul></td></tr></table></li></ul>",
+      "- | <ul><li>> next</li></ul> |\n  | --- |",
+    ),
+    (
+      "<blockquote><table><tr><td><ul><li><blockquote>next</blockquote></li></ul></td></tr></table></blockquote>",
+      "> | <ul><li>> next</li></ul> |\n> | --- |",
+    ),
+    (
+      "<ul><li><blockquote><table><tr><td><blockquote>n</blockquote></td></tr></table></blockquote>tail</li></ul>",
+      "- \n  > | > n |\n  > | --- |\n\n  tail",
     ),
     (
       "<ul><li><strong><blockquote>next</blockquote></strong></li><li>x</li></ul>",
