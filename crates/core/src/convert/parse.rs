@@ -415,7 +415,7 @@ impl ConvertState {
       current_walk_index: 0,
       child_text_node_index: 0,
       tag_id,
-      contains_whitespace: false,
+      link_content_counted: false,
       excluded_from_markdown: false,
       enter_skipped: false,
       is_inline: handler.is_inline,
@@ -501,14 +501,80 @@ impl ConvertState {
     (depth, index)
   }
 
+  /// `text`: the node's text as written, only read inside a link.
   #[inline(always)]
-  fn advance_text_node_counters(&mut self, first_block_parent_index: Option<usize>) {
+  fn advance_text_node_counters(
+    &mut self,
+    first_block_parent_index: Option<usize>,
+    excluded: bool,
+    text: &str,
+  ) {
     if let Some(parent) = self.stack.last_mut() {
       parent.current_walk_index += 1;
     }
     let up_to = first_block_parent_index.unwrap_or(0);
     for idx in up_to..self.stack.len() {
       self.stack[idx].child_text_node_index += 1;
+    }
+    if self.depth_map[TAG_A as usize] > 0 {
+      self.count_link_text(up_to, excluded, text);
+    }
+  }
+
+  /// Text inside a link: hidden text is counted as such, and text in a block
+  /// nested in the link counts for the link.
+  #[inline(never)]
+  fn count_link_text(&mut self, up_to: usize, excluded: bool, text: &str) {
+    if !excluded && (self.text_run_has_text || !text.bytes().all(is_whitespace)) {
+      if self.depth_map[TAG_A as usize] > 1
+        || !self.stack[up_to..]
+          .iter()
+          .any(|node| node.tag_id == Some(TAG_A))
+      {
+        // Text in a block nested in the link, such as `<svg><text>`, or in a
+        // link nested in a block of another one. Blank text there, as in
+        // `<pre> </pre>`, shows nothing.
+        self.count_content_in_enclosing_link(up_to);
+      }
+    } else if excluded || !self.in_pre {
+      self.count_hidden_link_text(up_to, excluded);
+    }
+  }
+
+  /// Excluded text never shows, and blank text with only hidden text before it
+  /// (or none, as a decoded `&#32;` after an `<svg>`) only spaces it out, so
+  /// neither is link text: a link holding only these still takes its label.
+  /// Blank text after visible text is not counted.
+  /// Excluded and skipped links never take the label, so they get no count.
+  #[inline(never)]
+  fn count_hidden_link_text(&mut self, up_to: usize, excluded: bool) {
+    for node in &mut self.stack[up_to..] {
+      if node.tag_id != Some(TAG_A) || node.excluded_from_markdown || node.enter_skipped {
+        continue;
+      }
+      let hidden = node
+        .extras
+        .as_ref()
+        .map_or(0, |extras| extras.hidden_text_nodes);
+      // The counters already include this text.
+      if excluded || hidden + 1 == node.child_text_node_index {
+        node.extras.get_or_insert_default().hidden_text_nodes += 1;
+      }
+    }
+  }
+
+  /// A blank dropped as a link's indentation after other content of the link, as
+  /// in `<a><svg></svg> </a>Next`, still spaces that content from what follows:
+  /// a label written in its place moves the blank past the link. A blank with
+  /// more children after it, as in `<a><svg></svg> <svg></svg></a>`, does not.
+  #[inline(never)]
+  fn note_trailing_link_blank(&mut self) {
+    if let Some(node) = self.stack.last_mut()
+      && node.tag_id == Some(TAG_A)
+      && node.current_walk_index > 0
+    {
+      let children = node.current_walk_index;
+      node.extras.get_or_insert_default().trailing_blank_at = Some(children);
     }
   }
 
@@ -538,6 +604,9 @@ impl ConvertState {
     }
 
     if !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty() {
+      if self.depth_map[TAG_A as usize] > 0 {
+        self.note_trailing_link_blank();
+      }
       return;
     }
     if text_buffer.is_empty() {
@@ -581,10 +650,9 @@ impl ConvertState {
       self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
     }
 
+    self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, &text);
     text.clear();
     *text_buffer = text;
-
-    self.advance_text_node_counters(first_block_parent_index);
   }
 
   /// Emit buffered text. Internal size flushes split one source text node into
@@ -645,6 +713,9 @@ impl ConvertState {
       && child_text_node_index == 0
       && !self.stack.is_empty()
     {
+      if self.depth_map[TAG_A as usize] > 0 {
+        self.note_trailing_link_blank();
+      }
       return;
     }
     if text_buffer.is_empty() {
@@ -750,13 +821,16 @@ impl ConvertState {
       );
     }
 
+    if completes_text_node {
+      self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, &text);
+    } else if self.depth_map[TAG_A as usize] > 0 && !self.text_run_has_text {
+      // A later piece may be blank only because the cut left it whitespace.
+      self.text_run_has_text = !text.bytes().all(is_whitespace);
+    }
+
     // Recover String allocation
     text.clear();
     *text_buffer = text;
-
-    if completes_text_node {
-      self.advance_text_node_counters(first_block_parent_index);
-    }
   }
 
   /// Close open nodes from the top of the stack up to and including the nearest
@@ -1267,7 +1341,7 @@ impl ConvertState {
     tag.index = current_walk_index;
     tag.current_walk_index = 0;
     tag.child_text_node_index = 0;
-    tag.contains_whitespace = false;
+    tag.link_content_counted = false;
     tag.excluded_from_markdown = false;
     tag.enter_skipped = false;
     tag.is_inline = h_inline;
@@ -1637,11 +1711,18 @@ impl ConvertState {
       self.generate_frontmatter_yaml();
     }
 
-    // Special: empty links — synthesize text from title/aria-label
+    // Empty links take their title or aria-label. Counted text that never
+    // shows leaves a link just as empty.
     if node_tag_id == Some(TAG_A)
-      && node_child_text_index == 0
       && !node_excluded
       && !node_enter_skipped
+      && (node_child_text_index == 0
+        || self
+          .stack
+          .retired()
+          .extras
+          .as_ref()
+          .is_some_and(|extras| extras.hidden_text_nodes == node_child_text_index))
     {
       let prefix = self
         .stack
@@ -1654,10 +1735,18 @@ impl ConvertState {
       if !prefix.is_empty() {
         let mut modified_node = self.stack.take_retired();
         modified_node.child_text_node_index = 1;
+        let trailing_blank = modified_node
+          .extras
+          .as_ref()
+          .is_some_and(|extras| extras.trailing_blank_at == Some(modified_node.current_walk_index));
         let text_depth = node_depth + 1;
         self.stack.push(modified_node);
+        let moves_blank = self.take_blank_link_text(&prefix, trailing_blank);
         // Emit synthetic text
         self.emit_text(&prefix, false, text_depth, 0);
+        if moves_blank {
+          self.pending_inline_whitespace = true;
+        }
         for prev in self.stack.iter_mut() {
           prev.child_text_node_index += 1;
         }

@@ -690,6 +690,9 @@ pub struct ConvertState {
   text_buffer_batchable_len: usize,
   /// Run length at which `flush_text_run` next looks for a cut.
   text_run_next_flush: usize,
+  /// In a link, a piece already cut from this text node held more than
+  /// whitespace, so the node is no blank link text whatever its last piece holds.
+  text_run_has_text: bool,
   #[cfg(fuzzing)]
   pub(crate) disable_text_run_flush: bool,
   text_buffer_has_inline_gfm_hazard: bool,
@@ -1050,6 +1053,7 @@ impl ConvertState {
       text_node_exhausted: false,
       text_buffer_batchable_len: 0,
       text_run_next_flush: TEXT_RUN_FLUSH_THRESHOLD,
+      text_run_has_text: false,
       #[cfg(fuzzing)]
       disable_text_run_flush: false,
       text_buffer_has_inline_gfm_hazard: false,
@@ -1343,6 +1347,7 @@ impl ConvertState {
       self.text_buffer_has_inline_gfm_hazard = false;
       self.has_encoded_html_entity = false;
     }
+    self.text_run_has_text = false;
     if exhausted {
       self.text_node_exhausted = false;
     }

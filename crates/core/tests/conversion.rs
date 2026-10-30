@@ -2,7 +2,7 @@ use std::fmt::Write as _;
 
 use mdream::types::{
   CleanConfig, ExtractionConfig, FilterConfig, FrontmatterConfig, HtmlToMarkdownOptions,
-  IsolateMainConfig, OutputFormat, PluginConfig, TagOverrideConfig,
+  IsolateMainConfig, OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
 };
 use mdream::{
   MarkdownStreamProcessor, html_to_html, html_to_markdown, html_to_markdown_result, html_to_text,
@@ -690,6 +690,343 @@ fn rendered_images_mark_block_and_anchor_scopes() {
     transparent_override("x-block", false),
   );
   assert_eq!(outer_scope, "[![Alt](/i)](/x) after");
+}
+
+/// Text in a block nested in a link, such as the `<text>` of an `<svg>`, is
+/// written like any link text, so the link takes no label and a space after
+/// the link still separates it.
+#[test]
+fn text_in_a_block_inside_a_link_is_link_text() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>"#,
+      "Go [x](/cart)",
+    ),
+    (
+      r#"<p>Go <a href="/cart" aria-label="Cart"><svg aria-hidden="true"><text>x</text></svg></a></p>"#,
+      "Go [x](/cart)",
+    ),
+    (
+      r#"<div><a href="/x" title="Title"><div>Text</div></a></div>"#,
+      r#"[Text](/x "Title")"#,
+    ),
+    (
+      r#"<p><a href="/c"><svg><text>x</text></svg></a> now</p>"#,
+      "[x](/c) now",
+    ),
+    (
+      r#"<div><a href="/x"><div>Text</div></a> now</div>"#,
+      "[Text](/x) now",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      filter.clone().with_max_node_bytes(4),
+    ] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  let html = r#"<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>"#;
+  assert_eq!(convert_text(html), "Go x");
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    r#"<p>Go <a href="/cart">x</a></p>"#
+  );
+  // Hidden text in the block is still no link text.
+  assert_eq!(
+    html_to_markdown(
+      r#"<p>Go <a href="/cart" aria-label="Cart"><svg><text hidden>x</text></svg></a></p>"#,
+      filter,
+    ),
+    "Go [Cart](/cart)"
+  );
+}
+
+/// An empty link still writes `[](url)`, so the text after it keeps its space.
+#[test]
+fn empty_link_keeps_the_space_after_it() {
+  let cases = [
+    (r#"<p><a href="/x"></a> tail</p>"#, "[](/x) tail"),
+    (r#"<p><a href="/x"></a>tail</p>"#, "[](/x)tail"),
+    (
+      r#"<p><a href="/x"></a> <a href="/y"></a> tail</p>"#,
+      "[](/x) [](/y) tail",
+    ),
+    (
+      r#"<ul><li><a href="/x"></a> tail</li></ul>"#,
+      "- [](/x) tail",
+    ),
+    (
+      r#"<p><span><a href="/x"></a></span> tail</p>"#,
+      "[](/x) tail",
+    ),
+    (r#"<p><a name="x"></a> tail</p>"#, "tail"),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "{html} width={width}");
+    }
+  }
+}
+
+/// Text in a block nested in a link counts for the link around that block. A
+/// block of the next link, or a link opened inside the block, counts for its
+/// own link, so neither takes its label next to visible text.
+#[test]
+fn nested_block_text_counts_for_its_own_link() {
+  let cases = [
+    (
+      r#"<a href="/a" title="A"><p>x</p></a><a href="/b" title="B"><p>y</p></a>"#,
+      r#"[x](/a "A") [y](/b "B")"#,
+    ),
+    (
+      r#"<a href="/a"><div>x<a href="/b" title="B"><p>y</p></a></div></a>"#,
+      r#"[x [y](/b "B")](/a)"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><ul><li>x<ul><li>y<ul><li>z</li></ul></li></ul></li></ul></a>"#,
+      r#"[- x  - y    - z](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><p>x</p><p>y</p></div></a>"#,
+      r#"[x y](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><p>x</a><a href="/b" title="B"><p>y</a>"#,
+      r#"[x](/a "A") [y](/b "B")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/b" title="B"><p>y</p>z</a>w</div></a>"#,
+      r#"[[y z](/b "B")w](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/b"><p>y</p></a></div><p>z</p></a>"#,
+      r#"[[y](/b) z](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><img src="/i" alt="I"></div></a><a href="/b" title="B"><div><img src="/i" alt="J"></div></a>"#,
+      r#"[![I](/i)](/a "A") [![J](/i)](/b "B")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><img src="/i" alt="I"><a href="/b" title="B"><p>y</p></a></div></a>"#,
+      r#"[![I](/i) [y](/b "B")](/a "A")"#,
+    ),
+    (
+      r#"<div><p><img src="/i" alt="I"></p><a href="/b" title="B"><p>y</p></a></div>"#,
+      "![I](/i)\n\n[y](/b \"B\")",
+    ),
+    // Sibling blocks under a counted wrapper, then a link opened below it.
+    (
+      r#"<a href="/a" title="A"><div><div><p>x</p><p>y</p><a href="/b" title="B"><p>z</p></a></div></div></a>"#,
+      r#"[x y [z](/b "B")](/a "A")"#,
+    ),
+    // A link in a block of another link stays nested, and its content is content
+    // of the outer link too, so the outer link takes no label.
+    (
+      r#"<a href="/a" title="A"><div><a href="/b"><p>y</p></a></div></a>"#,
+      r#"[[y](/b)](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/b">y</a></div></a>"#,
+      r#"[[y](/b)](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/b"><img src="/i" alt="I"></a></div></a>"#,
+      r#"[[![I](/i)](/b)](/a "A")"#,
+    ),
+    (
+      r#"<a href="/a" title="A"><div><a href="/c" title="C"><div><a href="/b"><p>y</p></a></div></a></div></a>"#,
+      r#"[[[y](/b)](/c "C")](/a "A")"#,
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "{html} width={width}");
+    }
+  }
+}
+
+/// Whitespace in a `<pre>` nested in a link is kept but shows nothing, so it
+/// is no link text: the link still takes its label.
+#[test]
+fn blank_pre_text_inside_a_link_is_no_link_text() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  let cases = [
+    (r#"<a href="/p" aria-label="L"><pre> </pre></a>"#, "[L](/p)"),
+    (
+      r#"<a href="/p" aria-label="L"><pre>&#32;</pre></a>"#,
+      "[L](/p)",
+    ),
+    (r#"<a href="/p" title="T"><pre> </pre></a>"#, "[T](/p)"),
+    (
+      r#"<a href="/p" aria-label="L"><div><pre> </pre></div></a>"#,
+      "[L](/p)",
+    ),
+    (
+      r#"<pre>a <a href="/c" aria-label="Item"><svg><text> </text></svg></a> Next</pre>"#,
+      "```\na Item Next\n```",
+    ),
+    // Text in the `<pre>` still takes the label's place.
+    (
+      r#"<a href="/p" aria-label="L"><pre>x</pre></a>"#,
+      "[```\nx\n```](/p)",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      clean.clone(),
+      filter.clone().with_max_node_bytes(4),
+    ] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  // Clean mode keeps the labeled link instead of dropping `[](/p)`.
+  assert_eq!(
+    html_to_markdown(r#"<a href="/p" aria-label="L"><pre> </pre></a>"#, clean),
+    "[L](/p)"
+  );
+  assert_eq!(
+    html_to_html(
+      r#"<a href="/p" aria-label="L"><pre> </pre></a>"#,
+      HtmlToMarkdownOptions::default()
+    ),
+    r#"<a href="/p"><pre tabindex="0"><code> </code></pre>L</a>"#
+  );
+}
+
+/// Text longer than the 64 KiB cut is read in pieces. A last piece that only
+/// decodes to spaces leaves the text before it, so the link keeps its text and
+/// takes no label, whatever the chunking.
+#[test]
+fn long_link_text_ending_in_encoded_blanks_is_link_text() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  let words = "word ".repeat(13_100);
+  let text = words.trim_end();
+  let blanks = "&#32;".repeat(20);
+  let at_cut = "word ".repeat(13_107);
+  let cases = [
+    (
+      "plain",
+      format!(r#"<p><a href="/c" aria-label="Item">{words}{blanks}</a> next</p>"#),
+      format!("[{text}](/c) next"),
+    ),
+    (
+      "two blanks",
+      format!(r#"<p><a href="/c" aria-label="Item">{at_cut}&#32;&#32;</a> next</p>"#),
+      format!("[{}](/c) next", at_cut.trim_end()),
+    ),
+    (
+      "span",
+      format!(r#"<p><a href="/c" aria-label="Item"><span>{words}{blanks}</span></a> next</p>"#),
+      format!("[{text}](/c) next"),
+    ),
+    (
+      "svg text",
+      format!(
+        r#"<p><a href="/c" aria-label="Item"><svg><text>{words}{blanks}</text></svg></a> next</p>"#
+      ),
+      format!("[{text}](/c) next"),
+    ),
+    // Blank in every piece, the text is still blank.
+    (
+      "all blank",
+      format!(
+        r#"<p><a href="/c" aria-label="Item"><svg></svg>{}</a> next</p>"#,
+        "&#32;".repeat(20_000)
+      ),
+      "[Item](/c) next".to_string(),
+    ),
+  ];
+  for (id, html, expected) in &cases {
+    assert_eq!(convert(html), *expected, "{id}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      clean.clone(),
+    ] {
+      assert_eq!(html_to_markdown(html, options.clone()), *expected, "{id}");
+      for width in [64, 1000, 4096, 65_535, 65_536, 65_537, html.len()] {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, *expected, "{id} width={width}");
+      }
+    }
+  }
+  let html = html_to_html(&cases[0].1, HtmlToMarkdownOptions::default());
+  assert!(html.ends_with("</a> next</p>") && !html.contains("Item"));
 }
 
 #[test]
@@ -3192,6 +3529,415 @@ fn filter_strips_hidden_content_and_subtree() {
   assert_eq!(
     convert_with_filter("<p>a</p><div style=\"display:flex\">V</div><p>b</p>"),
     "a\n\nV\n\nb"
+  );
+}
+
+#[test]
+fn excluded_link_text_falls_back_to_the_link_label() {
+  let with_plugins = |plugins: PluginConfig| HtmlToMarkdownOptions {
+    plugins: Some(plugins),
+    ..Default::default()
+  };
+  let filter = |config: FilterConfig| {
+    with_plugins(PluginConfig {
+      filter: Some(config),
+      ..Default::default()
+    })
+  };
+
+  let html = r#"<main><p><a href="/cart" aria-label="Cart"><span hidden>🛒</span></a></p></main>"#;
+  assert_eq!(convert_with_filter(html), "[Cart](/cart)");
+  assert_eq!(html_to_text(html, filter(FilterConfig::default())), "Cart");
+  assert_eq!(
+    html_to_html(html, filter(FilterConfig::default())),
+    r#"<main><p><a href="/cart">Cart</a></p></main>"#
+  );
+  assert_eq!(convert(html), "[🛒](/cart)");
+
+  assert_eq!(
+    convert_with_filter(
+      r#"<p><a href="/cart" title="Cart"><span style="display:none">x</span></a></p>"#
+    ),
+    "[Cart](/cart)"
+  );
+  assert_eq!(
+    html_to_markdown(
+      r#"<p><a href="/cart" aria-label="Cart"><span class="icon">x</span></a></p>"#,
+      filter(FilterConfig::exclude(&[".icon"])),
+    ),
+    "[Cart](/cart)"
+  );
+  assert_eq!(
+    html_to_markdown(
+      r#"<div><a href="/cart" aria-label="Cart"><span>x</span></a></div>"#,
+      filter(FilterConfig {
+        include: Some(vec!["a".to_string()]),
+        process_children: Some(false),
+        ..Default::default()
+      }),
+    ),
+    "[Cart](/cart)"
+  );
+  assert_eq!(
+    html_to_markdown(
+      r#"<p><a href="/cart" aria-label="Cart"><span class="hidden">x</span></a></p>"#,
+      with_plugins(PluginConfig {
+        tailwind: Some(TailwindConfig),
+        ..Default::default()
+      }),
+    ),
+    "[Cart](/cart)"
+  );
+  // The space after excluded text moves past the link, as trailing link text space does.
+  assert_eq!(
+    convert_with_filter(r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></p>"#),
+    "[Cart](/cart)"
+  );
+  assert_eq!(
+    convert_with_filter(
+      r#"<p><a href="/cart" aria-label="Cart"><b><span hidden>x</span> </b></a></p>"#
+    ),
+    "[Cart](/cart)"
+  );
+  // Visible link text still wins over the label.
+  assert_eq!(
+    convert_with_filter(r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span>Go</a></p>"#),
+    "[Go](/cart)"
+  );
+  assert_eq!(
+    convert_with_filter(
+      r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span> <b>Go</b></a></p>"#
+    ),
+    "[ **Go**](/cart)"
+  );
+}
+
+#[test]
+fn excluded_link_text_followed_by_encoded_space_uses_the_link_label() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for entity in ["&#32;", "&#x20;"] {
+    let html =
+      format!(r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span>{entity}</a></p>"#);
+    assert_eq!(html_to_markdown(&html, options.clone()), "[Cart](/cart)");
+    assert_eq!(html_to_text(&html, options.clone()), "Cart");
+    assert_eq!(
+      html_to_html(&html, options.clone()),
+      r#"<p><a href="/cart"> Cart</a></p>"#
+    );
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(options.clone());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, "[Cart](/cart)", "entity={entity} width={width}");
+    }
+    assert_eq!(
+      html_to_markdown(&html.replace(entity, "&#71;o"), options.clone()),
+      "[Go](/cart)"
+    );
+  }
+}
+
+/// The blank text only spaced out the hidden text, so it moves past the link
+/// like the trailing space of link text.
+#[test]
+fn blank_before_a_link_label_moves_past_the_link() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> </a>now</p>"#,
+      "Go [Cart](/cart) now",
+    ),
+    (
+      "<p><a href=\"/cart\" aria-label=\"Cart\">\n  <span hidden>x</span>\n</a></p>",
+      "[Cart](/cart)",
+    ),
+    (
+      r#"<p><strong><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></strong>B</p>"#,
+      "**[Cart](/cart)** B",
+    ),
+    (
+      r#"<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a><strong>B</strong></p>"#,
+      "[Cart](/cart) **B**",
+    ),
+    (
+      r#"<ul><li><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>item</li></ul>"#,
+      "- [Cart](/cart) item",
+    ),
+    (
+      r#"<table><tr><td><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>x</td><td>y</td></tr></table>"#,
+      "| [Cart](/cart) x | y |\n| --- | --- |",
+    ),
+    (
+      r#"<blockquote><p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a>B</p></blockquote>"#,
+      "> [Cart](/cart) B",
+    ),
+    (
+      r#"<p><a href="https://x.com" aria-label="https://x.com"><span hidden>x</span> </a></p>"#,
+      "<https://x.com>",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [filter.clone(), filter.clone().with_max_node_bytes(4)] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  // Clean mode drops the image, so the blank before the label is still pending.
+  let clean_filter = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..filter
+  };
+  assert_eq!(
+    html_to_markdown(
+      r#"<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> <img src="/c.png" alt=""> </a>now</p>"#,
+      clean_filter,
+    ),
+    "Go [Cart](/cart) now"
+  );
+}
+
+/// A blank after link content the parser leaves out, such as an empty `<svg>`
+/// or a `<style>`, spaces that content like the blank after hidden text: the
+/// link takes its label and the blank moves past the link, whether it is a
+/// plain space the parser drops or a decoded `&#32;`.
+#[test]
+fn blank_after_excluded_link_content_moves_past_the_label() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<p>Go <a href="/cart" aria-label="Cart"><style>.i{}</style>&#32;</a></p>"#,
+      "Go [Cart](/cart)",
+    ),
+    (
+      r#"<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>"#,
+      "[Cart](/cart)",
+    ),
+    (
+      r#"<p><a href="/c" aria-label="Item"><svg></svg> </a>Next</p>"#,
+      "[Item](/c) Next",
+    ),
+    (
+      r#"<p><a href="/c" aria-label="Item"><svg></svg>&#32;</a>Next</p>"#,
+      "[Item](/c) Next",
+    ),
+    (
+      "<p><a href=\"/c\" aria-label=\"Item\">\n  <svg aria-hidden=\"true\"></svg>\n</a>Next</p>",
+      "[Item](/c) Next",
+    ),
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><style>.i{}</style> </a>now</p>"#,
+      "Go [Item](/c) now",
+    ),
+    (
+      r#"<ul><li><a href="/c" aria-label="Item"><svg></svg> </a>item</li></ul>"#,
+      "- [Item](/c) item",
+    ),
+    (
+      r#"<p><a href="/c" aria-label="Item"><svg></svg> </a><strong>B</strong></p>"#,
+      "[Item](/c) **B**",
+    ),
+    // Without a label nothing takes the place of the content.
+    (r#"<p><a href="/c"><svg></svg> </a>Next</p>"#, "[](/c)Next"),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      filter.clone().with_max_node_bytes(4),
+    ] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  // Clean mode keeps the labeled link instead of dropping `[ ](/cart)`.
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(
+      r#"<p>Go<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>now</p>"#,
+      clean,
+    ),
+    "Go [Cart](/cart) now"
+  );
+  let html = r#"<p>Go <a href="/cart" aria-label="Cart"><svg></svg>&#32;</a></p>"#;
+  assert_eq!(convert_text(html), "Go Cart");
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    r#"<p>Go <a href="/cart"> Cart</a></p>"#
+  );
+}
+
+/// A blank the parser drops between two children of a link, as between two
+/// icons, is part of the content the label replaces: only a blank after the
+/// link's last child moves past the link.
+#[test]
+fn blank_between_excluded_link_content_stays_in_the_label() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg></a>Next</p>"#,
+      "Go [Item](/c)Next",
+    ),
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><span></span> <svg></svg></a>Next</p>"#,
+      "Go [Item](/c)Next",
+    ),
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> <svg></svg></a>Next</p>"#,
+      "Go [Item](/c)Next",
+    ),
+    (
+      r#"<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> </a>Next</p>"#,
+      "Go [Item](/c) Next",
+    ),
+    // A comment is no child of the link.
+    (
+      r#"<p>Go <a href="/c" aria-label="A"><svg></svg> <!-- c --></a>Next</p>"#,
+      "Go [A](/c) Next",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, filter.clone()), expected, "{html}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      filter.clone(),
+      filter.clone().with_max_node_bytes(4),
+    ] {
+      let one_shot = html_to_markdown(html, options.clone());
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, one_shot, "{html} width={width}");
+      }
+    }
+  }
+
+  let html = r#"<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg></a>Next</p>"#;
+  assert_eq!(convert_text(html), "Go ItemNext");
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    r#"<p>Go<a href="/c">Item</a>Next</p>"#
+  );
+}
+
+#[test]
+fn excluded_link_text_keeps_the_space_after_it() {
+  let exclude_icon = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::exclude(&[".icon"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let html = r#"<p>See<a href="/x"><span class="icon">arrow</span> <span>docs</span></a></p>"#;
+  assert_eq!(html_to_text(html, exclude_icon.clone()), "See docs");
+  assert_eq!(
+    html_to_html(html, exclude_icon),
+    r#"<p>See<a href="/x"> <span>docs</span></a></p>"#
+  );
+
+  let extract = |html: &str, plugins: PluginConfig, selector: &str| {
+    let result = html_to_markdown_result(
+      html,
+      HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          extraction: Some(ExtractionConfig {
+            selectors: vec![selector.to_string()],
+          }),
+          ..plugins
+        }),
+        ..Default::default()
+      },
+    );
+    result
+      .extracted
+      .unwrap()
+      .into_iter()
+      .map(|element| element.text_content)
+      .collect::<Vec<_>>()
+  };
+  let include_h1 = PluginConfig {
+    filter: Some(FilterConfig {
+      include: Some(vec!["h1".to_string()]),
+      process_children: Some(false),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    extract(
+      r#"<h1><a href="/x"><span>B</span> <span>C</span></a></h1>"#,
+      include_h1,
+      "h1"
+    ),
+    ["B C"]
+  );
+  let isolate_main = PluginConfig {
+    isolate_main: Some(IsolateMainConfig),
+    ..Default::default()
+  };
+  assert_eq!(
+    extract(
+      r#"<nav><a href="/docs"><span>Getting</span> <span>Started</span></a></nav><main><h1>T</h1><p>b</p></main>"#,
+      isolate_main,
+      "a[href]"
+    ),
+    ["Getting Started"]
   );
 }
 

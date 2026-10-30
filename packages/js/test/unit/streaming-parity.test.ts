@@ -1,4 +1,5 @@
 import type { ElementNode, MdreamOptions } from '../../src/types'
+import { strictEqual } from 'node:assert'
 import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
@@ -656,6 +657,57 @@ describe('streaming parity with the Rust core', () => {
     await expectStreamingParity(html)
   })
 
+  it.each([
+    ['<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>', 'Go [x](/cart)'],
+    ['<div><a href="/x" title="Title"><div>Text</div></a></div>', '[Text](/x "Title")'],
+    ['<p><a href="/c"><svg><text>x</text></svg></a> now</p>', '[x](/c) now'],
+  ])('keeps text in a block inside a link as link text across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    for (const format of ['markdown', 'text', 'html'] as const)
+      await expectStreamingParity(html, { format })
+  })
+
+  it.each([
+    ['<a href="/p" aria-label="L"><pre> </pre></a>', '[L](/p)'],
+    ['<a href="/p" aria-label="L"><pre>&#32;</pre></a>', '[L](/p)'],
+    ['<a href="/p" title="T"><pre> </pre></a>', '[T](/p)'],
+    ['<a href="/p" aria-label="L"><div><pre> </pre></div></a>', '[L](/p)'],
+    ['<pre>a <a href="/c" aria-label="Item"><svg><text> </text></svg></a> Next</pre>', '```\na Item Next\n```'],
+  ])('keeps the label of a link holding a blank pre across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    expect(convertOnce(html, { clean: clean() })).toBe(expected)
+    for (const format of ['markdown', 'text', 'html'] as const)
+      await expectStreamingParity(html, { format })
+    await expectStreamingParity(html, { clean: clean() })
+  })
+
+  it.each([
+    ['<p>Go <a href="/cart" aria-label="Cart"><style>.i{}</style>&#32;</a></p>', 'Go [Cart](/cart)'],
+    ['<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>', '[Cart](/cart)'],
+    ['<p><a href="/c" aria-label="Item"><svg></svg> </a>Next</p>', '[Item](/c) Next'],
+    ['<p><a href="/c" aria-label="Item"><svg></svg>&#32;</a>Next</p>', '[Item](/c) Next'],
+    ['<p><a href="/c" aria-label="Item">\n  <svg aria-hidden="true"></svg>\n</a>Next</p>', '[Item](/c) Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><style>.i{}</style> </a>now</p>', 'Go [Item](/c) now'],
+  ])('keeps the blank after excluded link content past the label across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    for (const format of ['markdown', 'text', 'html'] as const)
+      await expectStreamingParity(html, { format })
+    await expectStreamingParity(html, { clean: clean() })
+  })
+
+  it.each([
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><span></span> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> </a>Next</p>', 'Go [Item](/c) Next'],
+    ['<p>Go <a href="/c" aria-label="A"><svg></svg> <!-- c --></a>Next</p>', 'Go [A](/c) Next'],
+  ])('keeps a blank between excluded link content in the label across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    for (const format of ['markdown', 'text', 'html'] as const)
+      await expectStreamingParity(html, { format })
+    await expectStreamingParity(html, { clean: clean() })
+  })
+
   it.each(['html', 'text'] as const)('keeps linked-image %s output stable across every split', async (format) => {
     await expectStreamingParity(
       '<a href="/x" title="Title"><img src="/i" alt="Alt"></a>',
@@ -886,4 +938,79 @@ describe('flattened declaration carry', () => {
       }
     }
   })
+})
+
+it.for(['label', 'plain', 'span'].flatMap(kind => [
+  { kind, name: 'unbroken' },
+  { kind, name: 'words' },
+]))('moves decoded trailing spaces past long $kind links with $name', async ({ kind, name }) => {
+  const text = name === 'unbroken' ? 'x'.repeat(65_536) : 'word '.repeat(13_100)
+  const blanks = '&#32;'.repeat(20)
+  const content = kind === 'span' ? `<span>${text}${blanks}</span>` : text + blanks
+  const label = kind === 'label' ? ' aria-label="Label"' : ''
+  const html = `<a href="/x"${label}>${content}</a>Next`
+  const expected = `[${text.trimEnd()}](/x) Next`
+  expect(htmlToMarkdown(html) === expected).toBe(true)
+  for (let width = 1; width <= 64; width++) {
+    let offset = 0
+    const stream = new ReadableStream<string>({
+      pull(controller) {
+        if (offset === 0) {
+          offset = html.indexOf('&#32;') - 8
+          controller.enqueue(html.slice(0, offset))
+        }
+        else if (offset < html.length) {
+          controller.enqueue(html.slice(offset, offset + width))
+          offset += width
+        }
+        else {
+          controller.close()
+        }
+      },
+    })
+    let output = ''
+    for await (const chunk of streamHtmlToMarkdown(stream))
+      output += chunk
+    strictEqual(output, expected, `width=${width}`)
+  }
+  for (let split = html.indexOf('&#32;') - 8; split < html.length; split++)
+    strictEqual(await streamConvertAtSplit(html, split), expected, `split=${split}`)
+  const textStart = html.indexOf(text)
+  for (let split = textStart; split <= textStart + 16; split++)
+    strictEqual(await streamConvertAtSplit(html, split), expected, `split=${split}`)
+})
+
+it.each([
+  ['<a href="/x" title="x ">x&#32;</a>Next', '[x](/x) Next'],
+  ['<a href="/x" title="other ">x&#32;</a>Next', '[x](/x "other ") Next'],
+])('preserves link title deduplication with a spacing-only override: %s', async (html, expected) => {
+  const options: ParityOptions = { tagOverrides: { a: { spacing: [0, 0] } } }
+  expect(convertOnce(html, options)).toBe(expected)
+  for (let width = 1; width <= html.length; width++)
+    expect(await streamConvert(html, width, options), `width=${width}`).toBe(expected)
+})
+
+it.each([
+  ['<a href="/x" title="x&#11;">x</a>', '[x](/x "x\u000B")'],
+  ['<a href="/x">x&#11;&#32;&#32;</a>Next', '[x\u000B](/x) Next'],
+  ['<a href="https://example.com">https://example.com&#32;</a>Next', '<https://example.com> Next'],
+  ['<a href="/x" title="x ">x&#32;</a>Next', '[x](/x) Next'],
+  ['<a href="/x" title="x">x&#32;</a>Next', '[x](/x) Next'],
+  ['<a href="/x"><code>x&#32;</code></a>Next', '[`x `](/x)Next'],
+])('keeps link rewrites compatible with trailing spaces in %s', async (html, expected) => {
+  expect(htmlToMarkdown(html)).toBe(expected)
+  for (let width = 1; width <= html.length; width++)
+    expect(await streamConvert(html, width), `width=${width}`).toBe(expected)
+})
+
+it.each<[string, NonNullable<ParityOptions['tagOverrides']>, string]>([
+  ['<ex href="/x">x&#32;</ex>Next', { ex: 'a' }, '[x](/x) Next'],
+  ['<a href="/x">x&#32;</a>Next', { a: { enter: '[' } }, '[x](/x) Next'],
+  ['<a href="/x">x&#32;</a>Next', { a: { exit: ')' } }, '[x )Next'],
+  ['<a href="/x">x&#11;&#32;</a>Next', { a: { spacing: [0, 0] } }, '[x\u000B](/x) Next'],
+])('relocates link spaces only with the retained built-in exit: %s', async (html, tagOverrides, expected) => {
+  const options: ParityOptions = { tagOverrides }
+  expect(convertOnce(html, options)).toBe(expected)
+  for (let width = 1; width <= html.length; width++)
+    expect(await streamConvert(html, width, options), `width=${width}`).toBe(expected)
 })

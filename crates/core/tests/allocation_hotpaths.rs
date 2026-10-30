@@ -5,8 +5,8 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
 use mdream::{
-  CleanConfig, HtmlToMarkdownOptions, MarkdownStreamProcessor, OutputFormat, PluginConfig,
-  TailwindConfig, html_to_format, html_to_markdown,
+  CleanConfig, FilterConfig, HtmlToMarkdownOptions, IsolateMainConfig, MarkdownStreamProcessor,
+  OutputFormat, PluginConfig, TailwindConfig, html_to_format, html_to_markdown,
 };
 
 struct CountingAllocator;
@@ -87,6 +87,35 @@ fn cleaned_links_do_not_allocate_intermediate_urls() {
       // setup and output growth, without permitting a third allocation per link.
       COUNT * 2 + 64,
     );
+  }
+}
+
+#[test]
+fn excluded_links_do_not_allocate_per_link() {
+  const COUNT: usize = 1024;
+  let links = "<a href='/x'><span>Item</span> <span>more</span></a>".repeat(COUNT);
+  // The nav links are excluded; the header links are skipped until main is found.
+  for (html, plugins) in [
+    (
+      format!("<nav>{links}</nav><main><p>body</p></main>"),
+      PluginConfig {
+        filter: Some(FilterConfig::exclude(&["nav"])),
+        ..Default::default()
+      },
+    ),
+    (
+      format!("<header>{links}</header><main><p>body</p></main>"),
+      PluginConfig {
+        isolate_main: Some(IsolateMainConfig),
+        ..Default::default()
+      },
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_budget(&html, options, "body", 64);
   }
 }
 
