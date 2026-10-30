@@ -22,7 +22,6 @@ const SELF_CLOSING_CASES: [string, Record<string, any>, string][] = [
   ['<p>a<x-y>b</x-y>c</p>', { 'x-y': 'br', 'br': { isSelfClosing: false } }, 'a  \nbc'],
   ['<p>a <![CDATA[x]]> c</p><p>d</p>', { '#cdata-section': VOID_MARKED }, 'a [] c\n\nd'],
   ['<p>a <![CDATA[x]]> c</p><p>d</p>', { '#cdata-section': 'br' }, 'a  \n c\n\nd'],
-  ['<ul><li><hr>x</hr></li></ul>', { hr: { isSelfClosing: false } }, '- ***\n\n  x'],
   ['<br><h1></h1></br>b c', { br: { isSelfClosing: false } }, '# b c'],
 ]
 

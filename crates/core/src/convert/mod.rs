@@ -1553,7 +1553,12 @@ impl ConvertState {
       let tag_handler = pending.tag_id.and_then(get_tag_handler);
       let resume = resume_tag_attributes(
         chunk,
-        pending.self_closing,
+        self.tag_is_self_closing(
+          pending.name(),
+          pending.tag_id,
+          pending.is_builtin,
+          tag_handler,
+        ),
         self.attr_mask(tag_handler),
         &mut pending.carry,
         &mut pending.attrs,
@@ -3135,7 +3140,6 @@ pub(crate) struct PendingStartTag {
   pub(crate) custom_name: Option<String>,
   pub(crate) tag_id: Option<u8>,
   pub(crate) is_builtin: bool,
-  pub(crate) self_closing: bool,
   pub(crate) carry: Box<TagCarry>,
   pub(crate) attrs: crate::types::Attributes,
 }

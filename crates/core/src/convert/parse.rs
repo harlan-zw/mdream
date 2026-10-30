@@ -883,18 +883,20 @@ impl ConvertState {
     position: usize,
   ) -> OpeningTagResult {
     let tag_handler = tag_id.and_then(get_tag_handler);
-    let self_closing = self.tag_is_self_closing(tag_name, tag_id, is_builtin, tag_handler);
     // A custom name is owned by the node and by any suspended scan, so it is
     // charged; the `#cdata-section` pseudo-tag is a literal, not document bytes.
     let mut budget = AttrBudget::new(self.options.max_node_bytes);
     if !is_builtin && tag_name.as_bytes().first() != Some(&b'#') {
       budget.charge(tag_name.len());
     }
+    // Read after the mask: the other order costs every start tag a spill.
+    let attr_mask = self.attr_mask(tag_handler);
+    let self_closing = self.tag_is_self_closing(tag_name, tag_id, is_builtin, tag_handler);
     let scan = process_tag_attributes(
       html_chunk,
       position,
       self_closing,
-      self.attr_mask(tag_handler),
+      attr_mask,
       budget,
       &mut self.attr_scratch,
     );
@@ -906,7 +908,6 @@ impl ConvertState {
         custom_name: (!is_builtin).then(|| tag_name.to_string()),
         tag_id,
         is_builtin,
-        self_closing,
         carry: scan.carry.expect("an incomplete scan carries its state"),
         attrs: std::mem::take(&mut self.attr_scratch),
       }));
@@ -930,8 +931,8 @@ impl ConvertState {
 
   /// Whether a start tag of this element has no content. An `isSelfClosing`
   /// override decides; without one the handler does, aliases included.
-  #[inline]
-  fn tag_is_self_closing(
+  #[inline(always)]
+  pub(crate) fn tag_is_self_closing(
     &self,
     tag_name: &str,
     tag_id: Option<u8>,
@@ -946,6 +947,15 @@ impl ConvertState {
     } else {
       self_closing
     }
+  }
+
+  /// Only a void handler skips the depth-limit recovery. An override that makes
+  /// any other tag void needs no skip, and one that reopens this tag needs it.
+  #[cold]
+  fn end_tag_is_void(&self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool) -> bool {
+    let tag_handler = tag_id.and_then(get_tag_handler);
+    tag_handler.is_some_and(|handler| handler.is_self_closing)
+      && self.tag_is_self_closing(tag_name, tag_id, is_builtin, tag_handler)
   }
 
   /// A built-in name is looked up by id: the source spelling can be `<BR>`, and
@@ -1870,17 +1880,7 @@ impl ConvertState {
     }
 
     if self.overflow_same_name_depth > 0 {
-      // Only a void handler skips the checks below. An override that makes any
-      // other tag void needs no skip, and one that reopens this tag needs them.
-      let tag_handler = tag_id.and_then(get_tag_handler);
-      let is_self_closing = tag_handler.is_some_and(|handler| handler.is_self_closing)
-        && self.tag_is_self_closing(
-          tag_name.as_ref(),
-          tag_id,
-          builtin_tag_id.is_some(),
-          tag_handler,
-        );
-      if is_self_closing {
+      if self.end_tag_is_void(tag_name.as_ref(), tag_id, builtin_tag_id.is_some()) {
         self.just_closed_tag = true;
         return true;
       }
