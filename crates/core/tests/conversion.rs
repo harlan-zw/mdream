@@ -6511,6 +6511,25 @@ fn a_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
 }
 
 #[test]
+fn scout9_wrap_setext_boundary() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
 fn heading_overrides_inside_list_code_keep_their_output() {
   for (html, expected, tag, config) in [
     (
@@ -6540,6 +6559,17 @@ fn heading_overrides_inside_list_code_keep_their_output() {
     };
     assert_eq!(html_to_markdown(html, options.clone()), expected);
   }
+}
+
+#[test]
+fn scout9_wrap_setext_plain_text_still_wraps() {
+  assert_eq!(
+    html_to_text(
+      "<p>aaaaaaaaaa --</p>",
+      HtmlToMarkdownOptions::default().with_wrap_width(10)
+    ),
+    "aaaaaaaaaa\n--"
+  );
 }
 
 #[test]
@@ -6624,4 +6654,12 @@ fn scout9_excluded_list_spacing_options() {
       "html={html}"
     );
   }
+}
+
+#[test]
+fn paragraph_after_empty_nested_quote() {
+  assert_eq!(
+    convert("<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>"),
+    "- x\n\n  - \n  \n\n  y"
+  );
 }

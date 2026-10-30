@@ -10,6 +10,13 @@ const BYTE_PARITY_CASES = [
   '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
   '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
   '<ul><li>a</li><template>hidden</template><li>b</li></ul>',
+  '<p>aaaaaaaaaa --</p>',
+  '<p>aaaaaaaaaa ==</p>',
+  '<p>aaaaaaaaaa -</p>',
+  '<p>aaaaaaaaaa ---</p>',
+  '<p>aaaaaaaaaa =</p>',
+  '<p>aaaaaaaaaa --word</p>',
+  '<p>aaaaaaaaaa ==word</p>',
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',
@@ -353,6 +360,64 @@ describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
   })
 })
 
+describe('scout9_wrap_setext_boundary streaming', () => {
+  it.each([
+    [
+      '<p>aaaaaaaaaa --</p>',
+      'aaaaaaaaaa --',
+    ],
+    [
+      '<p>aaaaaaaaaa ==</p>',
+      'aaaaaaaaaa ==',
+    ],
+    [
+      '<p>aaaaaaaaaa -</p>',
+      'aaaaaaaaaa -',
+    ],
+    [
+      '<p>aaaaaaaaaa ---</p>',
+      'aaaaaaaaaa ---',
+    ],
+    [
+      '<p>aaaaaaaaaa =</p>',
+      'aaaaaaaaaa =',
+    ],
+    [
+      '<p>aaaaaaaaaa --word</p>',
+      'aaaaaaaaaa\n--word',
+    ],
+    [
+      '<p>aaaaaaaaaa ==word</p>',
+      'aaaaaaaaaa\n==word',
+    ],
+  ])('matches every split and chunk width: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      const options = { wrapWidth: 10 }
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream, options))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
+  })
+})
+
 describe('scout9_excluded_list_spacing streaming', () => {
   it.each([
     [
@@ -434,6 +499,33 @@ describe('scout9_excluded_list_spacing option streaming', () => {
           actual += part
         expect(actual, name).toBe(expected)
       }
+    }
+  })
+})
+describe('paragraph after empty nested quote', () => {
+  it.each(engines)('stays in the parent item for $name at every split and chunk width', async ({ engine }) => {
+    const html = '<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>'
+    const expected = '- x\n\n  - \n  \n\n  y'
+    expect(engine.htmlToMarkdown(html)).toBe(expected)
+    const chunks: string[][] = []
+    for (let width = 1; width <= html.length; width++) {
+      const parts: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        parts.push(html.slice(offset, offset + width))
+      chunks.push(parts)
+    }
+    for (let split = 1; split < html.length; split++)
+      chunks.push([html.slice(0, split), html.slice(split)])
+    for (const parts of chunks) {
+      const stream = new ReadableStream<string>({ start(controller) {
+        for (const part of parts)
+          controller.enqueue(part)
+        controller.close()
+      } })
+      let actual = ''
+      for await (const part of engine.streamHtmlToMarkdown(stream))
+        actual += part
+      expect(actual, JSON.stringify(parts)).toBe(expected)
     }
   })
 })
