@@ -2344,8 +2344,13 @@ impl ConvertState {
       self.list_rule_pending = true;
     }
 
-    if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
-      self.finalize_blockquote();
+    if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) {
+      if !self.blockquotes.is_empty() {
+        self.finalize_blockquote();
+      }
+      // The quote's close separates a raw HTML region that ended inside it,
+      // including a literal-enter quote, which pushed no frame.
+      self.pending_raw_html_boundary = false;
     }
 
     let new_line_config = if caption_exit {
@@ -2472,10 +2477,6 @@ impl ConvertState {
       self.exit_raw_html_boundary(has_override, output.is_some());
     }
 
-    if matches!(tag_id, Some(TAG_LI | TAG_BLOCKQUOTE)) {
-      self.pending_raw_html_boundary = false;
-    }
-
     // Get effective output
     let effective: Option<&str> = if let Some(ref sep) = table_separator {
       Some(sep.as_str())
@@ -2484,6 +2485,7 @@ impl ConvertState {
     };
 
     if tag_id == Some(TAG_LI) && !plain_text!(self) {
+      self.pending_raw_html_boundary = false;
       self.resolve_item_marker(true);
     }
 
