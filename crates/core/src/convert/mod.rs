@@ -456,6 +456,10 @@ const CLEAN_SELF_LINK_HEADINGS: u8 = 8;
 const CLEAN_EMPTY_IMAGES: u8 = 16;
 const CLEAN_EMPTY_LINK_TEXT: u8 = 32;
 
+// `list_pending` bits: separators deferred until visible content follows.
+const LIST_RULE_PENDING: u8 = 1;
+const LIST_TAIL_PENDING: u8 = 2;
+
 const SCRIPT_DATA: u8 = 0;
 const SCRIPT_DATA_ESCAPED: u8 = 1;
 const SCRIPT_DATA_ESCAPED_DASH: u8 = 2;
@@ -944,17 +948,23 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// Set with `empty_item_hazard`, `empty_list_marker_end` or `list_tail_start`
+  /// and recomputed by `settle_item_marker`, so the token loop and the hot
+  /// paths test one flag. It may stay set after all three clear, never the
+  /// other way round.
+  item_settle_pending: bool,
   /// Last built-in marker end, excluding its trailing space.
   last_item_marker_end: usize,
   #[cfg(test)]
   parent_marker_scans: usize,
-  /// A list item rule waiting to see whether visible content follows it.
-  list_rule_pending: bool,
+  /// `LIST_RULE_PENDING`: a list item rule waiting to see whether visible
+  /// content follows it. `LIST_TAIL_PENDING`: a nested list ended and the
+  /// parent item's text, if any, needs its own paragraph.
+  list_pending: u8,
   /// Actual built-in item marker end, distinct from marker-like source text.
   empty_list_marker_end: usize,
   /// `<li>` nesting level of the latest built-in item marker.
   empty_list_marker_depth: usize,
-  list_tail_pending: bool,
   /// A tentative separator retractable while following wrappers are empty.
   list_tail_start: usize,
   list_tail_scanned_to: usize,
@@ -1206,13 +1216,13 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      item_settle_pending: false,
       last_item_marker_end: usize::MAX,
       #[cfg(test)]
       parent_marker_scans: 0,
-      list_rule_pending: false,
+      list_pending: 0,
       empty_list_marker_end: usize::MAX,
       empty_list_marker_depth: 0,
-      list_tail_pending: false,
       list_tail_start: usize::MAX,
       list_tail_scanned_to: 0,
       empty_list_marker_scanned_to: 0,
@@ -1368,10 +1378,14 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
-    if self.empty_item_hazard
-      || self.empty_list_marker_end != usize::MAX
-      || self.list_tail_start != usize::MAX
-    {
+    debug_assert!(
+      self.item_settle_pending
+        || (!self.empty_item_hazard
+          && self.empty_list_marker_end == usize::MAX
+          && self.list_tail_start == usize::MAX),
+      "list item state is pending without item_settle_pending"
+    );
+    if self.item_settle_pending {
       self.settle_item_marker();
     }
     self.check_held_output();
@@ -2636,13 +2650,17 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
-    self.list_tail_scanned_to = self.list_tail_scanned_to.min(offset);
-    self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.min(offset);
-    if self.empty_list_marker_end != usize::MAX && offset < self.empty_list_marker_end {
-      self.empty_list_marker_end = usize::MAX;
-    }
-    if self.list_tail_start != usize::MAX && offset < self.list_tail_start {
-      self.list_tail_start = usize::MAX;
+    // Both scan cursors restart whenever their start is set, so they only
+    // matter while the settle flag is.
+    if self.item_settle_pending {
+      self.list_tail_scanned_to = self.list_tail_scanned_to.min(offset);
+      self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.min(offset);
+      if offset < self.empty_list_marker_end {
+        self.empty_list_marker_end = usize::MAX;
+      }
+      if offset < self.list_tail_start {
+        self.list_tail_start = usize::MAX;
+      }
     }
     if self.last_item_marker_end != usize::MAX && offset < self.last_item_marker_end {
       self.last_item_marker_end = usize::MAX;

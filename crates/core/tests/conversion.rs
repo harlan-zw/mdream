@@ -6178,6 +6178,36 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 }
 
 #[test]
+fn scout9_wrap_setext_boundary() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
+fn scout9_wrap_setext_plain_text_still_wraps() {
+  assert_eq!(
+    html_to_text(
+      "<p>aaaaaaaaaa --</p>",
+      HtmlToMarkdownOptions::default().with_wrap_width(10)
+    ),
+    "aaaaaaaaaa\n--"
+  );
+}
+
+#[test]
 fn empty_nested_list_tail_stays_in_parent_item() {
   for (html, expected) in [
     (
@@ -6285,6 +6315,22 @@ fn filled_nested_list_tail_stays_in_parent_item() {
     (
       "<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>",
       "-\n  -\n- z",
+    ),
+    (
+      "<ul><li>x<ul><li>z<br></li></ul>y</li></ul>",
+      "- x\n  - z  \n\n  y",
+    ),
+    (
+      "<ul><li><ul><li>a<br></li></ul>text</li></ul>",
+      "-\n  - a  \n\n  text",
+    ),
+    (
+      "<ul><li><a href=\"x\"><ul><li>a</li></ul></a>t<ul></ul>u</li></ul>",
+      "- [  - a](x)t u",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html}");
@@ -6472,36 +6518,6 @@ fn empty_nested_list_review_regressions() {
       "{id}: {html}"
     );
   }
-}
-
-#[test]
-fn scout9_wrap_setext_boundary() {
-  for (html, expected) in [
-    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
-    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
-    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
-    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
-    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
-    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
-    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
-  ] {
-    assert_eq!(
-      html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
-      expected,
-      "html={html}"
-    );
-  }
-}
-
-#[test]
-fn scout9_wrap_setext_plain_text_still_wraps() {
-  assert_eq!(
-    html_to_text(
-      "<p>aaaaaaaaaa --</p>",
-      HtmlToMarkdownOptions::default().with_wrap_width(10)
-    ),
-    "aaaaaaaaaa\n--"
-  );
 }
 
 #[test]

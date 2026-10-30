@@ -132,7 +132,7 @@ export interface MarkdownState {
   /** Last built-in item marker, retained until its emptiness is settled. */
   emptyListMarkerFragment?: number
   /** `<li>` nesting level of the latest built-in item marker. */
-  emptyListMarkerDepth?: number
+  emptyListMarkerDepth: number
   /** A separate parent-paragraph boundary after a nested list. */
   listTailPending?: boolean
   listTailStart?: number
@@ -910,6 +910,15 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
   return DEFAULT_BLOCK_SPACING
 }
 
+/** Whether an ancestor collapses block spacing, as `calculateNewLineConfig` does for `<li>`. */
+function insideInlineWrapper(node: ElementNode): boolean {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.tagHandler?.collapsesInnerWhiteSpace && parent.tagId !== TAG_SPAN)
+      return true
+  }
+  return false
+}
+
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
   const handler = node.tagHandler
   // Custom exits have not run yet. Treat them as wrappers unless a
@@ -1414,7 +1423,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
     emptyListMarkerFragment: undefined,
-    emptyListMarkerDepth: undefined,
+    emptyListMarkerDepth: 0,
     listTailPending: false,
     listTailStart: undefined,
     listTailScanFrom: undefined,
@@ -1790,7 +1799,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
-    if (hasNonWhitespace(textNode.value)) {
+    if ((state.emptyListMarkerFragment !== undefined || state.listTailStart !== undefined)
+      && hasNonWhitespace(textNode.value)) {
       state.emptyListMarkerFragment = undefined
       state.listTailStart = undefined
     }
@@ -1801,7 +1811,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     trimTrailingSpaces(state.buffer)
     state.listTailStart = state.buffer.length
     state.listTailScanFrom = state.listTailStart
-    state.buffer.push(`\n\n${state.listIndent}`)
+    // A hard break has already ended the line; write only the newlines the
+    // blank line still lacks.
+    state.buffer.push(`${'\n\n'.slice(newlineRunBefore(state.buffer, state.buffer.length))}${state.listIndent}`)
     state.lastContentCache = state.buffer.at(-1)
     state.lastTextNode = undefined
     state.listTailPending = false
@@ -1943,30 +1955,37 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
-    if (eventType === NodeEventExit && tagId === TAG_LI && state.listIndentWidths.length === 1)
-      state.emptyListMarkerFragment = undefined
-    if (eventType === NodeEventExit && tagId === TAG_LI && state.listTailStart !== undefined) {
-      const start = state.listTailStart
-      if (!hasNonWhitespaceFrom(buff, start)) {
-        state.outputPositions?.replace(start, buff.length, [])
-        buff.length = start
-        state.lastContentCache = buff.at(-1)
-        state.lastTextNode = undefined
-        lastBuffEntry = buff.at(-1)!
-        lastChar = lastBuffEntry?.at(-1) || ''
+    if (eventType === NodeEventExit) {
+      if (tagId === TAG_LI) {
+        if (state.listIndentWidths.length === 1)
+          state.emptyListMarkerFragment = undefined
+        if (state.listTailStart !== undefined) {
+          const start = state.listTailStart
+          if (!hasNonWhitespaceFrom(buff, start)) {
+            state.outputPositions?.replace(start, buff.length, [])
+            buff.length = start
+            state.lastContentCache = buff.at(-1)
+            state.lastTextNode = undefined
+            lastBuffEntry = buff.at(-1)!
+            lastChar = lastBuffEntry?.at(-1) || ''
+          }
+          state.listTailStart = undefined
+        }
       }
-      state.listTailStart = undefined
-    }
-    if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL)
-      && state.listIndent && !insideRawHtmlRegion && !isInsideTableCell(state)
-      && !handler?.literalExit && !element.pluginOutput?.length
-      && state.emptyListMarkerDepth! > state.depthMap[TAG_LI]!) {
-      // Any item of this list, filled or empty, ends before the parent's text.
-      state.listTailPending = true
-      state.emptyListMarkerDepth = state.depthMap[TAG_LI]
-      const marker = state.emptyListMarkerFragment
-      if (marker !== undefined && (marker >= buff.length || hasNonWhitespaceFrom(buff, marker + 1)))
-        state.emptyListMarkerFragment = undefined
+      else if ((tagId === TAG_UL || tagId === TAG_OL)
+        && state.emptyListMarkerDepth > state.depthMap[TAG_LI]!
+        && state.listIndent && !insideRawHtmlRegion && !isInsideTableCell(state)
+        && !handler?.literalExit && !element.pluginOutput?.length) {
+        // Any item of this list, filled or empty, ends before the parent's text.
+        // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+        // item line is left open for that text to continue.
+        if (!insideInlineWrapper(element))
+          state.listTailPending = true
+        state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
+        const marker = state.emptyListMarkerFragment
+        if (marker !== undefined && (marker >= buff.length || hasNonWhitespaceFrom(buff, marker + 1)))
+          state.emptyListMarkerFragment = undefined
+      }
     }
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
@@ -2519,7 +2538,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (!handler?.literalEnter && handlerOutput) {
           state.emptyListMarkerFragment = state.buffer.length - 1
           state.emptyListMarkerScanFrom = state.buffer.length
-          state.emptyListMarkerDepth = state.depthMap[TAG_LI]
+          state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
         }
       }
       else {

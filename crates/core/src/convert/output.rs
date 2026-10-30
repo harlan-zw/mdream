@@ -1123,16 +1123,8 @@ impl ConvertState {
       self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
       return;
     }
-    if self.list_tail_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      if matches!(self.stack[stack_len - 1].tag_id, Some(TAG_BLOCKQUOTE)) {
-        self.list_tail_pending = false;
-        self.empty_list_marker_end = usize::MAX;
-      } else {
-        self.flush_list_tail();
-      }
-    }
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+    if self.list_pending != 0 && !self.stack[stack_len - 1].excludes_text_nodes {
+      self.flush_list_pending(self.stack[stack_len - 1].tag_id);
     }
 
     let tag_id: Option<u8>;
@@ -1334,7 +1326,9 @@ impl ConvertState {
       false,
     );
     self.settle_empty_text_pending(output_start, || false);
-    self.defer_list_tail(tag_id);
+    if matches!(tag_id, Some(TAG_UL | TAG_OL)) {
+      self.defer_list_tail();
+    }
   }
 
   #[inline(always)]
@@ -1367,16 +1361,8 @@ impl ConvertState {
       return;
     }
 
-    if self.list_tail_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      if matches!(self.stack[stack_len - 1].tag_id, Some(TAG_BLOCKQUOTE)) {
-        self.list_tail_pending = false;
-        self.empty_list_marker_end = usize::MAX;
-      } else {
-        self.flush_list_tail();
-      }
-    }
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+    if self.list_pending != 0 && !self.stack[stack_len - 1].excludes_text_nodes {
+      self.flush_list_pending(self.stack[stack_len - 1].tag_id);
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -1755,6 +1741,7 @@ impl ConvertState {
       self.empty_list_marker_end = self.buffer.trim_end_matches(' ').len();
       self.empty_list_marker_scanned_to = self.empty_list_marker_end;
       self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
+      self.item_settle_pending = true;
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -2146,7 +2133,7 @@ impl ConvertState {
 
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
-      self.list_tail_pending = false;
+      self.list_pending = 0;
       if self.depth_map[TAG_LI as usize] == 1 {
         self.empty_list_marker_end = usize::MAX;
       }
@@ -2161,7 +2148,6 @@ impl ConvertState {
         }
         self.list_tail_start = usize::MAX;
       }
-      self.list_rule_pending = false;
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
     // Only the <pre> owning the open fence may close it; a nested one closing
@@ -2365,11 +2351,11 @@ impl ConvertState {
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
     {
-      self.list_rule_pending = true;
+      self.list_pending |= LIST_RULE_PENDING;
     }
 
-    if !has_override {
-      self.defer_list_tail(tag_id);
+    if !has_override && matches!(tag_id, Some(TAG_UL | TAG_OL)) {
+      self.defer_list_tail();
     }
 
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
@@ -2619,8 +2605,7 @@ impl ConvertState {
       && self.wrap_width == 0
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
-      && !self.list_rule_pending
-      && !self.list_tail_pending
+      && self.list_pending == 0
       && !self.pending_inline_whitespace
       && !self.pre_fence_pending
       && self.depth_map[TAG_PRE as usize] == 0
@@ -2713,11 +2698,15 @@ impl ConvertState {
         }
       }
     }
-    if (self.empty_list_marker_end != usize::MAX || self.list_tail_start != usize::MAX)
+    if self.item_settle_pending
+      && (self.empty_list_marker_end != usize::MAX || self.list_tail_start != usize::MAX)
       && has_visible(text.as_bytes())
     {
       self.empty_list_marker_end = usize::MAX;
       self.list_tail_start = usize::MAX;
+      // Only the hazard can still need settling, so a filled item does not
+      // call `settle_item_marker` again at its next token.
+      self.item_settle_pending = self.empty_item_hazard;
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.has_last_text_node = true;
@@ -2853,17 +2842,11 @@ impl ConvertState {
       return;
     }
 
-    if self.list_tail_pending {
+    if self.list_pending != 0 {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_list_tail();
-    }
-    if self.list_rule_pending {
-      if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
-        return;
-      }
-      self.flush_list_rule();
+      self.flush_list_pending(None);
     }
 
     if self.pending_inline_whitespace {
@@ -3386,6 +3369,8 @@ impl ConvertState {
   /// the same, and waiting for it pins the marker's line and everything the
   /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
   /// blank line also survives a nested list whose first `<li>` dropped it.
+  /// Kept out of line so the token loop stays small when nothing is pending.
+  #[inline(never)]
   pub(crate) fn settle_item_marker(&mut self) {
     if (self.empty_list_marker_end != usize::MAX || self.list_tail_start != usize::MAX)
       && self.open_markers.is_empty()
@@ -3425,6 +3410,9 @@ impl ConvertState {
     {
       self.resolve_item_marker(true);
     }
+    self.item_settle_pending = self.empty_item_hazard
+      || self.empty_list_marker_end != usize::MAX
+      || self.list_tail_start != usize::MAX;
   }
 
   /// Give a marker that ended up alone on its line the blank line it needs: the
@@ -4367,16 +4355,20 @@ impl ConvertState {
     p
   }
 
-  fn defer_list_tail(&mut self, tag_id: Option<u8>) {
-    if matches!(tag_id, Some(TAG_UL | TAG_OL))
-      && !plain_text!(self)
+  /// Called on a `</ul>` or `</ol>` exit.
+  fn defer_list_tail(&mut self) {
+    if !plain_text!(self)
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
       && !self.in_raw_html_block()
       && self.empty_list_marker_depth > self.depth_map[TAG_LI as usize] as usize
     {
       // Any item of this list, filled or empty, ends before the parent's text.
-      self.list_tail_pending = true;
+      // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+      // item line is left open for that text to continue.
+      if self.collapse_non_span_depth == 0 {
+        self.list_pending |= LIST_TAIL_PENDING;
+      }
       self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
       if self.empty_list_marker_end != usize::MAX {
         let end = self.empty_list_marker_end.min(self.buffer.len());
@@ -4394,10 +4386,33 @@ impl ConvertState {
     self.trim_trailing_spaces();
     self.list_tail_start = self.buffer.len();
     self.list_tail_scanned_to = self.list_tail_start;
+    self.item_settle_pending = true;
     let prefix = self.continuation_prefix();
-    let separator = format!("\n\n{prefix}");
+    // A hard break has already ended the line; write only the newlines the
+    // blank line still lacks.
+    let new_lines = &"\n\n"[usize::from(self.trailing_new_lines())..];
+    let separator = format!("{new_lines}{prefix}");
     self.last_content_cache_len = self.push_code_span_content(&separator, true);
-    self.list_tail_pending = false;
+    self.list_pending &= !LIST_TAIL_PENDING;
+  }
+
+  /// Write the separators `list_pending` deferred, now that visible content
+  /// follows: a nested list's tail first, then an item rule's. A blockquote
+  /// opening its own block drops the tail instead.
+  #[cold]
+  #[inline(never)]
+  fn flush_list_pending(&mut self, tag_id: Option<u8>) {
+    if self.list_pending & LIST_TAIL_PENDING != 0 {
+      if matches!(tag_id, Some(TAG_BLOCKQUOTE)) {
+        self.list_pending &= !LIST_TAIL_PENDING;
+        self.empty_list_marker_end = usize::MAX;
+      } else {
+        self.flush_list_tail();
+      }
+    }
+    if self.list_pending & LIST_RULE_PENDING != 0 {
+      self.flush_list_rule();
+    }
   }
 
   fn flush_list_rule(&mut self) {
@@ -4411,7 +4426,7 @@ impl ConvertState {
       let output = format!("\n\n{prefix}");
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
-    self.list_rule_pending = false;
+    self.list_pending &= !LIST_RULE_PENDING;
   }
 
   #[cold]
@@ -5624,7 +5639,9 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P, push_decimal};
+  use super::{
+    ConvertState, CutLineLead, LIST_TAIL_PENDING, TAG_A, TAG_CODE, TAG_LI, TAG_P, push_decimal,
+  };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -5768,7 +5785,7 @@ mod tests {
       if content == "xx" {
         assert!(state.code_spans[0].exhausted);
       }
-      state.list_tail_pending = true;
+      state.list_pending |= LIST_TAIL_PENDING;
       let before = state.buffer.len();
 
       state.flush_list_tail();
@@ -5783,7 +5800,7 @@ mod tests {
         state.list_tail_start, before,
         "even a rejected separator keeps its cleanup boundary"
       );
-      assert!(!state.list_tail_pending);
+      assert_eq!(state.list_pending & LIST_TAIL_PENDING, 0);
     }
   }
 

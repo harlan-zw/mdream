@@ -3348,6 +3348,28 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
 }
 
 #[test]
+fn scout9_wrap_setext_boundary_streaming() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    let opts = HtmlToMarkdownOptions::default().with_wrap_width(10);
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
 fn empty_nested_list_tail_stays_in_parent_item() {
   for (html, expected) in [
     (
@@ -3461,6 +3483,22 @@ fn filled_nested_list_tail_stays_in_parent_item() {
     (
       "<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>",
       "-\n  -\n- z",
+    ),
+    (
+      "<ul><li>x<ul><li>z<br></li></ul>y</li></ul>",
+      "- x\n  - z  \n\n  y",
+    ),
+    (
+      "<ul><li><ul><li>a<br></li></ul>text</li></ul>",
+      "-\n  - a  \n\n  text",
+    ),
+    (
+      "<ul><li><a href=\"x\"><ul><li>a</li></ul></a>t<ul></ul>u</li></ul>",
+      "- [  - a](x)t u",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
     ),
   ] {
     assert_eq!(
@@ -3772,28 +3810,6 @@ fn deep_bare_markers_preserve_expected_bytes_in_ancestor_contexts() {
         }
       }
     }
-  }
-}
-
-#[test]
-fn scout9_wrap_setext_boundary_streaming() {
-  for (html, expected) in [
-    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
-    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
-    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
-    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
-    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
-    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
-    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
-  ] {
-    let opts = HtmlToMarkdownOptions::default().with_wrap_width(10);
-    assert_eq!(
-      html_to_markdown(html, opts.clone()),
-      expected,
-      "html={html}"
-    );
-    assert_stream_matches(html, opts.clone());
-    assert_stream_matches_every_split(html, opts);
   }
 }
 
