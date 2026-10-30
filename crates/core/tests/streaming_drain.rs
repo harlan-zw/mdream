@@ -3605,3 +3605,40 @@ fn builtin_aliases_preserve_raw_source_boundaries_streaming() {
     assert_stream_matches_every_split(html, options);
   }
 }
+
+#[test]
+fn link_trailing_spaces_match_every_partition() {
+  for html in [
+    r#"<a href="x"><ul><li></li></ul></a>"#,
+    r#"<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>"#,
+    r#"<a href="x"><ul><li></li><li></li></ul></a>"#,
+    r#"<a href="x"><ol start="10"><li></li></ol></a>"#,
+    r#"<a href="x"><ul><li><ul><li></li></ul></li></ul></a>"#,
+    r#"<a href="x"><ul><li>one</li><li>two</li></ul></a>"#,
+    r#"<a href="x">before<ul><li></li></ul>after</a>"#,
+    r#"<a href="x">text <span></span></a>tail"#,
+    r#"<a href="x" title="Title"><ul><li></li></ul></a>tail"#,
+    r#"<a href="x"><ul><li></li></ul></a><em>tail</em>"#,
+    r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+    r#"<a href="x" title="text">text <span></span></a>"#,
+    r#"<a href="x" title="Title">text <span></span></a>"#,
+    r#"<a href="x"> </a>tail"#,
+    r#"<code><a href="x"><ul><li></li></ul></a></code>"#,
+    r#"<a href="x"><ul><li><code>a </code></li></ul></a>"#,
+    r#"<details><a href="x"><ul><li></li></ul></a></details>"#,
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn paragraph_after_empty_nested_quote() {
+  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "- x\n\n  - \n  \n\n  y"
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
