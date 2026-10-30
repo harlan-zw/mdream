@@ -1,5 +1,6 @@
+import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it } from 'vitest'
-import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 describe.each(engines)('links $name', (engineConfig) => {
   it.each([
@@ -696,6 +697,181 @@ describe.each(engines)('links $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     const markdown = htmlToMarkdown(`<a href="${href}">Link</a>`, { origin, engine })
     expect(markdown).toBe(`[Link](${expected})`)
+  })
+
+  it('uses the first href-bearing base', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<base target="_blank"><base href="../assets/"><base href="https://ignored.example/"><a href="page">Page</a> <img src="cover.png" alt="Cover">'
+
+    expect(htmlToMarkdown(html, {
+      engine,
+      origin: 'https://example.com/article/current.html',
+    })).toBe('[Page](https://example.com/assets/page) ![Cover](https://example.com/assets/cover.png)')
+  })
+
+  it('resolves URLs before the base against origin', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+
+    expect(htmlToMarkdown('<a href="before">Before</a> <base href="/docs/"><a href="after">After</a>', {
+      engine,
+      origin: 'https://example.com/article/current.html',
+    })).toBe('[Before](https://example.com/article/before) [After](https://example.com/docs/after)')
+  })
+
+  it('ignores a base inside a link', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+
+    expect(htmlToMarkdown('<a href="page">Before<base href="https://cdn.example/docs/">after</a> <a href="next">Next</a>', {
+      engine,
+      origin: 'https://example.com/article/current.html',
+    })).toBe('[Beforeafter](https://example.com/article/page) [Next](https://example.com/article/next)')
+  })
+
+  it('accepts an absolute base with an ASCII-case-insensitive HTTP scheme', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+
+    expect(htmlToMarkdown('<base href="HtTpS://cdn.example/docs/"><a href="page">Link</a>', { engine }))
+      .toBe('[Link](HtTpS://cdn.example/docs/page)')
+  })
+
+  it('resolves a fragment-only base against origin', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+
+    expect(htmlToMarkdown('<base href="#section"><a href="page">Link</a>', {
+      engine,
+      origin: 'https://example.com/docs/current.html',
+    })).toBe('[Link](https://example.com/docs/page)')
+  })
+
+  it.each([
+    'javascript:alert(1)',
+    'data:text/plain,ignored',
+    'mailto:person@example.com',
+    'file:///tmp/page',
+    'ftp://cdn.example/docs/',
+    'http:relative',
+    'https:///no-host/',
+    '',
+    '   ',
+  ])('ignores invalid first base href %s and keeps using origin', async (href) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<base href="${href}"><base href="https://ignored.example/"><a href="page">Link</a>`
+
+    expect(htmlToMarkdown(html, {
+      engine,
+      origin: 'https://example.com/article/current.html',
+    })).toBe('[Link](https://example.com/article/page)')
+  })
+
+  it.each(['/relative/', 'relative/'])('does not resolve relative base href %s without origin', async (href) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<base href="${href}"><base href="https://ignored.example/"><a href="page">Link</a>`
+
+    expect(htmlToMarkdown(html, { engine })).toBe('[Link](page)')
+  })
+
+  it('ignores a base with an empty host or inside a template', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const origin = 'https://example.com/article/current.html'
+
+    for (const href of ['https://:80/docs/', 'http://user@/docs/', 'http://@/docs/']) {
+      expect(htmlToMarkdown(`<base href="${href}"><a href="page">Link</a>`, { engine, origin }))
+        .toBe('[Link](https://example.com/article/page)')
+    }
+    expect(htmlToMarkdown('<template><base href="https://other.example/"></template><a href="page">Link</a>', { engine, origin }))
+      .toBe('[Link](https://example.com/article/page)')
+    expect(htmlToMarkdown('<base href="https://[::1]:8080/docs/"><a href="page">Link</a>', { engine, origin }))
+      .toBe('[Link](https://[::1]:8080/docs/page)')
+    // Elements flattened at the depth limit (an anchor, a div) must not set the base.
+    const deep = '<div>'.repeat(600)
+    const unwind = '</div>'.repeat(600)
+    expect(htmlToMarkdown(`${deep}<a href="/start"><base href="https://other.example/">X</a>${unwind}<a href="page">Link</a>`, { engine, origin }))
+      .toMatch(/\[Link\]\(https:\/\/example\.com\/article\/page\)$/)
+    expect(htmlToMarkdown(`${deep}<base href="https://other.example/">X${unwind}<a href="page">Link</a>`, { engine, origin }))
+      .toMatch(/\[Link\]\(https:\/\/example\.com\/article\/page\)$/)
+    for (const href of ['http://@host.example/', 'http://:pw@host.example/']) {
+      expect(htmlToMarkdown(`<base href="${href}"><a href="page">Link</a>`, { engine, origin }))
+        .toBe(`[Link](${href}page)`)
+    }
+  })
+
+  it('uses a base captured before filtering or main-content isolation', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<head><base href="/docs/"></head><main><a href="page">Link</a></main>'
+    const options = { engine, origin: 'https://example.com/article/current.html' }
+
+    expect(htmlToMarkdown(html, {
+      ...options,
+      plugins: { filter: { exclude: ['base'] } },
+    })).toBe('[Link](https://example.com/docs/page)')
+    expect(htmlToMarkdown(html, {
+      ...options,
+      plugins: { isolateMain: true },
+    })).toBe('[Link](https://example.com/docs/page)')
+  })
+
+  it('resolves URLs against base in safe HTML and text formats', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const origin = 'https://example.com/article/current.html'
+
+    expect(htmlToMarkdown('<base href="/docs/"><a href="guide">Guide</a><img src="cover.png">', {
+      engine,
+      format: 'html',
+      origin,
+    })).toBe('<a href="https://example.com/docs/guide">Guide</a><img src="https://example.com/docs/cover.png" alt="">')
+
+    expect(htmlToMarkdown('<base href="/docs/"><img src="cover.png">', {
+      engine,
+      format: 'text',
+      origin,
+    })).toBe('https://example.com/docs/cover.png')
+
+    expect(htmlToMarkdown('<a href="page">Before<base href="https://cdn.example/docs/">after</a>', {
+      engine,
+      format: 'html',
+      origin: 'javascript:blocked',
+    })).toBe('Beforeafter')
+  })
+
+  it('applies URL cleanup after resolving links and images against base', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+
+    expect(htmlToMarkdown('<base href="/docs/"><a href="page?utm_source=test&amp;keep=1">Link</a> <img src="cover.png?utm_campaign=drop&amp;keep=2" alt="Cover">', {
+      engine,
+      clean: { urls: true },
+      origin: 'https://example.com/article/current.html',
+    })).toBe('[Link](https://example.com/docs/page?keep=1) ![Cover](https://example.com/docs/cover.png?keep=2)')
+  })
+
+  it('compares redundant links with the base-resolved URL', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+
+    expect(htmlToMarkdown('<base href="https://example.com/docs/"><a href="page">https://example.com/docs/page</a>', {
+      engine,
+      clean: { redundantLinks: true },
+    })).toBe('https://example.com/docs/page')
+  })
+
+  it('applies a split streamed base tag only to later links', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const input = new ReadableStream<Uint8Array | string>({
+      start(controller) {
+        controller.enqueue('<a href="before">Before</a><base hr')
+        controller.enqueue('ef="/docs/"> | ')
+        controller.enqueue('<a href="later">Later</a> and <img src="cover.png" alt="Cover">')
+        controller.close()
+      },
+    })
+    let markdown = ''
+
+    for await (const chunk of streamHtmlToMarkdown(input, {
+      engine,
+      origin: 'https://example.com/article/current.html',
+    })) {
+      markdown += chunk
+    }
+
+    expect(markdown).toBe('[Before](https://example.com/article/before) | [Later](https://example.com/docs/later) and ![Cover](https://example.com/docs/cover.png)')
   })
 
   // RFC 3986 section 5.4, verbatim. The two references it resolves to the
