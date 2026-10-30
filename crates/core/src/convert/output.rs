@@ -4142,7 +4142,7 @@ impl ConvertState {
   #[inline(never)]
   fn exit_raw_html_boundary(&mut self, has_override: bool, has_output: bool) {
     self.track_raw_html_markdown_context(self.buffer.len());
-    if self.raw_html_markdown && !self.line_opens_raw_html_block() {
+    if self.raw_html_needs_boundary && self.raw_html_markdown && !self.line_opens_raw_html_block() {
       self.raw_html_needs_boundary = false;
     }
     if !has_override && has_output && self.block_open_prefix("").is_none() {
