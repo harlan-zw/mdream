@@ -2,7 +2,7 @@ import type { ParseState } from './parse'
 import type { EngineOptions, NodeEvent, TagHandler, TransformPlugin } from './types'
 import { createMarkdownProcessor } from './markdown-processor'
 import { createMarkdownDrain } from './markdown-stream'
-import { finalizeParse, parseHtmlStream } from './parse'
+import { commitPlainTextPrefix, finalizeParse, parseHtmlStream } from './parse'
 import { endPlugins, processPluginsForEvent } from './plugin-processor'
 import { tagHandlers } from './tags'
 
@@ -40,6 +40,7 @@ export async function* streamHtmlToMarkdown(
     ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
     : processor.processEvent
 
+  const incrementalPlainText = resolvedPlugins.length === 0 && !options.wrapWidth && !tagOverrideHandlers?.size
   let remainingHtml = ''
 
   try {
@@ -61,6 +62,8 @@ export async function* streamHtmlToMarkdown(
       const htmlContent = `${remainingHtml}${decoded}`
 
       remainingHtml = parseHtmlStream(htmlContent, parseState, handleEvent)
+      if (incrementalPlainText)
+        remainingHtml = commitPlainTextPrefix(remainingHtml, parseState, handleEvent)
 
       const chunk = processor.getMarkdownChunk()
       if (chunk) {
