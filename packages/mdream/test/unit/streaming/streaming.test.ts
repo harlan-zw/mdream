@@ -5,7 +5,79 @@ import { engines, resolveEngine, streamHtmlToMarkdown } from '../../utils/engine
 const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
 
+const LINK_SPACE_CASES: [string, string][] = [
+  [
+    '<a href="x"><ul><li></li></ul></a>',
+    '[-](x)',
+  ],
+  [
+    '<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>',
+    '- [  -](x)\n  - \\# h',
+  ],
+  [
+    '<a href="x"><ul><li></li><li></li></ul></a>',
+    '[- -](x)',
+  ],
+  [
+    '<a href="x"><ol start="10"><li></li></ol></a>',
+    '[10.](x)',
+  ],
+  [
+    '<a href="x"><ul><li><ul><li></li></ul></li></ul></a>',
+    '[-   -](x)',
+  ],
+  [
+    '<a href="x"><ul><li>one</li><li>two</li></ul></a>',
+    '[- one - two](x)',
+  ],
+  [
+    '<a href="x">before<ul><li></li></ul>after</a>',
+    '[before - after](x)',
+  ],
+  [
+    '<a href="x">text <span></span></a>tail',
+    '[text](x) tail',
+  ],
+  [
+    '<a href="x" title="Title"><ul><li></li></ul></a>tail',
+    '[- Title](x)tail',
+  ],
+  [
+    '<a href="x"><ul><li></li></ul></a><em>tail</em>',
+    '[-](x) *tail*',
+  ],
+  [
+    '<a href="x"><img src="i" alt="A"> <span></span></a>tail',
+    '[![A](i)](x) tail',
+  ],
+  [
+    '<a href="x" title="text">text <span></span></a>',
+    '[text](x)',
+  ],
+  [
+    '<a href="x" title="Title">text <span></span></a>',
+    '[text](x "Title")',
+  ],
+  [
+    '<a href="x"> </a>tail',
+    '[](x)tail',
+  ],
+  [
+    '<code><a href="x"><ul><li></li></ul></a></code>',
+    '`[- ](x)`',
+  ],
+  [
+    '<a href="x"><ul><li><code>a </code></li></ul></a>',
+    '[- `a`](x)',
+  ],
+  [
+    '<details><a href="x"><ul><li></li></ul></a></details>',
+    '<details><a href="x">- </a></details>',
+  ],
+]
+
 const BYTE_PARITY_CASES = [
+  ...LINK_SPACE_CASES.map(([html]) => html),
   '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
   '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
   '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
@@ -77,6 +149,24 @@ const BYTE_PARITY_CASES = [
 ]
 
 describe('cross-engine streaming byte parity', () => {
+  it.each(LINK_SPACE_CASES)('trims link label spaces at every split: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      for (let split = 0; split <= html.length; split++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(expected)
+      }
+    }
+  })
+
   it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (html) => {
     const engineOutputs: string[] = []
 
@@ -537,6 +627,33 @@ describe('scout9_excluded_list_spacing option streaming', () => {
           actual += part
         expect(actual, name).toBe(expected)
       }
+    }
+  })
+})
+describe('paragraph after empty nested quote', () => {
+  it.each(engines)('stays in the parent item for $name at every split and chunk width', async ({ engine }) => {
+    const html = '<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>'
+    const expected = '- x\n\n  - \n  \n\n  y'
+    expect(engine.htmlToMarkdown(html)).toBe(expected)
+    const chunks: string[][] = []
+    for (let width = 1; width <= html.length; width++) {
+      const parts: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        parts.push(html.slice(offset, offset + width))
+      chunks.push(parts)
+    }
+    for (let split = 1; split < html.length; split++)
+      chunks.push([html.slice(0, split), html.slice(split)])
+    for (const parts of chunks) {
+      const stream = new ReadableStream<string>({ start(controller) {
+        for (const part of parts)
+          controller.enqueue(part)
+        controller.close()
+      } })
+      let actual = ''
+      for await (const part of engine.streamHtmlToMarkdown(stream))
+        actual += part
+      expect(actual, JSON.stringify(parts)).toBe(expected)
     }
   })
 })
