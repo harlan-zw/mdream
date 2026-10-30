@@ -171,6 +171,12 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
       .toBe('Alpha beta gamma delta')
   })
 
+  it('keeps wrapping from the live column after a trim empties the last output', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p><b>x<img src="i" alt="Aaaa"> </b>tail tail</p>', { engine, format: 'text', wrapWidth: 8 }))
+      .toBe('x Aaaa\ntail\ntail')
+  })
+
   it('does not apply Markdown cleanup to literal text', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>[literal](#missing) and [](https://example.com)</p>'

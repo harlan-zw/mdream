@@ -3573,6 +3573,30 @@ fn link_trailing_spaces_match_every_partition() {
 }
 
 #[test]
+fn wrap_at_a_moved_link_separator_matches_every_partition() {
+  let options = HtmlToMarkdownOptions::default().with_wrap_width(12);
+  for (html, expected) in [
+    (
+      r#"<a href="x">text <span></span></a>tail"#,
+      "[text](x)\ntail",
+    ),
+    (
+      r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+      "[![A](i)](x)\ntail",
+    ),
+    ("<p><b>text </b>tailtail</p>", "**text**\ntailtail"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options.clone());
+  }
+}
+
+#[test]
 fn paragraph_after_empty_nested_quote() {
   let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
   assert_eq!(

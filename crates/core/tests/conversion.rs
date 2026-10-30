@@ -5053,6 +5053,43 @@ fn wrap_preserves_inline_spacing() {
   );
 }
 
+#[test]
+fn wrap_breaks_at_a_separator_moved_past_an_inline_close() {
+  for (html, expected) in [
+    (
+      r#"<a href="x">text <span></span></a>tail"#,
+      "[text](x)\ntail",
+    ),
+    (
+      r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+      "[![A](i)](x)\ntail",
+    ),
+    (r#"<a href="x">text </a>tail"#, "[text](x)\ntail"),
+    ("<p><b>text </b>tailtail</p>", "**text**\ntailtail"),
+    (
+      "<ul><li><b>text </b>tailtail</li></ul>",
+      "- **text**\n  tailtail",
+    ),
+    (
+      "<blockquote><b>text </b>tailtail</blockquote>",
+      "> **text**\n> tailtail",
+    ),
+    // Nothing to break for: the word fits, can't start a line, or can't wrap here.
+    ("<p><b>a </b>b</p>", "**a** b"),
+    ("<p><b>aaaaaaaaaa </b>==</p>", "**aaaaaaaaaa** =="),
+    ("<h1><b>text </b>tailtail</h1>", "# **text** tailtail"),
+  ] {
+    assert_eq!(convert_wrapped(html, 12), expected, "html={html:?}");
+  }
+  assert_eq!(
+    html_to_text(
+      "<p><b>text </b>tailtail</p>",
+      HtmlToMarkdownOptions::default().with_wrap_width(12)
+    ),
+    "text\ntailtail"
+  );
+}
+
 // ── HTML line breaks (issue #128) ──
 
 #[test]
