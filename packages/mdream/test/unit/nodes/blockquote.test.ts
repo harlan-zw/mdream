@@ -2,6 +2,31 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('blockquotes $name', (engineConfig) => {
+  it.each([510, 511, 512, 513])('normalizes aliased closing names at depth %s', async (depth) => {
+    const prefix = '<span>'.repeat(depth)
+    const suffix = `${'</span>'.repeat(depth)}<p>end</p>`
+    const expected = depth === 510 ? 'x\n\ntail\n\nend' : 'x tail\n\nend'
+    for (const [open, close] of [['BLOCKQUOTE', 'BLOCKQUOTE'], ['BlOcKqUoTe', 'bLoCkQuOtE']]) {
+      const body = `<blockquote><${open}>x</${close}>tail</blockquote>`
+      const html = `${prefix}${body}${suffix}`
+      const options = { plugins: { tagOverrides: { blockquote: 'div' } } }
+      expect(engineConfig.engine.htmlToMarkdown(html, options)).toBe(expected)
+      for (let split = 0; split <= body.length; split++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (const chunk of [prefix, body.slice(0, split), body.slice(split), suffix])
+              controller.enqueue(chunk)
+            controller.close()
+          },
+        })
+        let actual = ''
+        for await (const chunk of engineConfig.engine.streamHtmlToMarkdown(input, options))
+          actual += chunk
+        expect(actual, `depth=${depth} split=${split}`).toBe(expected)
+      }
+    }
+  })
+
   it.each([
     ['<blockquote>x</blockquote><p>tail</p>', 'x\n\ntail'],
     ['<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>', 'x\n\ntail'],

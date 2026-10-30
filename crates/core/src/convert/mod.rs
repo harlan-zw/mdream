@@ -2032,15 +2032,20 @@ impl ConvertState {
         } else {
           Cow::Borrowed(tag_name_raw)
         };
-        let alias_tag_id = self.alias_tag_id(tag_name.as_ref(), builtin_tag_id);
-        let tag_id = alias_tag_id.or(builtin_tag_id);
-        let is_builtin = builtin_tag_id.is_some() && alias_tag_id.is_none();
-        let tag_name = if alias_tag_id.is_some() && tag_name.bytes().any(|b| b.is_ascii_uppercase())
+        let mut name: &str = tag_name.as_ref();
+        let mut tag_id = builtin_tag_id;
+        let mut is_builtin = builtin_tag_id.is_some();
+        // An aliased tag renders as its target but keeps its source name for
+        // its end tag; a built-in one takes the lowercase name from TAG_NAMES.
+        if self.has_tag_overrides
+          && let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id)
         {
-          Cow::Owned(tag_name.to_ascii_lowercase())
-        } else {
-          tag_name
-        };
+          if let Some(id) = builtin_tag_id {
+            name = TAG_NAMES[id as usize];
+          }
+          tag_id = Some(alias_tag_id);
+          is_builtin = false;
+        }
         i2 = tag_name_end;
 
         self.complete_text_node(&mut text_buffer);
@@ -2076,7 +2081,7 @@ impl ConvertState {
           }
         }
 
-        let result = self.process_opening_tag(&tag_name, tag_id, is_builtin, chunk, i2);
+        let result = self.process_opening_tag(name, tag_id, is_builtin, chunk, i2);
         if result.skip {
           i = result.new_position;
         } else if result.complete {
