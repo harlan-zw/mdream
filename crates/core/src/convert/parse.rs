@@ -1495,7 +1495,9 @@ impl ConvertState {
     if tag_id == Some(TAG_LI)
       && let Some(li) = self.stack.last()
     {
-      let wrote_marker = !li.excluded_from_markdown;
+      let excluded = li.excluded_from_markdown;
+      // An override can leave the item no visible marker, which starts no run.
+      let wrote_marker = !excluded && (!self.has_tag_overrides || self.item_enter_is_visible(li));
       let mut ordered = false;
       let width: usize = if !skip_node && !self.in_table_cell() && !plain_text!(self) {
         let stack_len = self.stack.len();
@@ -1520,9 +1522,9 @@ impl ConvertState {
       for _ in 0..width {
         self.list_indent.push(' ');
       }
-      if width != 0 && wrote_marker {
+      if width != 0 && !excluded {
         let mut star = false;
-        if let Some(marker) = self.list_markers.last_mut() {
+        if wrote_marker && let Some(marker) = self.list_markers.last_mut() {
           *marker |= LIST_HAS_ITEM;
           star = !ordered && *marker == LIST_HAS_ITEM | b'*';
         }

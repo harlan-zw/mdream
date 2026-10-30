@@ -312,7 +312,7 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
  * paragraphs, nested lists) lands in the correct column. On exit, pop.
  * Skip when the list item is rendered as literal `<li>` inside a table cell.
  */
-function updateListIndent(state: MarkdownState, element: ElementNode, eventType: number): void {
+function updateListIndent(state: MarkdownState, element: ElementNode, eventType: number, output: string[] | undefined): void {
   if (element.tagId !== TAG_LI)
     return
   if (isInsideTableCell(state))
@@ -325,7 +325,9 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     const markers = state.listMarkers
     const top = markers.length - 1
     let star = false
-    if (top >= 0) {
+    // An empty override or plugin output leaves the item no visible marker,
+    // which starts no run.
+    if (top >= 0 && output?.some(hasNonWhitespace)) {
       const marker = markers[top]! | LIST_HAS_ITEM
       markers[top] = marker
       star = !isOrdered && marker === (LIST_HAS_ITEM | 42) // *
@@ -2423,7 +2425,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
         if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
           closeListMarker(element)
-        updateListIndent(state, element, eventType)
+        updateListIndent(state, element, eventType, output)
         return
       }
 
@@ -2584,7 +2586,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
       closeListMarker(element)
-    updateListIndent(state, element, eventType)
+    updateListIndent(state, element, eventType, output)
 
     if (!insideRawHtmlRegion && inRawHtmlRegion) {
       bufferScan[0] = false

@@ -84,6 +84,17 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
   })
 
+  // An item whose override writes nothing visible has no marker for the next
+  // list to join, so that list keeps the default character.
+  it.each([
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', { 'li': { enter: '' }, 'x-li': 'li' }, 'a\n\n- b'],
+    ['<ol><li>a</li></ol><ol><x-li>b</x-li></ol>', { 'li': { enter: ' ' }, 'x-li': 'li' }, 'a\n\n1. b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', { 'li': { enter: '+ ' }, 'x-li': 'li' }, '+ a\n\n* b'],
+  ])('starts a run only from an item that wrote its marker: %s', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
   it('handles nested unordered lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Level 1<ul><li>Level 2</li></ul></li><li>Another Level 1</li></ul>'

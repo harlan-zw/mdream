@@ -1047,6 +1047,21 @@ impl ConvertState {
     ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v)
   }
 
+  /// Whether an `<li>` override still writes something visible in place of
+  /// the marker, as the built-in enter always does.
+  #[cold]
+  #[inline(never)]
+  pub(super) fn item_enter_is_visible(&self, li: &ElementNode) -> bool {
+    let overrides = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|p| p.tag_overrides.as_ref());
+    Self::override_for_node(overrides, self.override_idx.as_deref(), li)
+      .and_then(|ov| ov.enter.as_deref())
+      .is_none_or(|enter| has_visible(enter.as_bytes()))
+  }
+
   /// Whether a code span marker applies: outside `<pre>` and raw HTML.
   #[inline(always)]
   fn code_span_marker_ok(&self) -> bool {

@@ -6378,6 +6378,48 @@ fn empty_quotes_preserve_adjacent_list_markers() {
   );
 }
 
+fn item_enter_overrides(enter: &str) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default()
+        .with_tag_override(
+          "li",
+          TagOverrideConfig {
+            enter: Some(enter.to_string()),
+            ..Default::default()
+          },
+        )
+        .with_tag_override("x-li", TagOverrideConfig::alias("li")),
+    ),
+    ..Default::default()
+  }
+}
+
+// An item whose override writes nothing visible leaves no marker for the next
+// list to join, so that list keeps the default character.
+#[test]
+fn items_without_a_visible_marker_start_no_run() {
+  for (html, enter, expected) in [
+    ("<ul><li>a</li></ul><ul><x-li>b</x-li></ul>", "", "a\n\n- b"),
+    (
+      "<ol><li>a</li></ol><ol><x-li>b</x-li></ol>",
+      " ",
+      "a\n\n1. b",
+    ),
+    (
+      "<ul><li>a</li></ul><ul><x-li>b</x-li></ul>",
+      "+ ",
+      "+ a\n\n* b",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, item_enter_overrides(enter)),
+      expected,
+      "html={html:?} enter={enter:?}"
+    );
+  }
+}
+
 #[test]
 fn cleaned_empty_links_preserve_adjacent_list_markers() {
   let options = HtmlToMarkdownOptions {

@@ -3281,6 +3281,30 @@ fn empty_quotes_keep_adjacent_list_markers_at_every_split() {
 }
 
 #[test]
+fn items_without_a_visible_marker_match_one_shot_at_every_split() {
+  for enter in ["", " ", "+ "] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(
+        PluginConfig::default()
+          .with_tag_override(
+            "li",
+            TagOverrideConfig {
+              enter: Some(enter.to_string()),
+              ..Default::default()
+            },
+          )
+          .with_tag_override("x-li", TagOverrideConfig::alias("li")),
+      ),
+      ..Default::default()
+    };
+    let html =
+      "<ul><li>a</li></ul><ul><x-li>b</x-li></ul><ol><li>c</li></ol><ol><x-li>d</x-li></ol>";
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
 fn quote_long_line_waits_for_a_completed_line() {
   let span = format!("<span>{}</span>", "x".repeat(1024));
   let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
