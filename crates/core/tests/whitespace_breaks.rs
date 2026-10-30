@@ -336,6 +336,26 @@ fn plain_text_line_end_drops_a_trailing_tab_run() {
   assert_eq!(md("<p>a&#9;<br>x</p>"), "a\t  \nx");
 }
 
+// ── Raw <br> after a closed inline element ──
+
+#[test]
+fn raw_br_keeps_the_space_a_closed_inline_element_deferred() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<h2>a<em>x </em><br>x</h2>", "## a*x* <br>x"),
+    ("<h2><em>x </em><br><br>x</h2>", "## *x* <br><br>x"),
+    ("<h2>a<a href=\"/l\">x </a><br>x</h2>", "## a [x](/l) <br>x"),
+    (
+      "<table><tr><td>a<em>x </em><br>x</td></tr></table>",
+      "| a*x* <br>x |\n| --- |",
+    ),
+    // A Markdown hard break still subsumes the space.
+    ("<p>a<em>x </em><br>x</p>", "a*x*  \nx"),
+  ] {
+    assert_every_split(html, &options, expected);
+  }
+}
+
 // ── Empty figcaption ──
 
 #[test]

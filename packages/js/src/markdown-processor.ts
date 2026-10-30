@@ -1878,8 +1878,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
 
-      if (state.pendingInlineWhitespace)
+      if (state.pendingInlineWhitespace) {
         state.pendingInlineWhitespace = false
+        // A raw `<br>` (heading, table cell) ends no line, so it keeps the
+        // separator a closed inline element deferred, as in Rust.
+        if (breakOutput?.charCodeAt(0) === 60) {
+          const last = lastOutputChar(buff)
+          if (last !== -1 && last !== 32 && last !== 10 && last !== 9 && last !== 13) {
+            buff.push(' ')
+            state.lastContentCache = ' '
+          }
+        }
+      }
 
       const lastFragment = state.lastContentCache
       const lastTextNode = state.lastTextNode
@@ -2231,7 +2241,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
-        if (!isInlineElement || tagId === TAG_BR || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+        // A raw `<br>` (heading, table cell) is no line end, so it keeps the
+        // separator like any inline output, as in Rust.
+        if (!isInlineElement || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
