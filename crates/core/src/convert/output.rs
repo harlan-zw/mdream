@@ -3213,11 +3213,13 @@ impl ConvertState {
       b'-' | b'*' | b'+' => {}
       _ => return false,
     }
-    let max_spaces = self.list_indent.len() + 3;
-    let mut spaces = 0;
-    while index > 0 && bytes[index - 1] == b' ' && spaces < max_spaces {
+    let floor = index.saturating_sub(self.list_indent.len() + 3);
+    // Deep lists put hundreds of spaces before a marker: skip them a word at a time.
+    while index >= floor + 8 && bytes[index - 8..index] == [b' '; 8] {
+      index -= 8;
+    }
+    while index > floor && bytes[index - 1] == b' ' {
       index -= 1;
-      spaces += 1;
     }
     if index == 0 {
       return !self.has_flushed_tail() || self.flushed_tail[1] == b'\n';
@@ -5471,6 +5473,28 @@ mod tests {
         "depth={depth}: {} parent scans",
         state.parent_marker_scans
       );
+    }
+  }
+
+  #[test]
+  fn list_marker_indent_cap_survives_word_skips() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    for indent in 0..=24 {
+      state.list_indent = " ".repeat(indent);
+      let max_spaces = indent + 3;
+      for spaces in 0..=60 {
+        for lead in ["", "\n", "x"] {
+          for marker in ["-", "3."] {
+            let line = format!("{lead}{}{marker}", " ".repeat(spaces));
+            let expected = (lead.is_empty() || lead == "\n") && spaces <= max_spaces;
+            assert_eq!(
+              state.list_marker_line_start(line.as_bytes(), line.len()),
+              expected,
+              "indent={indent} spaces={spaces} lead={lead:?} marker={marker}"
+            );
+          }
+        }
+      }
     }
   }
 
