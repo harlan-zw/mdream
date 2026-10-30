@@ -644,6 +644,21 @@ fn join_origin_prefix(origin: &str, url: &str) -> String {
   resolved
 }
 
+/// Resolve a `<base href>` against `origin`. Only an `http(s)://host` result is
+/// usable as a base; anything else is `None`, so resolution stays on `origin`.
+pub(crate) fn resolve_base_href(href: &str, origin: Option<&str>) -> Option<String> {
+  let resolved = resolve_url(href.trim_matches(|c: char| c <= ' '), origin, false);
+  let (scheme, authority) = BaseUrl::split(&resolved)?.root.split_once("://")?;
+  // The host follows any userinfo and precedes any port; an empty host is no origin.
+  let host = authority
+    .rsplit_once('@')
+    .map_or(authority, |(_, host)| host);
+  let host = host.split_once(':').map_or(host, |(host, _)| host);
+  let usable = (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
+    && !host.is_empty();
+  usable.then(|| resolved.into_owned())
+}
+
 #[inline]
 fn cleaned(resolved: String, needs_clean: bool) -> Cow<'static, str> {
   Cow::Owned(if needs_clean {

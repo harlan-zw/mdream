@@ -24,6 +24,7 @@ export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {
     tagHandlers,
     tagOverrideHandlers,
     plainText: false,
+    urlBaseTarget: processor.state,
   }
   const handleEvent: (event: NodeEvent) => void = plugins.length
     ? event => processPluginsForEvent(event, plugins, processor.state, processor.processEvent)

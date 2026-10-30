@@ -931,6 +931,91 @@ fn relative_path_with_origin() {
 }
 
 #[test]
+fn base_href_ignores_empty_host_and_template_bases() {
+  let origin = HtmlToMarkdownOptions {
+    origin: Some("https://example.com/article/".into()),
+    ..Default::default()
+  };
+  for href in ["https://:80/docs/", "http://user@/docs/", "http://@/docs/"] {
+    let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
+    assert_eq!(
+      html_to_markdown(&html, origin.clone()),
+      "[Link](https://example.com/article/page)",
+      "{href}"
+    );
+  }
+  let html = r#"<template><base href="https://other.example/"></template><a href="page">Link</a>"#;
+  assert_eq!(
+    html_to_markdown(html, origin.clone()),
+    "[Link](https://example.com/article/page)"
+  );
+  // A template at the depth limit is opaque and must not set the base either.
+  let deep = format!(
+    "{}<template><base href=\"https://other.example/\"></template>{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(!html_to_markdown(&deep, origin.clone()).contains("other.example"));
+  // An anchor flattened at the depth limit must not let its <base> replace the origin.
+  let deep_anchor = format!(
+    "{}<a href=\"/start\"><base href=\"https://other.example/\">X</a>{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(
+    html_to_markdown(&deep_anchor, origin.clone())
+      .ends_with("[Link](https://example.com/article/page)")
+  );
+  // Same for a base directly under a flattened div.
+  let deep_div = format!(
+    "{}<base href=\"https://other.example/\">X{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(
+    html_to_markdown(&deep_div, origin.clone())
+      .ends_with("[Link](https://example.com/article/page)")
+  );
+  // Userinfo with a real host is a valid base: the host follows the last '@'.
+  for href in ["http://@host.example/", "http://:pw@host.example/"] {
+    let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
+    assert_eq!(
+      html_to_markdown(&html, origin.clone()),
+      format!("[Link]({href}page)"),
+      "{href}"
+    );
+  }
+}
+
+#[test]
+fn base_href_replaces_origin_for_later_urls() {
+  let origin = "https://example.com/article/current.html";
+  assert_eq!(
+    convert_with_origin(
+      r#"<a href="a">A</a> <base href="/docs/"><base href="https://ignored.example/"><a href="b">B</a> <img src="c.png" alt="C">"#,
+      origin
+    ),
+    "[A](https://example.com/article/a) [B](https://example.com/docs/b) ![C](https://example.com/docs/c.png)"
+  );
+  for href in [
+    "javascript:alert(1)",
+    "ftp://cdn.example/",
+    "https:///x/",
+    "",
+  ] {
+    assert_eq!(
+      convert_with_origin(&format!(r#"<base href="{href}"><a href="b">B</a>"#), origin),
+      "[B](https://example.com/article/b)",
+      "{href:?}"
+    );
+  }
+  assert_eq!(
+    convert(r#"<a href="a">A<base href="https://cdn.example/">x</a> <a href="b">B</a>"#),
+    "[Ax](a) [B](b)"
+  );
+}
+
+#[test]
 fn relative_path_without_origin() {
   assert_eq!(
     convert(r#"<a href="/page#section">Link</a>"#),
@@ -6229,6 +6314,31 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 }
 
 #[test]
+fn builtin_blockquote_alias_uses_div_semantics() {
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("blockquote".into(), TagOverrideConfig::alias("div"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("<blockquote>x</blockquote><p>tail</p>", "x\n\ntail"),
+    ("<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>", "x\n\ntail"),
+    (
+      "<blockquote>x</div>tail</blockquote><p>end</p>",
+      "xtail\n\nend",
+    ),
+    ("<div>x</blockquote>tail</div><p>end</p>", "xtail\n\nend"),
+    ("<blockquote><p>a</p><p>b</p></blockquote>", "a\n\nb"),
+    ("<blockquote><div>x</div>tail</blockquote>", "x\n\ntail"),
+    ("<ul><li><blockquote>x</blockquote></li></ul>", "- x"),
+  ] {
+    assert_eq!(html_to_markdown(html, opts.clone()), expected, "{html}");
+  }
+}
+
+#[test]
 fn scout9_wrap_setext_boundary() {
   for (html, expected) in [
     ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
@@ -6842,4 +6952,108 @@ fn paragraph_after_empty_nested_quote() {
     convert("<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>"),
     "- x\n\n  - \n  \n\n  y"
   );
+}
+
+#[test]
+fn builtin_aliases_preserve_raw_source_boundaries() {
+  for (html, source, target, expected) in [
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "script",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "style",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "textarea",
+      "x\n\ntail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{source}:{target}"
+    );
+  }
+}
+
+#[test]
+fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
+  for html in [
+    "<DIV CLASS='a'><BLOCKQUOTE><P>A &amp; B</P></BLOCKQUOTE><P>tail</P></DIV>",
+    "<X-NOTE DATA-X='a'>before <EM>x</EM></X-NOTE><P>tail</P>",
+    "<STYLE>a</div><!--unfinished</STYLE><P>tail</P>",
+    "<SCRIPT><!--<script></script>--></SCRIPT><P>tail</P>",
+    "<DIV><LONG-CUSTOM-NAME attr='data'>x</LONG-CUSTOM-NAME></DIV>",
+  ] {
+    for cap in [0, 8, 64] {
+      for format in [
+        OutputFormat::Markdown,
+        OutputFormat::Text,
+        OutputFormat::Html,
+      ] {
+        let plain = HtmlToMarkdownOptions {
+          max_node_bytes: cap,
+          ..Default::default()
+        };
+        let configured = HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            tag_overrides: Some(vec![]),
+            ..Default::default()
+          }),
+          ..plain.clone()
+        };
+        let expected = mdream::html_to_format(html, plain.clone(), format);
+        assert_eq!(
+          mdream::html_to_format(html, configured.clone(), format),
+          expected,
+          "{html} cap={cap} format={format:?}"
+        );
+        for opts in [plain, configured] {
+          for width in 1..=html.len() {
+            let mut stream = MarkdownStreamProcessor::new_with_format(opts.clone(), format);
+            let mut actual = String::new();
+            for chunk in html.as_bytes().chunks(width) {
+              actual.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+            }
+            actual.push_str(&stream.finish());
+            assert_eq!(
+              actual, expected,
+              "{html} cap={cap} format={format:?} width={width}"
+            );
+          }
+          for split in 0..=html.len() {
+            let mut stream = MarkdownStreamProcessor::new_with_format(opts.clone(), format);
+            let mut actual = stream.process_chunk(&html[..split]);
+            actual.push_str(&stream.process_chunk(&html[split..]));
+            actual.push_str(&stream.finish());
+            assert_eq!(
+              actual, expected,
+              "{html} cap={cap} format={format:?} split={split}"
+            );
+          }
+        }
+      }
+    }
+  }
 }
