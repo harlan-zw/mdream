@@ -2814,9 +2814,7 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
-    // Wrapped text takes the separator with its first word, the only place the
-    // line can still break there.
-    let mut wrap_separator = false;
+    let mut relocated_space = false;
     if self.pending_inline_whitespace {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
@@ -2825,7 +2823,7 @@ impl ConvertState {
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
         if self.wrap_width != 0 && self.can_wrap_here() {
-          wrap_separator = true;
+          relocated_space = true;
         } else {
           self.push_code_span_content(" ", true);
         }
@@ -2991,7 +2989,7 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char, owns_leading_space, wrap_separator);
+      self.push_text_wrapped(text, last_char, owns_leading_space, relocated_space);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -4240,7 +4238,7 @@ impl ConvertState {
     text: &str,
     last_char: Option<u8>,
     owns_leading_space: bool,
-    wrap_separator: bool,
+    relocated_space: bool,
   ) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
@@ -4250,8 +4248,8 @@ impl ConvertState {
     let leading_space = text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
     // A caption owns the space before its first text, as on the unwrapped path.
-    let first_needs_space = leading_space
-      || wrap_separator
+    let first_needs_space = relocated_space
+      || leading_space
       || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
