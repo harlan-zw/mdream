@@ -314,8 +314,6 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
  * Skip when the list item is rendered as literal `<li>` inside a table cell.
  */
 function updateListIndent(state: MarkdownState, element: ElementNode, eventType: number, output: string[] | undefined, pluginWrote: boolean): void {
-  if (element.tagId !== TAG_LI)
-    return
   if (isInsideTableCell(state))
     return
   if (eventType === NodeEventEnter) {
@@ -2457,7 +2455,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
         if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
           closeListMarker(element)
-        updateListIndent(state, element, eventType, output, hasPluginOutput)
+        if (tagId === TAG_LI)
+          updateListIndent(state, element, eventType, output, hasPluginOutput)
         return
       }
 
@@ -2618,7 +2617,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
       closeListMarker(element)
-    updateListIndent(state, element, eventType, output, hasPluginOutput)
+    if (tagId === TAG_LI)
+      updateListIndent(state, element, eventType, output, hasPluginOutput)
 
     if (!insideRawHtmlRegion && inRawHtmlRegion) {
       bufferScan[0] = false

@@ -1522,18 +1522,14 @@ impl ConvertState {
         self.list_indent.push(' ');
       }
       if width != 0 && !excluded {
-        let selected = self.list_markers.last().map_or(0, |m| m.selected);
-        let written = if self.has_tag_overrides {
-          self.item_written_marker(li, selected)
+        if self.has_tag_overrides {
+          self.note_item_with_overrides();
+        } else if let Some(marker) = self.list_markers.last_mut() {
+          marker.written = marker.selected;
+          self.last_item_star = marker.selected == b'*';
         } else {
-          selected
-        };
-        if written != 0
-          && let Some(marker) = self.list_markers.last_mut()
-        {
-          marker.written = written;
+          self.last_item_star = false;
         }
-        self.last_item_star = written == b'*';
       }
     }
 

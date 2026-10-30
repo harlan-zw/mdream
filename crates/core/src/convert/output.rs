@@ -1081,19 +1081,29 @@ impl ConvertState {
     ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v)
   }
 
-  /// Marker character an `<li>` wrote when overrides are in play: `selected`
-  /// from the built-in enter, or whatever an enter override wrote instead.
+  /// Record the marker the open `<li>` wrote when overrides are in play: its
+  /// list's character from the built-in enter, or whatever an enter override
+  /// wrote instead.
   #[cold]
   #[inline(never)]
-  pub(super) fn item_written_marker(&self, li: &ElementNode, selected: u8) -> u8 {
+  pub(super) fn note_item_with_overrides(&mut self) {
     let overrides = self
       .options
       .plugins
       .as_ref()
       .and_then(|p| p.tag_overrides.as_ref());
-    Self::override_for_node(overrides, self.override_idx.as_deref(), li)
-      .and_then(|ov| ov.enter.as_deref())
-      .map_or(selected, |enter| written_list_marker(enter.as_bytes()))
+    let enter = self.stack.last().and_then(|li| {
+      Self::override_for_node(overrides, self.override_idx.as_deref(), li)
+        .and_then(|ov| ov.enter.as_deref())
+    });
+    let selected = self.list_markers.last().map_or(0, |m| m.selected);
+    let written = enter.map_or(selected, |enter| written_list_marker(enter.as_bytes()));
+    if written != 0
+      && let Some(marker) = self.list_markers.last_mut()
+    {
+      marker.written = written;
+    }
+    self.last_item_star = written == b'*';
   }
 
   /// Whether a code span marker applies: outside `<pre>` and raw HTML.
