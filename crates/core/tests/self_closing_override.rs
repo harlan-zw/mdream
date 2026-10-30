@@ -149,6 +149,12 @@ fn reopened_rule_separates_its_children_in_a_list_item() {
   let config = [("hr", flag(false))];
   assert_converts("<ul><li><hr>x</hr></li></ul>", &config, "- ***\n\n  x");
   assert_converts("<ul><li><hr></hr>x</li></ul>", &config, "- ***\n\n  x");
+  // Only the enter arms the separator, so text after the end tag gets none.
+  assert_converts(
+    "<ul><li>a<hr>x</hr>b</li></ul>",
+    &config,
+    "- a\n\n  ---\n\n  x b",
+  );
 }
 
 #[test]
