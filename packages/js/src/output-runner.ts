@@ -25,6 +25,7 @@ function createParseState(processor: OutputProcessor, options: OutputOptions): P
     tagHandlers: options.tagHandlers,
     tagOverrideHandlers: options.tagOverrideHandlers,
     plainText: options.plainText,
+    urlBaseTarget: processor.state,
   }
 }
 
