@@ -1732,17 +1732,6 @@ impl ConvertState {
       enter_is_literal,
     );
 
-    // Armed here, not at exit: an `<hr>` an override keeps open owes the
-    // separator before its children.
-    if !exit_is_overridden
-      && !plain_text!(self)
-      && tag_id == Some(TAG_HR)
-      && !self.in_table_cell()
-      && self.depth_map[TAG_LI as usize] > 0
-    {
-      self.list_rule_pending = true;
-    }
-
     if tag_id == Some(TAG_IMG)
       && !enter_is_literal
       && output.as_deref().is_some_and(|emitted| {

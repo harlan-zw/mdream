@@ -43,8 +43,7 @@ fn stream_at(html: &str, config: &[(&str, TagOverrideConfig)], split: usize) -> 
   output
 }
 
-/// Both halves of the conversion must agree on the tag, so a start tag parked
-/// mid-scan keeps the answer it had before the split.
+/// A start tag parked mid-scan must resolve as it does when read whole.
 fn assert_converts(html: &str, config: &[(&str, TagOverrideConfig)], expected: &str) {
   assert_eq!(html_to_markdown(html, options(config.to_vec())), expected);
   for split in 0..=html.len() {
@@ -143,12 +142,6 @@ fn cdata_section_closes_without_its_content() {
   assert_converts("<p>a <![CDATA[x]]> c</p><p>d</p>", &config, "a [] c\n\nd");
   let alias = [("#cdata-section", TagOverrideConfig::alias("br"))];
   assert_converts("<p>a <![CDATA[x]]> c</p><p>d</p>", &alias, "a  \n c\n\nd");
-}
-
-#[test]
-fn reopened_rule_separates_its_children_in_a_list_item() {
-  let config = [("hr", flag(false))];
-  assert_converts("<ul><li><hr>x</hr></li></ul>", &config, "- ***\n\n  x");
 }
 
 #[test]
