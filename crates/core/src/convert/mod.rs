@@ -941,8 +941,9 @@ pub struct ConvertState {
   /// Quote frames open around that list. A list under other `>` prefixes is no
   /// sibling, while a quote that writes nothing leaves the run to its output.
   sibling_list_quotes: usize,
-  /// Buffer offset where output after that list starts, lowered by rewrites
-  /// and shifted by drains. Read only while `sibling_list_marker` is set.
+  /// Buffer offset where output after that list may turn visible, past the
+  /// whitespace already scanned. Lowered by rewrites and shifted by drains.
+  /// Read only while `sibling_list_marker` is set.
   list_gap_from: usize,
   /// The latest item marker is `*`, where a rule on its line reads `* ***`.
   last_item_star: bool,
@@ -1002,6 +1003,9 @@ pub struct ConvertState {
   code_span_closed_bytes: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
+  /// Bytes read to decide whether output since a closed list ended its run.
+  #[cfg(test)]
+  list_gap_scanned: usize,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
   /// held inline it costs the override-free path more than the scan it replaces.
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
@@ -1235,6 +1239,8 @@ impl ConvertState {
       code_span_closed_bytes: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
+      #[cfg(test)]
+      list_gap_scanned: 0,
     };
     // Resolve clean config into bitmask
     if let Some(ref clean) = s.options.clean {
@@ -3338,6 +3344,57 @@ mod tests {
         html.len()
       );
     }
+  }
+
+  // A gap that only grows must not be read again at every empty list opening
+  // or block boundary, whether or not visible output ended it.
+  #[test]
+  fn a_growing_list_gap_is_read_once() {
+    let list = "<ul><li>a</li></ul>";
+    let breaks = "<br>".repeat(20_000);
+    for (name, html) in [
+      (
+        "empty lists",
+        format!("{list}{}", "<br><ul></ul>".repeat(20_000)),
+      ),
+      (
+        "after visible output",
+        format!("{list}{breaks}x{}", "<ul></ul>".repeat(20_000)),
+      ),
+      (
+        "block boundaries",
+        format!("{list}{breaks}x{}", "<em><div></div></em>".repeat(5_000)),
+      ),
+    ] {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      processor.process_chunk(&html);
+      let read = processor.state.list_gap_scanned;
+      assert!(
+        read <= 2 * html.len(),
+        "{name}: read {read} bytes of a {}-byte input",
+        html.len()
+      );
+    }
+  }
+
+  // The scanned position skips whitespace, so bytes written over it count again.
+  #[test]
+  fn list_gap_scan_reads_bytes_that_replace_scanned_ones() {
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let state = &mut processor.state;
+    state.buffer.push_str("  \n    ");
+    assert!(!state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 7);
+
+    state.truncate_buffer(3);
+    state.buffer.push('x');
+    assert!(state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 3);
+
+    // Visible output stays where the scan stopped, past any later whitespace.
+    state.buffer.push_str("  ");
+    assert!(state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 3);
   }
 
   // A held tail that only grows must not be read again on every chunk.

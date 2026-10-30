@@ -2635,9 +2635,9 @@ impl ConvertState {
     if self.sibling_list_marker != 0
       && let (Some(first), Some(last)) = (self.open_markers.first(), self.open_markers.last())
     {
-      let from = self.list_gap_from;
-      if !has_visible(&self.buffer.as_bytes()[from.min(first.output_start)..first.output_start]) {
-        self.list_gap_from = from.max(last.content_start);
+      let content_start = last.content_start;
+      if !self.scan_list_gap(first.output_start) {
+        self.list_gap_from = self.list_gap_from.max(content_start);
       }
     }
     self.open_markers.clear();
@@ -3271,7 +3271,7 @@ impl ConvertState {
   /// the list before it has the same type, sits at the same depth under the
   /// same quotes and nothing visible came between, since CommonMark would join
   /// the two.
-  pub(crate) fn next_list_marker(&self, ordered: bool) -> u8 {
+  pub(crate) fn next_list_marker(&mut self, ordered: bool) -> u8 {
     let sibling = self.sibling_list_marker;
     if sibling != 0
       && self.sibling_list_depth == self.depth_map[TAG_LI as usize]
@@ -3292,7 +3292,7 @@ impl ConvertState {
   /// Whether output since the closed list ends its run. An empty inline
   /// wrapper, code span or cleaned link can still retract its opener, so
   /// nothing from the first one still open on counts yet.
-  fn list_gap_visible(&self) -> bool {
+  fn list_gap_visible(&mut self) -> bool {
     let mut end = self.buffer.len();
     if let Some(marker) = self.open_markers.first() {
       end = end.min(marker.output_start);
@@ -3303,8 +3303,22 @@ impl ConvertState {
     if self.link.empty_text_pending {
       end = end.min(self.link.bracket_pos);
     }
+    self.scan_list_gap(end)
+  }
+
+  /// Whether the gap holds visible output before `end`. Moves its start to that
+  /// output, or to `end`, so a gap that keeps growing is never scanned twice.
+  pub(super) fn scan_list_gap(&mut self, end: usize) -> bool {
     let start = self.list_gap_from.min(end);
-    has_visible(&self.buffer.as_bytes()[start..end])
+    let visible = self.buffer.as_bytes()[start..end]
+      .iter()
+      .position(|&byte| !is_whitespace(byte));
+    #[cfg(test)]
+    {
+      self.list_gap_scanned += visible.map_or(end - start, |offset| offset + 1);
+    }
+    self.list_gap_from = visible.map_or(self.list_gap_from.max(end), |offset| start + offset);
+    visible.is_some()
   }
 
   /// Visible output leaving the buffer before `drain_end` ends the closed
