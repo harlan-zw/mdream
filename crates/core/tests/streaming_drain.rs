@@ -3344,6 +3344,35 @@ fn empty_quote_after_rule_streaming() {
 }
 
 #[test]
+fn quote_exit_override_after_rule_at_every_split() {
+  for html in [
+    "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+    "<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>",
+    "<ol><li><hr><blockquote></blockquote>tail</li></ol>",
+    "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+    "<blockquote><ul><li><hr><blockquote></blockquote>tail</li></ul></blockquote>",
+    "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
+  ] {
+    assert_stream_matches_every_split(
+      html,
+      HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![(
+            "blockquote".to_string(),
+            TagOverrideConfig {
+              exit: Some("END".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    );
+  }
+}
+
+#[test]
 fn pending_rule_quote_review_boundaries_at_every_split() {
   for html in [
     "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",

@@ -6301,6 +6301,84 @@ fn empty_quote_after_rule_restores_list_continuation() {
 }
 
 #[test]
+fn quote_exit_override_output_stays_after_the_list_rule() {
+  for (exit, html, expected) in [
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  END tail",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote></li></ul>",
+      "- ***\n\n  END",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>",
+      "- ***\n\n  END\n\n  tail",
+    ),
+    (
+      "END",
+      "<ol><li><hr><blockquote></blockquote>tail</li></ol>",
+      "1. ***\n\n   END tail",
+    ),
+    (
+      "END",
+      "<ul><li><ul><li><hr><blockquote></blockquote>tail</li></ul></li></ul>",
+      "-\n  - ***\n\n    END tail",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  END\nEND tail",
+    ),
+    (
+      "END",
+      "<blockquote><ul><li><hr><blockquote></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   END tailEND",
+    ),
+    // A quote with content, or a rule still pending inside one, keeps its order.
+    (
+      "END",
+      "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
+      "- ***\n\n  > qEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><blockquote>x<hr></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---END\n\n  tail",
+    ),
+    // Without visible output the next node still flushes the rule.
+    (
+      "",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  tail",
+    ),
+    (
+      " ",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n tail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "blockquote".to_string(),
+          TagOverrideConfig {
+            exit: Some(exit.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options), expected, "{html}");
+  }
+}
+
+#[test]
 fn pending_rule_quote_review_boundaries() {
   for (html, expected) in [
     (

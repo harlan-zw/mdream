@@ -2352,7 +2352,18 @@ impl ConvertState {
     }
 
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
+      let rule_was_pending = self.list_rule_pending;
       self.finalize_blockquote();
+      // An empty quote hands its rule back. Visible override output belongs
+      // after that rule's separator, inside the item.
+      if !rule_was_pending
+        && self.list_rule_pending
+        && output
+          .as_deref()
+          .is_some_and(|value| value.bytes().any(|byte| !is_whitespace(byte)))
+      {
+        self.flush_list_rule(false);
+      }
     }
 
     let new_line_config = if caption_exit {

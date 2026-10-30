@@ -143,6 +143,7 @@ interface CodeFence {
 }
 
 export interface BlockquoteFrame {
+  owner: ElementNode
   fragment: number
   listIndent: string
   /**
@@ -1278,6 +1279,7 @@ function commitGfmAction(
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
+        owner,
         fragment: state.buffer.length,
         listRulePending,
         listIndent: state.listIndent,
@@ -2080,6 +2082,24 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           output = [handlerOutput]
         if (res._tag === 'BlockquoteExit')
           captionBufferChanged = true
+      }
+    }
+    // An exit override or plugin output replaces the handler that closes the
+    // quote. A quote holding a list rule still closes here to settle that rule.
+    if (tagId === TAG_BLOCKQUOTE && eventType === NodeEventExit && !gfmAction
+      && state.blockquotes.at(-1)?.owner === element
+      && state.blockquotes.some(frame => frame.listRulePending !== undefined)) {
+      const rulePending = state.listRulePending
+      finalizeBlockquote(state)
+      captionBufferChanged = true
+      // An empty quote hands its rule back. Visible output belongs after that
+      // rule's separator, inside the item.
+      if (rulePending === undefined && state.listRulePending !== undefined && output?.some(hasNonWhitespace)) {
+        const separator = blockOpenPrefix(state.buffer, state.listRulePending) ?? ''
+        if (separator)
+          state.buffer.push(separator)
+        state.lastContentCache = separator
+        state.listRulePending = undefined
       }
     }
     // The row owns its deferred opener. Cell overrides and plugin output
