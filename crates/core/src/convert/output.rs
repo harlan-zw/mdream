@@ -1112,7 +1112,7 @@ impl ConvertState {
   /// Override keyed by built-in tag id, via the precomputed table. `idx` is
   /// `None` only when the key list was too long to index, so every lookup scans.
   #[inline]
-  fn override_by_id<'a>(
+  pub(super) fn override_by_id<'a>(
     ovs: Option<&'a Vec<(String, TagOverrideConfig)>>,
     idx: Option<&[u8; MAX_TAG_ID]>,
     id: u8,
