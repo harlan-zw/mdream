@@ -166,6 +166,34 @@ fn assert_every_chunking(html: &str, options: &HtmlToMarkdownOptions, expected: 
 }
 
 #[test]
+fn whitespace_before_a_final_break_never_reaches_the_stream() {
+  // End-of-output trimming takes the whole ASCII set, so none of it can be
+  // yielded while later input may still end the document.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a&#9;<br></p>", "a"),
+    ("<p>a&#12;<br></p>", "a"),
+    ("<p>a&#13;<br></p>", "a"),
+    ("<p>a <br></p>", "a"),
+    ("<p>a&#9;&#12;&#13; <br></p>", "a"),
+    ("<p>a&#9;<br>&#12;<br></p>", "a"),
+    ("<p>a&#9;</p>", "a"),
+    ("<li>a&#9;<br></li>", "- a"),
+    ("<blockquote><p>a&#9;<br></p></blockquote>", "> a"),
+    ("<h2>a #&#9;</h2>", "## a \\#"),
+    // Content after the break settles the tail: the break subsumes a space
+    // run and nothing else.
+    ("<p>a&#9;<br>b</p>", "a\t  \nb"),
+    ("<p>a&#12;<br>b</p>", "a\u{c}  \nb"),
+    ("<p>a <br>b</p>", "a  \nb"),
+    ("<li>a&#9;<br>b</li>", "- a\t  \n  b"),
+    ("<blockquote>a&#9;<br>b</blockquote>", "> a\t  \n> b"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
 fn output_after_a_hard_break_leaves_one_paragraph_separator() {
   // Output after the break reopens its line, so a block inside the item gets
   // the separator it gets without the break, never a second one.

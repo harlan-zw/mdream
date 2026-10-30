@@ -110,6 +110,68 @@ const BYTE_PARITY_CASES = [
   '<p>🎉</p>',
 ]
 
+// Trailing bytes one-shot trims, either at the end of the output or when a
+// later close reaches back. `text` is left out where the engines' one-shot
+// output differs.
+const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string][] = [
+  ['<p>a&#9;<br></p>', 'a', 'a'],
+  ['<p>a&#12;<br></p>', 'a', 'a'],
+  ['<p>a&#13;<br></p>', 'a', 'a'],
+  ['<p>a <br></p>', 'a', 'a'],
+  ['<p>a&#9;&#12;&#13; <br></p>', 'a', 'a'],
+  ['<p>a&#9;</p>', 'a', 'a'],
+  ['a&#9;', 'a', 'a'],
+  ['<p>a&#9;<br>&#12;<br></p>', 'a', 'a'],
+  ['<p>a&#9;<span></span><br></p>', 'a', 'a'],
+  ['<li>a&#9;<br></li>', '- a', 'a'],
+  ['<ul><li>a<ul><li>b&#12;<br></li></ul></li></ul>', '- a\n  - b', 'a\nb'],
+  ['<blockquote><p>a&#9;<br></p></blockquote>', '> a', 'a'],
+  ['<ul><li><blockquote>a&#13;<br></blockquote></li></ul>', '- \n  > a', 'a'],
+  ['<h2>a&#9;</h2>', '## a', 'a'],
+  ['<h2>a #&#9;</h2>', '## a \\#', 'a #'],
+  ['<p><b>x y&#9;</b><br>b</p>', '**x y**  \nb', 'x y\nb'],
+  ['<p><span>x y&#9;</span>z</p>', 'x y z', 'x y z'],
+  ['<p>a&#9;<br>b</p>', 'a\t  \nb'],
+  ['<p>a&#12;<br>b</p>', 'a\f  \nb', 'a\f\nb'],
+  ['<li>a&#9;<br>b</li>', '- a\t  \n  b'],
+  ['<blockquote>a&#9;<br>b</blockquote>', '> a\t  \n> b'],
+]
+
+describe('trailing whitespace at every chunking', () => {
+  it.each(TRAILING_WHITESPACE_CASES)('%s', async (html, markdown, text) => {
+    const chunkings: string[][] = []
+    for (let width = 1; width <= html.length; width++) {
+      const parts: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        parts.push(html.slice(offset, offset + width))
+      chunkings.push(parts)
+    }
+    for (let split = 1; split < html.length; split++)
+      chunkings.push([html.slice(0, split), html.slice(split)])
+
+    for (const { engine, name } of engines) {
+      for (const [format, expected] of [['markdown', markdown], ['text', text]] as const) {
+        if (expected === undefined)
+          continue
+        expect(engine.htmlToMarkdown(html, { format }), `engine=${name} format=${format}`).toBe(expected)
+        for (const parts of chunkings) {
+          const htmlStream = new ReadableStream<string>({
+            start(controller) {
+              for (const part of parts)
+                controller.enqueue(part)
+              controller.close()
+            },
+          })
+          let streamed = ''
+          for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, { format }))
+            streamed += chunk
+          expect(streamed, `engine=${name} format=${format} parts=${JSON.stringify(parts)}`).toBe(expected)
+        }
+      }
+    }
+  })
+})
+
 describe('cross-engine streaming byte parity', () => {
   it.each(LINK_SPACE_CASES)('trims link label spaces at every split: %s', async (html, expected) => {
     for (const { engine, name } of engines) {

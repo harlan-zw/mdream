@@ -234,12 +234,10 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     else {
       // The prefix ends before a mutable owner. Its trailing block spacing
       // stays buffered even when that owner sits inside a preformatted block.
-      while (stableLength > 0) {
-        const code = currentContent.charCodeAt(stableLength - 1)
-        if (code !== 32 && code !== 10)
-          break
+      // The whole ASCII set stays with it: the trims that reach back here, and
+      // the final one, take a tab, form feed or carriage return as well.
+      while (stableLength > 0 && isAsciiWhitespace(currentContent.charCodeAt(stableLength - 1)))
         stableLength--
-      }
       retainMutableFragments = stableLength < currentContent.length
     }
 
