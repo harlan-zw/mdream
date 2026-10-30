@@ -3074,6 +3074,15 @@ impl ConvertState {
         continue;
       }
 
+      // A decoded `&#13;` is a bare CR, which also ends a CommonMark line. It
+      // never needs an escape itself.
+      if byte == b'\r' {
+        line_indent = Some(0);
+        ordered_digits = 0;
+        index += 1;
+        continue;
+      }
+
       let mut should_escape = matches!(byte, b'\\' | b'*' | b'_' | b'~' | b'`' | b'[')
         || (byte == b']' && in_link)
         || (byte == b'|' && in_table)
@@ -3116,8 +3125,7 @@ impl ConvertState {
         copied_until = index + 1;
       }
 
-      // A decoded `&#13;` is a bare CR, which also ends a CommonMark line.
-      if matches!(byte, b'\n' | b'\r') {
+      if byte == b'\n' {
         line_indent = Some(0);
         ordered_digits = 0;
       } else if let Some(indent) = line_indent {
@@ -3487,7 +3495,7 @@ impl ConvertState {
     let mut spaces = 0usize;
     let structural_indent = self.list_indent.len();
     for (offset, &byte) in bytes.iter().enumerate().rev() {
-      if matches!(byte, b'\n' | b'\r') {
+      if GFM_BYTE_FLAGS[byte as usize] & GFM_NEWLINE_BIT != 0 {
         return Some(spaces.saturating_sub(structural_indent) as u8);
       }
       if byte != b' ' || spaces == structural_indent + 3 {

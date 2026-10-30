@@ -669,6 +669,14 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
       continue
     }
 
+    // A decoded `&#13;` is a bare CR, which also ends a CommonMark line. It
+    // never needs an escape itself.
+    if (code === 13) {
+      lineIndent = 0
+      orderedDigits = 0
+      continue
+    }
+
     let shouldEscape = '\\*_~`['.includes(character)
       || (code === 93 && inLink) // ]
       || (code === 124 && inTable) // |
@@ -708,8 +716,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
       copiedUntil = index + 1
     }
 
-    // A decoded `&#13;` is a bare CR, which also ends a CommonMark line.
-    if (code === 10 || code === 13) {
+    if (code === 10) {
       lineIndent = 0
       orderedDigits = 0
     }
