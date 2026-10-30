@@ -1,5 +1,7 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
-use mdream::types::{CleanConfig, HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{
+  CleanConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+};
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
 fn md(html: &str) -> String {
@@ -279,6 +281,59 @@ fn raw_pre_in_a_table_cell_keeps_its_trailing_whitespace() {
   ] {
     assert_every_split(html, &options, expected);
   }
+}
+
+// ── Trailing tabs at a plain-text line end ──
+
+fn assert_text_every_split(html: &str, expected: &str) {
+  assert_eq!(text(html), expected, "html={html}");
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HtmlToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} chunk={chunk}");
+  }
+  for split in 1..html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HtmlToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} split={split}");
+  }
+}
+
+#[test]
+fn plain_text_line_end_drops_a_trailing_tab_run() {
+  for (html, expected) in [
+    ("<p>a&#9;<br>x</p>", "a\nx"),
+    ("<p>a &#9;<br>x</p>", "a\nx"),
+    ("<p><span>a&#9;</span><br>x</p>", "a\nx"),
+    ("<table><tr><td>a&#9;<br>x</td></tr></table>", "a\nx"),
+    ("<p>a&#9; &#9;</p><p>b</p>", "a\n\nb"),
+    ("<ul><li>a&#9;<ul><li>b</li></ul></li></ul>", "a\nb"),
+    ("<pre>a&#9;</pre>x", "a\n\nx"),
+    ("<div><pre>x<b>a&#9;</b></pre>y</div>", "xa\n\ny"),
+    // Preformatted text and table rows keep their tabs.
+    ("<pre>a&#9;<br>x</pre>", "a\t\nx"),
+    ("<pre>a&#9;<p>b</p></pre>", "a\t\n\nb"),
+    (
+      "<table><tr><td>a&#9;</td></tr><tr><td>b</td></tr></table>",
+      "a\t\nb",
+    ),
+  ] {
+    assert_text_every_split(html, expected);
+  }
+  // Markdown keeps the tab before its hard break.
+  assert_eq!(md("<p>a&#9;<br>x</p>"), "a\t  \nx");
 }
 
 // ── Empty figcaption ──
