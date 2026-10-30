@@ -5162,8 +5162,9 @@ impl ConvertState {
     node_spacing: Option<[u8; 2]>,
     is_enter: bool,
   ) -> [u8; 2] {
-    // Inline tags return `NO_SPACING` unless they are `<pre>`.
-    if node_spacing == Some(NO_SPACING) && tag_id != Some(TAG_PRE) {
+    // Inline tags return `NO_SPACING` unless they are `<pre>`. An `<li>` gets
+    // here only through a spacing override, which the nested-list rule outranks.
+    if node_spacing == Some(NO_SPACING) && !matches!(tag_id, Some(TAG_PRE | TAG_LI)) {
       return NO_SPACING;
     }
     if plain_text!(self)

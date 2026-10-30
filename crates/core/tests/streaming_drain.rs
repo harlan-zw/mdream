@@ -3466,6 +3466,63 @@ fn nested_ordered_start_inside_inline_wrappers_matches_one_shot() {
 }
 
 #[test]
+fn nested_ordered_start_outranks_an_li_spacing_override() {
+  for (html, spacing, expected) in [
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
+      [0, 0],
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
+      [0, 1],
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
+      [0, 0],
+      "- x  \n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li><li>z</li></ol></li></ul>",
+      [0, 0],
+      "- x\n\n  10. y  11. z",
+    ),
+    (
+      "<ul><li>x<ol><li>y</li></ol></li></ul>",
+      [0, 0],
+      "- x  1. y",
+    ),
+    (
+      "<ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      [0, 0],
+      "- [x  10. y](u)",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "li".to_string(),
+          TagOverrideConfig {
+            spacing: Some(spacing),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
 fn nested_ordered_start_wraps_at_content_columns() {
   let html = "<ul><li>alpha beta gamma delta<ol start=\"10\"><li>one two three four five</li></ol></li></ul>";
   let opts = HtmlToMarkdownOptions::default().with_wrap_width(12);
