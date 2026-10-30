@@ -25,6 +25,13 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
     ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'textarea'],
     ['<script><b>x</b></script><p>tail</p>', 'script', 'div'],
   ] as const).map(([html, source, target]) => ({ html, options: { plugins: { tagOverrides: { [source]: target } } } })),
+  '<p>aaaaaaaaaa --</p>',
+  '<p>aaaaaaaaaa ==</p>',
+  '<p>aaaaaaaaaa -</p>',
+  '<p>aaaaaaaaaa ---</p>',
+  '<p>aaaaaaaaaa =</p>',
+  '<p>aaaaaaaaaa --word</p>',
+  '<p>aaaaaaaaaa ==word</p>',
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',
@@ -379,6 +386,64 @@ describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
       expect(markdown).toContain('# Main Content')
       expect(markdown).toContain('This is the main content.')
     })
+  })
+})
+
+describe('scout9_wrap_setext_boundary streaming', () => {
+  it.each([
+    [
+      '<p>aaaaaaaaaa --</p>',
+      'aaaaaaaaaa --',
+    ],
+    [
+      '<p>aaaaaaaaaa ==</p>',
+      'aaaaaaaaaa ==',
+    ],
+    [
+      '<p>aaaaaaaaaa -</p>',
+      'aaaaaaaaaa -',
+    ],
+    [
+      '<p>aaaaaaaaaa ---</p>',
+      'aaaaaaaaaa ---',
+    ],
+    [
+      '<p>aaaaaaaaaa =</p>',
+      'aaaaaaaaaa =',
+    ],
+    [
+      '<p>aaaaaaaaaa --word</p>',
+      'aaaaaaaaaa\n--word',
+    ],
+    [
+      '<p>aaaaaaaaaa ==word</p>',
+      'aaaaaaaaaa\n==word',
+    ],
+  ])('matches every split and chunk width: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      const options = { wrapWidth: 10 }
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream, options))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
   })
 })
 
