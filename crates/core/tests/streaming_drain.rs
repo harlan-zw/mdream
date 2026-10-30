@@ -3382,17 +3382,19 @@ fn quoted_lines_between_chunks_keep_adjacent_list_markers() {
       format!(
         "<blockquote><blockquote><p>{text}</p><ul><li>a</li></ul>\n<ul><li>b</li></ul><p>{text}</p><ol><li>c</li></ol><ol><li>d</li></ol></blockquote></blockquote>"
       ),
-      "> > * b",
+      &["> > * b", "> > 1. c\n> >\n> > 1) d"][..],
     ),
     (
       format!(
         "<ul><li><blockquote><p>{text}</p><ul><li>a</li></ul><ul><li>b</li></ul></blockquote></li></ul>"
       ),
-      "  > * b",
+      &["  > * b"][..],
     ),
   ] {
     let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
-    assert!(expected.contains(alternated), "{expected:?}");
+    for marker in alternated {
+      assert!(expected.contains(marker), "{marker:?} in {expected:?}");
+    }
     for chunk in [1, 7, 64, 1000, 4096] {
       assert_eq!(
         stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
