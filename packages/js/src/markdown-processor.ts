@@ -14,9 +14,7 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_A,
-  TAG_ABBR,
   TAG_B,
-  TAG_BDO,
   TAG_BLOCKQUOTE,
   TAG_BR,
   TAG_CITE,
@@ -41,7 +39,6 @@ import {
   TAG_Q,
   TAG_S,
   TAG_SAMP,
-  TAG_SMALL,
   TAG_SPAN,
   TAG_STRIKE,
   TAG_STRONG,
@@ -56,7 +53,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -104,7 +101,8 @@ export interface MarkdownState {
    * first non-whitespace content so empty/whitespace-only blocks emit nothing.
    * `preFencePending`: inside a <pre> whose fence is not yet decided.
    * `preFencePendingDepth`: <pre> depth of that <pre>; nested ones defer to it.
-   * `preFenceLang`: language resolved from the <pre>'s own class.
+   * `preFenceLang`: language resolved from the owning <pre>'s class/data
+   * attributes; a <code> that owns the fence can provide a higher-priority value.
    */
   preFencePending?: boolean
   preFencePendingDepth?: number
@@ -179,20 +177,6 @@ INLINE_MARKER_TYPE[TAG_CODE] = 5 // `
 INLINE_MARKER_TYPE[TAG_SAMP] = 5 // `
 INLINE_MARKER_TYPE[TAG_VAR] = 5 // `
 INLINE_MARKER_TYPE[TAG_Q] = 6 // "
-
-// Inline tags whose Markdown delimiters are literal text inside a `<pre>`, so
-// only their content is emitted there. `<code>` and `<br>` are absent: both
-// already have `<pre>`-aware handlers.
-function suppressesFormattingInPre(tagId: number): boolean {
-  return tagId === TAG_A
-    || tagId === TAG_KBD
-    || tagId === TAG_S
-    || tagId === TAG_STRIKE
-    || tagId === TAG_FIGCAPTION
-    || (tagId >= TAG_STRONG && tagId <= TAG_INS)
-    || (tagId >= TAG_ABBR && tagId <= TAG_SMALL)
-    || (tagId >= TAG_U && tagId <= TAG_BDO)
-}
 
 /**
  * Length of the newline run ending just before fragment `index`.
@@ -866,20 +850,6 @@ function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): bo
     || tagId === TAG_SUB || tagId === TAG_SUP || tagId === TAG_INS || tagId === TAG_U || tagId === TAG_MARK
 }
 
-/**
- * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
- * Used to decide if a <pre>'s content warrants opening a fenced code block.
- */
-function hasNonWhitespace(value: string): boolean {
-  for (let i = 0; i < value.length; i++) {
-    const c = value.charCodeAt(i)
-    if (c !== 32 && c !== 9 && c !== 10 && c !== 12 && c !== 13) {
-      return true
-    }
-  }
-  return false
-}
-
 export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13)
 }
@@ -1221,12 +1191,15 @@ function consumeGfmAction(action: GfmAction, state: MarkdownState, lifecycle: Gf
     case 'PreExit': {
       // The parser already counted this <pre> out of the depth map.
       const depth = state.depthMap[TAG_PRE]! + 1
-      if (state.preFencePendingDepth === depth)
+      if (state.preFencePendingDepth === depth) {
         state.preFencePending = false
+        state.preFenceLang = ''
+      }
       // Only the <pre> that owns the fence closes it.
       if (state.preFenceOwnerDepth !== depth)
         return undefined
       state.preFenceOwnerDepth = 0
+      state.preFenceLang = ''
       // The fence owns the trailing code whitespace. Later boundaries must not trim it.
       state.lastTextNode = undefined
       const indent = state.listIndent
@@ -1790,8 +1763,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const literalOverride = eventType === NodeEventEnter
           ? pendingHandler?.literalEnter
           : pendingHandler?.literalExit
-        if (literalOverride && codeOwnsPendingPreFence(state, pendingElement))
-          state.preFenceLang = getLanguageFromClass(pendingElement.attributes?.class)
+        if (literalOverride && codeOwnsPendingPreFence(state, pendingElement)) {
+          const language = getLanguageFromAttributes(pendingElement.attributes)
+          if (language)
+            state.preFenceLang = language
+        }
         if (pendingElement.pluginOutput?.length || literalOverride) {
           preparePendingPreFence()
           flushPreFence(state)

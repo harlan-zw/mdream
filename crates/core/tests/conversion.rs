@@ -2966,6 +2966,24 @@ fn pre_code_block_unchanged() {
 }
 
 #[test]
+fn pre_code_block_reads_data_language_attributes_in_precedence_order() {
+  assert_eq!(
+    convert(
+      r#"<pre class="language-rust" data-language="ignored"><code data-language="TypeScript" data-lang="bash">let x = 1;</code></pre>"#
+    ),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-language="Rust"><code data-lang="TypeScript">let x = 1;</code></pre>"#),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-lang="Rust"><code>let x = 1;</code></pre>"#),
+    "```Rust\nlet x = 1;\n```"
+  );
+}
+
+#[test]
 fn empty_and_whitespace_pre_emit_no_fence() {
   assert_eq!(convert("<pre></pre>"), "");
   assert_eq!(convert("<pre>   \n  </pre>"), "");
