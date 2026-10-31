@@ -264,6 +264,18 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
+fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
+  // The item's tab ends a drained chunk, which settled the empty-item guard early.
+  // The `</li>` trim then removed the continuation indent one-shot keeps.
+  let html = "<b>1) x<small><br> <ul><li>&#9;<br></li></ul></small>===<hr></b>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "**1) x  \n- \t  \n  \\=== ---**"
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+}
+
+#[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HtmlToMarkdownOptions::default());
 }

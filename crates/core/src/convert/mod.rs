@@ -2968,7 +2968,15 @@ impl ConvertState {
     }
     // Settle a pending marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
-    self.resolve_item_marker(false);
+    // Like `settle_item_marker`, only content ending in a non-blank byte settles it.
+    if self
+      .buffer
+      .as_bytes()
+      .last()
+      .is_some_and(|byte| !byte.is_ascii_whitespace())
+    {
+      self.resolve_item_marker(false);
+    }
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
