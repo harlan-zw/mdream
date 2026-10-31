@@ -1644,7 +1644,13 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
-      self.trim_trailing_spaces();
+      // A table cell keeps its tabs: the one before a non-first cell is the
+      // column separator, as at the row boundary.
+      if plain_text!(self) && self.depth_map[TAG_TABLE as usize] == 0 {
+        self.trim_trailing_blanks();
+      } else {
+        self.trim_trailing_spaces();
+      }
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
@@ -2504,20 +2510,33 @@ impl ConvertState {
       output.as_deref()
     };
 
-    if tag_id == Some(TAG_LI) && !plain_text!(self) {
-      // A hard break already ended the item. Its continuation indentation
-      // must not become a whitespace-only line before the following block.
-      if self.hard_break_end == self.buffer.len()
-        && !self.empty_item_hazard
-        && !has_override
-        && self.depth_map[TAG_PRE as usize] == 0
-        && !self.in_table_cell()
-      {
-        self.trim_trailing_spaces();
-        self.hard_break_end = self.buffer.len();
+    match tag_id {
+      Some(TAG_LI) if !plain_text!(self) => {
+        // A hard break already ended the item. Its continuation indentation
+        // must not become a whitespace-only line before the following block.
+        if self.hard_break_end == self.buffer.len()
+          && !self.empty_item_hazard
+          && !has_override
+          && self.depth_map[TAG_PRE as usize] == 0
+          && !self.in_table_cell()
+        {
+          self.trim_trailing_spaces();
+          self.hard_break_end = self.buffer.len();
+        }
+        self.pending_raw_html_boundary = false;
+        self.resolve_item_marker(true);
       }
-      self.pending_raw_html_boundary = false;
-      self.resolve_item_marker(true);
+      // A `<pre>` closing its plain-text block drops the trailing tab run its
+      // content ends on, as the block boundary does outside preformatted text.
+      Some(TAG_PRE)
+        if plain_text!(self)
+          && configured_new_lines > 0
+          && self.depth_map[TAG_TABLE as usize] == 0
+          && self.buffer.ends_with('\t') =>
+      {
+        self.trim_trailing_blanks();
+      }
+      _ => {}
     }
 
     let output_start = self.buffer.len();
@@ -3778,6 +3797,26 @@ impl ConvertState {
       // buffer wherever a drain has already cut the front, and the reach-back
       // trim's `cache_len <= buf_len` guard then skips a retraction one-shot
       // performs, keeping block spacing an empty element wrote.
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
+      self.truncate_buffer(trimmed_len);
+    }
+  }
+
+  /// Plain text ends a line on a space and tab run, as in JS. Kept out of
+  /// line so the Markdown paths that branch around it stay as they were.
+  #[cold]
+  #[inline(never)]
+  fn trim_trailing_blanks(&mut self) {
+    let floor = self.trim_floor();
+    let bytes = self.buffer.as_bytes();
+    let mut trimmed_len = bytes.len();
+    while trimmed_len > floor && matches!(bytes[trimmed_len - 1], b' ' | b'\t') {
+      trimmed_len -= 1;
+    }
+    if trimmed_len < bytes.len() {
       self.last_content_cache_len = self
         .last_content_cache_len
         .saturating_sub(self.buffer.len() - trimmed_len);
@@ -5183,8 +5222,23 @@ impl ConvertState {
         return;
       }
 
-      if last_char == b' ' && !self.buffer.is_empty() {
-        self.trim_trailing_spaces();
+      // A plain-text row keeps the tab that separates an empty trailing cell,
+      // and preformatted text keeps its tabs until its own `<pre>` boundary.
+      let trims_tabs = matches!(last_char, b' ' | b'\t')
+        && plain_text!(self)
+        && self.depth_map[TAG_TABLE as usize] == 0
+        && (self.depth_map[TAG_PRE as usize] == 0
+          || is_enter
+            && self
+              .stack
+              .last()
+              .is_some_and(|node| node.tag_id == Some(TAG_PRE)));
+      if (last_char == b' ' || trims_tabs) && !self.buffer.is_empty() {
+        if trims_tabs {
+          self.trim_trailing_blanks();
+        } else {
+          self.trim_trailing_spaces();
+        }
         // This source whitespace was consumed by the block boundary; do not
         // let its state leak into a later inline event and trim that output.
         self.last_text_node_contains_whitespace = false;
