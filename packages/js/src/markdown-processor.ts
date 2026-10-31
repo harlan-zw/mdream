@@ -186,6 +186,26 @@ INLINE_MARKER_TYPE[TAG_SAMP] = 5 // `
 INLINE_MARKER_TYPE[TAG_VAR] = 5 // `
 INLINE_MARKER_TYPE[TAG_Q] = 6 // "
 
+function isAsciiPunctuation(code: number): boolean {
+  return code >= 33 && code <= 126 && !isAsciiAlphanumeric(code)
+}
+
+function isAsciiAlphanumeric(code: number): boolean {
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+
+// Output other than contiguous closing delimiters ends a pending closer. A
+// module function rather than a closure over the event type, which would make
+// every event allocate a context.
+function breaksPendingCloser(output: string[], entering: boolean, closer: number): boolean {
+  for (let index = 0; index < output.length; index++) {
+    const fragment = output[index]
+    if (fragment && (entering || fragment.charCodeAt(0) !== closer || fragment.charCodeAt(fragment.length - 1) !== closer))
+      return true
+  }
+  return false
+}
+
 /**
  * Length of the newline run ending just before fragment `index`.
  */
@@ -311,6 +331,18 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     const width = state.listIndentWidths.pop() ?? 0
     state.listIndent = state.listIndent.slice(0, state.listIndent.length - width)
   }
+}
+
+/**
+ * Determines if spacing is needed between two characters
+ */
+function needsMarkdownSpacing(lastChar: string, firstChar: string, openMarkerCount: number): boolean {
+  // A strikethrough opener touches its content; a closer or a literal tilde
+  // keeps the separator.
+  if (lastChar === '~' && openMarkerCount)
+    return firstChar === '~'
+
+  return needsSpacing(lastChar, firstChar)
 }
 
 /**
@@ -1346,6 +1378,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
+  let pendingCloser = 0
+  // The pending closer each open marker's enter cleared.
+  const openMarkerClosers: number[] = []
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
   // 1 needs a boundary; 2 emitted one and still owns the next source space.
@@ -1727,6 +1762,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (textNode.generatedMarkdown && textNode.value)
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
 
+      if (pendingCloser && textNode.value) {
+        const code = textNode.value.charCodeAt(0)
+        if (lastChar.charCodeAt(0) === pendingCloser && isAsciiAlphanumeric(code))
+          textNode.value = `&#${code};${textNode.value.slice(1)}`
+        pendingCloser = 0
+      }
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
         const wrapped = wrapText(
@@ -1818,6 +1859,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
     const buff = state.buffer
+    const closerBefore = pendingCloser
 
     // Deferred <pre> code fence (issue #97). A bare <pre> opens its fence right
     // before its first non-whitespace child so empty/whitespace-only blocks emit
@@ -2228,6 +2270,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && !handler?.literalExit) {
         const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
         if (idx >= 0) {
+          pendingCloser = openMarkerClosers[openMarkerCount]!
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
@@ -2308,6 +2351,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         else if (firstOutput) {
           if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)) {
+            pendingCloser = 0
             state.buffer.push(' ')
             state.lastContentCache = ' '
             lastChar = ' '
@@ -2321,6 +2365,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (newLines > 0) {
+      pendingCloser = 0
       if (!buff.length && !captionEvent && !captionTransition) {
         if (output) {
           for (const fragment of output) {
@@ -2416,10 +2461,29 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // Add spacing between inline elements if needed
-    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
+    if (!captionTransition && output?.[0]?.[0] && (tagId !== TAG_BR || output[0][0] === '<') && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsMarkdownSpacing(lastChar, output[0][0], openMarkerCount)) {
+      pendingCloser = 0
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
+
+    if (eventType === NodeEventExit && handlerOutput) {
+      const markerType = INLINE_MARKER_TYPE[tagId]!
+      if (markerType && markerType <= 4) {
+        const mark = handlerOutput.charCodeAt(0)
+        const previous = lastOutputChar(buff)
+        if (previous !== mark && isAsciiPunctuation(previous)
+          && !handler?.literalExit && !options.tagOverrides && !captionFrameCount && !insideRawHtmlRegion
+          && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE]
+          && !state.depthMap[TAG_KBD] && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR]) {
+          pendingCloser = mark
+        }
+      }
+    }
+
+    // Only contiguous closing delimiters may extend a pending closer.
+    if (pendingCloser && output && breaksPendingCloser(output, eventType === NodeEventEnter, pendingCloser))
+      pendingCloser = 0
 
     // An overridden <br> skips the break fast path, but its line break still
     // subsumes the spaces before it.
@@ -2471,9 +2535,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (cleanPass) {
       if (eventType === NodeEventEnter)
-        cleanPass.enter(element, outputStart)
+        cleanPass.enter(element, outputStart, closerBefore)
       else if (handlerOutput)
-        cleanPass.closed(element, outputStart, handlerOutput)
+        cleanPass.closed(element, outputStart, handlerOutput, closerBefore)
     }
 
     // Track open inline markers for empty pair detection. Inline code in a
@@ -2485,6 +2549,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
+        openMarkerClosers[openMarkerCount] = closerBefore
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }
       else if (openMarkerCount

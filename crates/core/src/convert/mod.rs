@@ -12,8 +12,11 @@ use crate::types::{
   ElementNode, ExtractedElement, HtmlToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
   TagOverrideConfig, TailwindData,
 };
+#[cfg(feature = "html")]
+use crate::url::slugify_heading;
 use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url, slugify_heading,
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url,
+  slugify_markdown_heading,
 };
 use std::borrow::Cow;
 
@@ -169,6 +172,8 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// The pending closer this opener cleared, back in force if the pair drops.
+  pending: u8,
 }
 
 #[derive(Clone, Copy)]
@@ -253,6 +258,11 @@ struct LinkOutputState {
   /// The `[` starts where the latest hard break ends; see
   /// `OpenMarker::starts_at_hard_break`.
   starts_at_hard_break: bool,
+  /// The pending emphasis closers this link's `[` and its close cancelled.
+  /// The opener is recorded for cleaners that unwrap links; the close only
+  /// for `clean.fragments`, which may remove both again.
+  closer_before: u8,
+  closer_after: u8,
 }
 
 struct FragmentLink {
@@ -263,6 +273,11 @@ struct FragmentLink {
   /// The close was written as `](#frag "title")` instead of `](#frag)`, so the
   /// drift check must accept a quoted title between the fragment and `)`.
   has_title: bool,
+  /// Pending emphasis closers cancelled by the `[` and by the `](` close. When
+  /// a broken link loses its wrappers, the closer is adjacent to the next
+  /// byte again and needs the same numeric reference as without the link.
+  bracket_closer: u8,
+  text_closer: u8,
 }
 
 #[derive(Clone)]
@@ -888,6 +903,7 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
+  pending_emphasis: u8,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1176,6 +1192,7 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      pending_emphasis: 0,
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -2322,6 +2339,7 @@ impl ConvertState {
       };
 
       let mut removals = Vec::with_capacity(self.fragment_links.len());
+      let mut closers: Vec<(usize, u8)> = Vec::new();
       for link in &self.fragment_links {
         if has_aliased_bracket(link.bracket_start) {
           continue;
@@ -2370,6 +2388,12 @@ impl ConvertState {
         }
         removals.push((bracket_start, bracket_start + 1));
         removals.push((text_end, link_end));
+        if link.bracket_closer != 0 {
+          closers.push((bracket_start + 1, link.bracket_closer));
+        }
+        if link.text_closer != 0 {
+          closers.push((link_end, link.text_closer));
+        }
       }
 
       // Links are recorded at their close, so a link lands after the ones
@@ -2387,36 +2411,49 @@ impl ConvertState {
         removals[slot] = entry;
       }
 
-      // Only deletes, so it compacts in place: `write` trails `read` by bytes
-      // dropped so far. A clean document never writes a byte; rebuilding into
-      // a second String cost 7.2 MB on the spec page.
-      let buf_len = self.buffer.len();
-      let mut read = 0usize;
-      let mut write = 0usize;
-      let mut bytes = std::mem::take(&mut self.buffer).into_bytes();
-      for (remove_start, remove_end) in &removals {
-        // A duplicate range (an aliased bracket shared with a nested anchor)
-        // is already dropped; skip it without copying.
-        if *remove_end <= read {
-          continue;
+      if closers.is_empty() {
+        // Only deletes, so it compacts in place: `write` trails `read` by bytes
+        // dropped so far. A clean document never writes a byte; rebuilding into
+        // a second String cost 7.2 MB on the spec page.
+        let buf_len = self.buffer.len();
+        let mut read = 0usize;
+        let mut write = 0usize;
+        let mut bytes = std::mem::take(&mut self.buffer).into_bytes();
+        for (remove_start, remove_end) in &removals {
+          // A duplicate range (an aliased bracket shared with a nested anchor)
+          // is already dropped; skip it without copying.
+          if *remove_end <= read {
+            continue;
+          }
+          if *remove_start > read {
+            bytes.copy_within(read..*remove_start, write);
+            write += *remove_start - read;
+          }
+          read = *remove_end;
         }
-        if *remove_start > read {
-          bytes.copy_within(read..*remove_start, write);
-          write += *remove_start - read;
+        // `read` only advances past a dropped run, so zero means nothing changed.
+        if read > 0 {
+          if read < buf_len {
+            bytes.copy_within(read..buf_len, write);
+            write += buf_len - read;
+          }
+          bytes.truncate(write);
         }
-        read = *remove_end;
+        // Removals end on validated ASCII delimiters, so this cannot fail.
+        self.buffer = String::from_utf8(bytes)
+          .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+      } else {
+        for index in 1..closers.len() {
+          let entry = closers[index];
+          let mut slot = index;
+          while slot > 0 && closers[slot - 1].0 > entry.0 {
+            closers[slot] = closers[slot - 1];
+            slot -= 1;
+          }
+          closers[slot] = entry;
+        }
+        self.buffer = Self::remove_fragment_wrappers(&self.buffer, &removals, &closers);
       }
-      // `read` only advances past a dropped run, so zero means nothing changed.
-      if read > 0 {
-        if read < buf_len {
-          bytes.copy_within(read..buf_len, write);
-          write += buf_len - read;
-        }
-        bytes.truncate(write);
-      }
-      // Removals end on validated ASCII delimiters, so this cannot fail.
-      self.buffer = String::from_utf8(bytes)
-        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
     }
     if !self.streaming_break_runs.is_empty() {
       let extra_len = self.streaming_break_runs.iter().fold(0usize, |total, run| {
