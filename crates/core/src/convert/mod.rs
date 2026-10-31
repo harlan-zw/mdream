@@ -212,8 +212,14 @@ struct CaptionFrame {
 enum CaptionBoundary {
   None,
   Pending(u8),
+  QuoteParent,
+  QuoteTentative(usize),
   ConsumeSpace,
 }
+
+/// `CaptionBoundary::QuoteTentative` past a closing delimiter: no separator to
+/// retract, and the next source space separates words.
+const QUOTE_CLOSED: usize = usize::MAX;
 
 struct CodeFenceState {
   output_start: usize,

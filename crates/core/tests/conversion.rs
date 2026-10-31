@@ -2303,6 +2303,364 @@ fn blockquote_keeps_block_children_inside_the_quote() {
 }
 
 #[test]
+fn blockquote_parent_continuation() {
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em>tail</em></li></ul>",
+      "- \n  > q\n\n  *tail*",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote> <span></span><em></em><script>hidden</script>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ol start='10'><li><blockquote>q</blockquote>tail</li></ol>",
+      "10. \n    > q\n\n    tail",
+    ),
+    (
+      "<ul><li><blockquote>outer<blockquote>q</blockquote>tail</blockquote>after</li></ul>",
+      "- \n  > outer\n  > > q\n  >\n  > tail\n\n  after",
+    ),
+    ("<blockquote>q</blockquote>tail", "> q\n\ntail"),
+    (
+      "<ul><li><blockquote>q</blockquote><span> </span><em> </em><script>hidden</script>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><blockquote></blockquote>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote></li><li>next</li></ul>",
+      "- \n  > q\n- next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><blockquote>r</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  > r\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><code>tail</code></li></ul>",
+      "- \n  > q\n\n  `tail`",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"x\">tail</a></li></ul>",
+      "- \n  > q\n\n  [tail](x)",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><img src=\"x\" alt=\"tail\"></li></ul>",
+      "- \n  > q\n\n  ![tail](x)",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><ul><li>next</li></ul></li></ul>",
+      "- \n  > q\n  - next",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn blockquote_parent_continuation_keeps_sibling_quotes_inside_a_quote() {
+  // A nested quote's enter folds a preceding blank line. After a closed quote
+  // that blank is the only separator, and without it the siblings merge.
+  for (html, expected) in [
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote>tail</li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q\n>\n>   tail",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x</blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>\n>   > q",
+    ),
+    (
+      "<ul><li><blockquote><blockquote>x</blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > > x\n  >\n  > > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > q",
+    ),
+    (
+      "<blockquote><ul><li>a<blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - a\n>   > q",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
+  // A wrapper that stays in the output took the separator, so the next block
+  // spaces itself. One that writes nothing leaves the boundary pending.
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><blockquote>next</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"><em></em></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><a href=\"/x\"></a></em><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  *[](/x)*\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em></em><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><div>d</div></li></ul>",
+      "- \n  > q\n\n  [](/x) d",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><br><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)  \n  \n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><br></li><li>b</li></ul>",
+      "- \n  > q\n\n  [](/x)  \n- b",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><div>d</div></em></li></ul>",
+      "- \n  > q\n\n  *d*",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><blockquote>next</blockquote></em></li></ul>",
+      "- \n  > q\n\n  *\n  > next\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a>tail</a></li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a><h2>h</h2></li></ul>",
+      "- \n  > q\n\n  ## h",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn inline_wrapper_around_blockquote_in_list_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ol><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ol>",
+      "1. [\n   > next](/x)",
+    ),
+    (
+      "<ul><li>pre <a href=\"/x\"><blockquote>next</blockquote></a></li></ul>",
+      "- pre [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\">pre <blockquote>next</blockquote></a></li></ul>",
+      "- [pre \n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><span><blockquote>next</blockquote></span></a></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><span><a href=\"/x\"><blockquote>next</blockquote></a></span></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a> tail</li></ul>",
+      "- [\n  > next](/x)\n\n  tail",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><blockquote>b</blockquote></li></ul>",
+      "- [\n  > next](/x)\n\n  > b",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><p>para</p></li></ul>",
+      "- [\n  > next](/x)\n\n  para",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><ul><li>x</li></ul></li></ul>",
+      "- [\n  > next](/x)\n  - x",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li><li>x</li></ul>",
+      "- [\n  > next](/x)\n- x",
+    ),
+    (
+      "<ul><li><strong><a href=\"/x\"><blockquote>next</blockquote></a></strong></li></ul>",
+      "- **[\n  > next](/x)\n\n  **",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><strong><blockquote>next</blockquote></strong></a> tail</li></ul>",
+      "- [**\n  > next\n\n  **](/x) tail",
+    ),
+    (
+      "<table><tr><td><ul><li><span><blockquote>next</blockquote></span></li></ul></td></tr></table>",
+      "| <ul><li>> next</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ul></td></tr></table>",
+      "| <ul><li>[> next](/x)</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><blockquote>q</blockquote>tail</li></ul></td></tr></table>",
+      "| <ul><li>> q tail</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><blockquote>q</blockquote><blockquote>r</blockquote></li></ul></td></tr></table>",
+      "| <ul><li>> q>  r</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><strong><blockquote>next</blockquote></strong></li></ul></td></tr></table>",
+      "| <ul><li>**>  next**</li></ul> |\n| --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><blockquote>next</blockquote></td></tr></table></li></ul>",
+      "- | > next |\n  | --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><blockquote>q</blockquote>tail</td></tr></table></li></ul>",
+      "- | > q tail |\n  | --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><ul><li><blockquote>next</blockquote></li></ul></td></tr></table></li></ul>",
+      "- | <ul><li>> next</li></ul> |\n  | --- |",
+    ),
+    (
+      "<blockquote><table><tr><td><ul><li><blockquote>next</blockquote></li></ul></td></tr></table></blockquote>",
+      "> | <ul><li>> next</li></ul> |\n> | --- |",
+    ),
+    (
+      "<ul><li><blockquote><table><tr><td><blockquote>n</blockquote></td></tr></table></blockquote>tail</li></ul>",
+      "- \n  > | > n |\n  > | --- |\n\n  tail",
+    ),
+    (
+      "<table><tr><td><ul><li><code><blockquote>q</blockquote></code></li></ul></td></tr></table>",
+      "| <ul><li>`>  q`</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li>pre <code><blockquote>q</blockquote> mid</code></li></ul></td></tr></table>",
+      "| <ul><li>pre `>  q mid`</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><code><blockquote>q`x</blockquote></code></li></ul></td></tr></table>",
+      "| <ul><li>``>  q`x``</li></ul> |\n| --- |",
+    ),
+    ("<code><blockquote>q</blockquote></code>", "`>  q`"),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong></li><li>x</li></ul>",
+      "- **\n  > next\n\n  **\n- x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><ul><li>x</li></ul></li></ul>",
+      "- **\n  > next\n\n  **\n  - x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><br></li><li>x</li></ul>",
+      "- **\n  > next\n\n  **  \n- x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><div>d</div></li></ul>",
+      "- **\n  > next\n\n  ** d",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub></li><li>x</li></ul>",
+      "- <sub>\n  > next\n\n  </sub>\n- x",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub><ul><li>x</li></ul></li></ul>",
+      "- <sub>\n  > next\n\n  </sub>\n  - x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><sub></sub></li><li>x</li></ul>",
+      "- \n  > q\n\n  <sub></sub>\n- x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><sub></sub><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n\n  <sub></sub>\n  - x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><p><blockquote>r</blockquote></p></li></ul>",
+      "- \n  > q\n\n  \n  > r",
+    ),
+    (
+      "<ul><li><p><span><blockquote>q</blockquote></span></p><p><span><blockquote>r</blockquote></span></p></li></ul>",
+      "- \n  > q\n\n  \n  > r",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong> tail</li></ul>",
+      "- **\n  > next\n\n  ** tail",
+    ),
+    (
+      "<ul><li>pre <strong><blockquote>next</blockquote></strong> tail</li></ul>",
+      "- pre **\n  > next\n\n  ** tail",
+    ),
+    (
+      "<ul><li><strong><a href=\"/x\"><blockquote>next</blockquote></a></strong> tail</li></ul>",
+      "- **[\n  > next](/x)\n\n  ** tail",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub> tail</li></ul>",
+      "- <sub>\n  > next\n\n  </sub> tail",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><strong><blockquote>next</blockquote></strong> tail</a></li></ul>",
+      "- [**\n  > next\n\n  ** tail](/x)",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong>tail</li></ul>",
+      "- **\n  > next\n\n  **tail",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong> <p>para</p></li></ul>",
+      "- **\n  > next\n\n  **\n\n  para",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><br> tail</li></ul>",
+      "- **\n  > next\n\n  **  \n  tail",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><em> tail</em></li></ul>",
+      "- **\n  > next\n\n  ***tail*",
+    ),
+    (
+      "<ul><li>pre<blockquote>q</blockquote><strong> tail</strong></li></ul>",
+      "- pre\n  > q\n\n  **tail**",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><strong></strong> tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn sibling_blockquotes_separated_by_blank_line() {
   for (name, html, expected) in [
     (
@@ -6308,7 +6666,7 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
   );
   assert_eq!(
     convert_with_origin(html, "https://example.com/docs/page"),
-    "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
+    "A & B  \n\n| [`>  &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
 }
 
@@ -6338,132 +6696,46 @@ fn builtin_blockquote_alias_uses_div_semantics() {
 }
 
 #[test]
-fn raw_text_aliases_use_source_closing_names() {
-  for (html, source, target, expected) in [
+fn blockquote_parent_continuation_respects_overrides() {
+  for (html, override_name, config, expected) in [
     (
-      "<script><b>x</b></script><p>tail</p>",
-      "script",
-      "div",
-      "**x**\n\ntail",
+      "<ul><li><x-q>q</x-q>tail</li></ul>",
+      "x-q",
+      TagOverrideConfig {
+        alias_tag_id: mdream::get_tag_id("blockquote"),
+        ..Default::default()
+      },
+      "- \n  > q\n\n  tail",
     ),
     (
-      "<script>a</div>b</script><p>tail</p>",
-      "script",
-      "div",
-      "ab\n\ntail",
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "blockquote",
+      TagOverrideConfig {
+        enter: Some("[".into()),
+        exit: Some("]".into()),
+        spacing: Some([0, 0]),
+        ..Default::default()
+      },
+      "- [q] tail",
     ),
     (
-      "<style><b>x</b></style><p>tail</p>",
-      "style",
-      "div",
-      "**x**\n\ntail",
-    ),
-    (
-      "<style>a</div>b</style><p>tail</p>",
-      "style",
-      "div",
-      "ab\n\ntail",
-    ),
-    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
-    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
-    (
-      "<x>before <!--unfinished</x><p>tail</p>",
-      "x",
-      "script",
-      "tail",
-    ),
-    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
-    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
-    (
-      "<x>before <!--unfinished</x><p>tail</p>",
-      "x",
-      "style",
-      "tail",
-    ),
-    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
-    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
-    (
-      "<div>before <!--unfinished</div><p>tail</p>",
-      "div",
-      "script",
-      "tail",
-    ),
-    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
-    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
-    (
-      "<div>before <!--unfinished</div><p>tail</p>",
-      "div",
-      "style",
-      "tail",
-    ),
-    (
-      "<script><b>x</b></script><p>tail</p>",
-      "script",
-      "style",
-      "tail",
-    ),
-    (
-      "<script>a</style>b</script><p>tail</p>",
-      "script",
-      "style",
-      "tail",
-    ),
-    (
-      "<script>before <!--unfinished</script><p>tail</p>",
-      "script",
-      "style",
-      "tail",
-    ),
-    (
-      "<style><b>x</b></style><p>tail</p>",
-      "style",
-      "script",
-      "tail",
-    ),
-    (
-      "<style>a</script>b</style><p>tail</p>",
-      "style",
-      "script",
-      "tail",
-    ),
-    (
-      "<style>before <!--unfinished</style><p>tail</p>",
-      "style",
-      "script",
-      "tail",
-    ),
-    (
-      "<script><b>x</b></script><p>tail</p>",
-      "script",
-      "textarea",
-      "\\<b>x\\</b>\n\ntail",
-    ),
-    (
-      "<style><b>x</b></style><p>tail</p>",
-      "style",
-      "textarea",
-      "\\<b>x\\</b>\n\ntail",
-    ),
-    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
-    (
-      "<script><!--<script></script>--></script><p>tail</p>",
-      "script",
-      "script",
-      "tail",
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "blockquote",
+      TagOverrideConfig {
+        spacing: Some([0, 0]),
+        ..Default::default()
+      },
+      "- \n  > q\n\n  tail",
     ),
   ] {
-    let opts = HtmlToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
-        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        tag_overrides: Some(vec![(override_name.to_string(), config)]),
         ..Default::default()
       }),
       ..Default::default()
     };
-    assert_eq!(
-      html_to_markdown(html, opts.clone()),
-      expected,
-      "{html} {source}:{target}"
-    );
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
   }
 }
 
@@ -6761,5 +7033,333 @@ fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
         }
       }
     }
+  }
+}
+
+#[test]
+fn quote_boundary_review_regressions() {
+  for (id, html, expected) in [
+    (
+      "Q1-em-sibling",
+      "<ul><li><blockquote>q</blockquote><em></em></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-em-nested",
+      "<ul><li><blockquote>q</blockquote><em></em><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-strong-sibling",
+      "<ul><li><blockquote>q</blockquote><strong></strong></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-strong-nested",
+      "<ul><li><blockquote>q</blockquote><strong></strong><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-code-sibling",
+      "<ul><li><blockquote>q</blockquote><code></code></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-code-nested",
+      "<ul><li><blockquote>q</blockquote><code></code><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-nested-empty",
+      "<ul><li><blockquote>q</blockquote><em><strong> </strong></em></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-nested-tail",
+      "<ul><li><blockquote>q</blockquote><em><strong> </strong></em>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "Q3-ul-br1",
+      "<ul><li><blockquote>q</blockquote><br>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "Q3-ul-br2",
+      "<ul><li><blockquote>q</blockquote><br><br>tail</li></ul>",
+      "- \n  > q  \n    \n  \n  tail",
+    ),
+    (
+      "Q3-ul-br3",
+      "<ul><li><blockquote>q</blockquote><br><br><br>tail</li></ul>",
+      "- \n  > q  \n    \n    \n  \n  tail",
+    ),
+    (
+      "Q3-ol-br1",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br>tail</li></ol>",
+      "10. \n    > q  \n    \n    tail",
+    ),
+    (
+      "Q3-ol-br2",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br><br>tail</li></ol>",
+      "10. \n    > q  \n      \n    \n    tail",
+    ),
+    (
+      "Q3-ol-br3",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br><br><br>tail</li></ol>",
+      "10. \n    > q  \n      \n      \n    \n    tail",
+    ),
+    (
+      "R1-empty-ul",
+      "<ul><li><blockquote>q</blockquote><ul></ul>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R1-empty-ol",
+      "<ul><li><blockquote>q</blockquote><ol></ol>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R1-empty-chain",
+      "<ul><li><blockquote>q</blockquote><ul></ul><ol></ol><span> </span>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R2-empty-caption",
+      "<ul><li><blockquote>q</blockquote><figcaption></figcaption>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R2-caption-br1",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-caption-br2",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n    \n  \n  tail",
+    ),
+    (
+      "R2-caption-br3",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><br><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n    \n    \n  \n  tail",
+    ),
+    (
+      "R2-caption-empty-em",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><em></em></figcaption>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-figure-caption",
+      "<ul><li><blockquote>q</blockquote><figure><figcaption><br></figcaption></figure>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-caption-sibling",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption></li><li>x</li></ul>",
+      "- \n  > q  \n- x",
+    ),
+    (
+      "R2-caption-nested",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption><ul><li>x</li></ul></li></ul>",
+      "- \n  > q  \n  - x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{id}");
+  }
+}
+
+#[test]
+fn quote_boundary_literal_after_alias_review_regression() {
+  let html = "<ul><li><x-first>q</x-first><blockquote>r</blockquote>tail</li></ul>";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![
+        (
+          "x-first".to_string(),
+          TagOverrideConfig {
+            alias_tag_id: mdream::get_tag_id("blockquote"),
+            ..Default::default()
+          },
+        ),
+        (
+          "blockquote".to_string(),
+          TagOverrideConfig {
+            enter: Some("[".to_string()),
+            exit: Some("]".to_string()),
+            spacing: Some([0, 0]),
+            ..Default::default()
+          },
+        ),
+      ]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(html, options.clone()),
+    "- \n  > q\n\n  [r] tail"
+  );
+}
+
+#[test]
+fn empty_fenced_code_in_list_has_a_blank_body_line() {
+  // A whitespace-only line is just as blank in CommonMark. The opening fence
+  // already started the item, so this blank is fence content and the item,
+  // with anything after the fence, continues.
+  for (html, expected) in [
+    (
+      "<ul><li><pre><code></code></pre></li></ul>",
+      "- ```\n\n  ```",
+    ),
+    (
+      "<ol start=\"10\"><li><pre><code></code></pre></li></ol>",
+      "10. ```\n\n    ```",
+    ),
+    (
+      "<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>",
+      "> - ```\n>\n>   ```",
+    ),
+    (
+      "<ul><li><pre><code></code></pre>after</li><li>b</li></ul>",
+      "- ```\n\n  ```\n\n  after\n- b",
+    ),
+    (
+      "<ol start=\"10\"><li><pre><code></code></pre>after</li><li>b</li></ol>",
+      "10. ```\n\n    ```\n\n    after\n11. b",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn raw_text_aliases_use_source_closing_names() {
+  for (html, source, target, expected) in [
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<script>a</div>b</script><p>tail</p>",
+      "script",
+      "div",
+      "ab\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<style>a</div>b</style><p>tail</p>",
+      "style",
+      "div",
+      "ab\n\ntail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
+    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "script",
+      "tail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
+    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "style",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
+    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "script",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
+    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "style",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>a</style>b</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>before <!--unfinished</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>a</script>b</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>before <!--unfinished</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
+    (
+      "<script><!--<script></script>--></script><p>tail</p>",
+      "script",
+      "script",
+      "tail",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "{html} {source}:{target}"
+    );
   }
 }
