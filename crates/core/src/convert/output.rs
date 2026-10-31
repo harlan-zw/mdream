@@ -1326,6 +1326,14 @@ impl ConvertState {
     let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
     let configured_new_lines = new_line_config[1];
 
+    if matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && self.depth_map[TAG_LI as usize] > 0
+      && self.depth_map[TAG_PRE as usize] == 0
+      && !self.in_table_cell()
+    {
+      self.list_rule_pending = true;
+    }
+
     if self.drop_empty_marker_pair(tag_id, output.as_deref(), is_inline) {
       return;
     }
@@ -2357,7 +2365,8 @@ impl ConvertState {
 
     if !has_override
       && !plain_text!(self)
-      && tag_id == Some(TAG_HR)
+      && (tag_id == Some(TAG_HR)
+        || (matches!(tag_id, Some(TAG_UL | TAG_OL)) && self.depth_map[TAG_PRE as usize] == 0))
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
     {
@@ -4354,13 +4363,15 @@ impl ConvertState {
 
   fn flush_list_rule(&mut self) {
     let prefix = self.continuation_prefix();
+    self.trim_trailing_spaces();
+    let new_lines = usize::from(2_u8.saturating_sub(self.trailing_new_lines()));
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
-      self.buffer.reserve(2 + prefix.len());
-      self.buffer.push_str("\n\n");
+      self.buffer.reserve(new_lines + prefix.len());
+      self.buffer.push_str(&"\n\n"[..new_lines]);
       self.buffer.push_str(&prefix);
-      self.last_content_cache_len = 2 + prefix.len();
+      self.last_content_cache_len = new_lines + prefix.len();
     } else {
-      let output = format!("\n\n{prefix}");
+      let output = format!("{}{prefix}", &"\n\n"[..new_lines]);
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
     self.list_rule_pending = false;

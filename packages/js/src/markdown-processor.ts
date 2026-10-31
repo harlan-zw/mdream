@@ -55,6 +55,7 @@ import {
   TAG_TH,
   TAG_TR,
   TAG_U,
+  TAG_UL,
   TAG_VAR,
   TEXT_NODE,
 } from './const'
@@ -1835,9 +1836,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        const separator = `\n\n${state.listRulePending}`
+        trimTrailingSpaces(state.buffer)
+        const newLines = Math.max(0, 2 - newlineRunBefore(state.buffer, state.buffer.length))
+        const separator = `${'\n'.repeat(newLines)}${state.listRulePending}`
         state.buffer.push(separator)
         state.lastContentCache = separator
+        state.lastTextNode = undefined
         state.listRulePending = undefined
       }
       else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
@@ -2498,6 +2502,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         state.lastItemMarkerFragment = undefined
         state.lastItemMarkerOwner = undefined
       }
+    }
+    else if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL)
+      && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE]
+      && !isInsideTableCell(state) && !handler?.literalExit && !hasPluginOutput) {
+      state.listRulePending = state.listIndent
     }
 
     if (eventType === NodeEventEnter
