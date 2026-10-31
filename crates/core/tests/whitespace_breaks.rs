@@ -174,8 +174,14 @@ fn assert_every_text_chunking(html: &str, expected: &str) {
       OutputFormat::Text,
     );
     let mut out = String::new();
-    for c in html.as_bytes().chunks(chunk) {
-      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    let mut start = 0;
+    while start < html.len() {
+      let mut end = (start + chunk).min(html.len());
+      while !html.is_char_boundary(end) {
+        end += 1;
+      }
+      out.push_str(&p.process_chunk(&html[start..end]));
+      start = end;
     }
     out.push_str(&p.finish());
     assert_eq!(out, expected, "html={html} chunk={chunk}");
@@ -218,6 +224,20 @@ fn a_break_after_preformatted_text_preserves_source_newlines() {
     "<table><tr><td><pre>a&#10; </pre><span></span><br>x</td></tr></table>",
   ] {
     assert_every_text_chunking(html, "a\n\nx");
+  }
+}
+
+#[test]
+fn a_break_after_paragraph_preserves_unicode_text() {
+  for html in ["<p>€ a</p><br>b", "<p>€ a</p><span></span><br>b"] {
+    assert_every_text_chunking(html, "€ a\n\nb");
+  }
+}
+
+#[test]
+fn a_break_after_paragraph_preserves_ascii_spacing() {
+  for html in ["<p>a b</p><br>c", "<p>a b</p><span></span><br>c"] {
+    assert_every_text_chunking(html, "a b\n\nc");
   }
 }
 

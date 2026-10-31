@@ -1647,15 +1647,18 @@ impl ConvertState {
       // Preformatted source newlines stay content after </pre> closes.
       if self.last_text_node_contains_whitespace
         && !self.last_text_node_in_pre
-        && self.last_content_cache_len <= self.buffer.len()
+        && let Some((start, end)) = self.last_text_output_range
+        && end == self.buffer.len()
       {
-        let start = (self.buffer.len() - self.last_content_cache_len).max(self.trim_floor());
-        let end = start + trim_ascii_whitespace_end(&self.buffer[start..]);
-        self.last_content_cache_len = self
-          .last_content_cache_len
-          .saturating_sub(self.buffer.len() - end);
-        self.clamp_item_marker_end(end);
-        self.truncate_buffer(end);
+        let start = start.max(self.trim_floor());
+        if let Some(text) = self.buffer.get(start..end) {
+          let end = start + trim_ascii_whitespace_end(text);
+          self.last_content_cache_len = self
+            .last_content_cache_len
+            .saturating_sub(self.buffer.len() - end);
+          self.clamp_item_marker_end(end);
+          self.truncate_buffer(end);
+        }
       }
       self.trim_before_break();
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
@@ -2744,6 +2747,11 @@ impl ConvertState {
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.last_text_node_in_pre = self.depth_map[TAG_PRE as usize] > 0;
+    self.last_text_output_range = self
+      .buffer
+      .len()
+      .checked_sub(self.last_content_cache_len)
+      .map(|start| (start, self.buffer.len()));
     self.has_last_text_node = true;
     self.last_text_node_depth = depth;
     self.last_text_node_index = index;
@@ -5045,6 +5053,11 @@ impl ConvertState {
     literal: bool,
   ) {
     let output_str = output.unwrap_or("");
+    // Structural output ends the source text range, even when its cached
+    // content length remains available to other spacing rules.
+    if configured_new_lines > 0 || !output_str.is_empty() {
+      self.last_text_output_range = None;
+    }
     if is_enter {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
