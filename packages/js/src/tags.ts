@@ -944,7 +944,10 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_P]: {
     enter: ({ node, state }) => {
-      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
+      // The fence pays the opening separator. A paragraph inside the code
+      // still needs its separator after the fence has already opened.
+      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)
+        && !state.preFencePending && state.preFenceOpener !== node) {
         const lastEntry = state.buffer[enterOutputEnd(node, state) - 1]
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {

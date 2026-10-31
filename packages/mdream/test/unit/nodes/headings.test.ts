@@ -369,10 +369,32 @@ describe.each(engines)('headings $name', (engineConfig) => {
   it.each([
     ['<ul><li><h1></h1><pre><div>x</div></pre></li></ul>', '- #\n\n  ```\n  x\n  ```'],
     ['<ul><li><h1></h1><pre> <p>x</p></pre></li></ul>', '- #\n\n  ```\n  x\n  ```'],
+    ['<ul><li>p<pre><p>x</p></pre></li></ul>', '- p\n\n  ```\n  x\n  ```'],
+    ['<ul><li><a href="/w" title="W"><pre><p>x</p></pre></a></li></ul>', '- [\n\n  ```\n  x\n  ```\n\n  W](/w)'],
     ['<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>', '- a\n\n  ```\n  x\n\n  y\n  ```'],
   ])('keeps a block that opens a code block in a list item out of the code: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    const chunks: string[][] = []
+    for (let width = 1; width <= html.length; width++) {
+      const parts: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        parts.push(html.slice(offset, offset + width))
+      chunks.push(parts)
+    }
+    for (let split = 1; split < html.length; split++)
+      chunks.push([html.slice(0, split), html.slice(split)])
+    for (const parts of chunks) {
+      const input = new ReadableStream<string>({ start(controller) {
+        for (const part of parts)
+          controller.enqueue(part)
+        controller.close()
+      } })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        output += chunk
+      expect(output, JSON.stringify(parts)).toBe(expected)
+    }
   })
 
   // The fence of a `<pre>` after the heading pays the break the heading owes,

@@ -2905,16 +2905,8 @@ fn a_rule_around_a_deferred_fence_resumes_the_item() {
       "- p\n\n  ```\n  \n\n  ---\n  ```",
     ),
     (
-      "<ul><li>p<pre><p>x</p></pre></li></ul>",
-      "- p\n\n  ```\n  \n\n  x\n  ```",
-    ),
-    (
       "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
       "- p\n\n  ```\n  \n\n  x\n  ```",
-    ),
-    (
-      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
-      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)",
     ),
   ] {
     assert_eq!(convert(html), expected, "{html}");
@@ -5818,6 +5810,14 @@ fn a_block_that_opens_a_code_block_in_a_list_item_stays_out_of_the_code() {
     (
       "<ul><li>a<pre><p>x</p></pre></li></ul>",
       "- a\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><p>x</p></pre></li></ul>",
+      "- p\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+      "- [\n\n  ```\n  x\n  ```\n\n  W](/w)",
     ),
     (
       "<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>",
