@@ -9,6 +9,23 @@ import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText } from '../../src/text'
 
 describe('root conversion', () => {
+  it.each([1, 7, 64])('resumes a list rule after a deferred fence with chunk size %i', async (width) => {
+    const html = '<ul><li><pre><hr></pre>t</li></ul>'
+    const expected = '- ```\n  ***\n  ```\n\n  \n\n  t'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    const input = new ReadableStream<string>({
+      start(controller) {
+        for (let offset = 0; offset < html.length; offset += width)
+          controller.enqueue(html.slice(offset, offset + width))
+        controller.close()
+      },
+    })
+    let actual = ''
+    for await (const chunk of streamHtmlToMarkdown(input))
+      actual += chunk
+    expect(actual).toBe(expected)
+  })
+
   it.each([0, 1, 7])('supports mutable processAttributes with chunk size %i', async (chunkSize) => {
     const html = '<a>first</a><a href="/old" title="keep">second</a><a>third</a>'
     const attributes: ElementNode['attributes'][] = []

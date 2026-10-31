@@ -421,6 +421,7 @@ export function endsAtHardBreak(buffer: readonly string[]): boolean {
 export function blockOpenPrefix(
   buffer: readonly string[],
   prefix: string | undefined,
+  listIndent: number,
   end = buffer.length,
 ): string | undefined {
   switch (lastOutputChar(buffer, end)) {
@@ -442,7 +443,7 @@ export function blockOpenPrefix(
         }
         const code = buffer[fragment]!.charCodeAt(--index)
         if (code !== SPACE_CHAR) {
-          return code === NEWLINE_CHAR || listMarkerLineStart(buffer, fragment, index)
+          return code === NEWLINE_CHAR || listMarkerLineStart(buffer, fragment, index, listIndent)
             ? undefined
             : `\n\n${prefix ?? ''}`
         }
@@ -471,9 +472,11 @@ export function figcaptionOwnsBlockSpacing(node: Node, plainText: boolean): bool
 
 /**
  * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
- * line holds: optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+ * line holds: optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else. A
+ * nested marker is indented by its ancestors' items (`listIndent` columns),
+ * past the three spaces a top-level one may have.
  */
-export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: number, markerIndex: number): boolean {
+export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: number, markerIndex: number, listIndent: number): boolean {
   const marker = buffer[fragmentIndex]!.charCodeAt(markerIndex)
   const ordered = marker === 46 || marker === 41 // . )
   if (!ordered && marker !== 45 && marker !== 42 && marker !== 43) // - * +
@@ -499,7 +502,7 @@ export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: nu
     if (ordered && digits === 0)
       return false
     if (code === 32) {
-      if (++spaces > 3)
+      if (++spaces > listIndent + 3)
         return false
       continue
     }
