@@ -145,6 +145,7 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
   it('strips a whitespace-only <pre> (no fence)', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre>   \n  </pre>', { engine })).toBe('')
+    expect(htmlToMarkdown('<pre>\f\t\r\n </pre>', { engine })).toBe('')
   })
 
   it('does not leak a whitespace-only <pre> between surrounding blocks', async () => {
@@ -225,6 +226,144 @@ describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
         expect(result, `${html}: split at ${split}`).toBe(expected)
       }
     }
+  })
+})
+
+describe.each(engines)('code block language data attributes $name', (engineConfig) => {
+  it.each([
+    ['code data-language', '<pre><code data-language="TypeScript">code</code></pre>', 'TypeScript'],
+    ['code data-lang', '<pre><code data-lang="bash">code</code></pre>', 'bash'],
+    ['pre class with a code child', '<pre class="language-rust"><code>code</code></pre>', 'rust'],
+    ['pre data-language', '<pre data-language="TypeScript"><code>code</code></pre>', 'TypeScript'],
+    ['pre data-lang', '<pre data-lang="bash"><code>code</code></pre>', 'bash'],
+    ['bare pre data-language', '<pre data-language="sh">code</pre>', 'sh'],
+  ])('reads %s as the code block language', async (_, html, language) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(`\`\`\`${language}\ncode\n\`\`\``)
+  })
+
+  it.each([
+    [
+      'code class before pre data-language',
+      '<pre data-language="Rust"><code class="language-TypeScript" data-language="bash">code</code></pre>',
+      'TypeScript',
+    ],
+    [
+      'code data-language before pre class',
+      '<pre class="language-Rust"><code data-language="TypeScript">code</code></pre>',
+      'TypeScript',
+    ],
+    [
+      'code data-language before code data-lang',
+      '<pre><code data-language="TypeScript" data-lang="bash">code</code></pre>',
+      'TypeScript',
+    ],
+    [
+      'pre class before pre data-language',
+      '<pre class="language-Rust" data-language="TypeScript"><code>code</code></pre>',
+      'Rust',
+    ],
+    [
+      'pre data-language before pre data-lang',
+      '<pre data-language="TypeScript" data-lang="bash"><code>code</code></pre>',
+      'TypeScript',
+    ],
+  ])('honors %s', async (_, html, language) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(`\`\`\`${language}\ncode\n\`\`\``)
+  })
+
+  it('trims ASCII whitespace from data-language and preserves case', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<pre><code data-language="\t TypeScript \r\n">code</code></pre>'
+    expect(htmlToMarkdown(html, { engine })).toBe('```TypeScript\ncode\n```')
+  })
+
+  it.each([
+    ['a backtick', '<pre><code data-language="bad`value">code</code></pre>', ''],
+    ['an interior space', '<pre><code data-language="two words">code</code></pre>', ''],
+    [
+      'an unsafe value before a valid data-lang',
+      '<pre><code data-language="bad`value" data-lang="bash">code</code></pre>',
+      'bash',
+    ],
+    [
+      'an unsafe code value before the enclosing pre language',
+      '<pre data-language="rust"><code data-language="two words">code</code></pre>',
+      'rust',
+    ],
+  ])('rejects %s', async (_, html, language) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(`\`\`\`${language}\ncode\n\`\`\``)
+  })
+
+  it('ignores lang attributes and lang-* classes', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<pre lang="rust" class="lang-rust"><code lang="js" class="lang-typescript">code</code></pre>'
+    expect(htmlToMarkdown(html, { engine })).toBe('```\ncode\n```')
+  })
+
+  it('does not leak the previous pre language into an unlabelled code block', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<pre data-language="js">first</pre><pre><code>second</code></pre>'
+    expect(htmlToMarkdown(html, { engine })).toBe('```js\nfirst\n```\n\n```\nsecond\n```')
+  })
+
+  it('keeps data-language on inline code from opening a fenced block', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p><code data-language="js">inline</code></p>', { engine })).toBe('`inline`')
+  })
+
+  it('keeps code in a table cell as raw HTML with br line breaks', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<table><tr><td><pre data-language="sh"><code data-language="js">echo\nhi</code></pre></td><td>ok</td></tr></table>'
+    expect(htmlToMarkdown(html, { engine })).toBe(
+      '| <pre><code>echo<br>hi</code></pre> | ok |\n| --- | --- |',
+    )
+  })
+
+  it('keeps a nested pre from replacing its owning pre language', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<pre data-language="outer"><pre data-language="inner"></pre><code>code</code></pre>'
+    expect(htmlToMarkdown(html, { engine })).toBe('```outer\ncode\n```')
+  })
+
+  it('matches one-shot language resolution across stream splits', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<pre data-language="TypeScript"><code>const value = 1</code></pre>'
+    const expected = htmlToMarkdown(html, { engine })
+    expect(expected).toBe('```TypeScript\nconst value = 1\n```')
+    for (let split = 1; split < html.length; split++) {
+      const streamed = await collect(streamHtmlToMarkdown(
+        chunkedStream([html.slice(0, split), html.slice(split)]),
+        { engine },
+      ))
+      expect(streamed, `split at ${split}`).toBe(expected)
+    }
+  })
+
+  it('uses the same language resolution in HTML output', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<pre data-language="Rust"><code data-language="TypeScript">code</code></pre>'
+    expect(htmlToMarkdown(html, { engine, format: 'html' }))
+      .toBe('<pre tabindex="0"><code class="language-TypeScript">code</code></pre>')
+  })
+
+  // HTML output takes a <code> language only where Markdown lets that <code> own the fence.
+  it.each([
+    ['text before the code', '<pre data-language="rust">intro <code data-language="js">x</code></pre>', 'rust'],
+    ['an unlabelled code before a labelled one', '<pre><code>a</code><code data-language="js">b</code></pre>', ''],
+    ['a code nested in a span', '<pre data-language="rust"><span><code data-language="js">x</code></span></pre>', 'rust'],
+    ['whitespace before the code', '<pre data-language="rust">\n <code data-language="js">x</code></pre>', 'js'],
+    ['a form feed before the code', '<pre data-language="rust">\f<code data-language="js">x</code></pre>', 'js'],
+    ['an empty formatting element before the code', '<pre data-language="rust"><b></b><code data-language="js">x</code></pre>', 'js'],
+  ])('matches the Markdown fence language with %s', async (_, html, language) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const markdown = htmlToMarkdown(html, { engine })
+    expect(markdown.startsWith(`\`\`\`${language}\n`), markdown).toBe(true)
+    const rendered = htmlToMarkdown(html, { engine, format: 'html' })
+    const htmlClass = language ? ` class="language-${language}"` : ''
+    expect(rendered.startsWith(`<pre tabindex="0"><code${htmlClass}>`), rendered).toBe(true)
   })
 })
 
