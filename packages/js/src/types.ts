@@ -361,11 +361,17 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   preFencePendingDepth?: number
   preFenceLang?: string
   preFenceOwnerDepth?: number
+  /** Element whose enter opened the deferred <pre> fence. */
+  preFenceOpener?: ElementNode
+  /** Open fenced block, whose opener is the fragment at this index. */
+  codeFence?: { fragment: number }
   /** Number of default blockquotes currently buffered for line prefixing. */
   bufferedBlockquoteDepth?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
   listRuleAfterQuote?: boolean
+  /** An empty quote left the pending rule's separator in the buffer. */
+  listRuleRestored?: boolean
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }

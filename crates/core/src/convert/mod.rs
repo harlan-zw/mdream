@@ -679,6 +679,8 @@ pub struct ConvertState {
   pub depth_map: [u16; MAX_TAG_ID],
   /// Cached [`Self::in_raw_html_block`].
   raw_html_block_open: bool,
+  raw_html_needs_boundary: bool,
+  pending_raw_html_boundary: bool,
   pub depth: usize,
   has_encoded_html_entity: bool,
   last_char_was_whitespace: bool,
@@ -935,7 +937,9 @@ pub struct ConvertState {
   /// child) becomes a fenced code block, but the opening fence is deferred
   /// until the first non-whitespace child so empty/whitespace-only blocks emit
   /// nothing. `pre_fence_pending`: inside a `<pre>` whose fence is undecided.
-  /// `pre_fence_lang`: language resolved from the `<pre>`'s own class.
+  /// `pre_fence_lang`: language resolved from the `<pre>`'s own class/data
+  /// attributes; a `<code>` that owns the fence can provide a higher-priority
+  /// value.
   pre_fence_pending: bool,
   /// Depth of the `<pre>` whose fence is pending; nested `<pre>`s defer to it.
   pre_fence_pending_depth: u16,
@@ -953,6 +957,8 @@ pub struct ConvertState {
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
   list_rule_after_quote: bool,
+  /// An empty quote left the pending rule's separator in the buffer.
+  list_rule_restored: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1044,6 +1050,8 @@ impl ConvertState {
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
       raw_html_block_open: false,
+      raw_html_needs_boundary: false,
+      pending_raw_html_boundary: false,
       depth: 0,
       has_encoded_html_entity: false,
       last_char_was_whitespace: true,
@@ -1201,6 +1209,7 @@ impl ConvertState {
       empty_item_len: 0,
       list_rule_pending: false,
       list_rule_after_quote: false,
+      list_rule_restored: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,

@@ -2840,42 +2840,85 @@ fn a_rule_inside_a_list_item_keeps_its_own_block() {
 }
 
 #[test]
-fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
-  // The quote writes its own break into the item, so the rule's separator must
-  // not leave a blank `> ` (or bare indent) line above it.
-  assert_eq!(
-    convert("<ul><li><hr><blockquote>q</blockquote></li></ul>"),
-    "- ***\n\n  > q"
-  );
-  assert_eq!(
-    convert("<ol><li><hr><blockquote>q</blockquote></li></ol>"),
-    "1. ***\n\n   > q"
-  );
-  assert_eq!(
-    convert("<ul><li><ul><li><hr><blockquote>q</blockquote></li></ul></li></ul>"),
-    "-\n  - ***\n\n    > q"
-  );
-  assert_eq!(
-    convert("<ul><li>a<hr> <blockquote><p>q</p><p>r</p></blockquote></li></ul>"),
-    "- a\n\n  ---\n\n  > q\n  >\n  > r"
-  );
-  assert_eq!(
-    convert("<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote></li></ul>"),
-    "- ***\n\n  > > q"
-  );
-  assert_eq!(
-    convert("<blockquote><ul><li><hr><blockquote>q</blockquote></li></ul></blockquote>"),
-    "> - ***\n>   > q"
-  );
-  assert_eq!(
-    convert("<ul><li><blockquote>t<hr><blockquote>q</blockquote></blockquote></li></ul>"),
-    "- \n  > t\n  >\n  > ---\n  > > q"
-  );
-  // An empty quote leaves nothing behind, as it does anywhere else.
-  assert_eq!(
-    convert("<ul><li><hr><blockquote></blockquote></li></ul>"),
-    "- ***"
-  );
+fn a_rule_around_a_deferred_fence_resumes_the_item() {
+  // The rule's separator is written unconditionally, and the block reads the
+  // output as it was before the fence it opens.
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<li><a href=\"/w\" title=\"W\"><pre><hr>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<ol><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ol>",
+      "1. [\n\n   ```\n   \n\n   ---\n   ```\n\n   \n\n   W](/w)",
+    ),
+    (
+      "<ul><li><blockquote><a href=\"/w\" title=\"W\"><pre><hr></pre></a></blockquote></li></ul>",
+      "- \n  > [\n  >\n  > ```\n  >\n  >\n  > ---\n  > ```\n  >\n  >\n  >\n  > W](/w)",
+    ),
+    (
+      "<blockquote><ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul></blockquote>",
+      "> - [\n>\n>   ```\n>   \n>\n>   ---\n>   ```\n>\n>   \n>\n>   W](/w)",
+    ),
+    (
+      "<ul><li><a href=\"/w\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  ](/w)",
+    ),
+    (
+      "<ul><li><pre><hr></pre>t</li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ol><li><pre><hr></pre><b>x</b></li></ol>",
+      "1. ```\n   ***\n   ```\n\n   \n\n   **x**",
+    ),
+    (
+      "<ul><li><pre><hr></pre><hr></li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  ***",
+    ),
+    (
+      "<ul><li><pre>x<hr></pre>t</li></ul>",
+      "- ```\n  x\n\n  ---\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ul><li><pre><code><hr></code></pre>t</li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ul><li><pre><hr></pre><script>1</script></li><li>z</li></ul>",
+      "- ```\n  ***\n  ```\n\n- z",
+    ),
+    (
+      "<ul><li>a<hr><script>1</script></li><li>z</li></ul>",
+      "- a\n\n  ---\n- z",
+    ),
+    (
+      "<ul><li>p<pre><hr></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  ---\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><p>x</p></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  x\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  x\n  ```",
+    ),
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
 }
 
 // ── Paragraphs and spacing ──
@@ -3001,6 +3044,24 @@ fn pre_code_block_unchanged() {
       r#"<pre class="language-py"><figcaption><code class="language-js">x</code></figcaption></pre>"#
     ),
     "```py\nx\n```"
+  );
+}
+
+#[test]
+fn pre_code_block_reads_data_language_attributes_in_precedence_order() {
+  assert_eq!(
+    convert(
+      r#"<pre class="language-rust" data-language="ignored"><code data-language="TypeScript" data-lang="bash">let x = 1;</code></pre>"#
+    ),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-language="Rust"><code data-lang="TypeScript">let x = 1;</code></pre>"#),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-lang="Rust"><code>let x = 1;</code></pre>"#),
+    "```Rust\nlet x = 1;\n```"
   );
 }
 
@@ -6277,143 +6338,131 @@ fn builtin_blockquote_alias_uses_div_semantics() {
 }
 
 #[test]
-fn empty_quote_after_rule_restores_list_continuation() {
-  assert_eq!(
-    convert("<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>"),
-    "- ***\n\n  tail"
-  );
-  assert_eq!(
-    convert("<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>"),
-    "1. ***\n\n   tail"
-  );
-  assert_eq!(
-    convert("<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>"),
-    "-\n  - ***\n\n    tail"
-  );
-  assert_eq!(
-    convert("<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>"),
-    "> - ***\n>\n>   tail"
-  );
-  assert_eq!(
-    convert("<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>"),
-    "- ***\n\n  > q\n\n  tail"
-  );
-}
-
-#[test]
-fn quote_exit_override_output_stays_after_the_list_rule() {
-  for (exit, html, expected) in [
+fn raw_text_aliases_use_source_closing_names() {
+  for (html, source, target, expected) in [
     (
-      "END",
-      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n  END tail",
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
     ),
     (
-      "END",
-      "<ul><li><hr><blockquote></blockquote></li></ul>",
-      "- ***\n\n  END",
+      "<script>a</div>b</script><p>tail</p>",
+      "script",
+      "div",
+      "ab\n\ntail",
     ),
     (
-      "END",
-      "<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>",
-      "- ***\n\n  END\n\n  tail",
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "div",
+      "**x**\n\ntail",
     ),
     (
-      "END",
-      "<ol><li><hr><blockquote></blockquote>tail</li></ol>",
-      "1. ***\n\n   END tail",
+      "<style>a</div>b</style><p>tail</p>",
+      "style",
+      "div",
+      "ab\n\ntail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
+    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "script",
+      "tail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
+    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "style",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
+    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "script",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
+    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "style",
+      "tail",
     ),
     (
-      "END",
-      "<ul><li><ul><li><hr><blockquote></blockquote>tail</li></ul></li></ul>",
-      "-\n  - ***\n\n    END tail",
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
     ),
     (
-      "END",
-      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n  END\nEND tail",
+      "<script>a</style>b</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
     ),
     (
-      "END",
-      "<blockquote><ul><li><hr><blockquote></blockquote>tail</li></ul></blockquote>",
-      "> - ***\n>\n>   END tailEND",
-    ),
-    // A quote with content, or a rule still pending inside one, keeps its order.
-    (
-      "END",
-      "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
-      "- ***\n\n  > qEND tail",
+      "<script>before <!--unfinished</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
     ),
     (
-      "END",
-      "<ul><li><blockquote>x<hr></blockquote>tail</li></ul>",
-      "- \n  > x\n  >\n  > ---END\n\n  tail",
-    ),
-    // Without visible output the next node still flushes the rule.
-    (
-      "",
-      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n  tail",
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
     ),
     (
-      " ",
-      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n tail",
+      "<style>a</script>b</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>before <!--unfinished</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
+    (
+      "<script><!--<script></script>--></script><p>tail</p>",
+      "script",
+      "script",
+      "tail",
     ),
   ] {
-    let options = HtmlToMarkdownOptions {
+    let opts = HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
-        tag_overrides: Some(vec![(
-          "blockquote".to_string(),
-          TagOverrideConfig {
-            exit: Some(exit.to_string()),
-            ..Default::default()
-          },
-        )]),
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
         ..Default::default()
       }),
       ..Default::default()
     };
-    assert_eq!(html_to_markdown(html, options), expected, "{html}");
-  }
-}
-
-#[test]
-fn pending_rule_quote_review_boundaries() {
-  for (html, expected) in [
-    (
-      "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
-      "> - ***\n>\n>   tail",
-    ),
-    (
-      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n  tail",
-    ),
-    (
-      "<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>",
-      "> - ***\n>\n>   tail",
-    ),
-    (
-      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
-      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
-    ),
-    (
-      "<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>",
-      "- \n  > x\n  >\n  > ---\n\n  > q",
-    ),
-    (
-      "<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
-      "- ***\n\n  > q",
-    ),
-    (
-      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
-      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
-    ),
-  ] {
     assert_eq!(
-      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      html_to_markdown(html, opts.clone()),
       expected,
-      "{html}"
+      "{html} {source}:{target}"
     );
   }
 }
@@ -6712,5 +6761,186 @@ fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
         }
       }
     }
+  }
+}
+
+#[test]
+fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
+  // The quote writes its own break into the item, so the rule's separator must
+  // not leave a blank `> ` (or bare indent) line above it.
+  assert_eq!(
+    convert("<ul><li><hr><blockquote>q</blockquote></li></ul>"),
+    "- ***\n\n  > q"
+  );
+  assert_eq!(
+    convert("<ol><li><hr><blockquote>q</blockquote></li></ol>"),
+    "1. ***\n\n   > q"
+  );
+  assert_eq!(
+    convert("<ul><li><ul><li><hr><blockquote>q</blockquote></li></ul></li></ul>"),
+    "-\n  - ***\n\n    > q"
+  );
+  assert_eq!(
+    convert("<ul><li>a<hr> <blockquote><p>q</p><p>r</p></blockquote></li></ul>"),
+    "- a\n\n  ---\n\n  > q\n  >\n  > r"
+  );
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote></li></ul>"),
+    "- ***\n\n  > > q"
+  );
+  assert_eq!(
+    convert("<blockquote><ul><li><hr><blockquote>q</blockquote></li></ul></blockquote>"),
+    "> - ***\n>   > q"
+  );
+  assert_eq!(
+    convert("<ul><li><blockquote>t<hr><blockquote>q</blockquote></blockquote></li></ul>"),
+    "- \n  > t\n  >\n  > ---\n  > > q"
+  );
+  // An empty quote leaves nothing behind, as it does anywhere else.
+  assert_eq!(
+    convert("<ul><li><hr><blockquote></blockquote></li></ul>"),
+    "- ***"
+  );
+}
+
+#[test]
+fn empty_quote_after_rule_restores_list_continuation() {
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>"),
+    "- ***\n\n  tail"
+  );
+  assert_eq!(
+    convert("<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>"),
+    "1. ***\n\n   tail"
+  );
+  assert_eq!(
+    convert("<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>"),
+    "-\n  - ***\n\n    tail"
+  );
+  assert_eq!(
+    convert("<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>"),
+    "> - ***\n>\n>   tail"
+  );
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>"),
+    "- ***\n\n  > q\n\n  tail"
+  );
+}
+
+#[test]
+fn quote_exit_override_output_stays_after_the_list_rule() {
+  for (exit, html, expected) in [
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  END tail",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote></li></ul>",
+      "- ***\n\n  END",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>",
+      "- ***\n\n  END\n\n  tail",
+    ),
+    (
+      "END",
+      "<ol><li><hr><blockquote></blockquote>tail</li></ol>",
+      "1. ***\n\n   END tail",
+    ),
+    (
+      "END",
+      "<ul><li><ul><li><hr><blockquote></blockquote>tail</li></ul></li></ul>",
+      "-\n  - ***\n\n    END tail",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  END\nEND tail",
+    ),
+    (
+      "END",
+      "<blockquote><ul><li><hr><blockquote></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   END tailEND",
+    ),
+    // A quote with content, or a rule still pending inside one, keeps its order.
+    (
+      "END",
+      "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
+      "- ***\n\n  > qEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><blockquote>x<hr></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---END\n\n  tail",
+    ),
+    // Without visible output the next node still flushes the rule.
+    (
+      "",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  tail",
+    ),
+    (
+      " ",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n tail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "blockquote".to_string(),
+          TagOverrideConfig {
+            exit: Some(exit.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options), expected, "{html}");
+  }
+}
+
+#[test]
+fn pending_rule_quote_review_boundaries() {
+  for (html, expected) in [
+    (
+      "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   tail",
+    ),
+    (
+      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  tail",
+    ),
+    (
+      "<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   tail",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q",
+    ),
+    (
+      "<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+      "- ***\n\n  > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
   }
 }
