@@ -18,6 +18,21 @@ const fn is_unsafe_fence_info_byte(byte: u8) -> bool {
   byte < 0x20 || matches!(byte, 0x7F | b'`' | b'~' | b'"' | b'\'' | b'<' | b'>' | b'&')
 }
 
+/// A data attribute represents one language token, unlike a class list that
+/// has already been split into tokens. Trim its HTML whitespace and reject an
+/// interior space as well as bytes unsafe in a fence info string.
+fn get_language_from_data_attribute(value: Option<&str>) -> Option<&str> {
+  let value = value?.trim_ascii();
+  if value.is_empty()
+    || value
+      .bytes()
+      .any(|byte| byte == SPACE_CHAR || is_unsafe_fence_info_byte(byte))
+  {
+    return None;
+  }
+  Some(value)
+}
+
 /// Buffer size at which a streaming flush starts quoting completed blockquote
 /// lines, so a long quote releases instead of growing with the document.
 const STREAMING_FLUSH_THRESHOLD: usize = 8 * 1024;
@@ -999,7 +1014,7 @@ impl ConvertState {
   /// Override keyed by built-in tag id, via the precomputed table. `idx` is
   /// `None` only when the key list was too long to index, so every lookup scans.
   #[inline]
-  fn override_by_id<'a>(
+  pub(super) fn override_by_id<'a>(
     ovs: Option<&'a Vec<(String, TagOverrideConfig)>>,
     idx: Option<&[u8; MAX_TAG_ID]>,
     id: u8,
@@ -1373,9 +1388,7 @@ impl ConvertState {
       && !self.pre_fence_pending
       && !self.in_table_cell()
     {
-      let lang =
-        Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
-          .to_string();
+      let lang = Self::get_language_from_attributes(&self.stack[stack_len - 1]).to_string();
       self.pre_fence_pending = true;
       self.pre_fence_pending_depth = self.depth_map[TAG_PRE as usize];
       self.pre_fence_lang = lang;
@@ -1504,9 +1517,10 @@ impl ConvertState {
         && (!tag_id.is_some_and(suppresses_formatting_in_pre) || enter_is_literal)
       {
         if enter_is_literal && code_owns_fence {
-          self.pre_fence_lang =
-            Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
-              .to_string();
+          let language = Self::get_language_from_attributes(&self.stack[stack_len - 1]);
+          if !language.is_empty() {
+            self.pre_fence_lang = language.to_string();
+          }
         }
         self.flush_pre_fence();
         if tag_id == Some(TAG_CODE) && !enter_is_literal {
@@ -1792,9 +1806,12 @@ impl ConvertState {
         && self.buffer.ends_with(emitted)
       {
         let output_start = self.buffer.len() - emitted.len();
-        let language =
-          Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
-            .to_string();
+        let code_language = Self::get_language_from_attributes(&self.stack[stack_len - 1]);
+        let language = if code_language.is_empty() {
+          self.pre_fence_lang.clone()
+        } else {
+          code_language.to_string()
+        };
         self.start_code_fence(
           output_start,
           self.buffer.len(),
@@ -2483,8 +2500,12 @@ impl ConvertState {
         self.has_last_text_node = false;
         self.pre_fence_owner_depth = 0;
       }
-      if self.pre_fence_pending_depth == self.depth_map[TAG_PRE as usize] {
+      let closes_pending_pre = self.pre_fence_pending_depth == self.depth_map[TAG_PRE as usize];
+      if closes_pending_pre {
         self.pre_fence_pending = false;
+      }
+      if closes_pending_pre || closes_own_pre_fence {
+        self.pre_fence_lang.clear();
       }
     }
     if tag_id == Some(TAG_A) && self.link_caption_break_snapshot_active {
@@ -2851,12 +2872,7 @@ impl ConvertState {
     }
 
     // Open a deferred <pre> fence before its first non-whitespace text.
-    if self.pre_fence_pending
-      && text
-        .as_bytes()
-        .iter()
-        .any(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r')
-    {
+    if self.pre_fence_pending && !text.trim_ascii().is_empty() {
       self.flush_pre_fence();
     }
     // Still pending means this <pre> has only seen whitespace so far; drop it
@@ -4537,7 +4553,12 @@ impl ConvertState {
           if self.pre_fence_owner_depth != 0 {
             return None;
           }
-          let lang = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
+          let code_language = Self::get_language_from_attributes(node);
+          let lang = if code_language.is_empty() {
+            self.pre_fence_lang.as_str()
+          } else {
+            code_language
+          };
           let li_depth = self.depth_map[TAG_LI as usize] as usize;
           if li_depth > 0 {
             let indent = self.list_indent.as_str();
@@ -5427,6 +5448,22 @@ impl ConvertState {
       }
     }
     ""
+  }
+
+  /// Resolve language metadata on a `<code>` or `<pre>` in source order. Not
+  /// inlined: it has several call sites and only runs for `<pre>` and `<code>`.
+  #[inline(never)]
+  pub(crate) fn get_language_from_attributes(node: &ElementNode) -> &str {
+    let class_language = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
+    if !class_language.is_empty() {
+      return class_language;
+    }
+    if let Some(language) =
+      get_language_from_data_attribute(node.attributes.get_bit(ATTR_DATA_LANGUAGE))
+    {
+      return language;
+    }
+    get_language_from_data_attribute(node.attributes.get_bit(ATTR_DATA_LANG)).unwrap_or("")
   }
 
   /// The `| ` that opens a top-level row, preceded by whatever line break puts

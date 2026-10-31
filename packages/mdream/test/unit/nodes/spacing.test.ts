@@ -22,7 +22,7 @@ describe.each(engines)('spacing $name', (engineConfig) => {
 </span></span><span class="line" line="4"><span class="sWuyu"># bun --bun run dev -o
 </span></span></code><!--]--></pre></div>`
     const markdown = htmlToMarkdown(html, { engine })
-    expect(markdown).toBe('```\nbun run dev -o\n\n# To use the Bun runtime during development\n# bun --bun run dev -o\n```')
+    expect(markdown).toBe('```bash\nbun run dev -o\n\n# To use the Bun runtime during development\n# bun --bun run dev -o\n```')
   })
 
   it('comments between', async () => {

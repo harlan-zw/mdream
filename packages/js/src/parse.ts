@@ -1,4 +1,4 @@
-import type { ElementNode, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
+import type { ElementNode, EngineOptions, Node, NodeEvent, TagHandler, TextNode, TransformPlugin } from './types'
 import {
   ELEMENT_NODE,
   isInsideRawHtmlBlock,
@@ -67,7 +67,42 @@ import {
   TEXT_NODE,
 } from './const'
 import { parserTagHandlers } from './parser-tags'
+import { resolveUrl } from './url'
 import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+
+// The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
+const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
+
+// Keep rich element nodes to the same practical depth as browsers. One exact
+// flattened root preserves balanced recovery beyond it without allowing
+// untrusted nesting to grow memory forever.
+const MAX_ELEMENT_DEPTH = 512
+
+// The first `<base href>` replaces `origin` when it resolves to an `http(s)://host`
+// URL; anything else is ignored. A <base> inside a link is ignored too: the
+// link's open and close must resolve alike.
+function captureBaseHref(state: ParseState, href: string | undefined): void {
+  const target = state.urlBaseTarget
+  // At MAX_ELEMENT_DEPTH the element is flattened, and so is everything below it.
+  if (
+    !target
+    || href === undefined
+    || state.depthMap[TAG_A]
+    || state.depthMap[TAG_TEMPLATE]
+    || state.depth >= MAX_ELEMENT_DEPTH
+  ) {
+    return
+  }
+  state.baseHrefSeen = true
+  // Strip leading and trailing C0 controls and space, as the URL spec does.
+  let start = 0
+  let end = href.length
+  while (start < end && href.charCodeAt(start) <= 0x20) start++
+  while (end > start && href.charCodeAt(end - 1) <= 0x20) end--
+  const base = resolveUrl(href.slice(start, end), target.options.origin)
+  if (HTTP_BASE_RE.test(base))
+    target.options = { ...target.options, origin: base }
+}
 
 // A tag outside the dictionary with no override renders only its text, inline
 // with zero spacing, as in the Rust engine: `<x>X</x><y>Y</y>` is `XY`.
@@ -121,11 +156,6 @@ const SCRIPT_DATA_DOUBLE_ESCAPED_DASH_DASH = 6
 const SCRIPT_SEQUENCE_NO_MATCH = -1
 const SCRIPT_SEQUENCE_INCOMPLETE = -2
 const SCRIPT_SCAN_COMPLETE = -1
-
-// Keep rich element nodes to the same practical depth as browsers. One exact
-// flattened root preserves balanced recovery beyond it without allowing
-// untrusted nesting to grow memory forever.
-const MAX_ELEMENT_DEPTH = 512
 
 // Tags that are valid inside <head>. Per the HTML parser's "in head" insertion
 // mode, any start tag NOT in this set implies the end of <head> and the start of
@@ -632,6 +662,10 @@ export interface ParseState {
   tagOverrideHandlers?: Map<string, TagHandler>
   /** Whether emitted text should skip Markdown-only escaping */
   plainText?: boolean
+  /** Output state whose `options.origin` the first usable `<base href>` replaces. */
+  urlBaseTarget?: { options: EngineOptions }
+  /** Only the first `<base href>` counts, even when it is not usable. */
+  baseHrefSeen?: boolean
   /**
    * Parsed (whitespace-collapsed) form of the raw run the last parse returned.
    * At end of input it is committed instead of the raw run, so trailing text
@@ -853,6 +887,40 @@ export function parseHtml(html: string, options: ParseOptions = {}): ParseResult
 }
 
 /**
+ * Stream-owned opt-in: commit only an ordinary ASCII prose prefix. Public
+ * parser calls keep the complete text-node event contract by never calling it.
+ */
+export function commitPlainTextPrefix(
+  remainingHtml: string,
+  state: ParseState,
+  onEvent: (event: NodeEvent) => void,
+): string {
+  const text = state.trailingText
+  if (!state.textBufferContainsWhitespace || remainingHtml.length < 65536 || !text || text.length < 65536
+    || (state.currentNode?.tagId !== TAG_P && state.currentNode?.tagId !== TAG_LI)
+    || state.hasEncodedHtmlEntity || state.flattenedTagName
+    || state.depthMap[TAG_PRE] || state.depthMap[TAG_CODE]
+    || state.depthMap[TAG_TABLE] || isInsideRawHtmlBlock(state.depthMap)) {
+    return remainingHtml
+  }
+  const boundary = text.lastIndexOf(' ') + 1
+  if (!boundary)
+    return remainingHtml
+  for (let offset = 0; offset < remainingHtml.length; offset++) {
+    const code = remainingHtml.charCodeAt(offset)
+    if (code !== SPACE_CHAR && !isAsciiAlpha(code) && code !== 44 /* comma */)
+      return remainingHtml
+  }
+  const suffix = text.substring(boundary)
+  processTextBuffer(text.substring(0, boundary), state, onEvent)
+  state.trailingText = suffix
+  state.textBufferContainsWhitespace = false
+  state.textBufferContainsNonWhitespace = suffix.length > 0
+  state.lastCharWasWhitespace = true
+  return suffix
+}
+
+/**
  * Streaming HTML parser - calls onEvent for each DOM event
  */
 export function parseHtmlStream(
@@ -994,6 +1062,16 @@ function parseHtmlInternal(
         textBuffer += htmlChunk[i++]
         continue
       }
+    }
+
+    // Raw-text handlers only recognize their own end tag. In particular, a
+    // declaration opener must not hide that end tag inside a comment scan.
+    // Native script data has already been consumed by its dedicated scanner.
+    if (state.currentNode?.tagHandler?.isNonNesting && nextCharCode !== SLASH_CHAR) {
+      state.textBufferContainsNonWhitespace = true
+      state.lastCharWasWhitespace = false
+      textBuffer += htmlChunk[i++]
+      continue
     }
 
     // COMMENT, DOCTYPE or CDATA
@@ -1156,13 +1234,6 @@ function parseHtmlInternal(
       const mappedTagId = TagIdMap[tagName]
       const tagId = effectiveTagId(tagName, typeof mappedTagId === 'number' ? mappedTagId : -1, state)
       i2 = tagNameEnd
-
-      // Inside a non-nesting element (script/style/title/textarea) no opening
-      // tag is a real element; a nested `<script>` is literal text (issue #93).
-      if (state.currentNode?.tagHandler?.isNonNesting) {
-        textBuffer += htmlChunk[i++]
-        continue
-      }
 
       if (!tagName) {
         // `<` followed by whitespace or `>` is not a tag: treat as literal text
@@ -1774,6 +1845,7 @@ function processOpeningTag(
   selfClosing: boolean
   skip?: boolean
 } {
+  const isBase = tagId === TAG_BASE
   tagId = effectiveTagId(tagName, tagId, state)
 
   // Check if current element needs closing
@@ -1937,6 +2009,11 @@ function processOpeningTag(
       skip: true,
     }
   }
+
+  // Captured before filtering, so an excluded <head> still sets the base.
+  // After the opaque-overflow return, so a base inside a flattened subtree is ignored.
+  if (isBase && !state.baseHrefSeen)
+    captureBaseHref(state, result.attributes.href)
 
   if (!result.selfClosing && state.depth >= MAX_ELEMENT_DEPTH) {
     state.flattenedTagName = tagName
