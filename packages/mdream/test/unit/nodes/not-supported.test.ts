@@ -1,6 +1,41 @@
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
+const RAW_TEXT_ALIAS_CASES: [string, string, string, string][] = [
+  ['<script><b>x</b></script><p>tail</p>', 'script', 'div', '**x**\n\ntail'],
+  ['<script>a</div>b</script><p>tail</p>', 'script', 'div', 'ab\n\ntail'],
+  ['<style><b>x</b></style><p>tail</p>', 'style', 'div', '**x**\n\ntail'],
+  ['<style>a</div>b</style><p>tail</p>', 'style', 'div', 'ab\n\ntail'],
+  ['<x><b>x</b></x><p>tail</p>', 'x', 'script', 'tail'],
+  ['<x>a</script>b</x><p>tail</p>', 'x', 'script', 'tail'],
+  ['<x>before <!--unfinished</x><p>tail</p>', 'x', 'script', 'tail'],
+  ['<x><b>x</b></x><p>tail</p>', 'x', 'style', 'tail'],
+  ['<x>a</style>b</x><p>tail</p>', 'x', 'style', 'tail'],
+  ['<x>before <!--unfinished</x><p>tail</p>', 'x', 'style', 'tail'],
+  ['<div><b>x</b></div><p>tail</p>', 'div', 'script', 'tail'],
+  ['<div>a</script>b</div><p>tail</p>', 'div', 'script', 'tail'],
+  ['<div>before <!--unfinished</div><p>tail</p>', 'div', 'script', 'tail'],
+  ['<div><b>x</b></div><p>tail</p>', 'div', 'style', 'tail'],
+  ['<div>a</style>b</div><p>tail</p>', 'div', 'style', 'tail'],
+  ['<div>before <!--unfinished</div><p>tail</p>', 'div', 'style', 'tail'],
+  ['<script><b>x</b></script><p>tail</p>', 'script', 'style', 'tail'],
+  ['<script>a</style>b</script><p>tail</p>', 'script', 'style', 'tail'],
+  ['<script>before <!--unfinished</script><p>tail</p>', 'script', 'style', 'tail'],
+  ['<style><b>x</b></style><p>tail</p>', 'style', 'script', 'tail'],
+  ['<style>a</script>b</style><p>tail</p>', 'style', 'script', 'tail'],
+  ['<style>before <!--unfinished</style><p>tail</p>', 'style', 'script', 'tail'],
+  ['<script><b>x</b></script><p>tail</p>', 'script', 'textarea', '\\<b>x\\</b>\n\ntail'],
+  ['<style><b>x</b></style><p>tail</p>', 'style', 'textarea', '\\<b>x\\</b>\n\ntail'],
+  ['<X>hidden</X><p>tail</p>', 'x', 'script', 'tail'],
+  ['<script><!--<script></script>--></script><p>tail</p>', 'script', 'script', 'tail'],
+]
+
+describe.each(engines)('raw-text aliases $name', ({ engine }) => {
+  it.each(RAW_TEXT_ALIAS_CASES)('uses the target handler and source closing name: %s', (html, source, target, expected) => {
+    expect(engine.htmlToMarkdown(html, { plugins: { tagOverrides: { [source]: target } } })).toBe(expected)
+  })
+})
+
 describe.each(engines)('not supported $name', (engineConfig) => {
   it('inner forms', async () => {
     const engine = await resolveEngine(engineConfig.engine)

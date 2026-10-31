@@ -12,6 +12,9 @@ pub(super) enum HtmlFrame {
   Pre {
     depth: usize,
     language: String,
+    /// Mirrors the Markdown fence owner: a `<code>` can still supply the
+    /// language until text or another element opens the `<pre>`'s own fence.
+    language_pending: bool,
     output: String,
   },
 }
@@ -129,6 +132,14 @@ impl ConvertState {
 
   #[cfg(feature = "html")]
   fn push_html_text(&mut self, value: &str) {
+    if let Some(HtmlFrame::Pre {
+      language_pending, ..
+    }) = self.html_frames.last_mut()
+      && *language_pending
+      && !value.trim_ascii().is_empty()
+    {
+      *language_pending = false;
+    }
     for frame in self.html_frames.iter_mut().rev() {
       if let HtmlFrame::Heading { text, .. } = frame {
         text.push_str(value);
@@ -190,7 +201,7 @@ impl ConvertState {
         }
       }
       TAG_CODE => {
-        let language = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
+        let language = Self::get_language_from_attributes(node);
         if !language.is_empty() {
           output.push_str(" class=\"language-");
           push_escaped(&mut output, language, true);
@@ -240,12 +251,26 @@ impl ConvertState {
     };
     let tag_id = node.tag_id;
     if let Some(HtmlFrame::Pre {
-      language, output, ..
+      depth,
+      language,
+      language_pending,
+      output,
     }) = self.html_frames.last_mut()
     {
-      if tag_id == Some(TAG_CODE) && language.is_empty() {
-        *language = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS)).to_string();
-      } else if tag_id == Some(TAG_BR) {
+      if *language_pending
+        && tag_id != Some(TAG_PRE)
+        && !tag_id.is_some_and(suppresses_formatting_in_pre)
+      {
+        *language_pending = false;
+        let stack_len = self.stack.len();
+        if code_owns_pending_pre_fence(&self.stack) && self.stack[stack_len - 2].depth == *depth {
+          let code_language = Self::get_language_from_attributes(node);
+          if !code_language.is_empty() {
+            *language = code_language.to_string();
+          }
+        }
+      }
+      if tag_id == Some(TAG_BR) {
         output.push('\n');
       }
       return;
@@ -262,7 +287,8 @@ impl ConvertState {
     if tag_id == Some(TAG_PRE) {
       self.html_frames.push(HtmlFrame::Pre {
         depth: node.depth,
-        language: Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS)).to_string(),
+        language: Self::get_language_from_attributes(node).to_string(),
+        language_pending: true,
         output: String::new(),
       });
       return;
