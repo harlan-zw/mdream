@@ -237,6 +237,33 @@ fn assert_text_stream_matches_every_split(html: &str, expected: &str) {
 }
 
 #[test]
+fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
+  for html in [
+    "<ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul>",
+    "<li><a href=\"/w\" title=\"W\"><pre><hr>",
+    "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><hr></pre></a></li></ul>",
+    "<ol><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ol>",
+    "<ul><li><blockquote><a href=\"/w\" title=\"W\"><pre><hr></pre></a></blockquote></li></ul>",
+    "<blockquote><ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul></blockquote>",
+    "<ul><li><a href=\"/w\"><pre><hr></pre></a></li></ul>",
+    "<ul><li><pre><hr></pre>t</li></ul>",
+    "<ol><li><pre><hr></pre><b>x</b></li></ol>",
+    "<ul><li><pre><hr></pre><hr></li></ul>",
+    "<ul><li><pre>x<hr></pre>t</li></ul>",
+    "<ul><li><pre><code><hr></code></pre>t</li></ul>",
+    "<ul><li><pre><hr></pre><script>1</script></li><li>z</li></ul>",
+    "<ul><li>a<hr><script>1</script></li><li>z</li></ul>",
+    "<ul><li>p<pre><hr></pre></li></ul>",
+    "<ul><li>p<pre><p>x</p></pre></li></ul>",
+    "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
+    "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HtmlToMarkdownOptions::default());
 }
@@ -3319,6 +3346,331 @@ fn builtin_blockquote_alias_streams_as_div() {
 }
 
 #[test]
+fn raw_text_aliases_use_source_closing_names() {
+  for (html, source, target, expected) in [
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<script>a</div>b</script><p>tail</p>",
+      "script",
+      "div",
+      "ab\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<style>a</div>b</style><p>tail</p>",
+      "style",
+      "div",
+      "ab\n\ntail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
+    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "script",
+      "tail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
+    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "style",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
+    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "script",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
+    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "style",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>a</style>b</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>before <!--unfinished</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>a</script>b</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>before <!--unfinished</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
+    (
+      "<script><!--<script></script>--></script><p>tail</p>",
+      "script",
+      "script",
+      "tail",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "{html} {source}:{target}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn scout9_wrap_setext_boundary_streaming() {
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
+    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
+    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
+    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
+    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
+    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
+    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+  ] {
+    let opts = HtmlToMarkdownOptions::default().with_wrap_width(10);
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn scout9_excluded_list_spacing_streaming() {
+  for (html, expected) in [
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><style>hidden</style><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>",
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><template>hidden</template><li>b</li></ul>",
+      "- a\n- b",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn scout9_excluded_list_spacing_options_streaming() {
+  let cases = [
+    (
+      "<ul><li>a</li><x-text>visible</x-text><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "x-text".to_string(),
+          TagOverrideConfig {
+            alias_tag_id: mdream::get_tag_id("em"),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a*visible*\n- b",
+    ),
+    (
+      "<ul><li>a</li><div class=hide>hidden</div><li>b</li></ul>",
+      PluginConfig {
+        filter: Some(FilterConfig {
+          exclude: Some(vec![".hide".to_string()]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+      "- a\n- b",
+    ),
+    (
+      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
+      PluginConfig {
+        tag_overrides: Some(vec![(
+          "script".to_string(),
+          TagOverrideConfig {
+            spacing: Some([2, 2]),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      },
+      "- a\n\n- b",
+    ),
+  ];
+  for (html, plugins, expected) in cases {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn link_trailing_spaces_match_every_partition() {
+  for html in [
+    r#"<a href="x"><ul><li></li></ul></a>"#,
+    r#"<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>"#,
+    r#"<a href="x"><ul><li></li><li></li></ul></a>"#,
+    r#"<a href="x"><ol start="10"><li></li></ol></a>"#,
+    r#"<a href="x"><ul><li><ul><li></li></ul></li></ul></a>"#,
+    r#"<a href="x"><ul><li>one</li><li>two</li></ul></a>"#,
+    r#"<a href="x">before<ul><li></li></ul>after</a>"#,
+    r#"<a href="x">text <span></span></a>tail"#,
+    r#"<a href="x" title="Title"><ul><li></li></ul></a>tail"#,
+    r#"<a href="x"><ul><li></li></ul></a><em>tail</em>"#,
+    r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+    r#"<a href="x" title="text">text <span></span></a>"#,
+    r#"<a href="x" title="Title">text <span></span></a>"#,
+    r#"<a href="x"> </a>tail"#,
+    r#"<code><a href="x"><ul><li></li></ul></a></code>"#,
+    r#"<a href="x"><ul><li><code>a </code></li></ul></a>"#,
+    r#"<details><a href="x"><ul><li></li></ul></a></details>"#,
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn paragraph_after_empty_nested_quote() {
+  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "- x\n\n  - \n  \n\n  y"
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
+
+#[test]
+fn builtin_aliases_preserve_raw_source_boundaries_streaming() {
+  for (html, source, target, expected) in [
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "script",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "style",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "textarea",
+      "x\n\ntail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{source}:{target}"
+    );
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
 fn scout9_list_tail_quote_spacing_streaming() {
   for (html, expected) in [
     (
@@ -3585,198 +3937,5 @@ fn block_on_a_nested_pending_marker_streams_like_one_shot() {
         assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
       }
     }
-  }
-}
-
-#[test]
-fn scout9_wrap_setext_boundary_streaming() {
-  for (html, expected) in [
-    ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
-    ("<p>aaaaaaaaaa ==</p>", "aaaaaaaaaa =="),
-    ("<p>aaaaaaaaaa -</p>", "aaaaaaaaaa -"),
-    ("<p>aaaaaaaaaa ---</p>", "aaaaaaaaaa ---"),
-    ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
-    ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
-    ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
-  ] {
-    let opts = HtmlToMarkdownOptions::default().with_wrap_width(10);
-    assert_eq!(
-      html_to_markdown(html, opts.clone()),
-      expected,
-      "html={html}"
-    );
-    assert_stream_matches(html, opts.clone());
-    assert_stream_matches_every_split(html, opts);
-  }
-}
-
-#[test]
-fn scout9_excluded_list_spacing_streaming() {
-  for (html, expected) in [
-    (
-      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
-      "- a\n- b",
-    ),
-    (
-      "<ul><li>a</li><style>hidden</style><li>b</li></ul>",
-      "- a\n- b",
-    ),
-    (
-      "<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>",
-      "- a\n- b",
-    ),
-    (
-      "<ul><li>a</li><template>hidden</template><li>b</li></ul>",
-      "- a\n- b",
-    ),
-  ] {
-    let opts = HtmlToMarkdownOptions::default();
-    assert_eq!(
-      html_to_markdown(html, opts.clone()),
-      expected,
-      "html={html}"
-    );
-    assert_stream_matches(html, opts.clone());
-    assert_stream_matches_every_split(html, opts);
-  }
-}
-
-#[test]
-fn scout9_excluded_list_spacing_options_streaming() {
-  let cases = [
-    (
-      "<ul><li>a</li><x-text>visible</x-text><li>b</li></ul>",
-      PluginConfig {
-        tag_overrides: Some(vec![(
-          "x-text".to_string(),
-          TagOverrideConfig {
-            alias_tag_id: mdream::get_tag_id("em"),
-            ..Default::default()
-          },
-        )]),
-        ..Default::default()
-      },
-      "- a*visible*\n- b",
-    ),
-    (
-      "<ul><li>a</li><div class=hide>hidden</div><li>b</li></ul>",
-      PluginConfig {
-        filter: Some(FilterConfig {
-          exclude: Some(vec![".hide".to_string()]),
-          ..Default::default()
-        }),
-        ..Default::default()
-      },
-      "- a\n- b",
-    ),
-    (
-      "<ul><li>a</li><script>hidden</script><li>b</li></ul>",
-      PluginConfig {
-        tag_overrides: Some(vec![(
-          "script".to_string(),
-          TagOverrideConfig {
-            spacing: Some([2, 2]),
-            ..Default::default()
-          },
-        )]),
-        ..Default::default()
-      },
-      "- a\n\n- b",
-    ),
-  ];
-  for (html, plugins, expected) in cases {
-    let opts = HtmlToMarkdownOptions {
-      plugins: Some(plugins),
-      ..Default::default()
-    };
-    assert_eq!(
-      html_to_markdown(html, opts.clone()),
-      expected,
-      "html={html}"
-    );
-    assert_stream_matches(html, opts.clone());
-    assert_stream_matches_every_split(html, opts);
-  }
-}
-
-#[test]
-fn link_trailing_spaces_match_every_partition() {
-  for html in [
-    r#"<a href="x"><ul><li></li></ul></a>"#,
-    r#"<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>"#,
-    r#"<a href="x"><ul><li></li><li></li></ul></a>"#,
-    r#"<a href="x"><ol start="10"><li></li></ol></a>"#,
-    r#"<a href="x"><ul><li><ul><li></li></ul></li></ul></a>"#,
-    r#"<a href="x"><ul><li>one</li><li>two</li></ul></a>"#,
-    r#"<a href="x">before<ul><li></li></ul>after</a>"#,
-    r#"<a href="x">text <span></span></a>tail"#,
-    r#"<a href="x" title="Title"><ul><li></li></ul></a>tail"#,
-    r#"<a href="x"><ul><li></li></ul></a><em>tail</em>"#,
-    r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
-    r#"<a href="x" title="text">text <span></span></a>"#,
-    r#"<a href="x" title="Title">text <span></span></a>"#,
-    r#"<a href="x"> </a>tail"#,
-    r#"<code><a href="x"><ul><li></li></ul></a></code>"#,
-    r#"<a href="x"><ul><li><code>a </code></li></ul></a>"#,
-    r#"<details><a href="x"><ul><li></li></ul></a></details>"#,
-  ] {
-    assert_stream_matches(html, HtmlToMarkdownOptions::default());
-    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
-  }
-}
-
-#[test]
-fn paragraph_after_empty_nested_quote() {
-  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
-  assert_eq!(
-    html_to_markdown(html, HtmlToMarkdownOptions::default()),
-    "- x\n\n  - \n  \n\n  y"
-  );
-  assert_stream_matches(html, HtmlToMarkdownOptions::default());
-  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
-}
-
-#[test]
-fn builtin_aliases_preserve_raw_source_boundaries_streaming() {
-  for (html, source, target, expected) in [
-    (
-      "<blockquote>x</blockquote><p>tail</p>",
-      "blockquote",
-      "script",
-      "tail",
-    ),
-    (
-      "<blockquote>x</blockquote><p>tail</p>",
-      "blockquote",
-      "style",
-      "tail",
-    ),
-    (
-      "<blockquote>x</blockquote><p>tail</p>",
-      "blockquote",
-      "textarea",
-      "x\n\ntail",
-    ),
-    (
-      "<script><b>x</b></script><p>tail</p>",
-      "script",
-      "div",
-      "**x**\n\ntail",
-    ),
-  ] {
-    let options = HtmlToMarkdownOptions {
-      plugins: Some(PluginConfig {
-        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
-        ..Default::default()
-      }),
-      ..Default::default()
-    };
-    assert_eq!(
-      html_to_markdown(html, options.clone()),
-      expected,
-      "{source}:{target}"
-    );
-    assert_stream_matches(html, options.clone());
-    assert_stream_matches_every_split(html, options);
   }
 }
