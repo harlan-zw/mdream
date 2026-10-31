@@ -132,7 +132,7 @@ export interface MarkdownState {
   lastItemMarkerFragment?: number
   lastItemMarkerOwner?: ElementNode
   /** Content-column prefix deferred after a list item rule. */
-  listRulePending?: string
+  listRulePending?: string | true
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -1828,6 +1828,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (state.listRulePending !== undefined) {
+      const nestedList = state.listRulePending === true
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
         && !(node as TextNode).excludedFromMarkdown
@@ -1835,13 +1836,23 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const opensVisibleElement = node.type === ELEMENT_NODE
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
-      if (isVisibleText || opensVisibleElement) {
-        trimTrailingSpaces(state.buffer)
-        const newLines = Math.max(0, 2 - newlineRunBefore(state.buffer, state.buffer.length))
-        const separator = `${'\n'.repeat(newLines)}${state.listRulePending}`
+      if (nestedList && node.type === ELEMENT_NODE && eventType === NodeEventEnter
+        && ((node as ElementNode).tagId === TAG_UL || (node as ElementNode).tagId === TAG_OL)) {
+        state.listRulePending = undefined
+      }
+      else if (isVisibleText || opensVisibleElement) {
+        let separator: string
+        if (nestedList) {
+          trimTrailingSpaces(state.buffer)
+          const newLines = Math.max(0, 2 - newlineRunBefore(state.buffer, state.buffer.length))
+          separator = `${'\n'.repeat(newLines)}${state.listIndent}`
+          state.lastTextNode = undefined
+        }
+        else {
+          separator = `\n\n${state.listRulePending}`
+        }
         state.buffer.push(separator)
         state.lastContentCache = separator
-        state.lastTextNode = undefined
         state.listRulePending = undefined
       }
       else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
@@ -2506,7 +2517,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     else if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL)
       && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE]
       && !isInsideTableCell(state) && !handler?.literalExit && !hasPluginOutput) {
-      state.listRulePending = state.listIndent
+      state.listRulePending = true
     }
 
     if (eventType === NodeEventEnter

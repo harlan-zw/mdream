@@ -367,8 +367,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   codeFence?: { fragment: number }
   /** Number of default blockquotes currently buffered for line prefixing. */
   bufferedBlockquoteDepth?: number
-  /** Content-column prefix deferred after a list item rule. */
-  listRulePending?: string
+  /** Rule prefix, or true for a closed nested list awaiting parent content. */
+  listRulePending?: string | true
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }

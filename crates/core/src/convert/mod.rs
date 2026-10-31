@@ -215,6 +215,13 @@ enum CaptionBoundary {
   ConsumeSpace,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum ListBoundary {
+  None,
+  Rule,
+  NestedList,
+}
+
 struct CodeFenceState {
   output_start: usize,
   marker_offset: usize,
@@ -957,8 +964,8 @@ pub struct ConvertState {
   last_item_marker_end: usize,
   #[cfg(test)]
   parent_marker_scans: usize,
-  /// A list item rule waiting to see whether visible content follows it.
-  list_rule_pending: bool,
+  /// A rule or nested list waiting to see whether visible parent content follows.
+  list_rule_pending: ListBoundary,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1210,7 +1217,7 @@ impl ConvertState {
       last_item_marker_end: usize::MAX,
       #[cfg(test)]
       parent_marker_scans: 0,
-      list_rule_pending: false,
+      list_rule_pending: ListBoundary::None,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,

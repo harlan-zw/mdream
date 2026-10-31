@@ -29,7 +29,9 @@ describe('inline whitespace', () => {
     ['<ul><li><pre><ul></ul>x</pre></li></ul>', '- ```\n  x\n  ```'],
     ['<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>', '- x\n\n  - \n  \n\n  y'],
     ['<table><tr><td><ul><li><ol><li></li></ol>text</li></ul></td></tr></table>', '| <ul><li><ol><li></li></ol>text</li></ul> |\n| --- |'],
-  ])('keeps parent text after an empty nested list: %s', async (html, expected) => {
+    ['<ul><li><a href="/w" title="W"><pre><hr></pre></a></li></ul>', '- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)'],
+    ['<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>', '- [  -](x)\n  - \\# h'],
+  ])('preserves list content boundaries: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
     for (let split = 0; split <= html.length; split++)
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)

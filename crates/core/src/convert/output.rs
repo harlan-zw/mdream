@@ -1138,8 +1138,10 @@ impl ConvertState {
       self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
       return;
     }
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+    if self.list_rule_pending != ListBoundary::None
+      && !self.stack[stack_len - 1].excludes_text_nodes
+    {
+      self.flush_list_rule(self.stack[stack_len - 1].tag_id);
     }
 
     let tag_id: Option<u8>;
@@ -1331,7 +1333,7 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && !self.in_table_cell()
     {
-      self.list_rule_pending = true;
+      self.list_rule_pending = ListBoundary::NestedList;
     }
 
     if self.drop_empty_marker_pair(tag_id, output.as_deref(), is_inline) {
@@ -1381,8 +1383,10 @@ impl ConvertState {
       return;
     }
 
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+    if self.list_rule_pending != ListBoundary::None
+      && !self.stack[stack_len - 1].excludes_text_nodes
+    {
+      self.flush_list_rule(self.stack[stack_len - 1].tag_id);
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -2165,7 +2169,7 @@ impl ConvertState {
 
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
-      self.list_rule_pending = false;
+      self.list_rule_pending = ListBoundary::None;
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
     // Only the <pre> owning the open fence may close it; a nested one closing
@@ -2370,7 +2374,11 @@ impl ConvertState {
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
     {
-      self.list_rule_pending = true;
+      self.list_rule_pending = if tag_id == Some(TAG_HR) {
+        ListBoundary::Rule
+      } else {
+        ListBoundary::NestedList
+      };
     }
 
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) {
@@ -2638,7 +2646,7 @@ impl ConvertState {
       && self.wrap_width == 0
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
-      && !self.list_rule_pending
+      && self.list_rule_pending == ListBoundary::None
       && !self.pending_inline_whitespace
       && !self.pending_raw_html_boundary
       && !self.pre_fence_pending
@@ -2875,11 +2883,11 @@ impl ConvertState {
       return;
     }
 
-    if self.list_rule_pending {
+    if self.list_rule_pending != ListBoundary::None {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_list_rule();
+      self.flush_list_rule(None);
     }
 
     if self.pending_inline_whitespace {
@@ -4361,10 +4369,20 @@ impl ConvertState {
     p
   }
 
-  fn flush_list_rule(&mut self) {
+  fn flush_list_rule(&mut self, enter_tag: Option<u8>) {
+    if self.list_rule_pending == ListBoundary::NestedList
+      && matches!(enter_tag, Some(TAG_UL | TAG_OL))
+    {
+      self.list_rule_pending = ListBoundary::None;
+      return;
+    }
     let prefix = self.continuation_prefix();
-    self.trim_trailing_spaces();
-    let new_lines = usize::from(2_u8.saturating_sub(self.trailing_new_lines()));
+    let new_lines = if self.list_rule_pending == ListBoundary::NestedList {
+      self.trim_trailing_spaces();
+      usize::from(2_u8.saturating_sub(self.trailing_new_lines()))
+    } else {
+      2
+    };
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
       self.buffer.reserve(new_lines + prefix.len());
       self.buffer.push_str(&"\n\n"[..new_lines]);
@@ -4374,7 +4392,7 @@ impl ConvertState {
       let output = format!("{}{prefix}", &"\n\n"[..new_lines]);
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
-    self.list_rule_pending = false;
+    self.list_rule_pending = ListBoundary::None;
   }
 
   #[cold]
