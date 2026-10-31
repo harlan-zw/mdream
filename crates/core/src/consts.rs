@@ -267,6 +267,8 @@ pub const ATTR_PROPERTY: u16 = 1 << 8;
 pub const ATTR_CONTENT: u16 = 1 << 9;
 pub const ATTR_START: u16 = 1 << 10;
 pub const ATTR_COLSPAN: u16 = 1 << 11;
+pub const ATTR_DATA_LANGUAGE: u16 = 1 << 12;
+pub const ATTR_DATA_LANG: u16 = 1 << 13;
 pub const ATTR_ALL: u16 = u16::MAX;
 
 /// Reverse of [`attr_bit`], for re-serialisation and extraction output.
@@ -285,6 +287,8 @@ pub(crate) const fn attr_name(bit: u16) -> &'static str {
     ATTR_CONTENT => "content",
     ATTR_START => "start",
     ATTR_COLSPAN => "colspan",
+    ATTR_DATA_LANGUAGE => "data-language",
+    ATTR_DATA_LANG => "data-lang",
     _ => "",
   }
 }
@@ -356,9 +360,23 @@ pub(crate) fn attr_bit(name: &[u8]) -> u16 {
         ATTR_NONE
       }
     }
+    9 => {
+      if name.eq_ignore_ascii_case(b"data-lang") {
+        ATTR_DATA_LANG
+      } else {
+        ATTR_NONE
+      }
+    }
     10 => {
       if name.eq_ignore_ascii_case(b"aria-label") {
         ATTR_ARIA_LABEL
+      } else {
+        ATTR_NONE
+      }
+    }
+    13 => {
+      if name.eq_ignore_ascii_case(b"data-language") {
+        ATTR_DATA_LANGUAGE
       } else {
         ATTR_NONE
       }
