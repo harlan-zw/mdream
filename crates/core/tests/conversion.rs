@@ -2839,6 +2839,88 @@ fn a_rule_inside_a_list_item_keeps_its_own_block() {
   );
 }
 
+#[test]
+fn a_rule_around_a_deferred_fence_resumes_the_item() {
+  // The rule's separator is written unconditionally, and the block reads the
+  // output as it was before the fence it opens.
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<li><a href=\"/w\" title=\"W\"><pre><hr>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<ol><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ol>",
+      "1. [\n\n   ```\n   \n\n   ---\n   ```\n\n   \n\n   W](/w)",
+    ),
+    (
+      "<ul><li><blockquote><a href=\"/w\" title=\"W\"><pre><hr></pre></a></blockquote></li></ul>",
+      "- \n  > [\n  >\n  > ```\n  >\n  >\n  > ---\n  > ```\n  >\n  >\n  >\n  > W](/w)",
+    ),
+    (
+      "<blockquote><ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul></blockquote>",
+      "> - [\n>\n>   ```\n>   \n>\n>   ---\n>   ```\n>\n>   \n>\n>   W](/w)",
+    ),
+    (
+      "<ul><li><a href=\"/w\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  ](/w)",
+    ),
+    (
+      "<ul><li><pre><hr></pre>t</li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ol><li><pre><hr></pre><b>x</b></li></ol>",
+      "1. ```\n   ***\n   ```\n\n   \n\n   **x**",
+    ),
+    (
+      "<ul><li><pre><hr></pre><hr></li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  ***",
+    ),
+    (
+      "<ul><li><pre>x<hr></pre>t</li></ul>",
+      "- ```\n  x\n\n  ---\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ul><li><pre><code><hr></code></pre>t</li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ul><li><pre><hr></pre><script>1</script></li><li>z</li></ul>",
+      "- ```\n  ***\n  ```\n\n- z",
+    ),
+    (
+      "<ul><li>a<hr><script>1</script></li><li>z</li></ul>",
+      "- a\n\n  ---\n- z",
+    ),
+    (
+      "<ul><li>p<pre><hr></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  ---\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><p>x</p></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  x\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  x\n  ```",
+    ),
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 // ── Paragraphs and spacing ──
 
 #[test]
@@ -2962,6 +3044,24 @@ fn pre_code_block_unchanged() {
       r#"<pre class="language-py"><figcaption><code class="language-js">x</code></figcaption></pre>"#
     ),
     "```py\nx\n```"
+  );
+}
+
+#[test]
+fn pre_code_block_reads_data_language_attributes_in_precedence_order() {
+  assert_eq!(
+    convert(
+      r#"<pre class="language-rust" data-language="ignored"><code data-language="TypeScript" data-lang="bash">let x = 1;</code></pre>"#
+    ),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-language="Rust"><code data-lang="TypeScript">let x = 1;</code></pre>"#),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-lang="Rust"><code>let x = 1;</code></pre>"#),
+    "```Rust\nlet x = 1;\n```"
   );
 }
 

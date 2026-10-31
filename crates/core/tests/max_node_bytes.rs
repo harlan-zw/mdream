@@ -892,6 +892,40 @@ fn generated_spacing_consumes_the_inline_code_span_cap() {
 }
 
 #[test]
+fn raw_html_spacing_respects_code_caps_across_contexts() {
+  assert_capped_inline_code(
+    "<code><br><details>x</details>y</code>tail",
+    10,
+    "`\n<details>`\n\ntail",
+    true,
+  );
+  assert_capped_inline_code(
+    "<ul><li><code><br><details>x</details>y</code>tail</li></ul>",
+    12,
+    "- `\n<details>x`\n\n  tail",
+    true,
+  );
+  assert_capped_inline_code(
+    "<code><br><details>x</details><blockquote>q</blockquote></code>tail",
+    10,
+    "`\n<details>`tail",
+    true,
+  );
+}
+
+#[test]
+fn raw_html_spacing_within_code_is_unchanged_when_the_cap_fits() {
+  for html in [
+    "<code><br><details>x</details>y</code>tail",
+    "<ul><li><code><br><details>x</details>y</code>tail</li></ul>",
+    "<code><br><details>x</details><blockquote>q</blockquote></code>tail",
+  ] {
+    let expected = html_to_markdown_result(html, options(0));
+    assert_capped_inline_code(html, 128, &expected.markdown, false);
+  }
+}
+
+#[test]
 fn a_growing_autolink_rewrite_can_exactly_fill_the_span_cap() {
   assert_capped_inline_code(
     "<code><span>12345678</span><a href=http://x>http://x</a></code>",
