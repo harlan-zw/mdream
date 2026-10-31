@@ -1,5 +1,5 @@
 import type { OutputPositions } from './output-positions'
-import type { HandlerContext, TagHandler } from './types'
+import type { ElementNode, HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
   isInsideRawHtmlBlock,
@@ -125,7 +125,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -142,6 +142,14 @@ function stripsEmptyLink(state: HandlerContext['state'], href: string): boolean 
   if (!(clean === true || (typeof clean === 'object' && clean.emptyLinks)))
     return false
   return isEmptyLinkHref(href)
+}
+
+/**
+ * Where the output a block reads on enter ends. The Rust engine renders an
+ * element before the deferred `<pre>` fence it opens, so that fence doesn't count.
+ */
+function enterOutputEnd(node: ElementNode, state: HandlerContext['state']): number {
+  return state.preFenceOpener === node ? state.codeFence!.fragment : state.buffer.length
 }
 
 function serializeMarkdownTitle(title: string): string {
@@ -478,7 +486,12 @@ export const tagHandlers: Record<number, TagHandler> = {
         return MARKDOWN_HORIZONTAL_RULE
       if (state.depthMap?.[TAG_LI])
         state.listRulePending = prefix
-      const open = blockOpenPrefix(state.buffer, prefix, state.listIndent?.length ?? 0)
+      const end = enterOutputEnd(node, state)
+      // A <code> fence opener stops at column 0 and leaves the first line's
+      // indent to the content, which this rule is. It opens no new block.
+      if (state.codeFence?.fragment === end - 1 && state.buffer[end - 1]!.endsWith('\n'))
+        return `${prefix}${MARKDOWN_HORIZONTAL_RULE_ALT}`
+      const open = blockOpenPrefix(state.buffer, prefix, state.listIndent?.length ?? 0, end)
       // Sharing the marker's line, where `---` would make the whole line a
       // thematic break and take the item with it.
       return open === undefined
@@ -538,7 +551,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       return {
         _tag: 'PreEnter',
-        language: getLanguageFromClass(node.attributes?.class),
+        language: getLanguageFromAttributes(node.attributes),
       }
     },
     exit: ({ state }) => {
@@ -561,7 +574,8 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (state.preFenceOwnerDepth) {
           return undefined
         }
-        const language = getLanguageFromClass(node.attributes?.class)
+        const codeLanguage = getLanguageFromAttributes(node.attributes)
+        const language = codeLanguage || state.preFenceLang || ''
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent
@@ -752,10 +766,10 @@ export const tagHandlers: Record<number, TagHandler> = {
   // preceding text it swallows the table's first row, and at column 0 it takes the
   // table out of the item.
   [TAG_CAPTION]: {
-    enter: ({ state }) => {
+    enter: ({ node, state }) => {
       if ((state.depthMap?.[TAG_LI] || 0) === 0 || isInsideTableCell(state))
         return undefined
-      return blockOpenPrefix(state.buffer, state.listIndent, state.listIndent?.length ?? 0)
+      return blockOpenPrefix(state.buffer, state.listIndent, state.listIndent?.length ?? 0, enterOutputEnd(node, state))
     },
   },
   [TAG_THEAD]: {
@@ -862,9 +876,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
   },
   [TAG_P]: {
-    enter: ({ state }) => {
+    enter: ({ node, state }) => {
       if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
-        const lastEntry = state.buffer.at(-1)
+        const lastEntry = state.buffer[enterOutputEnd(node, state) - 1]
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
           return `\n\n${state.listIndent}`
