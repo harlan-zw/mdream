@@ -16,16 +16,19 @@ import {
   NodeEventEnter,
   NodeEventExit,
   TAG_A,
-  TAG_ABBR,
+  TAG_ADDRESS,
   TAG_B,
-  TAG_BDO,
   TAG_BLOCKQUOTE,
   TAG_BR,
   TAG_CITE,
   TAG_CODE,
+  TAG_DD,
   TAG_DEL,
+  TAG_DETAILS,
   TAG_DFN,
   TAG_DIV,
+  TAG_DL,
+  TAG_DT,
   TAG_EM,
   TAG_FIGCAPTION,
   TAG_H1,
@@ -43,11 +46,11 @@ import {
   TAG_Q,
   TAG_S,
   TAG_SAMP,
-  TAG_SMALL,
   TAG_SPAN,
   TAG_STRIKE,
   TAG_STRONG,
   TAG_SUB,
+  TAG_SUMMARY,
   TAG_SUP,
   TAG_TABLE,
   TAG_TD,
@@ -59,7 +62,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromClass, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -107,7 +110,8 @@ export interface MarkdownState {
    * first non-whitespace content so empty/whitespace-only blocks emit nothing.
    * `preFencePending`: inside a <pre> whose fence is not yet decided.
    * `preFencePendingDepth`: <pre> depth of that <pre>; nested ones defer to it.
-   * `preFenceLang`: language resolved from the <pre>'s own class.
+   * `preFenceLang`: language resolved from the owning <pre>'s class/data
+   * attributes; a <code> that owns the fence can provide a higher-priority value.
    */
   preFencePending?: boolean
   preFencePendingDepth?: number
@@ -133,6 +137,8 @@ export interface MarkdownState {
   listMarkers: number[]
   /** See `MdreamRuntimeState.lastItemStar`. */
   lastItemStar: boolean
+  /** Element whose enter opened the deferred <pre> fence. */
+  preFenceOpener?: ElementNode
 }
 
 interface CodeSpan {
@@ -188,20 +194,6 @@ INLINE_MARKER_TYPE[TAG_CODE] = 5 // `
 INLINE_MARKER_TYPE[TAG_SAMP] = 5 // `
 INLINE_MARKER_TYPE[TAG_VAR] = 5 // `
 INLINE_MARKER_TYPE[TAG_Q] = 6 // "
-
-// Inline tags whose Markdown delimiters are literal text inside a `<pre>`, so
-// only their content is emitted there. `<code>` and `<br>` are absent: both
-// already have `<pre>`-aware handlers.
-function suppressesFormattingInPre(tagId: number): boolean {
-  return tagId === TAG_A
-    || tagId === TAG_KBD
-    || tagId === TAG_S
-    || tagId === TAG_STRIKE
-    || tagId === TAG_FIGCAPTION
-    || (tagId >= TAG_STRONG && tagId <= TAG_INS)
-    || (tagId >= TAG_ABBR && tagId <= TAG_SMALL)
-    || (tagId >= TAG_U && tagId <= TAG_BDO)
-}
 
 /**
  * Length of the newline run ending just before fragment `index`.
@@ -885,20 +877,6 @@ function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): bo
 }
 
 /**
- * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
- * Used to decide if a <pre>'s content warrants opening a fenced code block.
- */
-function hasNonWhitespace(value: string): boolean {
-  for (let i = 0; i < value.length; i++) {
-    const c = value.charCodeAt(i)
-    if (c !== 32 && c !== 9 && c !== 10 && c !== 12 && c !== 13) {
-      return true
-    }
-  }
-  return false
-}
-
-/**
  * List marker character code opening the last visible line of `output`: a
  * bullet, or the delimiter of an ordered marker. 0 when that line opens with
  * neither. A marker ending `output` counts, as the item's text is spaced from it.
@@ -1058,6 +1036,7 @@ function finalizeCodeFence(state: MarkdownState): string | undefined {
   if (!fence)
     return
   state.codeFence = undefined
+  state.preFenceOpener = undefined
   const marker = fence.language.includes('`') ? '~' : '`'
   const markerCode = marker.charCodeAt(0)
   const content = state.buffer.slice(fence.fragment + 1).join('')
@@ -1241,6 +1220,7 @@ function consumePendingPreChild(state: MarkdownState, node: Node, eventType: num
       && !suppressesFormattingInPre(element.tagId!)) {
       beforeFlush()
       flushPreFence(state)
+      state.preFenceOpener = element
     }
     return false
   }
@@ -1270,12 +1250,15 @@ function consumeGfmAction(action: GfmAction, state: MarkdownState, lifecycle: Gf
     case 'PreExit': {
       // The parser already counted this <pre> out of the depth map.
       const depth = state.depthMap[TAG_PRE]! + 1
-      if (state.preFencePendingDepth === depth)
+      if (state.preFencePendingDepth === depth) {
         state.preFencePending = false
+        state.preFenceLang = ''
+      }
       // Only the <pre> that owns the fence closes it.
       if (state.preFenceOwnerDepth !== depth)
         return undefined
       state.preFenceOwnerDepth = 0
+      state.preFenceLang = ''
       // The fence owns the trailing code whitespace. Later boundaries must not trim it.
       state.lastTextNode = undefined
       const indent = state.listIndent
@@ -1304,10 +1287,11 @@ function commitGfmAction(
   lifecycle: GfmLifecycleState,
   outputStart: number,
   owner: ElementNode,
+  preserveSeparator = false,
 ): void {
   switch (action._tag) {
     case 'BlockquoteEnter': {
-      if (state.blockquotes.length > 0)
+      if (state.blockquotes.length > 0 && (!preserveSeparator || newlineRunBefore(state.buffer, state.buffer.length) > 2))
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
@@ -1404,6 +1388,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFenceOwnerDepth: 0,
     listMarkers: [],
     lastItemStar: false,
+    preFenceOpener: undefined,
   }
   // Marker character code of the list that last closed with items, or 0 once
   // visible output, or the close of a quote around it, ends its run. CommonMark
@@ -1426,6 +1411,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let listClosedInGap = false
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
   let inRawHtmlRegion = false
+  let rawHtmlNeedsBoundary = false
+  let pendingRawHtmlBoundary = false
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
@@ -1684,7 +1671,62 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
+  function finishRawHtmlBlock(value: string, generated = false): void {
+    if (!pendingRawHtmlBoundary || isInsideRawHtmlBlock(state.depthMap)
+      || !hasNonWhitespace(value)) {
+      return
+    }
+    pendingRawHtmlBoundary = false
+    let leadingNewlines = 0
+    if (generated) {
+      for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i)
+        if (code === 10)
+          leadingNewlines++
+        else if (code !== 32 && code !== 9 && code !== 13)
+          break
+      }
+    }
+    let newlines = leadingNewlines
+    let scanning = true
+    for (let i = state.buffer.length - 1; i >= 0 && scanning; i--) {
+      const fragment = state.buffer[i]!
+      for (let j = fragment.length - 1; j >= 0; j--) {
+        const code = fragment.charCodeAt(j)
+        if (code === 10) {
+          if (++newlines === 2)
+            return
+        }
+        else if (code !== 32 && code !== 9 && code !== 13) {
+          scanning = false
+          break
+        }
+      }
+    }
+    const separator = '\n'.repeat(Math.max(0, 2 - newlines)) + (leadingNewlines ? '' : state.listIndent)
+    state.buffer.push(separator)
+    state.lastContentCache = separator
+    state.lastTextNode = undefined
+  }
+
   function processTextNode(textNode: TextNode, lastNode: ElementNode | TextNode | undefined, lastChar: string): void {
+    if (pendingRawHtmlBoundary) {
+      finishRawHtmlBlock(textNode.value)
+      // The boundary starts this text's line, so its leading space, tab and
+      // line breaks go, including decoded ones, as in the Rust engine.
+      if (!pendingRawHtmlBoundary) {
+        const value = textNode.value
+        let start = 0
+        while (start < value.length) {
+          const code = value.charCodeAt(start)
+          if (code !== 32 && code !== 9 && code !== 10 && code !== 13)
+            break
+          start++
+        }
+        if (start !== 0)
+          textNode.value = value.slice(start)
+      }
+    }
     if (textNode.trimsAtLineStart)
       trimTextAtLineStart(textNode, state.buffer)
     if (textNode.value) {
@@ -1920,6 +1962,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (siblingListMarker !== 0 && !inGapEvent)
       return processGapEvent(event)
     const { type: eventType, node } = event
+    if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
+      && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
+      pendingRawHtmlBoundary = false
+    }
     // Update depth for plugin access
     state.depth = node.depth
 
@@ -1951,12 +1997,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
+        && !(node as TextNode).excludedFromMarkdown
         && hasNonWhitespace((node as TextNode).value)
       const opensVisibleElement = node.type === ELEMENT_NODE
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        const separator = blockOpenPrefix(state.buffer, state.listRulePending)!
+        const separator = `\n\n${state.listRulePending}`
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined
@@ -1991,8 +2038,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const literalOverride = eventType === NodeEventEnter
           ? pendingHandler?.literalEnter
           : pendingHandler?.literalExit
-        if (literalOverride && codeOwnsPendingPreFence(state, pendingElement))
-          state.preFenceLang = getLanguageFromClass(pendingElement.attributes?.class)
+        if (literalOverride && codeOwnsPendingPreFence(state, pendingElement)) {
+          const language = getLanguageFromAttributes(pendingElement.attributes)
+          if (language)
+            state.preFenceLang = language
+        }
         if (pendingElement.pluginOutput?.length || literalOverride) {
           preparePendingPreFence()
           flushPreFence(state)
@@ -2406,6 +2456,28 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       output = undefined
     }
 
+    const rawBlockTag = tagId === TAG_ADDRESS || tagId === TAG_DL || tagId === TAG_DT
+      || tagId === TAG_DD || tagId === TAG_DETAILS || tagId === TAG_SUMMARY
+    if (rawBlockTag && rawHtmlNeedsBoundary && trackRawHtmlMarkdownContext(buff, bufferScan))
+      rawHtmlNeedsBoundary = false
+    if (rawBlockTag && !isInsideTableCell(state) && !state.depthMap[TAG_PRE]
+      && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
+      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(buff, undefined) === undefined)) {
+      rawHtmlNeedsBoundary = true
+      bufferScan[0] = false
+      bufferScan[1] = buff.length
+    }
+    const endsRawHtmlBlock = rawBlockTag && eventType === NodeEventExit && !insideRawHtmlRegion
+    if (endsRawHtmlBlock) {
+      pendingRawHtmlBoundary = rawHtmlNeedsBoundary && !handler?.literalExit
+      rawHtmlNeedsBoundary = false
+    }
+    else if (rawBlockTag && eventType === NodeEventEnter) {
+      pendingRawHtmlBoundary = false
+    }
+    if (eventType === NodeEventExit && (tagId === TAG_LI || tagId === TAG_BLOCKQUOTE))
+      pendingRawHtmlBoundary = false
+
     // Handle newlines
     const newLineConfig = suppressedInPre
       ? NO_SPACING
@@ -2571,6 +2643,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       trimTrailingSpaces(buff)
     }
 
+    const rawHtmlQuoteBoundary = pendingRawHtmlBoundary && gfmAction?._tag === 'BlockquoteEnter'
+    if (rawHtmlQuoteBoundary)
+      finishRawHtmlBlock(`${output?.join('') ?? ''}>`, true)
+
+    if (pendingRawHtmlBoundary && !endsRawHtmlBlock && output) {
+      if (newLines >= 2) {
+        pendingRawHtmlBoundary = false
+      }
+      else {
+        finishRawHtmlBlock(output.join(''), true)
+      }
+    }
+
     // Add all output fragments
     let outputStart = state.buffer.length
     if (output) {
@@ -2584,7 +2669,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (gfmAction)
-      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element)
+      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, rawHtmlQuoteBoundary)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
