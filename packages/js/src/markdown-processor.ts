@@ -1144,7 +1144,7 @@ function flushPreFence(state: MarkdownState): void {
   // A blank line between the marker and the fence ends the item, leaving the block
   // a sibling of the list, so a pending marker takes no separator.
   const fence = liDepth > 0
-    ? `${blockOpenPrefix(state.buffer, state.listIndent) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
+    ? `${blockOpenPrefix(state, state.listIndent) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
   state.buffer.push(fence)
   startCodeFence(state, state.buffer.length - 1, lang, state.listIndent)
@@ -1419,7 +1419,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (spacing === CAPTION_DEFAULT_SPACING)
       spacing = DEFAULT_BLOCK_SPACING[0]
     const indent = includeListIndent ? state.listIndent : ''
-    const blockPrefix = blockOpenPrefix(state.buffer, indent, beforeFragment)
+    const blockPrefix = blockOpenPrefix(state, indent, beforeFragment)
     const trailingNewLines = newlineRunBeforePrefix(state.buffer, beforeFragment, indent)
     if (blockPrefix === undefined && trailingNewLines === 0)
       return ''
@@ -2260,7 +2260,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       rawHtmlNeedsBoundary = false
     if (rawBlockTag && !isInsideTableCell(state) && !state.depthMap[TAG_PRE]
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
-      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(buff, undefined) === undefined)) {
+      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(state, undefined) === undefined)) {
       rawHtmlNeedsBoundary = true
       bufferScan[0] = false
       bufferScan[1] = buff.length

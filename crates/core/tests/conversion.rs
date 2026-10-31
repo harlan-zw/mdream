@@ -6763,3 +6763,214 @@ fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
     }
   }
 }
+
+#[test]
+fn scout9_list_tail_quote_spacing() {
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>",
+      "-\n  - a  \n\n  > q",
+    ),
+    (
+      "<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>",
+      "1.\n   - a  \n\n   > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+#[test]
+fn hard_break_trim_preserves_an_empty_item_guard() {
+  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
+  assert_eq!(convert(html), "- x\n\n  - \n  \n\n  y");
+}
+
+#[test]
+fn heading_after_nested_hard_break_stays_in_parent_item() {
+  for (html, expected) in [
+    ("<ul><li><p>a</p><h2>h</h2></li></ul>", "- a\n\n  ## h"),
+    (
+      "<ol start=\"10\"><li><p>a</p><h2>h</h2></li></ol>",
+      "10. a\n\n    ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>",
+      "- a\n  - b  \n\n  ## h",
+    ),
+    (
+      "<ol start=\"10\"><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ol>",
+      "10. a\n    - b  \n\n    ## h",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn block_opens_on_the_first_line_of_a_quote_in_an_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote><h1>h</h1></blockquote></li></ul>",
+      "- \n  > # h",
+    ),
+    (
+      "<ol><li><blockquote><h2>h</h2></blockquote></li></ol>",
+      "1. \n   > ## h",
+    ),
+    (
+      "<ol start=\"10\"><li><blockquote><h3>h</h3></blockquote></li></ol>",
+      "10. \n    > ### h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<blockquote><h2>h</h2></blockquote></li></ul></li></ul>",
+      "- a\n  - b\n    > ## h",
+    ),
+    (
+      "<ul><li>a<ul><li><blockquote><h2>h</h2></blockquote></li></ul></li></ul>",
+      "- a\n\n  - \n    > ## h",
+    ),
+    (
+      "<ul><li>a<blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  > ## h",
+    ),
+    (
+      "<ul><li><p>a</p><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  > ## h",
+    ),
+    (
+      "<ul><li>a<br><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a  \n  \n  > ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<br></li></ul><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  - b  \n\n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><div><h2>h</h2></div></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><blockquote><h2>h</h2></blockquote></blockquote></li></ul>",
+      "- \n  > > ## h",
+    ),
+    (
+      "<ul><li><blockquote> <h2>h</h2></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><b></b><h2>h</h2></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><h2>h</h2><p>x</p></blockquote></li></ul>",
+      "- \n  > ## h\n  >\n  > x",
+    ),
+    (
+      "<ul><li><blockquote><p>x</p></blockquote></li></ul>",
+      "- \n  > x",
+    ),
+    (
+      "<ul><li><blockquote><pre>x</pre></blockquote></li></ul>",
+      "- \n  > ```\n  > x\n  > ```",
+    ),
+    (
+      "<ul><li><blockquote><hr></blockquote></li></ul>",
+      "- \n  > ---",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>y</li></ul></blockquote></li></ul>",
+      "- \n  > - y",
+    ),
+    (
+      "<ul><li><blockquote><table><tr><th>t</th></tr><tr><td>c</td></tr></table></blockquote></li></ul>",
+      "- \n  > | t |\n  > | --- |\n  > | c |",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>y<br></li></ul><h2>h</h2></blockquote></li></ul>",
+      "- \n  > - y  \n  >\n  > ## h",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn block_opens_on_a_nested_pending_marker() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ## h",
+    ),
+    (
+      "<ol><li>a<ol><li>a<ol><li><h2>h</h2></li></ol></li></ol></li></ol>",
+      "1. a\n   1. a\n      1. ## h",
+    ),
+    (
+      "<ol start=\"100\"><li>a<ul><li><h2>h</h2></li></ul></li></ol>",
+      "100. a\n     - ## h",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><h2>h</h2></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ## h",
+    ),
+    (
+      "<blockquote><ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul></blockquote>",
+      "> - a\n>   - a\n>     - ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><pre>x</pre></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ```\n      x\n      ```",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><hr></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ***",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - | t |\n      | --- |\n      | c |",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn block_leaves_the_marker_of_a_closed_nested_item() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>",
+      "- a\n\n  - \n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>",
+      "- a\n  - b\n\n    - \n\n    ## h",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>",
+      "- a\n\n  - \n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><hr></li></ul>",
+      "- a\n\n  - \n\n  ---",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>",
+      "- a\n\n  - \n\n  | t |\n  | --- |\n  | c |",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn text_after_a_closed_nested_item_stays_escaped() {
+  assert_eq!(
+    convert("<ul><li>a<ul><li></li></ul># t</li></ul>"),
+    "- a\n\n  - \\# t"
+  );
+}
