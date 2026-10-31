@@ -1644,7 +1644,23 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
-      self.trim_trailing_spaces();
+      // Preformatted source newlines stay content after </pre> closes.
+      if self.last_text_node_contains_whitespace
+        && !self.last_text_node_in_pre
+        && let Some((start, end)) = self.last_text_output_range
+        && end == self.buffer.len()
+      {
+        let start = start.max(self.trim_floor());
+        if let Some(text) = self.buffer.get(start..end) {
+          let end = start + trim_ascii_whitespace_end(text);
+          self.last_content_cache_len = self
+            .last_content_cache_len
+            .saturating_sub(self.buffer.len() - end);
+          self.clamp_item_marker_end(end);
+          self.truncate_buffer(end);
+        }
+      }
+      self.trim_before_break();
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
@@ -1725,6 +1741,14 @@ impl ConvertState {
       output.as_deref(),
       enter_is_literal,
     );
+
+    if plain_text!(self)
+      && !enter_is_literal
+      && matches!(tag_id, Some(TAG_TD | TAG_TH))
+      && output.as_deref() == Some("\t")
+    {
+      self.text_cell_start = self.buffer.len();
+    }
 
     if tag_id == Some(TAG_IMG)
       && !enter_is_literal
@@ -2510,7 +2534,13 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
-    self.write_output(false, is_inline, configured_new_lines, effective, false);
+    self.write_output(
+      false,
+      is_inline,
+      configured_new_lines,
+      effective,
+      has_override,
+    );
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
     }
@@ -2723,7 +2753,23 @@ impl ConvertState {
         }
       }
     }
+    let mut start = self.buffer.len().checked_sub(self.last_content_cache_len);
+    if contains_whitespace
+      && self.last_text_node_contains_whitespace
+      && !self.last_text_node_in_pre
+      && !plain_text!(self)
+      && self.depth_map[TAG_PRE as usize] == 0
+      && let Some((source_start, source_end)) = self.last_text_output_range
+      && Some(source_end) == start
+      && self.buffer.as_bytes().get(source_end.wrapping_sub(1)) == Some(&b'\x0B')
+      && text.bytes().all(is_whitespace)
+    {
+      start = Some(source_start);
+      self.last_content_cache_len = self.buffer.len() - source_start;
+    }
     self.last_text_node_contains_whitespace = contains_whitespace;
+    self.last_text_node_in_pre = self.depth_map[TAG_PRE as usize] > 0;
+    self.last_text_output_range = start.map(|start| (start, self.buffer.len()));
     self.has_last_text_node = true;
     self.last_text_node_depth = depth;
     self.last_text_node_index = index;
@@ -3756,6 +3802,26 @@ impl ConvertState {
       // buffer wherever a drain has already cut the front, and the reach-back
       // trim's `cache_len <= buf_len` guard then skips a retraction one-shot
       // performs, keeping block spacing an empty element wrote.
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
+      self.truncate_buffer(trimmed_len);
+    }
+  }
+
+  /// A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+  /// line feed, which ends block spacing or an earlier break and so stays. The
+  /// run is the same whatever the text's source whitespace; U+000B is content.
+  fn trim_before_break(&mut self) {
+    let floor = self.trim_floor().max(self.text_cell_start);
+    if self.buffer.len() > floor {
+      let bytes = self.buffer.as_bytes();
+      let mut trimmed_len = bytes.len();
+      while trimmed_len > floor && matches!(bytes[trimmed_len - 1], b' ' | b'\t' | b'\x0C' | b'\r')
+      {
+        trimmed_len -= 1;
+      }
       self.last_content_cache_len = self
         .last_content_cache_len
         .saturating_sub(self.buffer.len() - trimmed_len);
@@ -5005,6 +5071,11 @@ impl ConvertState {
     literal: bool,
   ) {
     let output_str = output.unwrap_or("");
+    // Structural output ends the source text range, even when its cached
+    // content length remains available to other spacing rules.
+    if configured_new_lines > 0 || !output_str.is_empty() {
+      self.last_text_output_range = None;
+    }
     if is_enter {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
@@ -5201,7 +5272,21 @@ impl ConvertState {
             // set: a trailing U+00A0 (`&nbsp;`) is meaningful content, and once
             // streaming has yielded it the truncation can't un-send its bytes,
             // so the reach-back would drop the next text's leading char.
-            let trimmed_len = trim_ascii_whitespace_end(frag);
+            let mut trimmed_len = trim_ascii_whitespace_end(frag);
+            if !is_enter
+              && is_inline
+              && !plain_text!(self)
+              && !literal
+              && matches!(output_str, "*" | "**" | "~~")
+            {
+              let bytes = frag.as_bytes();
+              while trimmed_len > 0
+                && (bytes[trimmed_len - 1].is_ascii_whitespace()
+                  || bytes[trimmed_len - 1] == b'\x0B')
+              {
+                trimmed_len -= 1;
+              }
+            }
             if start + trimmed_len < buf_len {
               self.clamp_item_marker_end(start + trimmed_len);
               self.truncate_buffer(start + trimmed_len);
@@ -5214,8 +5299,11 @@ impl ConvertState {
             }
           }
         }
-        self.last_text_node_contains_whitespace = false;
-        self.has_last_text_node = false;
+        // Transparent exits leave the source tail available to an enclosing delimiter.
+        if plain_text!(self) || is_enter || !is_inline || literal || !output_str.is_empty() {
+          self.last_text_node_contains_whitespace = false;
+          self.has_last_text_node = false;
+        }
       }
 
       if is_enter
@@ -5838,7 +5926,8 @@ mod tests {
     let html = format!("<p>x{}y</p>", "<br>&#9;".repeat(4096));
     assert_eq!(state.process_html(&html), html.len());
     let out = state.get_markdown_chunk();
-    assert!(out.starts_with("x  \n\t"), "{:.20}", out);
+    // Each later break takes the tab before it, so only the first line is fixed.
+    assert!(out.starts_with("x  \n"), "{:.20}", out);
     assert!(
       state.break_run_scanned <= html.len(),
       "read {} bytes for {} of input",

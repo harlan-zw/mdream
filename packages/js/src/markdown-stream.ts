@@ -3,6 +3,9 @@ import { TAG_PRE } from './const'
 import { isAsciiWhitespace, lineOpensRawHtmlBlock, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { isInsideHeading, trimOutputStart } from './utils'
 
+/** Held whitespace this long is no longer rejoined by every input chunk. */
+const LONG_HELD_RUN = 1024
+
 interface QuoteScan {
   owner: BlockquoteFrame
   depth: number
@@ -42,7 +45,7 @@ function flushBlockquoteLines(state: MarkdownState): boolean {
     return false
 
   const content = buffer.slice(start).join('')
-  const stableEnd = trimAsciiWhitespaceEnd(content).length
+  const stableEnd = trimAsciiWhitespaceEnd(content, true).length
   let end = content.lastIndexOf('\n', stableEnd - 1) + 1
   while (end >= 2 && content.charCodeAt(end - 2) === 10)
     end--
@@ -120,7 +123,7 @@ function prepareQuoteOutput(state: MarkdownState, bufferScan: BufferScanState, q
   for (; quoteScan.fragment < state.buffer.length; quoteScan.fragment++) {
     const fragment = state.buffer[quoteScan.fragment]!
     const lastNewline = fragment.lastIndexOf('\n')
-    const contentEnd = trimAsciiWhitespaceEnd(fragment).length
+    const contentEnd = trimAsciiWhitespaceEnd(fragment, true).length
     if (contentEnd > 0) {
       const settled = lastNewline < contentEnd
         ? lastNewline
@@ -154,6 +157,10 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
   let lastYieldedLength = 0
   let hasYieldedContent = false
   let quoteScan: QuoteScan | undefined
+  // Fragment end of a long held whitespace run, 0 when there is none, and the
+  // fragment before it, which a rewrite of the run replaces.
+  let heldRunEnd = 0
+  let heldRunLast: string | undefined
 
   // getMarkdownChunk returns before this when `holdsOutput` is set.
   function prepareDrain(final: boolean): number {
@@ -166,6 +173,24 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       quoteScan = undefined
     }
     return context.getHeldOutputFragment(final)
+  }
+
+  // Only fragments past a held run can settle it, so reading those keeps a run
+  // that grows from being rejoined and rescanned on every chunk. The bytes stay
+  // buffered, as in Rust: a later trim can still take them. Skipping a drain is
+  // the same as merging two input chunks, so a missed rewrite only delays output.
+  function extendHeldRun(heldFragment: number): boolean {
+    const buffer = state.buffer
+    const end = Math.min(heldFragment, buffer.length)
+    if (end < heldRunEnd || buffer[heldRunEnd - 1] !== heldRunLast)
+      return false
+    for (let index = heldRunEnd; index < end; index++) {
+      if (trimAsciiWhitespaceEnd(buffer[index]!, true).length !== 0)
+        return false
+    }
+    heldRunEnd = end
+    heldRunLast = buffer[end - 1]
+    return true
   }
 
   function observeStableOutput(content: string, end: number): void {
@@ -210,6 +235,12 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     const heldFragment = prepareDrain(final)
 
     const fragmentHeld = heldFragment !== Infinity
+    const inPre = state.depthMap[TAG_PRE] !== 0 && state.preFenceOwnerDepth !== 0
+    if (heldRunEnd !== 0) {
+      if (!final && (!inPre || fragmentHeld) && extendHeldRun(heldFragment))
+        return ''
+      heldRunEnd = 0
+    }
 
     // A held suffix cannot be emitted yet. Joining it on every input chunk
     // repeatedly copies large fences and quotes before their owners close.
@@ -218,8 +249,8 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     const leadingTrimmed = content.length - currentContent.length
     // Keep the cursor in buffer coordinates across the initial leading trim.
     const yieldedLength = Math.max(0, lastYieldedLength - leadingTrimmed)
-    const inPre = state.depthMap[TAG_PRE] !== 0 && state.preFenceOwnerDepth !== 0
     let stableLength = currentContent.length
+    let heldRunStart = -1
     let retainMutableFragments = false
     if (inPre && !fragmentHeld) {
       const trailingCode = currentContent.charCodeAt(stableLength - 1)
@@ -232,15 +263,15 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       }
     }
     else {
-      // The prefix ends before a mutable owner. Its trailing block spacing
-      // stays buffered even when that owner sits inside a preformatted block.
+      // U+000B stays mutable until an inline closer settles it.
       while (stableLength > 0) {
         const code = currentContent.charCodeAt(stableLength - 1)
-        if (code !== 32 && code !== 10)
+        if (!isAsciiWhitespace(code) && (final || code !== 11))
           break
         stableLength--
       }
       retainMutableFragments = stableLength < currentContent.length
+      heldRunStart = stableLength
     }
 
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
@@ -336,6 +367,12 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       bufferScan[2] = state.buffer.length
       if (bufferScan[5] === undefined)
         bufferScan[3] = state.buffer.length
+    }
+    // A heading hold can cut before the run, and the heading's exit rewrites
+    // what it held, so only whitespace past the cut can skip the next drain.
+    if (heldRunStart !== -1 && stableLength >= heldRunStart && currentContent.length - stableLength >= LONG_HELD_RUN) {
+      heldRunEnd = Math.min(context.getHeldOutputFragment(), state.buffer.length)
+      heldRunLast = state.buffer[heldRunEnd - 1]
     }
     return newContent
   }
