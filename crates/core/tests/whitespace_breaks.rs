@@ -29,6 +29,32 @@ fn md_wrapped(html: &str, width: usize) -> String {
   )
 }
 
+#[test]
+fn relocated_link_space_is_a_wrap_boundary() {
+  for (html, expected) in [
+    (
+      r#"<a href="x">text <span></span></a>tail"#,
+      "[text](x)\ntail",
+    ),
+    (
+      r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+      "[![A](i)](x)\ntail",
+    ),
+  ] {
+    assert_eq!(md_wrapped(html, 12), expected);
+    for width in 1..=html.len() {
+      let mut processor =
+        MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default().with_wrap_width(12));
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "chunk width={width}");
+    }
+  }
+}
+
 // ── Block spacing after a one-character line ──
 
 #[test]

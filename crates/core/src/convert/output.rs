@@ -2903,6 +2903,7 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
+    let mut relocated_space = false;
     if self.pending_inline_whitespace {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
@@ -2910,7 +2911,11 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
-        self.push_code_span_content(" ", true);
+        if self.wrap_width != 0 && self.can_wrap_here() {
+          relocated_space = true;
+        } else {
+          self.push_code_span_content(" ", true);
+        }
       }
       self.pending_inline_whitespace = false;
     }
@@ -3068,7 +3073,7 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char, owns_leading_space);
+      self.push_text_wrapped(text, last_char, owns_leading_space, relocated_space);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -4403,7 +4408,13 @@ impl ConvertState {
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
   /// inline boundaries (e.g. `foo**bar**`) stay intact.
-  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>, owns_leading_space: bool) {
+  fn push_text_wrapped(
+    &mut self,
+    text: &str,
+    last_char: Option<u8>,
+    owns_leading_space: bool,
+    relocated_space: bool,
+  ) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
@@ -4412,7 +4423,8 @@ impl ConvertState {
     let leading_space = text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
     // A caption owns the space before its first text, as on the unwrapped path.
-    let first_needs_space = leading_space
+    let first_needs_space = relocated_space
+      || leading_space
       || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
@@ -5412,8 +5424,9 @@ impl ConvertState {
     node_spacing: Option<[u8; 2]>,
     is_enter: bool,
   ) -> [u8; 2] {
-    // Inline tags return `NO_SPACING` unless they are `<pre>`.
-    if node_spacing == Some(NO_SPACING) && tag_id != Some(TAG_PRE) {
+    // Inline tags return `NO_SPACING` unless they are `<pre>`. An `<li>` gets
+    // here only through a spacing override, which the nested-list rule outranks.
+    if node_spacing == Some(NO_SPACING) && !matches!(tag_id, Some(TAG_PRE | TAG_LI)) {
       return NO_SPACING;
     }
     if plain_text!(self)
@@ -5432,6 +5445,27 @@ impl ConvertState {
       }
     } else if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
       return NO_SPACING;
+    }
+    // Only a list starting at 1 may interrupt its parent's paragraph. A bare
+    // parent marker has no paragraph to separate, so keep that list tight, and
+    // so does an open link or emphasis, which a blank line would never close.
+    if self.depth_map[TAG_LI as usize] > 1
+      && tag_id == Some(TAG_LI)
+      && is_enter
+      && !plain_text!(self)
+      && self.stack.last().is_some_and(|node| node.index == 0)
+      && self
+        .stack
+        .iter()
+        .rev()
+        .nth(1)
+        .is_some_and(|node| node.tag_id == Some(TAG_OL))
+      && self.ordered_item_number(0) != 1
+      && !self.in_table_cell()
+      && !self.inside_open_inline_delimiter()
+      && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
+    {
+      return DEFAULT_BLOCK_SPACING;
     }
     // A heading's own collapse keeps its block spacing, but in a table cell that
     // newline would end the row. The count holds the heading only while it is
@@ -5544,6 +5578,26 @@ impl ConvertState {
           && node.tag_id != Some(TAG_SPAN)
       })
       .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
+  }
+
+  /// Whether an ancestor of the node just entered left a Markdown delimiter
+  /// open, which has to close in the same paragraph. Raw tags survive a blank
+  /// line and a marker-less wrapper has nothing to close, so neither counts.
+  fn inside_open_inline_delimiter(&self) -> bool {
+    if self.collapse_non_span_depth == 0 && self.collapse_span_depth == 0 {
+      return false;
+    }
+    let raw_html = self.in_raw_html_block();
+    self.stack.iter().rev().skip(1).any(|node| {
+      node.collapses_inner_white_space
+        && !node.excluded_from_markdown
+        && !matches!(
+          node.tag_id,
+          Some(TAG_INS | TAG_SUB | TAG_SUP | TAG_MARK | TAG_U)
+        )
+        && !(raw_html && node.tag_id == Some(TAG_A))
+        && self.wrapper_emits_inline_markdown(node)
+    })
   }
 
   #[inline]

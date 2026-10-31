@@ -809,6 +809,17 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
     return NO_SPACING
   }
 
+  // Only a list starting at 1 may interrupt its parent's paragraph. A bare
+  // parent marker has no paragraph to separate, so keep that list tight, and
+  // so does an open link or emphasis, which a blank line would never close.
+  if (eventType === NodeEventEnter && tagId === TAG_LI && depthMap[TAG_LI]! > 1
+    && node.index === 0 && node.parent?.tagId === TAG_OL
+    && orderedItemNumber(node.parent, 0) !== 1 && !isInsideTableCell(state)
+    && !insideOpenInlineDelimiter(node, state)
+    && (blockOpenPrefix(state.buffer, '') !== undefined || endsAtHardBreak(state.buffer))) {
+    return DEFAULT_BLOCK_SPACING
+  }
+
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
   // because spans shouldn't affect block-level semantics of their children
@@ -856,6 +867,25 @@ function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): bo
   return (INLINE_MARKER_TYPE[tagId] !== undefined && INLINE_MARKER_TYPE[tagId] !== 0)
     || (tagId === TAG_A && (node.attributes?.href !== undefined || isInsideRawHtmlBlock(state.depthMap)))
     || tagId === TAG_SUB || tagId === TAG_SUP || tagId === TAG_INS || tagId === TAG_U || tagId === TAG_MARK
+}
+
+/**
+ * Whether an ancestor left a Markdown delimiter open, which has to close in the
+ * same paragraph. Raw tags survive a blank line and a marker-less wrapper has
+ * nothing to close, so neither counts.
+ */
+function insideOpenInlineDelimiter(node: ElementNode, state: MarkdownState): boolean {
+  const rawHtml = isInsideRawHtmlBlock(state.depthMap)
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    const tagId = parent.tagId
+    if (parent.tagHandler?.collapsesInnerWhiteSpace
+      && tagId !== TAG_INS && tagId !== TAG_SUB && tagId !== TAG_SUP && tagId !== TAG_MARK && tagId !== TAG_U
+      && !(rawHtml && tagId === TAG_A)
+      && wrapperEmitsInlineMarkdown(parent, state)) {
+      return true
+    }
+  }
+  return false
 }
 
 export function isAsciiWhitespace(code: number): boolean {
