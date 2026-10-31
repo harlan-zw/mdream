@@ -2355,6 +2355,107 @@ fn ordered_list() {
   );
 }
 
+// CommonMark joins a list into the one before it when both use the same marker
+// character, blank line or not. A sibling list switches to the other one.
+#[test]
+fn adjacent_same_type_lists_alternate_marker_characters() {
+  let cases = [
+    ("<ul><li>a</li></ul><ul><li>b</li></ul>", "- a\n\n* b"),
+    ("<ol><li>a</li></ol><ol><li>b</li></ol>", "1. a\n\n1) b"),
+    // A different start number does not separate ordered lists.
+    (
+      "<ol><li>a</li></ol><ol start=\"3\"><li>b</li></ol>",
+      "1. a\n\n3) b",
+    ),
+    (
+      "<ul><li>a</li><li>b</li></ul>\n  <ul><li>c</li><li>d</li></ul><ul><li>e</li></ul>",
+      "- a\n- b\n\n* c\n* d\n\n- e",
+    ),
+    (
+      "<ol><li>a</li></ol><ol><li>b</li></ol><ol><li>c</li></ol>",
+      "1. a\n\n1) b\n\n1. c",
+    ),
+    // Elements that write nothing do not separate the lists either.
+    (
+      "<ul><li>a</li></ul><div><span></span><!-- c --><ul><li>b</li></ul></div>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ul><li>a</li></ul><script>x</script><p></p><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ul><li>a</li></ul><ul></ul><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ul><li>a<ul><li>b</li></ul><ul><li>c</li></ul></li></ul>",
+      "- a\n  - b\n  * c",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul></li></ul><ul><li>b</li></ul>",
+      "- x\n  - a\n\n* b",
+    ),
+    (
+      "<ul><li>a</li></ul><ul><li>b<ul><li>c</li></ul></li></ul>",
+      "- a\n\n* b\n  - c",
+    ),
+    (
+      "<blockquote><ul><li>a</li></ul><ul><li>b</li></ul></blockquote>",
+      "> - a\n>\n> * b",
+    ),
+    // `* ***` is a thematic break; the rule takes the other character.
+    ("<ul><li>a</li></ul><ul><li><hr></li></ul>", "- a\n\n* ---"),
+    (
+      "<ul><li>a</li></ul><ul><li>* * *</li><li><em>b</em></li></ul>",
+      "- a\n\n* \\* \\* \\*\n* *b*",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn separated_lists_keep_the_default_marker() {
+  let cases = [
+    (
+      "<ul><li>a</li></ul><p>x</p><ul><li>b</li></ul>",
+      "- a\n\nx\n\n- b",
+    ),
+    ("<ul><li>a</li></ul><ol><li>b</li></ol>", "- a\n\n1. b"),
+    ("<ul><li>a</li></ul>x<ul><li>b</li></ul>", "- a\n\nx\n\n- b"),
+    (
+      "<ul><li>a</li></ul><hr><ul><li>b</li></ul>",
+      "- a\n\n---\n\n- b",
+    ),
+    (
+      "<blockquote><ul><li>a</li></ul></blockquote><ul><li>b</li></ul>",
+      "> - a\n\n- b",
+    ),
+    (
+      "<blockquote><ul><li>a</li></ul></blockquote><blockquote><ul><li>b</li></ul></blockquote>",
+      "> - a\n\n> - b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote>",
+      "- a\n\n> - b",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul></li><li>y<ul><li>b</li></ul></li></ul>",
+      "- x\n  - a\n- y\n  - b",
+    ),
+    ("<ul><li><hr></li></ul>", "- ***"),
+    (
+      "<table><tr><td><ul><li>a</li></ul><ul><li>b</li></ul></td></tr></table>",
+      "| <ul><li>a</li></ul><ul><li>b</li></ul> |\n| --- |",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
 #[test]
 fn long_text_before_an_ordered_list_item_counts_as_one_child() {
   let text = "word ".repeat(16_384);
@@ -5514,7 +5615,7 @@ fn each_ordered_list_numbers_from_its_own_start() {
     convert(
       "<ol start=\"5\"><li>a<ol start=\"20\"><li>b</li></ol></li><li>c<ul><li>d</li></ul></li><li>e</li></ol><ol><li>f</li></ol>"
     ),
-    "5. a\n   20. b\n6. c\n   - d\n7. e\n\n1. f"
+    "5. a\n   20. b\n6. c\n   - d\n7. e\n\n1) f"
   );
   // Read once per list, so a padded value costs its length once, not per item.
   let html = format!(
@@ -6495,6 +6596,429 @@ fn scout9_wrap_setext_plain_text_still_wraps() {
     ),
     "aaaaaaaaaa\n--"
   );
+}
+
+#[test]
+fn removable_output_preserves_adjacent_list_markers() {
+  assert_eq!(
+    convert("<ul><li>a</li></ul><b></b><ul><li>b</li></ul>"),
+    "- a\n\n* b"
+  );
+  assert_eq!(
+    convert("<ul><li>a</li></ul><code></code><ul><li>b</li></ul>"),
+    "- a\n\n* b"
+  );
+  assert_eq!(
+    convert("<ul><li>a</li></ul><b><code></code></b><ul><li>b</li></ul>"),
+    "- a\n\n* b"
+  );
+  assert_eq!(
+    convert(
+      "<ul><li>a</li></ul><template><blockquote>x</blockquote></template><ul><li>b</li></ul>"
+    ),
+    "- a\n\n* b"
+  );
+  assert_eq!(
+    convert("<ol><li>a</li></ol><b></b><ol><li>b</li></ol>"),
+    "1. a\n\n1) b"
+  );
+  assert_eq!(
+    convert("<ol><li>a</li></ol><code></code><ol><li>b</li></ol>"),
+    "1. a\n\n1) b"
+  );
+  assert_eq!(
+    convert("<ol><li>a</li></ol><b><code></code></b><ol><li>b</li></ol>"),
+    "1. a\n\n1) b"
+  );
+  assert_eq!(
+    convert(
+      "<ol><li>a</li></ol><template><blockquote>x</blockquote></template><ol><li>b</li></ol>"
+    ),
+    "1. a\n\n1) b"
+  );
+  assert_eq!(
+    convert("<ul><li>a</li></ul><b>x</b><ul><li>b</li></ul>"),
+    "- a\n\n**x**\n\n- b"
+  );
+  assert_eq!(
+    convert("<ol><li>a</li></ol><code>x</code><ol><li>b</li></ol>"),
+    "1. a\n\n`x`\n\n1. b"
+  );
+}
+
+#[test]
+fn excluded_quote_preserves_adjacent_list_markers() {
+  assert_eq!(
+    convert(
+      "<ul><li>a</li></ul><template><blockquote>x</blockquote></template><ul><li>b</li></ul>"
+    ),
+    "- a\n\n* b"
+  );
+}
+
+// A quote that writes nothing leaves the lists around it adjacent. One that
+// writes its `>`, or holds a list, ends the run, and lists inside a quote are
+// under other prefixes than the list before it.
+#[test]
+fn empty_quotes_preserve_adjacent_list_markers() {
+  for (html, expected) in [
+    (
+      "<ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ol><li>a</li></ol><blockquote> </blockquote><ol><li>b</li></ol>",
+      "1. a\n\n1) b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote><p></p></blockquote><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote><blockquote></blockquote></blockquote><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ol><li>a</li></ol><blockquote><ul></ul></blockquote><ol><li>b</li></ol>",
+      "1. a\n\n1) b",
+    ),
+    (
+      "<blockquote><ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul></blockquote>",
+      "> - a\n>\n> * b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote>x</blockquote><ul><li>b</li></ul>",
+      "- a\n\n> x\n\n- b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote><ul><li>c</li></ul>",
+      "- a\n\n> - b\n\n- c",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // An override that writes no quote leaves its list next to the one before.
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig::default().with_tag_override(
+      "blockquote",
+      TagOverrideConfig {
+        enter: Some(String::new()),
+        exit: Some(String::new()),
+        ..Default::default()
+      },
+    )),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(
+      "<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote>",
+      options
+    ),
+    "- a\n\n* b"
+  );
+}
+
+fn item_enter_overrides(enter: &str) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default()
+        .with_tag_override(
+          "li",
+          TagOverrideConfig {
+            enter: Some(enter.to_string()),
+            ..Default::default()
+          },
+        )
+        .with_tag_override("x-li", TagOverrideConfig::alias("li")),
+    ),
+    ..Default::default()
+  }
+}
+
+// The next list joins the marker an item wrote, whichever list selected it. An
+// override that wrote none, or one no default collides with, leaves that list
+// the default character.
+#[test]
+fn a_run_follows_the_marker_an_item_wrote() {
+  let unordered = "<ul><li>a</li></ul><ul><x-li>b</x-li></ul>";
+  let ordered = "<ol><li>a</li></ol><ol><x-li>b</x-li></ol>";
+  for (html, enter, expected) in [
+    (unordered, "", "a\n\n- b"),
+    (ordered, " ", "a\n\n1. b"),
+    (unordered, "+ ", "+ a\n\n- b"),
+    (unordered, "\u{2022} ", "\u{2022} a\n\n- b"),
+    (unordered, "**", "** a\n\n- b"),
+    (unordered, "-", "- a\n\n* b"),
+    (unordered, "* ", "* a\n\n- b"),
+    (unordered, "  - ", "- a\n\n* b"),
+    (unordered, "\n- ", "- a\n\n* b"),
+    (unordered, "- [ ] ", "- [ ] a\n\n* b"),
+    (ordered, "1) ", "1) a\n\n1. b"),
+    (ordered, "7. ", "7. a\n\n1) b"),
+    (
+      "<ul><li>a</li></ul><ol><x-li>b</x-li></ol>",
+      "1. ",
+      "1. a\n\n1) b",
+    ),
+    (
+      "<ol><li>a</li></ol><ul><x-li>b</x-li></ul>",
+      "- ",
+      "- a\n\n* b",
+    ),
+    // The override stays out of the list's own character, and only the last
+    // marker meets the next list.
+    (
+      "<ul><li>a</li><x-li>b</x-li></ul><ul><x-li>c</x-li></ul>",
+      "* ",
+      "* a\n- b\n\n* c",
+    ),
+    (
+      "<ul><x-li>a</x-li><li>b</li></ul><ul><x-li>c</x-li></ul>",
+      "* ",
+      "- a\n* b\n\n- c",
+    ),
+    (
+      "<ul><x-li>a</x-li><li>b</li></ul><ul><x-li>c</x-li></ul>",
+      "",
+      "- a\nb\n\n* c",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, item_enter_overrides(enter)),
+      expected,
+      "html={html:?} enter={enter:?}"
+    );
+  }
+}
+
+// A rule sharing the marker's line must differ from the marker that line holds,
+// or the whole line reads as a thematic break and the item is lost.
+#[test]
+fn an_item_rule_avoids_the_marker_an_override_wrote() {
+  for (html, enter, expected) in [
+    (
+      "<ul><x-li>a</x-li></ul><ul><li><hr></li></ul>",
+      "- ",
+      "- a\n\n- ***",
+    ),
+    ("<ul><li><hr></li></ul>", "* ", "* ---"),
+    ("<ol><li><hr></li></ol>", "* ", "* ---"),
+    ("<ul><li><hr></li></ul>", "+ ", "+ ***"),
+    ("<ol><li><hr></li></ol>", "1) ", "1) ***"),
+    (
+      "<ul><x-li>a</x-li></ul><ul><x-li><hr></x-li></ul>",
+      "",
+      "- a\n\n* ---",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, item_enter_overrides(enter)),
+      expected,
+      "html={html:?} enter={enter:?}"
+    );
+  }
+}
+
+#[test]
+fn cleaned_empty_links_preserve_adjacent_list_markers() {
+  let options = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li>a</li></ul><a href=\"x\"></a><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ol><li>a</li></ol><a href=\"x\"></a><ol><li>b</li></ol>",
+      "1. a\n\n1) b",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+  }
+}
+
+// A block inside an inline wrapper makes its opener permanent without writing
+// anything visible. As in the JS engine, that opener does not end the run.
+#[test]
+fn block_committed_inline_opener_keeps_adjacent_list_markers() {
+  for (html, expected) in [
+    (
+      "<ol><li>a</li></ol><em><div></div><ol><li>b</li></ol></em>",
+      "1. a\n\n*1) b*",
+    ),
+    (
+      "<ol><li>a</li></ol><strong><p></p><ol><li>b</li></ol></strong><ol><li>c</li></ol>",
+      "1. a\n\n**1) b**\n\n1. c",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+// A bullet that does not start its line opens no list, so nothing needs keeping
+// apart, and a `*` there would read as a delimiter.
+#[test]
+fn a_bullet_inside_a_line_keeps_the_default_marker() {
+  for (html, expected) in [
+    (
+      "<ul><li>a</li></ul><em><ul><li>b</li></ul></em>",
+      "- a\n\n*- b*",
+    ),
+    (
+      "<ul><li>a</li></ul><strong><ul><li>b</li></ul></strong>",
+      "- a\n\n**- b**",
+    ),
+    (
+      "<ul><li>a</li></ul><b><i><ul><li>b</li></ul></i></b>",
+      "- a\n\n***- b***",
+    ),
+    (
+      "<ul><li>a</li></ul><code><ul><li>b</li></ul></code>",
+      "- a\n\n`- b`",
+    ),
+    (
+      "<ul><li>a</li></ul><em><ul><li>b</li></ul>c</em>",
+      "- a\n\n*- b c*",
+    ),
+    (
+      "<ul><li>a</li></ul><em><div></div><ul><li>b</li></ul></em>",
+      "- a\n\n*- b*",
+    ),
+    (
+      "<ul><li>a</li></ul><em><ul><li>b</li></ul></em><ul><li>c</li></ul>",
+      "- a\n\n*- b*\n\n- c",
+    ),
+    (
+      "<em><ul><li>a</li></ul><ul><li>b</li></ul></em>",
+      "*- a - b*",
+    ),
+    (
+      "<small><ul><li>a</li></ul><ul><li>b</li></ul></small>",
+      "- a - b",
+    ),
+    (
+      "<h1><ul><li>a</li></ul><ul><li>b</li></ul></h1>",
+      "# - a - b",
+    ),
+    (
+      "<blockquote><ul><li>a</li></ul><em><ul><li>b</li></ul></em></blockquote>",
+      "> - a\n>\n> *- b*",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><em><ul><li>b</li></ul></em></li></ul>",
+      "- x\n  - a*  - b*",
+    ),
+    // A caption writes its `*` only once its first output arrives.
+    (
+      "<ul><li>a</li></ul><figcaption><ul><li>b</li></ul></figcaption>",
+      "- a\n\n*- b*",
+    ),
+    (
+      "<ul><li>a</li></ul><figure><figcaption><small><ul><li>b</li></ul></small></figcaption></figure>",
+      "- a\n\n*- b*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_bullet_starting_its_line_alternates_under_a_markerless_wrapper() {
+  for (html, expected) in [
+    (
+      "<span><ul><li>a</li></ul><ul><li>b</li></ul></span>",
+      "- a\n* b",
+    ),
+    (
+      "<ul><li>a</li></ul><span><ul><li>b</li></ul></span>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ul><li>a</li></ul><small><ul><li>b</li></ul></small>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ul><li>a</li></ul>\n<label>\n<ul><li>b</li></ul>\n</label>",
+      "- a\n\n* b",
+    ),
+    (
+      "<blockquote><ul><li>a</li></ul><small><ul><li>b</li></ul></small></blockquote>",
+      "> - a\n>\n> * b",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+// `)` forms no delimiter run, so an ordered list alternates wherever it sits.
+#[test]
+fn an_ordered_marker_alternates_beside_a_delimiter() {
+  for (html, expected) in [
+    (
+      "<ol><li>a</li></ol><em><ol><li>b</li></ol></em>",
+      "1. a\n\n*1) b*",
+    ),
+    (
+      "<ol><li>a</li></ol><figcaption><ol><li>b</li></ol></figcaption>",
+      "1. a\n\n*1) b*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+/// Overrides that make a list or quote inline, or alias a tag to a list.
+fn inline_list_overrides() -> HtmlToMarkdownOptions {
+  let inline = TagOverrideConfig {
+    is_inline: Some(true),
+    ..Default::default()
+  };
+  HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default()
+        .with_tag_override("ul", inline.clone())
+        .with_tag_override("blockquote", inline)
+        .with_tag_override("x-list", TagOverrideConfig::alias("ol")),
+    ),
+    ..Default::default()
+  }
+}
+
+// Inline tags skip the list bookkeeping unless an override exists, so an
+// override that makes a list inline must keep its push and pop paired.
+#[test]
+fn inline_overridden_lists_keep_adjacent_list_markers() {
+  for (html, expected) in [
+    ("<ul><li>a</li></ul><ul><li>b</li></ul>", "- a\n\n* b"),
+    (
+      "<ul><li>a<ul><li>b</li></ul></li></ul><ul><li>c</li></ul>",
+      "- a\n  - b\n\n* c",
+    ),
+    (
+      "<ol><li>a</li></ol><x-list><li>b</li></x-list>",
+      "1. a\n\n1) b",
+    ),
+    (
+      "<ul><li>a</li></ul><blockquote>q</blockquote><ul><li>b</li></ul>",
+      "- a\n\n> q\n\n- b",
+    ),
+    // The quote's `>` lands inside an emphasis opener that could still retract.
+    (
+      "<ul><li>a</li></ul><em><blockquote></blockquote><ul><li>b</li></ul></em>",
+      "- a\n\n*>- b*",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, inline_list_overrides()),
+      expected,
+      "html={html:?}"
+    );
+  }
 }
 
 #[test]

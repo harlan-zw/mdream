@@ -2,6 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('lists $name', (engineConfig) => {
+  it.each([
+    ['<ul><li>a</li></ul><a href="x"></a><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ol><li>a</li></ol><a href="x"></a><ol><li>b</li></ol>', '1. a\n\n1) b'],
+  ])('keeps lists separate when clean removes an empty link: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, clean: { emptyLinkText: true } })).toBe(expected)
+  })
+
   it('converts unordered lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Item 1</li><li>Item 2</li></ul>'
@@ -14,6 +22,169 @@ describe.each(engines)('lists $name', (engineConfig) => {
     const html = '<ol><li>First</li><li>Second</li></ol>'
     const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('1. First\n2. Second')
+  })
+
+  it.each([
+    ['<ul><li>a</li></ul><b></b><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><code></code><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><b><code></code></b><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><template><blockquote>x</blockquote></template><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ol><li>a</li></ol><b></b><ol><li>b</li></ol>', '1. a\n\n1) b'],
+    ['<ol><li>a</li></ol><code></code><ol><li>b</li></ol>', '1. a\n\n1) b'],
+    ['<ol><li>a</li></ol><b><code></code></b><ol><li>b</li></ol>', '1. a\n\n1) b'],
+    ['<ol><li>a</li></ol><template><blockquote>x</blockquote></template><ol><li>b</li></ol>', '1. a\n\n1) b'],
+    ['<ul><li>a</li></ul><b>x</b><ul><li>b</li></ul>', '- a\n\n**x**\n\n- b'],
+    ['<ol><li>a</li></ol><code>x</code><ol><li>b</li></ol>', '1. a\n\n`x`\n\n1. b'],
+  ])('preserves adjacent list markers through removable output: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  // CommonMark joins a list into the one before it when both use the same
+  // marker character, blank line or not. A sibling list switches characters.
+  it.each([
+    ['<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>', '- a\n\n* b\n\n- c'],
+    ['<ol><li>a</li></ol><ol start="3"><li>b</li></ol><ol><li>c</li></ol>', '1. a\n\n3) b\n\n1. c'],
+    ['<ul><li>a</li></ul><div><!-- c --><ul></ul><ul><li>b</li></ul></div>', '- a\n\n* b'],
+    ['<ul><li>a<ul><li>b</li></ul><ul><li>c</li></ul></li></ul>', '- a\n  - b\n  * c'],
+    ['<ul><li>x<ul><li>a</li></ul></li></ul><ul><li>b</li></ul>', '- x\n  - a\n\n* b'],
+    ['<blockquote><ul><li>a</li></ul><ul><li>b</li></ul></blockquote>', '> - a\n>\n> * b'],
+    ['<ul><li>a</li></ul><ul><li><hr></li><li>* * *</li></ul>', '- a\n\n* ---\n* \\* \\* \\*'],
+    // A block makes the enclosing opener permanent without visible output.
+    ['<ol><li>a</li></ol><em><div></div><ol><li>b</li></ol></em>', '1. a\n\n*1) b*'],
+    ['<ol><li>a</li></ol><strong><p></p><ol><li>b</li></ol></strong><ol><li>c</li></ol>', '1. a\n\n**1) b**\n\n1. c'],
+    // A quote that writes nothing leaves the lists around it adjacent.
+    ['<ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ol><li>a</li></ol><blockquote> </blockquote><ol><li>b</li></ol>', '1. a\n\n1) b'],
+    ['<ul><li>a</li></ul><blockquote><p></p></blockquote><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><blockquote><blockquote></blockquote></blockquote><ul><li>b</li></ul>', '- a\n\n* b'],
+    ['<blockquote><ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul></blockquote>', '> - a\n>\n> * b'],
+  ])('alternates the marker of an adjacent same-type list: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  // A bullet that does not start its line opens no list, so nothing needs
+  // keeping apart, and a `*` there would read as a delimiter.
+  it.each([
+    ['<ul><li>a</li></ul><em><ul><li>b</li></ul></em>', '- a\n\n*- b*'],
+    ['<ul><li>a</li></ul><strong><ul><li>b</li></ul></strong>', '- a\n\n**- b**'],
+    ['<ul><li>a</li></ul><b><i><ul><li>b</li></ul></i></b>', '- a\n\n***- b***'],
+    ['<ul><li>a</li></ul><code><ul><li>b</li></ul></code>', '- a\n\n`- b`'],
+    ['<ul><li>a</li></ul><em><ul><li>b</li></ul>c</em>', '- a\n\n*- b c*'],
+    ['<ul><li>a</li></ul><em><div></div><ul><li>b</li></ul></em>', '- a\n\n*- b*'],
+    ['<ul><li>a</li></ul><em><ul><li>b</li></ul></em><ul><li>c</li></ul>', '- a\n\n*- b*\n\n- c'],
+    ['<em><ul><li>a</li></ul><ul><li>b</li></ul></em>', '*- a - b*'],
+    ['<small><ul><li>a</li></ul><ul><li>b</li></ul></small>', '- a - b'],
+    ['<h1><ul><li>a</li></ul><ul><li>b</li></ul></h1>', '# - a - b'],
+    ['<blockquote><ul><li>a</li></ul><em><ul><li>b</li></ul></em></blockquote>', '> - a\n>\n> *- b*'],
+    ['<ul><li>x<ul><li>a</li></ul><em><ul><li>b</li></ul></em></li></ul>', '- x\n  - a*  - b*'],
+    // A caption writes its `*` only once its first output arrives.
+    ['<ul><li>a</li></ul><figcaption><ul><li>b</li></ul></figcaption>', '- a\n\n*- b*'],
+    ['<ul><li>a</li></ul><figure><figcaption><small><ul><li>b</li></ul></small></figcaption></figure>', '- a\n\n*- b*'],
+  ])('keeps the default marker of a bullet inside a line: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<span><ul><li>a</li></ul><ul><li>b</li></ul></span>', '- a\n* b'],
+    ['<ul><li>a</li></ul><span><ul><li>b</li></ul></span>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><small><ul><li>b</li></ul></small>', '- a\n\n* b'],
+    ['<ul><li>a</li></ul>\n<label>\n<ul><li>b</li></ul>\n</label>', '- a\n\n* b'],
+    ['<blockquote><ul><li>a</li></ul><small><ul><li>b</li></ul></small></blockquote>', '> - a\n>\n> * b'],
+    // `)` forms no delimiter run, so an ordered list alternates wherever it sits.
+    ['<ol><li>a</li></ol><em><ol><li>b</li></ol></em>', '1. a\n\n*1) b*'],
+    ['<ol><li>a</li></ol><figcaption><ol><li>b</li></ol></figcaption>', '1. a\n\n*1) b*'],
+  ])('alternates a marker that forms no delimiter: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li>a</li></ul><p>x</p><ul><li>b</li></ul>', '- a\n\nx\n\n- b'],
+    ['<ul><li>a</li></ul><ol><li>b</li></ol>', '- a\n\n1. b'],
+    ['<blockquote><ul><li>a</li></ul></blockquote><blockquote><ul><li>b</li></ul></blockquote>', '> - a\n\n> - b'],
+    ['<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote>', '- a\n\n> - b'],
+    ['<ul><li>a</li></ul><blockquote>x</blockquote><ul><li>b</li></ul>', '- a\n\n> x\n\n- b'],
+    ['<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote><ul><li>c</li></ul>', '- a\n\n> - b\n\n- c'],
+  ])('keeps the default marker when content separates the lists: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote>', { blockquote: { enter: '', exit: '' } }, '- a\n\n* b'],
+    ['<ul><li>a</li></ul><em><blockquote></blockquote><ul><li>b</li></ul></em>', { ul: { isInline: true }, blockquote: { isInline: true } }, '- a\n\n*>- b*'],
+  ])('follows the quote prefixes an override writes: %s', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  // The next list joins the marker an item wrote, whichever list selected it. An
+  // override that wrote none, or one no default collides with, leaves that list
+  // the default character.
+  it.each([
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '', 'a\n\n- b'],
+    ['<ol><li>a</li></ol><ol><x-li>b</x-li></ol>', ' ', 'a\n\n1. b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '+ ', '+ a\n\n- b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '• ', '• a\n\n- b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '**', '** a\n\n- b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '-', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '* ', '* a\n\n- b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '  - ', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '\n- ', '- a\n\n* b'],
+    ['<ul><li>a</li></ul><ul><x-li>b</x-li></ul>', '- [ ] ', '- [ ] a\n\n* b'],
+    ['<ol><li>a</li></ol><ol><x-li>b</x-li></ol>', '1) ', '1) a\n\n1. b'],
+    ['<ol><li>a</li></ol><ol><x-li>b</x-li></ol>', '7. ', '7. a\n\n1) b'],
+    ['<ul><li>a</li></ul><ol><x-li>b</x-li></ol>', '1. ', '1. a\n\n1) b'],
+    ['<ol><li>a</li></ol><ul><x-li>b</x-li></ul>', '- ', '- a\n\n* b'],
+    // The override stays out of the list's own character, and only the last
+    // marker meets the next list.
+    ['<ul><li>a</li><x-li>b</x-li></ul><ul><x-li>c</x-li></ul>', '* ', '* a\n- b\n\n* c'],
+    ['<ul><x-li>a</x-li><li>b</li></ul><ul><x-li>c</x-li></ul>', '* ', '- a\n* b\n\n- c'],
+    ['<ul><x-li>a</x-li><li>b</li></ul><ul><x-li>c</x-li></ul>', '', '- a\nb\n\n* c'],
+  ])('starts a run from the marker an item wrote: %s with %j', async (html, enter, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const tagOverrides = { 'li': { enter }, 'x-li': 'li' }
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  // A rule sharing the marker's line must differ from the marker that line
+  // holds, or the whole line reads as a thematic break and the item is lost.
+  it.each([
+    ['<ul><x-li>a</x-li></ul><ul><li><hr></li></ul>', '- ', '- a\n\n- ***'],
+    ['<ul><li><hr></li></ul>', '* ', '* ---'],
+    ['<ol><li><hr></li></ol>', '* ', '* ---'],
+    ['<ul><li><hr></li></ul>', '+ ', '+ ***'],
+    ['<ol><li><hr></li></ol>', '1) ', '1) ***'],
+    ['<ul><x-li>a</x-li></ul><ul><x-li><hr></x-li></ul>', '', '- a\n\n* ---'],
+  ])('keeps an item rule off the marker an override wrote: %s with %j', async (html, enter, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const tagOverrides = { 'li': { enter }, 'x-li': 'li' }
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+  })
+
+  // Rereading the gap resumes after whitespace it already saw, so a run has to
+  // survive repeated empty lists and still end at the output that follows them.
+  it.each([
+    ['<ul><li>a</li></ul><br><ul></ul><br><ul></ul><ul><li>b</li></ul>', '* b'],
+    ['<ol><li>a</li></ol><br><ol></ol><ol><li>b</li></ol>', '1) b'],
+    ['<ul><li>a</li></ul><br><ul></ul>x<ul></ul><ul><li>b</li></ul>', 'x\n\n- b'],
+    ['<ul><li>a</li></ul><br><ul></ul><p>x</p><ul><li>b</li></ul>', 'x\n\n- b'],
+  ])('rereads a list gap across empty lists: %s', async (html, end) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine }).endsWith(end)).toBe(true)
+  })
+
+  // A list's exit output continues its last item, so it separates nothing:
+  // `- aEND` then `- bEND` would read as one list.
+  it.each([
+    ['<ul><li>a</li></ul><ul><li>b</li></ul>', { ul: { exit: 'END' } }, '- aEND\n\n* bEND'],
+    ['<ol><li>a</li></ol><ol><li>b</li></ol>', { ol: { exit: 'END' } }, '1. aEND\n\n1) bEND'],
+  ])('alternates after a list whose exit writes output: %s', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
   })
 
   it('handles nested unordered lists', async () => {
