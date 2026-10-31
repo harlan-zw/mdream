@@ -44,15 +44,22 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
     ['<p>a&#9;<br>x</p>', 'a\nx'],
     ['<p>a &#9;<br>x</p>', 'a\nx'],
     ['<p><span>a&#9;</span><br>x</p>', 'a\nx'],
-    ['<table><tr><td>a&#9;<br>x</td></tr></table>', 'a\nx'],
     ['<p>a&#9; &#9;</p><p>b</p>', 'a\n\nb'],
     ['<ul><li>a&#9;<ul><li>b</li></ul></li></ul>', 'a\nb'],
     ['<pre>a&#9;</pre>x', 'a\n\nx'],
     ['<div><pre>x<b>a&#9;</b></pre>y</div>', 'xa\n\ny'],
-    // Preformatted text and table rows keep their tabs.
+    // Preformatted text and table cells keep their tabs: in a row, the tab
+    // before a non-first cell is the column separator.
     ['<pre>a&#9;<br>x</pre>', 'a\t\nx'],
     ['<pre>a&#9;<p>b</p></pre>', 'a\t\n\nb'],
     ['<table><tr><td>a&#9;</td></tr><tr><td>b</td></tr></table>', 'a\t\nb'],
+    ['<table><tr><td>a&#9;<br>x</td></tr></table>', 'a\t\nx'],
+    ['<table><tr><td>a</td><td><br>b</td></tr></table>', 'a\t\nb'],
+    ['<table><tr><td>a</td><td>&#9;<br>b</td></tr></table>', 'a\t\t\nb'],
+    ['<table><tr><td>a</td><td>b&#9;<br>c</td></tr></table>', 'a\tb\t\nc'],
+    ['<table><tr><td>a</td><td>b&#9; <br>c</td></tr></table>', 'a\tb\t\nc'],
+    ['<table><tr><th>a</th><th><br>b</th></tr></table>', 'a\t\nb'],
+    ['<table><tr><td><pre>a &#9;</pre><br>c</td></tr></table>', 'a \t\nc'],
   ])('drops a trailing tab run at a line end: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     const options = { engine, format: 'text' as const }

@@ -1644,7 +1644,9 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
-      if plain_text!(self) {
+      // A table cell keeps its tabs: the one before a non-first cell is the
+      // column separator, as at the row boundary.
+      if plain_text!(self) && self.depth_map[TAG_TABLE as usize] == 0 {
         self.trim_trailing_blanks();
       } else {
         self.trim_trailing_spaces();
