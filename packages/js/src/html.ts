@@ -29,7 +29,7 @@ function createProcessor(options: MdreamOptions): OutputProcessor {
         : event.node.parent?.excludedFromMarkdown
       if (inTemplate)
         return
-      processHtmlOutputEvent(event, outputState, state.buffer, options)
+      processHtmlOutputEvent(event, outputState, state.buffer, state.options)
     },
     takeOutput() {
       const output = state.buffer.join('')
