@@ -267,6 +267,7 @@ struct FragmentLink {
 
 #[derive(Clone)]
 struct BlockquoteFrame {
+  list_rule_pending: bool,
   content_start: usize,
   list_indent: String,
 }
@@ -955,6 +956,9 @@ pub struct ConvertState {
   empty_item_len: usize,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  list_rule_after_quote: bool,
+  /// An empty quote left the pending rule's separator in the buffer.
+  list_rule_restored: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1204,6 +1208,8 @@ impl ConvertState {
       empty_item_line_start: 0,
       empty_item_len: 0,
       list_rule_pending: false,
+      list_rule_after_quote: false,
+      list_rule_restored: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -3407,6 +3413,7 @@ mod tests {
     state.buffer = format!("{}\n{}", "a".repeat(8192), "#".repeat(64));
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
+      list_rule_pending: false,
       list_indent: "  ".to_string(),
     });
     assert_eq!(state.trailing_heading_run(1 << 20), 64);

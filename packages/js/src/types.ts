@@ -369,6 +369,9 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   bufferedBlockquoteDepth?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  listRuleAfterQuote?: boolean
+  /** An empty quote left the pending rule's separator in the buffer. */
+  listRuleRestored?: boolean
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }
