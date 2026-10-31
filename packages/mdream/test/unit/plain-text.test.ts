@@ -40,6 +40,45 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
     }
   })
 
+  it.each([
+    ['<p>a&#9;<br>x</p>', 'a\nx'],
+    ['<p>a &#9;<br>x</p>', 'a\nx'],
+    ['<p><span>a&#9;</span><br>x</p>', 'a\nx'],
+    ['<table><tr><td>a&#9;<br>x</td></tr></table>', 'a\nx'],
+    ['<p>a&#9; &#9;</p><p>b</p>', 'a\n\nb'],
+    ['<ul><li>a&#9;<ul><li>b</li></ul></li></ul>', 'a\nb'],
+    ['<pre>a&#9;</pre>x', 'a\n\nx'],
+    ['<div><pre>x<b>a&#9;</b></pre>y</div>', 'xa\n\ny'],
+    // Preformatted text and table rows keep their tabs.
+    ['<pre>a&#9;<br>x</pre>', 'a\t\nx'],
+    ['<pre>a&#9;<p>b</p></pre>', 'a\t\n\nb'],
+    ['<table><tr><td>a&#9;</td></tr><tr><td>b</td></tr></table>', 'a\t\nb'],
+  ])('drops a trailing tab run at a line end: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, format: 'text' as const }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      expect(await collect(streamHtmlToMarkdown(input, options))).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      expect(await collect(streamHtmlToMarkdown(input, options))).toBe(expected)
+    }
+  })
+
   it('omits markdown markup from common document structure', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<h1>Hello <em>World</em></h1><p>Visit <a href="https://example.com">Example</a> and <strong>read</strong>.</p><ul><li>One</li><li>Two</li></ul>'

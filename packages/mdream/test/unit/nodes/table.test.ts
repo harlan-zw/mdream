@@ -281,4 +281,43 @@ describe.each(engines)('tables $name', (engineConfig) => {
       '| <pre><code>&lt;script&gt;alert(1)&amp;2&lt;/script&gt;</code></pre> | ok |\n| --- | --- |',
     )
   })
+
+  it.each([
+    ['<table><tr><td><pre>a </pre></td></tr></table>', '| <pre>a </pre> |\n| --- |'],
+    ['<table><tr><td><pre>  a  </pre>x</td></tr></table>', '| <pre>  a  </pre>x |\n| --- |'],
+    ['<table><tr><td><pre>a <b>x</b> </pre></td></tr></table>', '| <pre>a x </pre> |\n| --- |'],
+    ['<table><tr><td><pre>a &#10; </pre></td></tr></table>', '| <pre>a <br> </pre> |\n| --- |'],
+    ['<table><tr><th><pre>* </pre></th><td>z</td></tr></table>', '| <pre>* </pre> | z |\n| --- | --- |'],
+    // Outside a cell the fence still drops the trailing spaces.
+    ['<pre>a </pre>', '```\na\n```'],
+  ])('keeps trailing whitespace before a raw </pre> in a cell: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        output += chunk
+      expect(output).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        output += chunk
+      expect(output).toBe(expected)
+    }
+  })
 })
