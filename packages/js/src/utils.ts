@@ -503,7 +503,7 @@ export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: nu
         return false
       continue
     }
-    return code === 10
+    return code === 10 || code === 13
   }
 }
 

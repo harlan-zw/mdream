@@ -142,7 +142,7 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
   }
   t[b'\n' as usize] |= GFM_NEWLINE_BIT;
   t[b'\r' as usize] |= GFM_NEWLINE_BIT;
-  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let active = b"\\*_~`[]|><\n\r#-+=.) 0123456789";
   let mut i = 0usize;
   while i < active.len() {
     t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
@@ -953,6 +953,9 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// That line follows a decoded `\r`, which a single `\n` only turns into one
+  /// `\r\n` line ending.
+  empty_item_after_cr: bool,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
@@ -1203,6 +1206,7 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      empty_item_after_cr: false,
       list_rule_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]

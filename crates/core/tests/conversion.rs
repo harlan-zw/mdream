@@ -6338,6 +6338,109 @@ fn builtin_blockquote_alias_uses_div_semantics() {
 }
 
 #[test]
+fn setext_equals_text_preserves_paragraphs() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a<br># b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\# b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\- b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\+ b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>",
+      "- x\n  - a  \n    1\\. b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\> b",
+    ),
+    ("<p>aaaaa<br>===</p>", "aaaaa  \n\\==="),
+    (
+      "<p>aaaaa<br><span>=</span><span>==</span></p>",
+      "aaaaa  \n\\===",
+    ),
+    ("<p>aaaaa<br> <span></span>===</p>", "aaaaa  \n\\==="),
+    ("<p>aaaaa<br>=</p>", "aaaaa  \n\\="),
+    ("<p>aaaaa<br>==</p>", "aaaaa  \n\\=="),
+    ("<p>=SUM(A1:A3)</p>", "=SUM(A1:A3)"),
+    ("<p>aaaaa<br>= b</p>", "aaaaa  \n= b"),
+    ("<p>aaaaa<br>=b</p>", "aaaaa  \n=b"),
+    ("<p>aaaaa<br>== =</p>", "aaaaa  \n== ="),
+    ("<p>aaaaa<br>=== x</p>", "aaaaa  \n=== x"),
+    ("<p>aaaaa<br>=== </p>", "aaaaa  \n\\==="),
+    (
+      "<ul><li>x<ul><li>a<br>= b</li></ul></li></ul>",
+      "- x\n  - a  \n    = b",
+    ),
+    ("<blockquote><p>x<br>= b</p></blockquote>", "> x  \n> = b"),
+    ("<blockquote><p>x<br>==</p></blockquote>", "> x  \n> \\=="),
+    ("<p>aaaaa<br><span></span></p>", "aaaaa"),
+    ("<p>a = b and x===y</p>", "a = b and x===y"),
+    ("<p>a<span>=</span><span>==</span>b</p>", "a===b"),
+    ("<p><code>===</code></p>", "`===`"),
+    ("<p></p>", ""),
+    (
+      "<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>",
+      "- aaaaa  \n  \\===",
+    ),
+    (
+      "<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>",
+      "- x\n  - aaaaa  \n    \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - aaaaa  \n      \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - aaaaa  \n        \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - aaaaa  \n          \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - x\n          - aaaaa  \n            \\===",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn setext_dash_text_preserves_paragraphs() {
+  for (html, expected) in [
+    ("<p>aaaaa<br>--</p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>-- </p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>--\t</p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>--<br>b</p>", "aaaaa  \n\\--  \nb"),
+    ("<p>aaaaa<br>-<span>-</span></p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>- -</p>", "aaaaa  \n\\- -"),
+    ("<p>aaaaa<br>-- -</p>", "aaaaa  \n\\-- -"),
+    ("<p>aaaaa<br>---</p>", "aaaaa  \n\\---"),
+    ("<ul><li>x<br>--</li></ul>", "- x  \n  \\--"),
+    (
+      "<ul><li>x<ul><li>y<br>--</li></ul></li></ul>",
+      "- x\n  - y  \n    \\--",
+    ),
+    ("<blockquote><p>x<br>--</p></blockquote>", "> x  \n> \\--"),
+    ("<p>aaaaa<br>-- a</p>", "aaaaa  \n-- a"),
+    ("<p>aaaaa<br>--a</p>", "aaaaa  \n--a"),
+    ("<p>aaaaa --</p>", "aaaaa --"),
+    ("<p>x<br><b>--</b></p>", "x  \n**--**"),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn raw_text_aliases_use_source_closing_names() {
   for (html, source, target, expected) in [
     (
@@ -6477,12 +6580,63 @@ fn scout9_wrap_setext_boundary() {
     ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
     ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
     ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+    ("<p>aaaaaaaaaa ===&#10;foo</p>", "aaaaaaaaaa ===\nfoo"),
+    ("<p>aaaaaaaaaa ===&#13;foo</p>", "aaaaaaaaaa ===\rfoo"),
+    ("<p>aaaaaaaaaa ---&#10;foo</p>", "aaaaaaaaaa ---\nfoo"),
+    ("<p>aaaaaaaaaa ---&#13;foo</p>", "aaaaaaaaaa ---\rfoo"),
+    ("<p>aaaaaaaaaa ===&#9;&#10;foo</p>", "aaaaaaaaaa ===\t\nfoo"),
+    ("<p>aaaaaaaaaa ---&#9;&#13;foo</p>", "aaaaaaaaaa ---\t\rfoo"),
+    ("<p>aaaaaaaaaa -&#9;-&#9;-</p>", "aaaaaaaaaa -\t-\t-"),
+    ("<p>aaaaaaaaaa ===&#9;foo</p>", "aaaaaaaaaa\n===\tfoo"),
+    ("<p>aaaaaaaaaa ==x&#10;foo</p>", "aaaaaaaaaa\n==x\nfoo"),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default().with_wrap_width(10)),
       expected,
       "html={html}"
     );
+  }
+}
+
+#[test]
+fn lone_list_marker_after_a_decoded_bare_cr_opens_a_block() {
+  // A `\n` after the `\r` would only complete one `\r\n` line ending, which still
+  // reads the marker as a setext underline.
+  for (html, expected) in [
+    ("<small>a&#13;<ul><li></li></ul></small>", "a\r\n\n-"),
+    ("<small>a&#13;<ol><li></li></ol></small>", "a\r\n\n1."),
+    (
+      "<b>a&#13;<ul><li><blockquote>x</blockquote></li></ul></b>",
+      "**a\r\n\n- \n  > x**",
+    ),
+    (
+      "<small>a&#13;<ol><li><blockquote>x</blockquote></li></ol></small>",
+      "a\r\n\n1. \n   > x",
+    ),
+    ("<a>a&#13;<ul><li></li></ul></a>", "a\r\n\n-"),
+    (
+      "<ul><li>z<small>a&#13;<ul><li></li></ul></small></li></ul>",
+      "- za\r\n\n  -",
+    ),
+    (
+      "<blockquote><small>a&#13;<ul><li><blockquote>x</blockquote></li></ul></small></blockquote>",
+      "> a\r\n>\n> - \n>   > x",
+    ),
+    (
+      "<small>a&#10;<ul><li>&#13;x</li></ul></small>",
+      "a\n\n- \rx",
+    ),
+    // Already a blank line, or no underline at all.
+    ("<small>a&#13;&#10;<ul><li></li></ul></small>", "a\r\n\n-"),
+    ("<small>a&#13;&#13;<ul><li></li></ul></small>", "a\r\r -"),
+    ("<small>a&#10;&#13;<ul><li></li></ul></small>", "a\n\r -"),
+    ("<small>a&#13;<ul><li>x</li></ul></small>", "a\r - x"),
+    (
+      "<a href=\"/x\">a&#13;<ol><li></li></ol></a>",
+      "[a\r 1.](/x)",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
   }
 }
 
