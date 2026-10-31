@@ -823,6 +823,7 @@ pub struct ConvertState {
   // 0=none, 1=left, 2=center, 3=right
   table_column_alignments: Vec<u8>,
   last_text_node_contains_whitespace: bool,
+  last_text_node_in_pre: bool,
   last_text_node_depth: usize,
   last_text_node_index: usize,
   has_last_text_node: bool,
@@ -1147,6 +1148,7 @@ impl ConvertState {
       },
       table_column_alignments: Vec::new(),
       last_text_node_contains_whitespace: false,
+      last_text_node_in_pre: false,
       last_text_node_depth: 0,
       last_text_node_index: 0,
       has_last_text_node: false,

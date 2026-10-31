@@ -211,6 +211,17 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
 }
 
 #[test]
+fn a_break_after_preformatted_text_preserves_source_newlines() {
+  for html in [
+    "<table><tr><td><pre>a&#10; </pre><br>x</td></tr></table>",
+    "<table><tr><td><pre>a&#10;&#9;</pre><br>x</td></tr></table>",
+    "<table><tr><td><pre>a&#10; </pre><span></span><br>x</td></tr></table>",
+  ] {
+    assert_every_text_chunking(html, "a\n\nx");
+  }
+}
+
+#[test]
 fn a_break_subsumes_the_whitespace_run_before_it() {
   // Source text trims separately; structural line feeds and earlier breaks stay.
   let markdown = HtmlToMarkdownOptions::default();

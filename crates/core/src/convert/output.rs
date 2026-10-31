@@ -1644,7 +1644,10 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
-      if self.last_text_node_contains_whitespace && self.last_content_cache_len <= self.buffer.len()
+      // Preformatted source newlines stay content after </pre> closes.
+      if self.last_text_node_contains_whitespace
+        && !self.last_text_node_in_pre
+        && self.last_content_cache_len <= self.buffer.len()
       {
         let start = (self.buffer.len() - self.last_content_cache_len).max(self.trim_floor());
         let end = start + trim_ascii_whitespace_end(&self.buffer[start..]);
@@ -2740,6 +2743,7 @@ impl ConvertState {
       }
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
+    self.last_text_node_in_pre = self.depth_map[TAG_PRE as usize] > 0;
     self.has_last_text_node = true;
     self.last_text_node_depth = depth;
     self.last_text_node_index = index;
