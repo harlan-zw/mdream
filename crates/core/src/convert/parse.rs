@@ -925,6 +925,7 @@ impl ConvertState {
         custom_name: (!is_builtin).then(|| tag_name.to_string()),
         tag_id,
         is_builtin,
+        self_closing,
         carry: scan.carry.expect("an incomplete scan carries its state"),
         attrs: std::mem::take(&mut self.attr_scratch),
       }));
@@ -958,12 +959,26 @@ impl ConvertState {
   ) -> bool {
     let self_closing = tag_handler.is_some_and(|handler| handler.is_self_closing);
     if self.has_tag_overrides {
-      self
-        .self_closing_override(tag_name, tag_id, is_builtin)
-        .unwrap_or(self_closing)
+      self.overridden_self_closing(tag_name, tag_id, is_builtin, self_closing)
     } else {
       self_closing
     }
+  }
+
+  /// The override branch of `tag_is_self_closing`, kept out of line so the
+  /// no-override path stays one field test at every start-tag call site.
+  #[cold]
+  #[inline(never)]
+  fn overridden_self_closing(
+    &self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    handler_value: bool,
+  ) -> bool {
+    self
+      .self_closing_override(tag_name, tag_id, is_builtin)
+      .unwrap_or(handler_value)
   }
 
   /// Only a void handler skips the depth-limit recovery. An override that makes
