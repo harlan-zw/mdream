@@ -6498,6 +6498,296 @@ fn scout9_wrap_setext_plain_text_still_wraps() {
 }
 
 #[test]
+fn vertical_tabs_before_emphasis_closers() {
+  for (tag, marker) in [
+    ("em", "*"),
+    ("i", "*"),
+    ("strong", "**"),
+    ("b", "**"),
+    ("cite", "*"),
+    ("dfn", "**"),
+    ("del", "~~"),
+    ("s", "~~"),
+    ("strike", "~~"),
+  ] {
+    for suffix in [
+      "\u{000b}",
+      "\u{000b} ",
+      "\u{000b}\u{000b} ",
+      "\u{000b} \t",
+      " \u{000b}",
+      "\u{000b} \u{000b} ",
+    ] {
+      let html = format!("<{tag}>T{suffix}</{tag}>");
+      let expected = format!("{marker}T{marker}{}", suffix.trim_ascii_end());
+      let separator = if suffix.ends_with([' ', '\t']) {
+        " "
+      } else {
+        ""
+      };
+      for (html, expected) in [
+        (html.clone(), expected.clone()),
+        (format!("<p>{html}</p>"), expected.clone()),
+        (format!("<ul><li>{html}</li></ul>"), format!("- {expected}")),
+        (format!("{html}X"), format!("{expected}{separator}X")),
+      ] {
+        assert_eq!(convert(&html), expected, "{html:?}");
+        for width in 1..=html.len() {
+          let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+          let mut output = String::new();
+          for chunk in html.as_bytes().chunks(width) {
+            output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+          }
+          output.push_str(&stream.finish());
+          assert_eq!(output, expected, "{html:?}, width {width}");
+        }
+      }
+    }
+  }
+}
+
+#[test]
+fn non_html_whitespace_streaming_parity() {
+  for space in ['\u{000b}', '\u{00a0}', '\u{2003}'] {
+    let cases = [
+      (format!("T{space}"), format!("T{space}")),
+      (format!("<p>T</p>{space}"), format!("T\n\n{space}")),
+      (format!("<ul><li>T{space}</li></ul>"), format!("- T{space}")),
+      (
+        format!("<ul><li><h3>T</h3>{space}</li></ul>"),
+        format!("- ### T {space}"),
+      ),
+      (
+        format!("<p>T</p>{space}<p>X</p>"),
+        format!("T\n\n{space}\n\nX"),
+      ),
+      (format!("<p>T</p>{space} "), format!("T\n\n{space}")),
+    ];
+    for (html, expected) in cases {
+      assert_eq!(convert(&html), expected);
+      let chars: Vec<char> = html.chars().collect();
+      for width in 1..=chars.len() {
+        let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = String::new();
+        for chunk in chars.chunks(width) {
+          output.push_str(&stream.process_chunk(&chunk.iter().collect::<String>()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, expected, "{html:?}, width {width}");
+      }
+    }
+  }
+}
+
+#[test]
+fn override_whitespace_streaming_parity() {
+  for space in ['\t', '\n', '\u{000c}', '\r', ' ', '\u{000b}'] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "span".to_string(),
+          TagOverrideConfig {
+            exit: Some(space.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    for html in ["<span>T</span>", "<span>T</span>X"] {
+      let expected = if html.ends_with('X') {
+        format!("T{space}X")
+      } else if space == '\u{000b}' {
+        format!("T{space}")
+      } else {
+        "T".to_string()
+      };
+      assert_eq!(html_to_markdown(html, options.clone()), expected);
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for chunk in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, expected, "{html:?}, width {width}");
+      }
+    }
+  }
+}
+
+#[test]
+fn emphasis_override_vertical_tabs() {
+  for (tag, marker) in [("em", "*"), ("cite", "*"), ("dfn", "**"), ("del", "~~")] {
+    for (html, override_tag, exit, expected) in [
+      (
+        format!("<{tag}>T&#11;</{tag}>X"),
+        tag,
+        marker,
+        format!("{marker}T\u{000b}{marker}X"),
+      ),
+      (
+        format!("<{tag}>T<span></span></{tag}>X"),
+        "span",
+        "\u{000b} ",
+        format!("{marker}T{marker}\u{000b} X"),
+      ),
+    ] {
+      let options = HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![(
+            override_tag.to_string(),
+            TagOverrideConfig {
+              exit: Some(exit.to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      };
+      assert_eq!(html_to_markdown(&html, options.clone()), expected, "{html}");
+      for width in 1..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for chunk in html.as_bytes().chunks(width) {
+          output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "{html}, width {width}");
+      }
+    }
+  }
+}
+
+#[test]
+fn caption_vertical_tabs_keep_the_existing_marker_placement() {
+  for suffix in ["&#11;", "&#11; "] {
+    let html = format!("<figure><img src=\"a.png\"><figcaption>T{suffix}</figcaption></figure>");
+    let expected = convert(&html);
+    assert!(expected.contains("*T\u{000b}*"), "{expected:?}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_vertical_tabs_before_breaks_and_aliases() {
+  let alias = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("ex".to_string(), TagOverrideConfig::alias("em"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    (
+      "<em>T&#11;<br></em>X",
+      HtmlToMarkdownOptions::default(),
+      "*T*\u{000b}  \nX",
+    ),
+    ("<ex>T&#11;</ex>X", alias, "*T*\u{000b}X"),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options.clone());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_vertical_tabs_stream_after_the_emphasis_closes() {
+  // Text output moves no run, and the held run must not go stale once the
+  // emphasis closes (a debug build asserts on it).
+  for (format, html, expected) in [
+    (OutputFormat::Text, "<h2><em>a&#11;</em></h2>", "a\u{000b}"),
+    (
+      OutputFormat::Text,
+      "<p><em>a&#11;&#11;</em></p>",
+      "a\u{000b}\u{000b}",
+    ),
+    (OutputFormat::Text, "<p><em>a&#11;</em>b</p>", "a\u{000b}b"),
+    (
+      OutputFormat::Markdown,
+      "<pre><em>T&#11;</em>x</pre>",
+      "```\nT\u{000b}x\n```",
+    ),
+    (
+      OutputFormat::Markdown,
+      "<pre><em>T&#11; </em>x</pre>",
+      "```\nT\u{000b} x\n```",
+    ),
+    (
+      OutputFormat::Markdown,
+      "<p><em>T&#11;</em>&#11;x</p>",
+      "*T*\u{000b}\u{000b}x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    let one_shot = mdream::html_to_format_result(html, options.clone(), format);
+    assert_eq!(one_shot.markdown, expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{format:?} {html}, width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_holding_only_vertical_tabs_drops_its_delimiters() {
+  // The closer moves the run after itself, so the pair is empty like `<em></em>`.
+  for (html, expected) in [
+    // The document-start trim takes the run, as it does for `<p>&#11;x</p>`.
+    ("<p><em>&#11;</em>x</p>", "x"),
+    ("<p>z</p><p><em>&#11;</em>x</p>", "z\n\n\u{000b}x"),
+    ("<p>z <em>&#11; </em>x</p>", "z \u{000b} x"),
+    ("<p>z <strong><em>&#11;</em></strong>x</p>", "z \u{000b}x"),
+    ("<p><strong>a<em>&#11;</em></strong>x</p>", "**a**\u{000b}x"),
+    ("<ul><li><em>&#11;</em></li></ul>", "- \u{000b}"),
+    ("<p>z<br><em>&#11;</em>x</p>", "z  \n\u{000b}x"),
+    ("<p>z <em>&#11;<br></em>x</p>", "z \u{000b}  \nx"),
+    ("<p>a <del>&#11;</del> x</p>", "a \u{000b} x"),
+    ("<p>a <cite>&#11;&#11;</cite> x</p>", "a \u{000b}\u{000b} x"),
+    ("<p>a <dfn>&#11;</dfn>x</p>", "a \u{000b}x"),
+    (
+      "<figure><img src=\"a.png\"><figcaption><em>&#11;</em></figcaption></figure>",
+      "![](a.png)\n\n*\u{000b}*",
+    ),
+    ("<p>z <code>&#11;</code>x</p>", "z `\u{000b}`x"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
 fn scout9_excluded_list_spacing() {
   for (html, expected) in [
     (

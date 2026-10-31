@@ -2749,6 +2749,30 @@ impl ConvertState {
     let mut stable_end = self
       .held_whitespace
       .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
+    // A Markdown emphasis closer moves a trailing run that holds a vertical tab
+    // after itself, so the whole run stays mutable while emphasis is open. The
+    // cache keeps the plain predicate: its carried start would go stale once
+    // the emphasis closes, so the vertical tab part is scanned without it.
+    if stable_end > 0
+      && self.buffer.as_bytes()[stable_end - 1] == 11
+      && !plain_text!(self)
+      && (self.depth_map[TAG_EM as usize] != 0
+        || self.depth_map[TAG_I as usize] != 0
+        || self.depth_map[TAG_STRONG as usize] != 0
+        || self.depth_map[TAG_B as usize] != 0
+        || self.depth_map[TAG_CITE as usize] != 0
+        || self.depth_map[TAG_DFN as usize] != 0
+        || self.depth_map[TAG_DEL as usize] != 0
+        || self.depth_map[TAG_S as usize] != 0
+        || self.depth_map[TAG_STRIKE as usize] != 0)
+    {
+      let bytes = self.buffer.as_bytes();
+      while stable_end > 0
+        && (bytes[stable_end - 1].is_ascii_whitespace() || bytes[stable_end - 1] == 11)
+      {
+        stable_end -= 1;
+      }
+    }
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
       // line-leading run is the exception: list continuation indentation is
