@@ -931,6 +931,9 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
+  /// `<li>` children opened so far in each open `<ol>` or `<ul>`, innermost
+  /// last. An item's position among them numbers it and marks the list's first.
+  list_item_counts: Vec<u32>,
 
   /// `<pre>` fenced-code deferral (issue #97). A bare `<pre>` (no `<code>`
   /// child) becomes a fenced code block, but the opening fence is deferred
@@ -1198,6 +1201,7 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       ordered_starts: Vec::new(),
+      list_item_counts: Vec::new(),
 
       pre_fence_pending: false,
       pre_fence_pending_depth: 0,

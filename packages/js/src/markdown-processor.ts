@@ -879,6 +879,17 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
     return NO_SPACING
   }
 
+  // Only a list starting at 1 may interrupt its parent's paragraph. A bare
+  // parent marker has no paragraph to separate, so keep that list tight, and
+  // so does an open link or emphasis, which a blank line would never close.
+  if (eventType === NodeEventEnter && tagId === TAG_LI && depthMap[TAG_LI]! > 1
+    && node.index === 0 && node.parent?.tagId === TAG_OL
+    && orderedItemNumber(node.parent, 0) !== 1 && !isInsideTableCell(state)
+    && !insideOpenInlineDelimiter(node, state)
+    && (blockOpenPrefix(state, '') !== undefined || endsAtHardBreak(state.buffer))) {
+    return DEFAULT_BLOCK_SPACING
+  }
+
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
   // because spans shouldn't affect block-level semantics of their children
@@ -926,6 +937,25 @@ function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): bo
   return (INLINE_MARKER_TYPE[tagId] !== undefined && INLINE_MARKER_TYPE[tagId] !== 0)
     || (tagId === TAG_A && (node.attributes?.href !== undefined || isInsideRawHtmlBlock(state.depthMap)))
     || tagId === TAG_SUB || tagId === TAG_SUP || tagId === TAG_INS || tagId === TAG_U || tagId === TAG_MARK
+}
+
+/**
+ * Whether an ancestor left a Markdown delimiter open, which has to close in the
+ * same paragraph. Raw tags survive a blank line and a marker-less wrapper has
+ * nothing to close, so neither counts.
+ */
+function insideOpenInlineDelimiter(node: ElementNode, state: MarkdownState): boolean {
+  const rawHtml = isInsideRawHtmlBlock(state.depthMap)
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    const tagId = parent.tagId
+    if (parent.tagHandler?.collapsesInnerWhiteSpace
+      && tagId !== TAG_INS && tagId !== TAG_SUB && tagId !== TAG_SUP && tagId !== TAG_MARK && tagId !== TAG_U
+      && !(rawHtml && tagId === TAG_A)
+      && wrapperEmitsInlineMarkdown(parent, state)) {
+      return true
+    }
+  }
+  return false
 }
 
 export function isAsciiWhitespace(code: number): boolean {
@@ -1214,7 +1244,7 @@ function flushPreFence(state: MarkdownState): void {
   // A blank line between the marker and the fence ends the item, leaving the block
   // a sibling of the list, so a pending marker takes no separator.
   const fence = liDepth > 0
-    ? `${blockOpenPrefix(state.buffer, state.listIndent) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
+    ? `${blockOpenPrefix(state, state.listIndent) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
   state.buffer.push(fence)
   startCodeFence(state, state.buffer.length - 1, lang, state.listIndent)
@@ -1490,7 +1520,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (spacing === CAPTION_DEFAULT_SPACING)
       spacing = DEFAULT_BLOCK_SPACING[0]
     const indent = includeListIndent ? state.listIndent : ''
-    const blockPrefix = blockOpenPrefix(state.buffer, indent, beforeFragment)
+    const blockPrefix = blockOpenPrefix(state, indent, beforeFragment)
     const trailingNewLines = newlineRunBeforePrefix(state.buffer, beforeFragment, indent)
     if (blockPrefix === undefined && trailingNewLines === 0)
       return ''
@@ -1999,8 +2029,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
 
-      if (state.pendingInlineWhitespace)
+      if (state.pendingInlineWhitespace) {
         state.pendingInlineWhitespace = false
+        // A raw `<br>` (heading, table cell) ends no line, so it keeps the
+        // separator a closed inline element deferred, as in Rust.
+        if (breakOutput?.charCodeAt(0) === 60) {
+          const last = lastOutputChar(buff)
+          if (last !== -1 && last !== 32 && last !== 10 && last !== 9 && last !== 13) {
+            buff.push(' ')
+            state.lastContentCache = ' '
+          }
+        }
+      }
 
       const lastFragment = state.lastContentCache
       const lastTextNode = state.lastTextNode
@@ -2321,7 +2361,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       rawHtmlNeedsBoundary = false
     if (rawBlockTag && !isInsideTableCell(state) && !state.depthMap[TAG_PRE]
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
-      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(buff, undefined) === undefined)) {
+      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(state, undefined) === undefined)) {
       rawHtmlNeedsBoundary = true
       bufferScan[0] = false
       bufferScan[1] = buff.length
@@ -2374,7 +2414,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
-        if (!isInlineElement || tagId === TAG_BR || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+        // A raw `<br>` (heading, table cell) is no line end, so it keeps the
+        // separator like any inline output, as in Rust.
+        if (!isInlineElement || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
@@ -2461,7 +2503,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // Also don't trim before block elements that have their own spacing configuration
           // At a quote's content start the last fragment is the sibling separator,
           // not trailing whitespace; trimming it would glue adjacent quotes.
+          // A raw `</pre>` in a table cell closes preformatted text, so the
+          // whitespace before it is content, as in Rust.
           const shouldTrim = !quoteAtStart
+            && !(tagId === TAG_PRE && eventType === NodeEventExit && isInsideTableCell(state))
             && ((tagId === TAG_BR && output?.[0]?.endsWith('\n') && !parentInPre)
               || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)))
 

@@ -1644,7 +1644,13 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
-      self.trim_trailing_spaces();
+      // A table cell keeps its tabs: the one before a non-first cell is the
+      // column separator, as at the row boundary.
+      if plain_text!(self) && self.depth_map[TAG_TABLE as usize] == 0 {
+        self.trim_trailing_blanks();
+      } else {
+        self.trim_trailing_spaces();
+      }
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
@@ -2504,9 +2510,33 @@ impl ConvertState {
       output.as_deref()
     };
 
-    if tag_id == Some(TAG_LI) && !plain_text!(self) {
-      self.pending_raw_html_boundary = false;
-      self.resolve_item_marker(true);
+    match tag_id {
+      Some(TAG_LI) if !plain_text!(self) => {
+        // A hard break already ended the item. Its continuation indentation
+        // must not become a whitespace-only line before the following block.
+        if self.hard_break_end == self.buffer.len()
+          && !self.empty_item_hazard
+          && !has_override
+          && self.depth_map[TAG_PRE as usize] == 0
+          && !self.in_table_cell()
+        {
+          self.trim_trailing_spaces();
+          self.hard_break_end = self.buffer.len();
+        }
+        self.pending_raw_html_boundary = false;
+        self.resolve_item_marker(true);
+      }
+      // A `<pre>` closing its plain-text block drops the trailing tab run its
+      // content ends on, as the block boundary does outside preformatted text.
+      Some(TAG_PRE)
+        if plain_text!(self)
+          && configured_new_lines > 0
+          && self.depth_map[TAG_TABLE as usize] == 0
+          && self.buffer.ends_with('\t') =>
+      {
+        self.trim_trailing_blanks();
+      }
+      _ => {}
     }
 
     let output_start = self.buffer.len();
@@ -2873,6 +2903,7 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
+    let mut relocated_space = false;
     if self.pending_inline_whitespace {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
@@ -2880,7 +2911,11 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
-        self.push_code_span_content(" ", true);
+        if self.wrap_width != 0 && self.can_wrap_here() {
+          relocated_space = true;
+        } else {
+          self.push_code_span_content(" ", true);
+        }
       }
       self.pending_inline_whitespace = false;
     }
@@ -3038,7 +3073,7 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char, owns_leading_space);
+      self.push_text_wrapped(text, last_char, owns_leading_space, relocated_space);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -3261,9 +3296,18 @@ impl ConvertState {
     }
   }
 
-  /// Whether `end` sits just past a list marker that is all its line holds:
-  /// optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
-  fn list_marker_line_start(&self, bytes: &[u8], end: usize) -> bool {
+  /// Deepest indent of a marker a block can share a line with. A list writes the
+  /// open item's marker at its container's content column; a marker past that
+  /// column belongs to a closed nested item, whose line the block must leave.
+  fn pending_marker_indent(&self) -> usize {
+    self.list_indent_widths.last().map_or(3, |&width| {
+      self.list_indent.len().saturating_sub(usize::from(width))
+    })
+  }
+
+  /// Whether `end` sits just past a list marker that is all its line holds: up
+  /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+  fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
     let mut index = end - 1;
     match bytes[index] {
       b'.' | b')' => {
@@ -3279,9 +3323,17 @@ impl ConvertState {
       _ => return false,
     }
     let mut spaces = 0;
-    while index > 0 && bytes[index - 1] == b' ' && spaces < 3 {
+    while index > 0 && bytes[index - 1] == b' ' {
+      // The space after a decoded `\r` separates the marker from the line end
+      // before it; it is not indentation, so it never counts against the cap.
+      let separator = index >= 2 && bytes[index - 2] == b'\r';
+      if !separator {
+        if spaces >= max_spaces {
+          break;
+        }
+        spaces += 1;
+      }
       index -= 1;
-      spaces += 1;
     }
     if index == 0 {
       return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
@@ -3580,7 +3632,9 @@ impl ConvertState {
       if byte != b' ' || spaces == structural_indent + 3 {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
-        return self.list_marker_line_start(bytes, offset + 1).then_some(0);
+        return self
+          .list_marker_line_start(bytes, offset + 1, 3)
+          .then_some(0);
       }
       spaces += 1;
     }
@@ -3811,6 +3865,26 @@ impl ConvertState {
       // buffer wherever a drain has already cut the front, and the reach-back
       // trim's `cache_len <= buf_len` guard then skips a retraction one-shot
       // performs, keeping block spacing an empty element wrote.
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
+      self.truncate_buffer(trimmed_len);
+    }
+  }
+
+  /// Plain text ends a line on a space and tab run, as in JS. Kept out of
+  /// line so the Markdown paths that branch around it stay as they were.
+  #[cold]
+  #[inline(never)]
+  fn trim_trailing_blanks(&mut self) {
+    let floor = self.trim_floor();
+    let bytes = self.buffer.as_bytes();
+    let mut trimmed_len = bytes.len();
+    while trimmed_len > floor && matches!(bytes[trimmed_len - 1], b' ' | b'\t') {
+      trimmed_len -= 1;
+    }
+    if trimmed_len < bytes.len() {
       self.last_content_cache_len = self
         .last_content_cache_len
         .saturating_sub(self.buffer.len() - trimmed_len);
@@ -4314,13 +4388,27 @@ impl ConvertState {
           // marker scan's starting point — left with the drain.
           return drained_onto_content;
         }
-        bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end)
+        bytes[end - 1] != b'\n'
+          && !self.list_marker_line_start(bytes, end, self.pending_marker_indent())
       }
       Some(b'\n') => false,
       // Directly under text the block reads as a setext underline or a lazy
       // continuation, so it has to break the paragraph first.
       _ => true,
     }
+  }
+
+  /// Whether the innermost open quote has written nothing yet, so the output
+  /// still sits on the line its opener started. A streaming flush also anchors a
+  /// quote at the buffer end, past a hard break it wrote, so the frame alone
+  /// cannot tell.
+  #[cold]
+  fn quote_at_start(&self) -> bool {
+    self.hard_break_end != self.buffer.len()
+      && self
+        .blockquotes
+        .last()
+        .is_some_and(|frame| frame.content_start == self.buffer.len())
   }
 
   /// Continuation prefix re-emitted at the start of each continued line so the
@@ -4389,7 +4477,13 @@ impl ConvertState {
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
   /// inline boundaries (e.g. `foo**bar**`) stay intact.
-  fn push_text_wrapped(&mut self, text: &str, last_char: Option<u8>, owns_leading_space: bool) {
+  fn push_text_wrapped(
+    &mut self,
+    text: &str,
+    last_char: Option<u8>,
+    owns_leading_space: bool,
+    relocated_space: bool,
+  ) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
@@ -4398,7 +4492,8 @@ impl ConvertState {
     let leading_space = text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
     // A caption owns the space before its first text, as on the unwrapped path.
-    let first_needs_space = leading_space
+    let first_needs_space = relocated_space
+      || leading_space
       || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
@@ -4488,6 +4583,22 @@ impl ConvertState {
             static H_OPEN: [&str; 6] = ["<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>"];
             Some(Cow::Borrowed(H_OPEN[depth]))
           }
+        } else if !self.list_indent.is_empty()
+          && self.last_output_byte() == Some(b'\n')
+          && !self.quote_at_start()
+        {
+          let prefix = self.continuation_prefix();
+          Some(Cow::Owned(format!("\n{prefix}{}", HEADING_PREFIXES[depth])))
+        } else if !self.list_indent.is_empty()
+          && _ancestors
+            .last()
+            .is_some_and(|parent| parent.tag_id == Some(TAG_LI))
+        {
+          let prefix = self.continuation_prefix();
+          Some(match self.block_open_prefix(&prefix) {
+            Some(open) => Cow::Owned(format!("{open}{}", HEADING_PREFIXES[depth])),
+            None => Cow::Borrowed(HEADING_PREFIXES[depth]),
+          })
         } else {
           Some(Cow::Borrowed(HEADING_PREFIXES[depth]))
         }
@@ -5192,8 +5303,23 @@ impl ConvertState {
         return;
       }
 
-      if last_char == b' ' && !self.buffer.is_empty() {
-        self.trim_trailing_spaces();
+      // A plain-text row keeps the tab that separates an empty trailing cell,
+      // and preformatted text keeps its tabs until its own `<pre>` boundary.
+      let trims_tabs = matches!(last_char, b' ' | b'\t')
+        && plain_text!(self)
+        && self.depth_map[TAG_TABLE as usize] == 0
+        && (self.depth_map[TAG_PRE as usize] == 0
+          || is_enter
+            && self
+              .stack
+              .last()
+              .is_some_and(|node| node.tag_id == Some(TAG_PRE)));
+      if (last_char == b' ' || trims_tabs) && !self.buffer.is_empty() {
+        if trims_tabs {
+          self.trim_trailing_blanks();
+        } else {
+          self.trim_trailing_spaces();
+        }
         // This source whitespace was consumed by the block boundary; do not
         // let its state leak into a later inline event and trim that output.
         self.last_text_node_contains_whitespace = false;
@@ -5367,8 +5493,9 @@ impl ConvertState {
     node_spacing: Option<[u8; 2]>,
     is_enter: bool,
   ) -> [u8; 2] {
-    // Inline tags return `NO_SPACING` unless they are `<pre>`.
-    if node_spacing == Some(NO_SPACING) && tag_id != Some(TAG_PRE) {
+    // Inline tags return `NO_SPACING` unless they are `<pre>`. An `<li>` gets
+    // here only through a spacing override, which the nested-list rule outranks.
+    if node_spacing == Some(NO_SPACING) && !matches!(tag_id, Some(TAG_PRE | TAG_LI)) {
       return NO_SPACING;
     }
     if plain_text!(self)
@@ -5387,6 +5514,27 @@ impl ConvertState {
       }
     } else if self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0 {
       return NO_SPACING;
+    }
+    // Only a list starting at 1 may interrupt its parent's paragraph. A bare
+    // parent marker has no paragraph to separate, so keep that list tight, and
+    // so does an open link or emphasis, which a blank line would never close.
+    if self.depth_map[TAG_LI as usize] > 1
+      && tag_id == Some(TAG_LI)
+      && is_enter
+      && !plain_text!(self)
+      && self.stack.last().is_some_and(|node| node.index == 0)
+      && self
+        .stack
+        .iter()
+        .rev()
+        .nth(1)
+        .is_some_and(|node| node.tag_id == Some(TAG_OL))
+      && self.ordered_item_number(0) != 1
+      && !self.in_table_cell()
+      && !self.inside_open_inline_delimiter()
+      && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
+    {
+      return DEFAULT_BLOCK_SPACING;
     }
     // A heading's own collapse keeps its block spacing, but in a table cell that
     // newline would end the row. The count holds the heading only while it is
@@ -5501,6 +5649,26 @@ impl ConvertState {
       .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
   }
 
+  /// Whether an ancestor of the node just entered left a Markdown delimiter
+  /// open, which has to close in the same paragraph. Raw tags survive a blank
+  /// line and a marker-less wrapper has nothing to close, so neither counts.
+  fn inside_open_inline_delimiter(&self) -> bool {
+    if self.collapse_non_span_depth == 0 && self.collapse_span_depth == 0 {
+      return false;
+    }
+    let raw_html = self.in_raw_html_block();
+    self.stack.iter().rev().skip(1).any(|node| {
+      node.collapses_inner_white_space
+        && !node.excluded_from_markdown
+        && !matches!(
+          node.tag_id,
+          Some(TAG_INS | TAG_SUB | TAG_SUP | TAG_MARK | TAG_U)
+        )
+        && !(raw_html && node.tag_id == Some(TAG_A))
+        && self.wrapper_emits_inline_markdown(node)
+    })
+  }
+
   #[inline]
   fn figcaption_owns_block_spacing(&self) -> bool {
     !self.in_table_cell() && (plain_text!(self) || self.collapse_non_span_depth == 1)
@@ -5596,7 +5764,7 @@ impl ConvertState {
       .unwrap_or(line.len());
     let after_marker = || {
       let end = bytes.len() - trailing_spaces(bytes);
-      end != 0 && self.list_marker_line_start(bytes, end)
+      end != 0 && self.list_marker_line_start(bytes, end, self.pending_marker_indent())
     };
     // `index == 0` means the scan ran out of buffer, not that the line starts
     // here: a drain may have taken the beginning of this line away. Trusting the
@@ -5661,7 +5829,10 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P, push_decimal};
+  use super::{
+    BlockquoteFrame, ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_H2, TAG_LI, TAG_P,
+    push_decimal,
+  };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -5777,6 +5948,23 @@ mod tests {
     state.emit_enter_element();
 
     assert_eq!(state.buffer, "\n\n  ");
+  }
+
+  // A drain can take the newline a quote opened on, leaving it readable only
+  // through `flushed_tail`. The heading still opens the quote's first line.
+  #[test]
+  fn drained_quote_opener_keeps_the_heading_on_its_line() {
+    let mut state = drained_open_list_item();
+    state.flushed_tail = *b"y\n";
+    state.blockquotes.push(BlockquoteFrame {
+      content_start: 0,
+      list_indent: "  ".to_string(),
+    });
+    state.stack.push(entering_node(TAG_H2, false));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, "## ");
   }
 
   // A code span after drained content glues with a separator space, the way

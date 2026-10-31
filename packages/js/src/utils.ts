@@ -1,4 +1,4 @@
-import type { ElementNode, Node, TextNode } from './types'
+import type { ElementNode, MdreamRuntimeState, Node, TextNode } from './types'
 import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_ABBR, TAG_BDO, TAG_BLOCKQUOTE, TAG_FIGCAPTION, TAG_H1, TAG_H6, TAG_INS, TAG_KBD, TAG_LI, TAG_S, TAG_SMALL, TAG_SPAN, TAG_STRIKE, TAG_STRONG, TAG_TD, TAG_TH, TAG_U } from './const'
 import {
   HTML_ENTITIES,
@@ -385,6 +385,9 @@ export function lastOutputChar(buffer: readonly string[], end = buffer.length): 
   return -1
 }
 
+/** What placing a block on the current output line reads from the state. */
+type ListLineState = Pick<MdreamRuntimeState, 'buffer' | 'listIndent' | 'listIndentWidths'>
+
 /** Whether only indentation follows a prose hard break. */
 export function endsAtHardBreak(buffer: readonly string[]): boolean {
   let fragment = buffer.length - 1
@@ -419,10 +422,11 @@ export function endsAtHardBreak(buffer: readonly string[]): boolean {
  * `undefined` when the buffer already sits there.
  */
 export function blockOpenPrefix(
-  buffer: readonly string[],
+  state: ListLineState,
   prefix: string | undefined,
-  end = buffer.length,
+  end = state.buffer.length,
 ): string | undefined {
+  const buffer = state.buffer
   switch (lastOutputChar(buffer, end)) {
     // Empty output.
     case -1:
@@ -442,7 +446,7 @@ export function blockOpenPrefix(
         }
         const code = buffer[fragment]!.charCodeAt(--index)
         if (code !== SPACE_CHAR) {
-          return code === NEWLINE_CHAR || listMarkerLineStart(buffer, fragment, index)
+          return code === NEWLINE_CHAR || listMarkerLineStart(buffer, fragment, index, pendingMarkerIndent(state))
             ? undefined
             : `\n\n${prefix ?? ''}`
         }
@@ -470,10 +474,21 @@ export function figcaptionOwnsBlockSpacing(node: Node, plainText: boolean): bool
 }
 
 /**
- * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
- * line holds: optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+ * Deepest indent of a marker a block can share a line with. A list writes the
+ * open item's marker at its container's content column; a marker past that
+ * column belongs to a closed nested item, whose line the block must leave.
  */
-export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: number, markerIndex: number): boolean {
+export function pendingMarkerIndent(state: ListLineState): number {
+  const widths = state.listIndentWidths
+  return widths?.length ? state.listIndent!.length - widths[widths.length - 1]! : 3
+}
+
+/**
+ * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
+ * line holds: up to `maxIndent` spaces, `-`/`*`/`+` or `N.`/`N)`, and nothing
+ * else.
+ */
+export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: number, markerIndex: number, maxIndent = 3): boolean {
   const marker = buffer[fragmentIndex]!.charCodeAt(markerIndex)
   const ordered = marker === 46 || marker === 41 // . )
   if (!ordered && marker !== 45 && marker !== 42 && marker !== 43) // - * +
@@ -499,7 +514,12 @@ export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: nu
     if (ordered && digits === 0)
       return false
     if (code === 32) {
-      if (++spaces > 3)
+      // The space after a decoded `\r` separates the marker from the line end
+      // before it; it is not indentation, so it never counts against the cap.
+      const afterCr = cursor > 0
+        ? buffer[fragment]!.charCodeAt(cursor - 1) === 13
+        : fragment > 0 && buffer[fragment - 1]!.endsWith('\r')
+      if (!afterCr && ++spaces > maxIndent)
         return false
       continue
     }
