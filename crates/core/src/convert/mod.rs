@@ -682,6 +682,9 @@ pub struct ConvertState {
   pending_raw_html_boundary: bool,
   pub depth: usize,
   has_encoded_html_entity: bool,
+  /// Run offsets where a discarded token ended the DOM text node. No character
+  /// reference spans one, so decoding ends a reference still open there.
+  entity_seals: Vec<usize>,
   last_char_was_whitespace: bool,
   text_buffer_contains_whitespace: bool,
   text_buffer_contains_non_whitespace: bool,
@@ -1050,6 +1053,7 @@ impl ConvertState {
       pending_raw_html_boundary: false,
       depth: 0,
       has_encoded_html_entity: false,
+      entity_seals: Vec::new(),
       last_char_was_whitespace: true,
       text_buffer_contains_whitespace: false,
       text_buffer_contains_non_whitespace: false,
@@ -1336,10 +1340,51 @@ impl ConvertState {
     self.script_text_buffer = script_text;
   }
 
+  /// Marks the end of the run as the end of a DOM text node: the token
+  /// discarded there splits the text without the separator a new node adds.
+  #[inline]
+  fn seal_text_run(&mut self, text_buffer: &str) {
+    let at = text_buffer.len();
+    // Only a `&` before the token can start a reference that reaches past it.
+    if self.has_encoded_html_entity && at != 0 && self.entity_seals.last() != Some(&at) {
+      self.entity_seals.push(at);
+    }
+  }
+
+  /// Ends the character reference left open at each seal, so the decode that
+  /// follows reads the text on each side of a discarded token apart. The run
+  /// keeps its source bytes until here, which is what the node cap counts.
+  #[cold]
+  #[inline(never)]
+  fn end_references_at_seals(&mut self, text_buffer: &mut String) {
+    let mut seals = std::mem::take(&mut self.entity_seals);
+    let mut ended = String::with_capacity(text_buffer.len() + 4 * seals.len());
+    let mut from = 0;
+    for &at in &seals {
+      let at = at.min(text_buffer.len());
+      let segment = &text_buffer[from..at];
+      match open_reference_start(segment.as_bytes()) {
+        Some(amp) => {
+          ended.push_str(&segment[..amp]);
+          push_ended_reference(&mut ended, &segment[amp..], &mut self.entity_buffer);
+        }
+        None => ended.push_str(segment),
+      }
+      from = at;
+    }
+    ended.push_str(&text_buffer[from..]);
+    *text_buffer = ended;
+    seals.clear();
+    self.entity_seals = seals;
+  }
+
   fn complete_text_node(&mut self, text_buffer: &mut String) {
     self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
     let exhausted = self.text_node_exhausted;
     if !text_buffer.is_empty() {
+      if !self.entity_seals.is_empty() {
+        self.end_references_at_seals(text_buffer);
+      }
       self.process_text_buffer(text_buffer);
       text_buffer.clear();
     } else if exhausted {
@@ -1486,7 +1531,22 @@ impl ConvertState {
     };
     self.text_run_next_flush = TEXT_RUN_FLUSH_THRESHOLD;
     let tail = text_buffer.split_off(cut);
+    let tail_seals = if self.entity_seals.is_empty() {
+      Vec::new()
+    } else {
+      let split = self.entity_seals.partition_point(|&at| at <= cut);
+      let tail_seals = self
+        .entity_seals
+        .drain(split..)
+        .map(|at| at - cut)
+        .collect();
+      if split > 0 {
+        self.end_references_at_seals(text_buffer);
+      }
+      tail_seals
+    };
     self.process_text_buffer_piece(text_buffer, false);
+    self.entity_seals = tail_seals;
     // A blank link's text can outgrow the cap within a single run.
     self.check_held_output();
     self.last_node_is_inline = true;
@@ -1949,9 +2009,23 @@ impl ConvertState {
           carry_bounded = true;
           break;
         }
-        self.complete_text_node(&mut text_buffer);
-        if self.held_output_exceeded {
-          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+        if remaining.len() < 9
+          && b"<!doctype"[..remaining.len()].eq_ignore_ascii_case(remaining.as_bytes())
+        {
+          run_start = i;
+          carry = true;
+          carry_bounded = true;
+          break;
+        }
+        // A comment becomes a DOM node. A DOCTYPE in content is ignored without
+        // one, so like a bogus comment it only ends the character reference.
+        if cdata.is_some() || remaining.starts_with("<!--") {
+          self.complete_text_node(&mut text_buffer);
+          if self.held_output_exceeded {
+            return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
+          }
+        } else {
+          self.seal_text_run(&text_buffer);
         }
         run_start = i;
         if cdata.is_some() {
@@ -1970,7 +2044,14 @@ impl ConvertState {
           self.discard_declaration(remaining);
           break;
         }
-      } else if next == SLASH_CHAR {
+      } else if next == SLASH_CHAR
+        && i + 2 < chunk_length
+        // Lowercase first: real end tags are lowercase, and combined with the
+        // `>` test `is_ascii_alphabetic` compiled to `A-Z` before `a-z`.
+        && (bytes[i + 2].is_ascii_lowercase()
+          || bytes[i + 2].is_ascii_uppercase()
+          || bytes[i + 2] == GT_CHAR)
+      {
         self.complete_text_node(&mut text_buffer);
         if self.held_output_exceeded {
           return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
@@ -1985,12 +2066,15 @@ impl ConvertState {
           discard_end_tag = result.name_ended;
           break;
         }
-      } else if next == QUESTION_CHAR {
-        // `<?` opens a bogus comment, which ends at the first `>`.
-        self.complete_text_node(&mut text_buffer);
-        if self.held_output_exceeded {
-          return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
-        }
+      } else if next == SLASH_CHAR && i + 2 == chunk_length {
+        // `</` at the chunk end is an end tag or a bogus comment.
+        run_start = i;
+        carry = true;
+        carry_bounded = true;
+        break;
+      } else if next == SLASH_CHAR || next == QUESTION_CHAR {
+        // Bogus comments end at the first `>`, even inside quotes.
+        self.seal_text_run(&text_buffer);
         run_start = i;
         let Some(len) = discarded_gt(&chunk[i..]) else {
           self.discard_declaration(&chunk[i..]);
@@ -2162,6 +2246,7 @@ impl ConvertState {
     chunk_length: usize,
   ) -> usize {
     text_buffer.clear();
+    self.entity_seals.clear();
     self.parse_text_buffer = text_buffer;
     self.pending_start = None;
     self.pending_tag = None;
@@ -3204,6 +3289,46 @@ fn non_ascii_run_end(bytes: &[u8], start: usize, limit: usize) -> usize {
     end += 1;
   }
   end
+}
+
+/// Start of the character reference that bytes appended after `run` could still
+/// extend: a final `&` followed only by a name, or by `#` and digits.
+fn open_reference_start(run: &[u8]) -> Option<usize> {
+  let amp = run.iter().rposition(|&byte| byte == AMPERSAND_CHAR)?;
+  let rest = &run[amp + 1..];
+  let open = match rest.split_first() {
+    Some((b'#', digits)) => match digits.split_first() {
+      Some((b'x' | b'X', digits)) => digits.iter().all(u8::is_ascii_hexdigit),
+      _ => digits.iter().all(u8::is_ascii_digit),
+    },
+    _ => rest.iter().all(u8::is_ascii_alphanumeric),
+  };
+  open.then_some(amp)
+}
+
+/// Writes `reference`, an open one from [`open_reference_start`], so it decodes
+/// as it does alone and takes no byte from the text written after it.
+fn push_ended_reference(out: &mut String, reference: &str, scratch: &mut String) {
+  if let Some(rest) = reference.strip_prefix("&#") {
+    // Digits run to the first non-digit, and a `;` there is part of the reference.
+    if !rest.strip_prefix(['x', 'X']).unwrap_or(rest).is_empty() {
+      out.push_str(reference);
+      out.push(';');
+      return;
+    }
+  }
+  if decode_html_entities_into(reference, false, false, scratch) {
+    for ch in scratch.chars() {
+      if ch == '&' {
+        out.push_str("&amp;");
+      } else {
+        out.push(ch);
+      }
+    }
+  } else {
+    out.push_str("&amp;");
+    out.push_str(&reference[1..]);
+  }
 }
 
 fn push_capped_text_node(
