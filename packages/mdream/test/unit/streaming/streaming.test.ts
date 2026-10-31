@@ -150,6 +150,10 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<>',
   // String chunks split the UTF-16 surrogate pair at width 1.
   '<p>🎉</p>',
+  // A marker nested past three spaces is recognized from its whole line lead.
+  '<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>',
+  '<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>',
+  '<ul><li><ul><li></li></ul></li></ul>',
 ]
 
 describe('cross-engine streaming byte parity', () => {

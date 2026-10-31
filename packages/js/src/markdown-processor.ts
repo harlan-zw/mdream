@@ -55,6 +55,7 @@ import {
   TAG_TH,
   TAG_TR,
   TAG_U,
+  TAG_UL,
   TAG_VAR,
   TEXT_NODE,
 } from './const'
@@ -128,8 +129,10 @@ export interface MarkdownState {
   bufferedBlockquoteDepth: number
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
+  lastItemMarkerFragment?: number
+  lastItemMarkerOwner?: ElementNode
   /** Content-column prefix deferred after a list item rule. */
-  listRulePending?: string
+  listRulePending?: string | true
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -227,18 +230,49 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
   }
 }
 
+type MarkdownListNode = ElementNode & { hasListItemOutput?: true }
+
 /**
  * Arm the empty-item guard for the `<li>` whose marker was just written. A marker
  * line continuing the paragraph above turns a lone marker into a setext
  * underline: the text becomes a heading and the item disappears. A blank line, or
  * a sibling marker, opens its own block instead.
  */
-function recordItemMarker(state: MarkdownState, index: number): void {
+function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: boolean): void {
+  const previousFragment = state.lastItemMarkerFragment
+  const previousOwner = state.lastItemMarkerOwner
+  state.lastItemMarkerFragment = builtIn ? state.buffer.length - 1 : undefined
+  state.lastItemMarkerOwner = builtIn ? element : undefined
+  const index = element.index
   // Only a list's first item can follow a paragraph, so every later sibling
   // skips the scan below.
   if (index !== 0 || newlineRunBefore(state.buffer, state.buffer.length - 1) !== 1) {
     state.emptyItemFragment = undefined
     return
+  }
+  // A parent's bare marker is no paragraph, and a blank line under it would end
+  // that item and turn this one into its sibling. A marker outside the
+  // innermost blockquote keeps the blank line it already had, which the quote's
+  // prefix makes harmless.
+  for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
+    const value = state.buffer[fragment]!
+    for (let cursor = value.length - 1; cursor >= 0; cursor--) {
+      const code = value.charCodeAt(cursor)
+      if (code === 10 || code === 32)
+        continue
+      // A direct first-child list cannot have inserted content before its
+      // parent's built-in marker. A drain/rewrite that moves that fragment
+      // misses this shortcut and keeps the general line recognizer.
+      const recordedParent = fragment === previousFragment
+        && previousOwner === element.parent?.parent
+        && element.parent?.index === 0
+        && (fragment === 0 || newlineRunBefore(state.buffer, fragment) > 0)
+        && (code === 45 || code === 46)
+      state.emptyItemFragment = (recordedParent || listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length))
+        ? undefined
+        : state.buffer.length - 1
+      return
+    }
   }
   state.emptyItemFragment = state.buffer.length - 1
 }
@@ -518,27 +552,27 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
 }
 
 /**
- * Return the current GFM line indent when a block marker may still start at
- * this position. A non-space byte, or more than three leading spaces, makes
- * the position ordinary inline text.
+ * Return block indentation after the active list continuation prefix.
+ * Four additional spaces make the position ordinary inline text.
  */
-function markdownLineIndent(buffer: string[]): number {
+function markdownLineIndent(buffer: string[], listIndent: number): number {
   let spaces = 0
+  const limit = listIndent + 3
   for (let fragmentIndex = buffer.length - 1; fragmentIndex >= 0; fragmentIndex--) {
     const fragment = buffer[fragmentIndex]!
     for (let index = fragment.length - 1; index >= 0; index--) {
       const code = fragment.charCodeAt(index)
       if (code === 10)
-        return spaces
+        return Math.max(0, spaces - listIndent)
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
-      if (code !== 32 || spaces === 3) {
-        return listMarkerLineStart(buffer, fragmentIndex, index) ? 0 : -1
+      if (code !== 32 || spaces === limit) {
+        return listMarkerLineStart(buffer, fragmentIndex, index, listIndent) ? 0 : -1
       }
       spaces++
     }
   }
-  return spaces
+  return Math.max(0, spaces - listIndent)
 }
 
 function isMarkdownMarkerWhitespace(code: number): boolean {
@@ -577,7 +611,7 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
  */
-function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array): boolean {
+function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array, listIndent: number): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true
   if ((depthMap[TAG_TABLE] && value.includes('|'))
@@ -593,7 +627,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
     return false
   }
 
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, listIndent)
   if (lineIndent < 0)
     return false
 
@@ -615,11 +649,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, listIndent: number): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, listIndent)
   let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
@@ -1144,7 +1178,7 @@ function flushPreFence(state: MarkdownState): void {
   // A blank line between the marker and the fence ends the item, leaving the block
   // a sibling of the list, so a pending marker takes no separator.
   const fence = liDepth > 0
-    ? `${blockOpenPrefix(state.buffer, state.listIndent) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
+    ? `${blockOpenPrefix(state.buffer, state.listIndent, state.listIndent.length) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
   state.buffer.push(fence)
   startCodeFence(state, state.buffer.length - 1, lang, state.listIndent)
@@ -1329,6 +1363,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
+    lastItemMarkerFragment: undefined,
+    lastItemMarkerOwner: undefined,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -1419,7 +1455,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (spacing === CAPTION_DEFAULT_SPACING)
       spacing = DEFAULT_BLOCK_SPACING[0]
     const indent = includeListIndent ? state.listIndent : ''
-    const blockPrefix = blockOpenPrefix(state.buffer, indent, beforeFragment)
+    const blockPrefix = blockOpenPrefix(state.buffer, indent, state.listIndent.length, beforeFragment)
     const trailingNewLines = newlineRunBeforePrefix(state.buffer, beforeFragment, indent)
     if (blockPrefix === undefined && trailingNewLines === 0)
       return ''
@@ -1719,9 +1755,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap)
+        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
       }
 
       if (textNode.generatedMarkdown && textNode.value)
@@ -1794,6 +1830,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (state.listRulePending !== undefined) {
+      const nestedList = state.listRulePending === true
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
         && !(node as TextNode).excludedFromMarkdown
@@ -1801,8 +1838,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const opensVisibleElement = node.type === ELEMENT_NODE
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
-      if (isVisibleText || opensVisibleElement) {
-        const separator = `\n\n${state.listRulePending}`
+        && !(nestedList && ((node as ElementNode).tagId === TAG_UL || (node as ElementNode).tagId === TAG_OL))
+      if (nestedList && node.type === ELEMENT_NODE && eventType === NodeEventEnter
+        && (node as ElementNode).tagId === TAG_LI) {
+        state.listRulePending = undefined
+      }
+      else if (isVisibleText || opensVisibleElement) {
+        let separator: string
+        if (nestedList) {
+          trimTrailingSpaces(state.buffer)
+          const newLines = Math.max(0, 2 - newlineRunBefore(state.buffer, state.buffer.length))
+          separator = `${'\n'.repeat(newLines)}${state.listIndent}`
+          state.lastTextNode = undefined
+        }
+        else {
+          separator = `\n\n${state.listRulePending}`
+        }
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined
@@ -2250,7 +2301,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       rawHtmlNeedsBoundary = false
     if (rawBlockTag && !isInsideTableCell(state) && !state.depthMap[TAG_PRE]
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
-      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(buff, undefined) === undefined)) {
+      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(buff, undefined, state.listIndent.length) === undefined)) {
       rawHtmlNeedsBoundary = true
       bufferScan[0] = false
       bufferScan[1] = buff.length
@@ -2457,10 +2508,26 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, rawHtmlQuoteBoundary)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
-      if (eventType === NodeEventEnter)
-        recordItemMarker(state, element.index)
-      else
+      if (eventType === NodeEventEnter) {
+        const parent = element.parent as MarkdownListNode | undefined
+        if (parent && (parent.tagId === TAG_UL || parent.tagId === TAG_OL)
+          && outputStart < state.buffer.length
+          && ((!handler?.literalEnter && !hasPluginOutput) || output?.some(hasNonWhitespace))) {
+          parent.hasListItemOutput = true
+        }
+        recordItemMarker(state, element, !handler?.literalEnter && !hasPluginOutput)
+      }
+      else {
         resolveItemMarker(state, true)
+        state.lastItemMarkerFragment = undefined
+        state.lastItemMarkerOwner = undefined
+      }
+    }
+    else if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL)
+      && (element as MarkdownListNode).hasListItemOutput
+      && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE]
+      && !isInsideTableCell(state) && !handler?.literalExit && !hasPluginOutput) {
+      state.listRulePending = true
     }
 
     if (eventType === NodeEventEnter
