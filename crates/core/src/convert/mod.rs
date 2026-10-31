@@ -678,6 +678,8 @@ pub struct ConvertState {
   pub depth_map: [u16; MAX_TAG_ID],
   /// Cached [`Self::in_raw_html_block`].
   raw_html_block_open: bool,
+  raw_html_needs_boundary: bool,
+  pending_raw_html_boundary: bool,
   pub depth: usize,
   has_encoded_html_entity: bool,
   last_char_was_whitespace: bool,
@@ -1044,6 +1046,8 @@ impl ConvertState {
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
       raw_html_block_open: false,
+      raw_html_needs_boundary: false,
+      pending_raw_html_boundary: false,
       depth: 0,
       has_encoded_html_entity: false,
       last_char_was_whitespace: true,
