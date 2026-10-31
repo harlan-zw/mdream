@@ -142,7 +142,7 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
   }
   t[b'\n' as usize] |= GFM_NEWLINE_BIT;
   t[b'\r' as usize] |= GFM_NEWLINE_BIT;
-  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let active = b"\\*_~`[]|><\n\r#-+=.) 0123456789";
   let mut i = 0usize;
   while i < active.len() {
     t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
@@ -956,6 +956,9 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// That line follows a decoded `\r`, which a single `\n` only turns into one
+  /// `\r\n` line ending.
+  empty_item_after_cr: bool,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
@@ -1207,6 +1210,7 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      empty_item_after_cr: false,
       list_rule_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
@@ -2964,7 +2968,15 @@ impl ConvertState {
     }
     // Settle a pending marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
-    self.resolve_item_marker(false);
+    // Like `settle_item_marker`, only content ending in a non-blank byte settles it.
+    if self
+      .buffer
+      .as_bytes()
+      .last()
+      .is_some_and(|byte| !byte.is_ascii_whitespace())
+    {
+      self.resolve_item_marker(false);
+    }
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }

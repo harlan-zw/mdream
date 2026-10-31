@@ -3163,6 +3163,15 @@ impl ConvertState {
         continue;
       }
 
+      // A decoded `&#13;` is a bare CR, which also ends a CommonMark line. It
+      // never needs an escape itself.
+      if byte == b'\r' {
+        line_indent = Some(0);
+        ordered_digits = 0;
+        index += 1;
+        continue;
+      }
+
       let mut should_escape = matches!(byte, b'\\' | b'*' | b'_' | b'~' | b'`' | b'[')
         || (byte == b']' && in_link)
         || (byte == b'|' && in_table)
@@ -3182,9 +3191,13 @@ impl ConvertState {
             end - index <= 6 && Self::is_markdown_marker_whitespace(bytes.get(end).copied());
         } else if byte == b'-' || byte == b'+' {
           should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied())
-            || (byte == b'-' && Self::is_thematic_break(&bytes[index..], byte));
+            || (byte == b'-' && Self::is_dash_line(&bytes[index..]));
         } else if byte == b'>' {
           should_escape = true;
+        } else if byte == b'=' {
+          // A node ending inside the run still escapes, since inline nodes can
+          // split one setext underline.
+          should_escape = Self::is_equals_line(&bytes[index..]);
         }
       } else if !should_escape && ordered_digits > 0 && (byte == b'.' || byte == b')') {
         should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied());
@@ -3232,7 +3245,7 @@ impl ConvertState {
     // Text-side reject first: prose that cannot open a block skips the buffer
     // scan entirely, which is most text nodes.
     match text.as_bytes().first() {
-      Some(b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9') => {}
+      Some(b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9') => {}
       _ => return false,
     }
     let Some(mut indent) = self.markdown_line_indent() else {
@@ -3243,7 +3256,7 @@ impl ConvertState {
         indent += 1;
         continue;
       }
-      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'0'..=b'9');
+      return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9');
     }
     false
   }
@@ -3310,14 +3323,22 @@ impl ConvertState {
       _ => return false,
     }
     let mut spaces = 0;
-    while index > 0 && bytes[index - 1] == b' ' && spaces < max_spaces {
+    while index > 0 && bytes[index - 1] == b' ' {
+      // The space after a decoded `\r` separates the marker from the line end
+      // before it; it is not indentation, so it never counts against the cap.
+      let separator = index >= 2 && bytes[index - 2] == b'\r';
+      if !separator {
+        if spaces >= max_spaces {
+          break;
+        }
+        spaces += 1;
+      }
       index -= 1;
-      spaces += 1;
     }
     if index == 0 {
-      return !self.has_flushed_tail() || self.flushed_tail[1] == b'\n';
+      return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
     }
-    bytes[index - 1] == b'\n'
+    matches!(bytes[index - 1], b'\n' | b'\r')
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -3347,8 +3368,15 @@ impl ConvertState {
       }
     };
     let starts_document = line_start == 0 && !self.has_streamed_output;
-    let blank_above = before(1) != b'\n' || before(2) == b'\n';
+    // `\r\n` is a single line ending, so it opens no blank line by itself.
+    let line_ending = before(1);
+    let blank_above = match line_ending {
+      b'\n' => before(2) == b'\n',
+      b'\r' => matches!(before(2), b'\n' | b'\r'),
+      _ => true,
+    };
     self.empty_item_hazard = !starts_document && !blank_above;
+    self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
   }
@@ -3415,7 +3443,7 @@ impl ConvertState {
     }
 
     // Content on the marker's own line settles it: no blank line is owed.
-    if !tail.is_empty() && !tail.starts_with('\n') {
+    if !tail.is_empty() && !tail.starts_with(['\n', '\r']) {
       self.empty_item_hazard = false;
       return;
     }
@@ -3427,12 +3455,29 @@ impl ConvertState {
       return;
     }
     self.empty_item_hazard = false;
+    // A link's `](url)` will share the marker's line, so nothing reads as an
+    // underline there, and a blank line would split the link across two blocks.
+    if tail.is_empty() && self.empty_item_after_cr && self.link.open && self.link.bracket_emitted {
+      return;
+    }
     // Inserting before the marker moves a trailing hard break without removing
     // it. Preserve its boundary so a following parent paragraph resets the
     // child item's continuation indent, just as it does without this guard.
     let break_at_end = self.hard_break_end == self.buffer.len();
-    if !self.replace_code_span_content(self.empty_item_line_start..self.empty_item_line_start, "\n")
-    {
+    let at = self.empty_item_line_start;
+    // A `\n` after a decoded `\r` only completes one `\r\n` line ending, so the
+    // blank line takes two. They replace the space `needs_spacing` put after the
+    // `\r`: it moves the item's content column past the indent of its next lines.
+    let bytes = self.buffer.as_bytes();
+    let spaced =
+      self.empty_item_after_cr && bytes.get(at) == Some(&b' ') && bytes.get(at + 1) != Some(&b' ');
+    let replaced = usize::from(spaced);
+    let separator = if self.empty_item_after_cr {
+      "\n\n"
+    } else {
+      "\n"
+    };
+    if !self.replace_code_span_content(at..at + replaced, separator) {
       return;
     }
     // The insertion moves cached offsets at or past the line: an inline marker
@@ -3445,8 +3490,9 @@ impl ConvertState {
     // rather than its child. `link_bracket_pos` needs no shift either — a pending
     // `[` is the tail this function has already returned on.
 
-    let at = self.empty_item_line_start;
-    self.shift_offsets_at_or_after(at);
+    for _ in replaced..separator.len() {
+      self.shift_offsets_at_or_after(at);
+    }
     if break_at_end {
       self.hard_break_end = self.buffer.len();
     }
@@ -3516,19 +3562,35 @@ impl ConvertState {
     matches!(byte, None | Some(b' ' | b'\t' | b'\n' | b'\r'))
   }
 
+  /// A line of only `-` and blanks is a list marker, a thematic break, or a
+  /// setext underline, so its leading `-` always needs an escape.
   #[inline]
-  fn is_thematic_break(value: &[u8], marker: u8) -> bool {
-    let mut count = 0u8;
+  fn is_dash_line(value: &[u8]) -> bool {
     for &byte in value {
-      if byte == marker {
-        count = count.saturating_add(1);
-      } else if byte == b'\n' || byte == b'\r' {
+      if byte == b'\n' || byte == b'\r' {
         break;
-      } else if byte != b' ' && byte != b'\t' {
+      }
+      if byte != b'-' && byte != b' ' && byte != b'\t' {
         return false;
       }
     }
-    count >= 3
+    true
+  }
+
+  /// A `=` run followed only by blanks is a setext underline; blanks inside
+  /// the run make it plain text.
+  #[inline]
+  fn is_equals_line(value: &[u8]) -> bool {
+    let run = value.iter().take_while(|&&byte| byte == b'=').count();
+    for &byte in &value[run..] {
+      if byte == b'\n' || byte == b'\r' {
+        break;
+      }
+      if byte != b' ' && byte != b'\t' {
+        return false;
+      }
+    }
+    true
   }
 
   #[inline]
@@ -3561,12 +3623,13 @@ impl ConvertState {
   #[inline]
   fn markdown_line_indent(&self) -> Option<u8> {
     let bytes = self.buffer.as_bytes();
-    let mut spaces = 0u8;
+    let mut spaces = 0usize;
+    let structural_indent = self.list_indent.len();
     for (offset, &byte) in bytes.iter().enumerate().rev() {
-      if byte == b'\n' {
-        return Some(spaces);
+      if GFM_BYTE_FLAGS[byte as usize] & GFM_NEWLINE_BIT != 0 {
+        return Some(spaces.saturating_sub(structural_indent) as u8);
       }
-      if byte != b' ' || spaces == 3 {
+      if byte != b' ' || spaces == structural_indent + 3 {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
         return self
@@ -3576,13 +3639,13 @@ impl ConvertState {
       spaces += 1;
     }
     if self.buffer.is_empty() && self.has_streamed_output {
-      if self.flushed_tail[1] == b'\n' {
+      if matches!(self.flushed_tail[1], b'\n' | b'\r') {
         Some(0)
       } else {
         None
       }
     } else {
-      Some(spaces)
+      Some(spaces.saturating_sub(structural_indent) as u8)
     }
   }
 
@@ -4397,10 +4460,16 @@ impl ConvertState {
     self.list_rule_pending = false;
   }
 
+  /// Only the word's own line counts: a decoded line ending or a trailing tab
+  /// inside the word still leaves the marker alone on the wrapped line.
   #[cold]
   fn is_setext_marker_run(word: &str) -> bool {
     let bytes = word.as_bytes();
-    matches!(bytes[0], b'-' | b'=') && bytes.iter().all(|&byte| byte == bytes[0])
+    match bytes[0] {
+      b'-' => Self::is_dash_line(bytes),
+      b'=' => Self::is_equals_line(bytes),
+      _ => false,
+    }
   }
 
   /// Push `text` into the buffer, hard-wrapping on spaces so no output line
@@ -5693,11 +5762,17 @@ impl ConvertState {
       .iter()
       .position(|byte| !matches!(byte, b' ' | b'\t'))
       .unwrap_or(line.len());
+    let after_marker = || {
+      let end = bytes.len() - trailing_spaces(bytes);
+      end != 0 && self.list_marker_line_start(bytes, end, self.pending_marker_indent())
+    };
     // `index == 0` means the scan ran out of buffer, not that the line starts
     // here: a drain may have taken the beginning of this line away. Trusting the
     // fragment reads an open row as content and separates it with a blank line,
-    // which ends the GFM table and ejects every row after it.
-    if index == 0 && line_lead_drained {
+    // which ends the GFM table and ejects every row after it. A marker behind a
+    // decoded `\r` has its own line start, so what the drain took says nothing
+    // about it.
+    if index == 0 && line_lead_drained && !after_marker() {
       match self.cut_line_lead {
         CutLineLead::Row => return LineBeforeRow::Row,
         CutLineLead::RawHtml | CutLineLead::Content => return LineBeforeRow::Content,
@@ -5705,22 +5780,13 @@ impl ConvertState {
       }
     }
     match line.get(start) {
-      Some(b'|') => LineBeforeRow::Row,
       None => LineBeforeRow::Open,
       // A pending list marker is block prefix, not content: a table's first row
-      // belongs on it.
+      // belongs on it, whatever the text before a decoded `\r` led with.
       // A drain can empty the buffer entirely; the marker scan needs a byte to
       // start from, and a fully drained line has none to offer.
-      Some(_)
-        if !bytes.is_empty()
-          && self.list_marker_line_start(
-            bytes,
-            bytes.len() - trailing_spaces(bytes),
-            self.pending_marker_indent(),
-          ) =>
-      {
-        LineBeforeRow::Open
-      }
+      Some(_) if after_marker() => LineBeforeRow::Open,
+      Some(b'|') => LineBeforeRow::Row,
       Some(_) => LineBeforeRow::Content,
     }
   }
@@ -5822,6 +5888,20 @@ mod tests {
 
     state.buffer.push('z');
     assert_eq!(state.last_output_byte(), Some(b'z'));
+  }
+
+  // A decoded `&#13;` ends a CommonMark line, so text after a drain that cut
+  // right behind it may open a block just as it would after `\n`.
+  #[test]
+  fn drained_bare_cr_starts_a_markdown_line() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Content;
+    state.flushed_tail = *b"c\r";
+    assert_eq!(state.markdown_line_indent(), Some(0));
+
+    state.flushed_tail = *b"cd";
+    assert_eq!(state.markdown_line_indent(), None);
   }
 
   /// An open list item whose buffer a drain emptied: the item's content line

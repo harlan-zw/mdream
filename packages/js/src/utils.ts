@@ -514,11 +514,16 @@ export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: nu
     if (ordered && digits === 0)
       return false
     if (code === 32) {
-      if (++spaces > maxIndent)
+      // The space after a decoded `\r` separates the marker from the line end
+      // before it; it is not indentation, so it never counts against the cap.
+      const afterCr = cursor > 0
+        ? buffer[fragment]!.charCodeAt(cursor - 1) === 13
+        : fragment > 0 && buffer[fragment - 1]!.endsWith('\r')
+      if (!afterCr && ++spaces > maxIndent)
         return false
       continue
     }
-    return code === 10
+    return code === 10 || code === 13
   }
 }
 
