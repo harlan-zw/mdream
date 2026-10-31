@@ -237,6 +237,33 @@ fn assert_text_stream_matches_every_split(html: &str, expected: &str) {
 }
 
 #[test]
+fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
+  for html in [
+    "<ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul>",
+    "<li><a href=\"/w\" title=\"W\"><pre><hr>",
+    "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><hr></pre></a></li></ul>",
+    "<ol><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ol>",
+    "<ul><li><blockquote><a href=\"/w\" title=\"W\"><pre><hr></pre></a></blockquote></li></ul>",
+    "<blockquote><ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul></blockquote>",
+    "<ul><li><a href=\"/w\"><pre><hr></pre></a></li></ul>",
+    "<ul><li><pre><hr></pre>t</li></ul>",
+    "<ol><li><pre><hr></pre><b>x</b></li></ol>",
+    "<ul><li><pre><hr></pre><hr></li></ul>",
+    "<ul><li><pre>x<hr></pre>t</li></ul>",
+    "<ul><li><pre><code><hr></code></pre>t</li></ul>",
+    "<ul><li><pre><hr></pre><script>1</script></li><li>z</li></ul>",
+    "<ul><li>a<hr><script>1</script></li><li>z</li></ul>",
+    "<ul><li>p<pre><hr></pre></li></ul>",
+    "<ul><li>p<pre><p>x</p></pre></li></ul>",
+    "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
+    "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HtmlToMarkdownOptions::default());
 }
