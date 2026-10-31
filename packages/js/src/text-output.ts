@@ -34,6 +34,7 @@ interface TextState extends MdreamRuntimeState {
   depthMap: Uint16Array
   lastNode?: ElementNode | TextNode
   lastTextNode?: TextNode
+  lastTextOutputFragment?: number
   pendingInlineWhitespace?: boolean
 }
 
@@ -52,8 +53,8 @@ function trimAsciiWhitespaceEnd(value: string): string {
  * A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
  * line feed, which ends block spacing or an earlier break and so stays.
  */
-function trimBeforeBreak(buffer: string[]): void {
-  for (let index = buffer.length - 1; index >= 0; index--) {
+function trimBeforeBreak(buffer: string[], floor: number): void {
+  for (let index = buffer.length - 1; index >= floor; index--) {
     const fragment = buffer[index]!
     let end = fragment.length
     while (end > 0) {
@@ -311,6 +312,8 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
       buffer[buffer.length - 1] = trimmed
   }
   const missingNewlines = Math.max(0, wantedNewlines - trailingNewlines(buffer))
+  if (missingNewlines > 0 || output)
+    state.lastTextOutputFragment = undefined
   // An unknown tag with no handler is inline, as in the Rust engine.
   const isInline = element.tagHandler ? element.tagHandler.isInline === true : element.tagId === -1
 
@@ -391,6 +394,8 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
   let started = false
   // Column the first buffer fragment starts at, once yielded output is dropped.
   let bufferColumn = 0
+  // Generated column separators belong to the table, outside source whitespace.
+  let textCellStart = 0
   const columnScan: [fragments: number, column: number] = [0, 0]
   // A caption only earns its blank-line boundary once it emits visible
   // content, so an empty `<figcaption>` leaves the text unchanged.
@@ -482,6 +487,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       ? wrapText(node.value, currentColumn(state.buffer, bufferColumn, columnScan), width)
       : node.value
     state.buffer.push(value)
+    state.lastTextOutputFragment = state.buffer.length - 1
     state.lastContentCache = value
     state.lastTextNode = node
     if (openQuotes.length !== 0 && hasNonWhitespace(value)) {
@@ -555,11 +561,16 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       // The break owns the line end, so the whitespace before it goes too,
       // before the line ends it would add are counted, as in Rust.
       if (!state.depthMap[TAG_PRE] && !element.tagHandler?.literalEnter && output.endsWith('\n')) {
-        if (state.lastTextNode?.containsWhitespace && lastOutputChar(state.buffer) === 10) {
-          const last = state.buffer.at(-1)!
-          state.buffer[state.buffer.length - 1] = trimAsciiWhitespaceEnd(last)
+        if (state.lastTextNode?.containsWhitespace && state.lastTextOutputFragment === state.buffer.length - 1) {
+          let parent = state.lastTextNode.parent
+          while (parent && parent.tagId !== TAG_PRE)
+            parent = parent.parent
+          if (!parent) {
+            const last = state.buffer.at(-1)!
+            state.buffer[state.buffer.length - 1] = trimAsciiWhitespaceEnd(last)
+          }
         }
-        trimBeforeBreak(state.buffer)
+        trimBeforeBreak(state.buffer, textCellStart)
       }
       const currentNewlines = trailingNewlines(state.buffer)
       if (!state.depthMap[TAG_PRE] && currentNewlines >= 2)
@@ -590,6 +601,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
 
     appendOutput(state, element, event.type, output)
+    if (event.type === NodeEventEnter && (element.tagId === TAG_TD || element.tagId === TAG_TH)
+      && !element.tagHandler?.literalEnter && output === '\t') {
+      textCellStart = state.buffer.length
+    }
     if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {
       openQuotes.push(state.buffer.length - 1)
       openQuoteNodes.push(element)
@@ -649,6 +664,12 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       buffer.push(kept[index]!)
     // The context fragment replaces fragments `0..keepFrom`.
     const shift = keepFrom - 1
+    textCellStart = Math.max(0, textCellStart - shift)
+    if (state.lastTextOutputFragment !== undefined) {
+      state.lastTextOutputFragment = state.lastTextOutputFragment >= keepFrom
+        ? state.lastTextOutputFragment - shift
+        : undefined
+    }
     for (let index = 0; index < openQuotes.length; index++)
       openQuotes[index]! -= shift
     columnScan[0] = 0

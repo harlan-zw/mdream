@@ -1,4 +1,4 @@
-import { htmlToMarkdown as jsMarkdown, streamHtmlToMarkdown as jsMarkdownStream } from '@mdream/js'
+import { createPlugin, htmlToMarkdown as jsMarkdown, streamHtmlToMarkdown as jsMarkdownStream } from '@mdream/js'
 import { htmlToSafeHtml as jsHtml, streamHtmlToSafeHtml as jsHtmlStream } from '@mdream/js/html'
 import { htmlToText as jsText, streamHtmlToText as jsTextStream } from '@mdream/js/text'
 import { htmlToMarkdown as rustMarkdown, streamHtmlToMarkdown as rustStream } from 'mdream'
@@ -62,7 +62,82 @@ async function assertChunkings(
   }
 }
 
+describe('javascript plugin hard breaks', () => {
+  const options = {
+    plugins: [createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'br')
+          return '  \n'
+      },
+    })],
+  }
+
+  describe.each([
+    ['<p>x y&#10;<br>b</p>', 'x y  \nb'],
+    ['<p>x y&#13;&#10;<br>b</p>', 'x y  \nb'],
+    ['<p>x y&#10;<i></i><br>b</p>', 'x y\n  \nb'],
+    ['<p>x y<br>&#10;<br>b</p>', 'x y  \n\n  \nb'],
+    ['<p>x y</p>&#10;<br>b', 'x y\n\n\n  \nb'],
+    ['<ul><li>x y&#10;<br>b</li></ul>', '- x y  \nb'],
+    ['<pre>a\n</pre><br>x', '```\na\n\n```\n\n  \nx'],
+  ])('preserves source and structural spacing: %s', (html, expected) => {
+    it('converts through the package export', () => {
+      expect(jsMarkdown(html, options)).toBe(expected)
+    })
+
+    it('streams across every chunk width and split', async () => {
+      await assertChunkings(html, stream => jsMarkdownStream(stream, options), expected)
+    })
+  })
+
+  it.each(['L\n', '  \n'])('preserves source line feeds before literal breaks: %j', async (enter) => {
+    const html = '<p>x y&#10;<br>b</p>'
+    const literalOptions = { tagOverrides: { br: { enter } } }
+    const expected = `x y\n${enter}b`
+    expect(jsMarkdown(html, literalOptions)).toBe(expected)
+    await assertChunkings(html, stream => jsMarkdownStream(stream, literalOptions), expected)
+  })
+
+  it.each([
+    ['<pre>a\n</pre><br>x', 'a\n\nx'],
+    ['<pre>a\n </pre><br>x', 'a\n\nx'],
+    ['<table><tr><td><pre>a&#10; </pre><br>x</td></tr></table>', 'a\n  \nx'],
+    ['<table><tr><td><pre>a&#10;&#9;</pre><br>x</td></tr></table>', 'a\n  \nx'],
+    ['<table><tr><td><pre>a&#10; </pre><span></span><br>x</td></tr></table>', 'a\n  \nx'],
+  ])('preserves closed preformatted text before plugin breaks: %s', async (html, expected) => {
+    expect(jsText(html, options)).toBe(expected)
+    await assertChunkings(html, stream => jsTextStream(stream, options), expected)
+  })
+})
+
 describe.each(engines)('$name formatting whitespace', (engine) => {
+  it.each([
+    ['<p><em><span>T&#11; </span></em>x</p>', '*T* x'],
+    ['<p><em><span>T &#11;</span></em>x</p>', '*T* x'],
+    ['<p><strong><span>T&#11; </span></strong>x</p>', '**T** x'],
+    ['<p><strong><span>T &#11;</span></strong>x</p>', '**T** x'],
+    ['<p><em><span><span>T&#11; </span></span></em>x</p>', '*T* x'],
+    ['<p><em><span>T&#11;</span></em>x</p>', '*T\u000B*x'],
+    ['<p><strong><span>T&#11;</span></strong>x</p>', '**T\u000B**x'],
+    ['<p><span>T&#11; </span>x</p>', 'T\u000B x'],
+    ['<pre><code><em><span>T&#11; </span></em></code></pre>', '```\nT\u000B\n```'],
+  ])('settles formatting whitespace through transparent wrappers: %s', async (html, expected) => {
+    expect(engine.markdown(html)).toBe(expected)
+    await assertChunkings(html, engine.markdownStream, expected)
+  })
+
+  it.each([
+    ['em', '*', '</em>'],
+    ['strong', '**', '</strong>'],
+    ['em', '*', '*'],
+    ['strong', '**', '**'],
+  ])('preserves wrapped vertical tabs before a literal %s exit %s %s', async (tag, enter, exit) => {
+    const html = `<p><${tag}><span>T&#11; </span></${tag}>x</p>`
+    const expected = `${enter}T\u000B${exit} x`
+    expect(engine.literalExit(html, tag, exit)).toBe(expected)
+    await assertChunkings(html, stream => engine.literalExitStream(stream, tag, exit), expected)
+  })
+
   it.each([
     ['<p><em>T&#11; </em>x</p>', '*T* x'],
     ['<p><em>a &#11;</em>b</p>', '*a* b'],
@@ -96,6 +171,28 @@ describe.each(engines)('$name formatting whitespace', (engine) => {
   ])('preserves vertical tabs in text output: %s', async (html, expected) => {
     expect(engine.text(html)).toBe(expected)
     await assertChunkings(html, engine.textStream, expected)
+  })
+
+  it.each([
+    ['<table><tr><td><pre>a\n</pre><br>x</td></tr></table>', 'a\n\nx'],
+    ['<table><tr><td>a</td><td><br>b</td></tr></table>', 'a\t\nb'],
+    ['<table><tr><th>a</th><th><br>b</th></tr></table>', 'a\t\nb'],
+    ['<table><tr><td>a</td><td>&#9;<i></i><br>b</td></tr></table>', 'a\t\nb'],
+    [`<table><tr><td>${'a'.repeat(64)}</td><td>&#9;<i></i><br>b</td></tr></table>`, `${'a'.repeat(64)}\t\nb`],
+    ['<p>x y&#10;&#9;<br>b</p>', 'x y\nb'],
+    ['<p>x y&#10; <br>b</p>', 'x y\nb'],
+    ['<p>€ a</p><br>b', '€ a\n\nb'],
+    ['<p>a b</p><br>c', 'a b\n\nc'],
+  ])('preserves source and generated text boundaries before breaks: %s', async (html, expected) => {
+    expect(engine.text(html)).toBe(expected)
+    await assertChunkings(html, engine.textStream, expected)
+  })
+
+  it('preserves mixed source whitespace before a literal text break', async () => {
+    const html = '<p>x y&#10;&#9;<br>b</p>'
+    const expected = 'x y\n\tL\nb'
+    expect(engine.literalText(html)).toBe(expected)
+    await assertChunkings(html, engine.literalTextStream, expected)
   })
 
   it.each([

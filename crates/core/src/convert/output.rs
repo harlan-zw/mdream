@@ -1742,6 +1742,14 @@ impl ConvertState {
       enter_is_literal,
     );
 
+    if plain_text!(self)
+      && !enter_is_literal
+      && matches!(tag_id, Some(TAG_TD | TAG_TH))
+      && output.as_deref() == Some("\t")
+    {
+      self.text_cell_start = self.buffer.len();
+    }
+
     if tag_id == Some(TAG_IMG)
       && !enter_is_literal
       && output.as_deref().is_some_and(|emitted| {
@@ -3796,7 +3804,7 @@ impl ConvertState {
   /// line feed, which ends block spacing or an earlier break and so stays. The
   /// run is the same whatever the text's source whitespace; U+000B is content.
   fn trim_before_break(&mut self) {
-    let floor = self.trim_floor();
+    let floor = self.trim_floor().max(self.text_cell_start);
     if self.buffer.len() > floor {
       let bytes = self.buffer.as_bytes();
       let mut trimmed_len = bytes.len();
@@ -5281,8 +5289,11 @@ impl ConvertState {
             }
           }
         }
-        self.last_text_node_contains_whitespace = false;
-        self.has_last_text_node = false;
+        // Transparent exits leave the source tail available to an enclosing delimiter.
+        if plain_text!(self) || is_enter || !is_inline || literal || !output_str.is_empty() {
+          self.last_text_node_contains_whitespace = false;
+          self.has_last_text_node = false;
+        }
       }
 
       if is_enter

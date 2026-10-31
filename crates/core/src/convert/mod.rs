@@ -825,6 +825,8 @@ pub struct ConvertState {
   last_text_node_contains_whitespace: bool,
   last_text_node_in_pre: bool,
   last_text_output_range: Option<(usize, usize)>,
+  /// Generated table-column separators are outside source whitespace.
+  text_cell_start: usize,
   last_text_node_depth: usize,
   last_text_node_index: usize,
   has_last_text_node: bool,
@@ -1151,6 +1153,7 @@ impl ConvertState {
       last_text_node_contains_whitespace: false,
       last_text_node_in_pre: false,
       last_text_output_range: None,
+      text_cell_start: 0,
       last_text_node_depth: 0,
       last_text_node_index: 0,
       has_last_text_node: false,
@@ -2615,6 +2618,7 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    self.text_cell_start = self.text_cell_start.min(offset);
     if self
       .last_text_output_range
       .is_some_and(|(_, end)| offset < end)
@@ -2641,6 +2645,7 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    self.text_cell_start = self.text_cell_start.saturating_sub(removed);
     self.last_text_output_range = self.last_text_output_range.and_then(|(start, end)| {
       (end > removed).then(|| (start.saturating_sub(removed), end - removed))
     });

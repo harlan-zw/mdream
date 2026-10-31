@@ -2408,7 +2408,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // Don't trim if we're about to add inline content that needs spacing
       // Don't trim before block elements that need their own spacing
       if (lastFragment && state.lastTextNode?.containsWhitespace && (!!node.parent || isInlineElement) && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
-        let parent = node.parent
+        const breakConsumesSourceWhitespace = eventType === NodeEventEnter && tagId === TAG_BR
+          && !state.depthMap[TAG_PRE] && !handler?.literalEnter && output?.at(-1)?.endsWith('\n')
+        // A plugin break consumes source whitespace, while closed pre content keeps its newlines.
+        let parent = breakConsumesSourceWhitespace ? state.lastTextNode.parent : node.parent
         let parentInPre = false
         while (parent) {
           if (parent.tagId === TAG_PRE) {
@@ -2428,7 +2431,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // At a quote's content start the last fragment is the sibling separator,
           // not trailing whitespace; trimming it would glue adjacent quotes.
           const shouldTrim = !quoteAtStart
-            && (!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)
+            && (breakConsumesSourceWhitespace
+              || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)))
 
           if (shouldTrim) {
             const originalLength = lastFragment.length
@@ -2441,13 +2445,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
               if (buff?.length && buff.at(-1) === lastFragment) {
                 state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
                 buff[buff.length - 1] = trimmed
+                state.lastContentCache = trimmed
               }
               if (eventType === NodeEventExit && isInlineElement)
                 state.pendingInlineWhitespace = true
             }
           }
 
-          state.lastTextNode = undefined
+          // Transparent exits leave the source tail available to an enclosing delimiter.
+          if (eventType !== NodeEventExit || !isInlineElement || handler?.literalExit || output)
+            state.lastTextNode = undefined
         }
       }
     }

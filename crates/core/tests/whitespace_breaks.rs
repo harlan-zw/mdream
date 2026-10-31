@@ -219,11 +219,49 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
 #[test]
 fn a_break_after_preformatted_text_preserves_source_newlines() {
   for html in [
+    "<table><tr><td><pre>a\n</pre><br>x</td></tr></table>",
     "<table><tr><td><pre>a&#10; </pre><br>x</td></tr></table>",
     "<table><tr><td><pre>a&#10;&#9;</pre><br>x</td></tr></table>",
     "<table><tr><td><pre>a&#10; </pre><span></span><br>x</td></tr></table>",
   ] {
     assert_every_text_chunking(html, "a\n\nx");
+  }
+}
+
+#[test]
+fn a_break_preserves_generated_table_column_separators() {
+  for html in [
+    "<table><tr><td>a</td><td><br>b</td></tr></table>",
+    "<table><tr><th>a</th><th><br>b</th></tr></table>",
+    "<table><tr><td>a</td><td>&#9;<i></i><br>b</td></tr></table>",
+  ] {
+    assert_every_text_chunking(html, "a\t\nb");
+  }
+  let prefix = "a".repeat(64);
+  let html = format!("<table><tr><td>{prefix}</td><td>&#9;<i></i><br>b</td></tr></table>");
+  assert_every_text_chunking(&html, &format!("{prefix}\t\nb"));
+}
+
+#[test]
+fn transparent_wrappers_preserve_the_formatting_whitespace_tail() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p><em><span>T&#11; </span></em>x</p>", "*T* x"),
+    ("<p><em><span>T &#11;</span></em>x</p>", "*T* x"),
+    ("<p><strong><span>T&#11; </span></strong>x</p>", "**T** x"),
+    ("<p><strong><span>T &#11;</span></strong>x</p>", "**T** x"),
+    (
+      "<p><em><span><span>T&#11; </span></span></em>x</p>",
+      "*T* x",
+    ),
+    ("<p><em><span>T&#11;</span></em>x</p>", "*T\u{b}*x"),
+    (
+      "<p><strong><span>T&#11;</span></strong>x</p>",
+      "**T\u{b}**x",
+    ),
+    ("<p><span>T&#11; </span>x</p>", "T\u{b} x"),
+  ] {
+    assert_every_chunking(html, &options, expected);
   }
 }
 
@@ -255,6 +293,8 @@ fn a_break_subsumes_the_whitespace_run_before_it() {
     ("<p>a<br>&#9;<br>b</p>", "a  \n  \nb", "a\n\nb"),
     ("<p>a</p>&#9;<br>b", "a\n\n  \nb", "a\n\nb"),
     ("<p>x y&#10;<br>b</p>", "x y  \nb", "x y\nb"),
+    ("<p>x y&#10;&#9;<br>b</p>", "x y  \nb", "x y\nb"),
+    ("<p>x y&#10; <br>b</p>", "x y  \nb", "x y\nb"),
     ("<p>x y&#11;<br>b</p>", "x y\u{b}  \nb", "x y\u{b}\nb"),
     ("<code>x y&#9;<br>b</code>", "`x y\nb`", "x y\nb"),
     ("<a href=\"x\">x y&#9;<br>b</a>", "[x y  \nb](x)", "x y\nb"),
