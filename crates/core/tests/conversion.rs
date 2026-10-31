@@ -931,6 +931,91 @@ fn relative_path_with_origin() {
 }
 
 #[test]
+fn base_href_ignores_empty_host_and_template_bases() {
+  let origin = HtmlToMarkdownOptions {
+    origin: Some("https://example.com/article/".into()),
+    ..Default::default()
+  };
+  for href in ["https://:80/docs/", "http://user@/docs/", "http://@/docs/"] {
+    let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
+    assert_eq!(
+      html_to_markdown(&html, origin.clone()),
+      "[Link](https://example.com/article/page)",
+      "{href}"
+    );
+  }
+  let html = r#"<template><base href="https://other.example/"></template><a href="page">Link</a>"#;
+  assert_eq!(
+    html_to_markdown(html, origin.clone()),
+    "[Link](https://example.com/article/page)"
+  );
+  // A template at the depth limit is opaque and must not set the base either.
+  let deep = format!(
+    "{}<template><base href=\"https://other.example/\"></template>{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(!html_to_markdown(&deep, origin.clone()).contains("other.example"));
+  // An anchor flattened at the depth limit must not let its <base> replace the origin.
+  let deep_anchor = format!(
+    "{}<a href=\"/start\"><base href=\"https://other.example/\">X</a>{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(
+    html_to_markdown(&deep_anchor, origin.clone())
+      .ends_with("[Link](https://example.com/article/page)")
+  );
+  // Same for a base directly under a flattened div.
+  let deep_div = format!(
+    "{}<base href=\"https://other.example/\">X{}<a href=\"page\">Link</a>",
+    "<div>".repeat(600),
+    "</div>".repeat(600)
+  );
+  assert!(
+    html_to_markdown(&deep_div, origin.clone())
+      .ends_with("[Link](https://example.com/article/page)")
+  );
+  // Userinfo with a real host is a valid base: the host follows the last '@'.
+  for href in ["http://@host.example/", "http://:pw@host.example/"] {
+    let html = format!(r#"<base href="{href}"><a href="page">Link</a>"#);
+    assert_eq!(
+      html_to_markdown(&html, origin.clone()),
+      format!("[Link]({href}page)"),
+      "{href}"
+    );
+  }
+}
+
+#[test]
+fn base_href_replaces_origin_for_later_urls() {
+  let origin = "https://example.com/article/current.html";
+  assert_eq!(
+    convert_with_origin(
+      r#"<a href="a">A</a> <base href="/docs/"><base href="https://ignored.example/"><a href="b">B</a> <img src="c.png" alt="C">"#,
+      origin
+    ),
+    "[A](https://example.com/article/a) [B](https://example.com/docs/b) ![C](https://example.com/docs/c.png)"
+  );
+  for href in [
+    "javascript:alert(1)",
+    "ftp://cdn.example/",
+    "https:///x/",
+    "",
+  ] {
+    assert_eq!(
+      convert_with_origin(&format!(r#"<base href="{href}"><a href="b">B</a>"#), origin),
+      "[B](https://example.com/article/b)",
+      "{href:?}"
+    );
+  }
+  assert_eq!(
+    convert(r#"<a href="a">A<base href="https://cdn.example/">x</a> <a href="b">B</a>"#),
+    "[Ax](a) [B](b)"
+  );
+}
+
+#[test]
 fn relative_path_without_origin() {
   assert_eq!(
     convert(r#"<a href="/page#section">Link</a>"#),
@@ -2754,6 +2839,88 @@ fn a_rule_inside_a_list_item_keeps_its_own_block() {
   );
 }
 
+#[test]
+fn a_rule_around_a_deferred_fence_resumes_the_item() {
+  // The rule's separator is written unconditionally, and the block reads the
+  // output as it was before the fence it opens.
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<li><a href=\"/w\" title=\"W\"><pre><hr>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<ol><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ol>",
+      "1. [\n\n   ```\n   \n\n   ---\n   ```\n\n   \n\n   W](/w)",
+    ),
+    (
+      "<ul><li><blockquote><a href=\"/w\" title=\"W\"><pre><hr></pre></a></blockquote></li></ul>",
+      "- \n  > [\n  >\n  > ```\n  >\n  >\n  > ---\n  > ```\n  >\n  >\n  >\n  > W](/w)",
+    ),
+    (
+      "<blockquote><ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul></blockquote>",
+      "> - [\n>\n>   ```\n>   \n>\n>   ---\n>   ```\n>\n>   \n>\n>   W](/w)",
+    ),
+    (
+      "<ul><li><a href=\"/w\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  ](/w)",
+    ),
+    (
+      "<ul><li><pre><hr></pre>t</li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ol><li><pre><hr></pre><b>x</b></li></ol>",
+      "1. ```\n   ***\n   ```\n\n   \n\n   **x**",
+    ),
+    (
+      "<ul><li><pre><hr></pre><hr></li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  ***",
+    ),
+    (
+      "<ul><li><pre>x<hr></pre>t</li></ul>",
+      "- ```\n  x\n\n  ---\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ul><li><pre><code><hr></code></pre>t</li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ul><li><pre><hr></pre><script>1</script></li><li>z</li></ul>",
+      "- ```\n  ***\n  ```\n\n- z",
+    ),
+    (
+      "<ul><li>a<hr><script>1</script></li><li>z</li></ul>",
+      "- a\n\n  ---\n- z",
+    ),
+    (
+      "<ul><li>p<pre><hr></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  ---\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><p>x</p></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  x\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  x\n  ```",
+    ),
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 // ── Paragraphs and spacing ──
 
 #[test]
@@ -2877,6 +3044,24 @@ fn pre_code_block_unchanged() {
       r#"<pre class="language-py"><figcaption><code class="language-js">x</code></figcaption></pre>"#
     ),
     "```py\nx\n```"
+  );
+}
+
+#[test]
+fn pre_code_block_reads_data_language_attributes_in_precedence_order() {
+  assert_eq!(
+    convert(
+      r#"<pre class="language-rust" data-language="ignored"><code data-language="TypeScript" data-lang="bash">let x = 1;</code></pre>"#
+    ),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-language="Rust"><code data-lang="TypeScript">let x = 1;</code></pre>"#),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-lang="Rust"><code>let x = 1;</code></pre>"#),
+    "```Rust\nlet x = 1;\n```"
   );
 }
 
@@ -6128,6 +6313,161 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 }
 
 #[test]
+fn builtin_blockquote_alias_uses_div_semantics() {
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("blockquote".into(), TagOverrideConfig::alias("div"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("<blockquote>x</blockquote><p>tail</p>", "x\n\ntail"),
+    ("<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>", "x\n\ntail"),
+    (
+      "<blockquote>x</div>tail</blockquote><p>end</p>",
+      "xtail\n\nend",
+    ),
+    ("<div>x</blockquote>tail</div><p>end</p>", "xtail\n\nend"),
+    ("<blockquote><p>a</p><p>b</p></blockquote>", "a\n\nb"),
+    ("<blockquote><div>x</div>tail</blockquote>", "x\n\ntail"),
+    ("<ul><li><blockquote>x</blockquote></li></ul>", "- x"),
+  ] {
+    assert_eq!(html_to_markdown(html, opts.clone()), expected, "{html}");
+  }
+}
+
+#[test]
+fn raw_text_aliases_use_source_closing_names() {
+  for (html, source, target, expected) in [
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<script>a</div>b</script><p>tail</p>",
+      "script",
+      "div",
+      "ab\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<style>a</div>b</style><p>tail</p>",
+      "style",
+      "div",
+      "ab\n\ntail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
+    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "script",
+      "tail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
+    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "style",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
+    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "script",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
+    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "style",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>a</style>b</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>before <!--unfinished</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>a</script>b</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>before <!--unfinished</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
+    (
+      "<script><!--<script></script>--></script><p>tail</p>",
+      "script",
+      "script",
+      "tail",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "{html} {source}:{target}"
+    );
+  }
+}
+
+#[test]
 fn scout9_wrap_setext_boundary() {
   for (html, expected) in [
     ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
@@ -6608,4 +6948,108 @@ fn paragraph_after_empty_nested_quote() {
     convert("<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>"),
     "- x\n\n  - \n  \n\n  y"
   );
+}
+
+#[test]
+fn builtin_aliases_preserve_raw_source_boundaries() {
+  for (html, source, target, expected) in [
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "script",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "style",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "textarea",
+      "x\n\ntail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{source}:{target}"
+    );
+  }
+}
+
+#[test]
+fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
+  for html in [
+    "<DIV CLASS='a'><BLOCKQUOTE><P>A &amp; B</P></BLOCKQUOTE><P>tail</P></DIV>",
+    "<X-NOTE DATA-X='a'>before <EM>x</EM></X-NOTE><P>tail</P>",
+    "<STYLE>a</div><!--unfinished</STYLE><P>tail</P>",
+    "<SCRIPT><!--<script></script>--></SCRIPT><P>tail</P>",
+    "<DIV><LONG-CUSTOM-NAME attr='data'>x</LONG-CUSTOM-NAME></DIV>",
+  ] {
+    for cap in [0, 8, 64] {
+      for format in [
+        OutputFormat::Markdown,
+        OutputFormat::Text,
+        OutputFormat::Html,
+      ] {
+        let plain = HtmlToMarkdownOptions {
+          max_node_bytes: cap,
+          ..Default::default()
+        };
+        let configured = HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            tag_overrides: Some(vec![]),
+            ..Default::default()
+          }),
+          ..plain.clone()
+        };
+        let expected = mdream::html_to_format(html, plain.clone(), format);
+        assert_eq!(
+          mdream::html_to_format(html, configured.clone(), format),
+          expected,
+          "{html} cap={cap} format={format:?}"
+        );
+        for opts in [plain, configured] {
+          for width in 1..=html.len() {
+            let mut stream = MarkdownStreamProcessor::new_with_format(opts.clone(), format);
+            let mut actual = String::new();
+            for chunk in html.as_bytes().chunks(width) {
+              actual.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+            }
+            actual.push_str(&stream.finish());
+            assert_eq!(
+              actual, expected,
+              "{html} cap={cap} format={format:?} width={width}"
+            );
+          }
+          for split in 0..=html.len() {
+            let mut stream = MarkdownStreamProcessor::new_with_format(opts.clone(), format);
+            let mut actual = stream.process_chunk(&html[..split]);
+            actual.push_str(&stream.process_chunk(&html[split..]));
+            actual.push_str(&stream.finish());
+            assert_eq!(
+              actual, expected,
+              "{html} cap={cap} format={format:?} split={split}"
+            );
+          }
+        }
+      }
+    }
+  }
 }

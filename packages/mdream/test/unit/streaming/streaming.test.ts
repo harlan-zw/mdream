@@ -76,12 +76,54 @@ const LINK_SPACE_CASES: [string, string][] = [
   ],
 ]
 
-const BYTE_PARITY_CASES = [
+const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { tagOverrides: Record<string, string> } } }> = [
   ...LINK_SPACE_CASES.map(([html]) => html),
   '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
   '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
   '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
   '<ul><li>a</li><template>hidden</template><li>b</li></ul>',
+  { html: '<script><b>x</b></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'div' } } } },
+  { html: '<script>a</div>b</script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'div' } } } },
+  { html: '<style><b>x</b></style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'div' } } } },
+  { html: '<style>a</div>b</style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'div' } } } },
+  { html: '<x><b>x</b></x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'script' } } } },
+  { html: '<x>a</script>b</x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'script' } } } },
+  { html: '<x>before <!--unfinished</x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'script' } } } },
+  { html: '<x><b>x</b></x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'style' } } } },
+  { html: '<x>a</style>b</x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'style' } } } },
+  { html: '<x>before <!--unfinished</x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'style' } } } },
+  { html: '<div><b>x</b></div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'script' } } } },
+  { html: '<div>a</script>b</div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'script' } } } },
+  { html: '<div>before <!--unfinished</div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'script' } } } },
+  { html: '<div><b>x</b></div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'style' } } } },
+  { html: '<div>a</style>b</div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'style' } } } },
+  { html: '<div>before <!--unfinished</div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'style' } } } },
+  { html: '<script><b>x</b></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'style' } } } },
+  { html: '<script>a</style>b</script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'style' } } } },
+  { html: '<script>before <!--unfinished</script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'style' } } } },
+  { html: '<style><b>x</b></style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'script' } } } },
+  { html: '<style>a</script>b</style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'script' } } } },
+  { html: '<style>before <!--unfinished</style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'script' } } } },
+  { html: '<script><b>x</b></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'textarea' } } } },
+  { html: '<style><b>x</b></style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'textarea' } } } },
+  { html: '<X>hidden</X><p>tail</p>', options: { plugins: { tagOverrides: { x: 'script' } } } },
+  { html: '<script><!--<script></script>--></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'script' } } } },
+
+  ...[
+    '<blockquote>x</blockquote><p>tail</p>',
+    '<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>',
+    '<blockquote>x</div>tail</blockquote><p>end</p>',
+    '<div>x</blockquote>tail</div><p>end</p>',
+    '<blockquote><p>a</p><p>b</p></blockquote>',
+    '<blockquote><div>x</div>tail</blockquote>',
+    '<ul><li><blockquote>x</blockquote></li></ul>',
+  ].map(html => ({ html, options: { plugins: { tagOverrides: { blockquote: 'div' } } } })),
+  ...([
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'script'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'style'],
+    ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'textarea'],
+    ['<script><b>x</b></script><p>tail</p>', 'script', 'div'],
+  ] as const).map(([html, source, target]) => ({ html, options: { plugins: { tagOverrides: { [source]: target } } } })),
   '<p>aaaaaaaaaa --</p>',
   '<p>aaaaaaaaaa ==</p>',
   '<p>aaaaaaaaaa -</p>',
@@ -129,11 +171,12 @@ describe('cross-engine streaming byte parity', () => {
     }
   })
 
-  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (html) => {
+  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (testCase) => {
+    const { html, options } = typeof testCase === 'string' ? { html: testCase, options: undefined } : testCase
     const engineOutputs: string[] = []
 
     for (const { engine, name } of engines) {
-      const expected = engine.htmlToMarkdown(html)
+      const expected = engine.htmlToMarkdown(html, options)
       engineOutputs.push(expected)
 
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
@@ -145,9 +188,22 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
           streamed += chunk
         expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
+      }
+      for (let split = 1; split < html.length; split++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(expected)
       }
     }
 

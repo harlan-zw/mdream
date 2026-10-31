@@ -151,7 +151,7 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
     collapses_inner_white_space: true,
     spacing: Some(NO_SPACING),
     is_inline: true,
-    wanted_attrs: ATTR_CLASS,
+    wanted_attrs: ATTR_CLASS | ATTR_DATA_LANGUAGE | ATTR_DATA_LANG,
     ..NONE
   });
 
@@ -227,10 +227,10 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   t[TAG_HEADER as usize] = Some(BLOCK);
   t[TAG_MAIN as usize] = Some(BLOCK);
   t[TAG_FIGURE as usize] = Some(BLOCK);
-  // `class` is kept so a bare <pre class="language-x"> can resolve its fence
-  // language for the deferred code block (issue #97).
+  // Language metadata is kept for both a bare <pre> and a code child that owns
+  // the deferred fence (issue #97).
   t[TAG_PRE as usize] = Some(TagHandler {
-    wanted_attrs: ATTR_CLASS,
+    wanted_attrs: ATTR_CLASS | ATTR_DATA_LANGUAGE | ATTR_DATA_LANG,
     ..NONE
   });
 
@@ -290,7 +290,10 @@ static TAG_HANDLERS: [Option<TagHandler>; MAX_TAG_ID] = {
   // Self-closing inline elements
   t[TAG_LINK as usize] = Some(SELF_CLOSING_INLINE);
   t[TAG_AREA as usize] = Some(SELF_CLOSING_INLINE);
-  t[TAG_BASE as usize] = Some(SELF_CLOSING_INLINE);
+  t[TAG_BASE as usize] = Some(TagHandler {
+    wanted_attrs: ATTR_HREF,
+    ..SELF_CLOSING_INLINE
+  });
   t[TAG_WBR as usize] = Some(SELF_CLOSING_INLINE);
   t[TAG_INPUT as usize] = Some(SELF_CLOSING_INLINE);
   t[TAG_KEYGEN as usize] = Some(SELF_CLOSING_INLINE);

@@ -237,6 +237,33 @@ fn assert_text_stream_matches_every_split(html: &str, expected: &str) {
 }
 
 #[test]
+fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
+  for html in [
+    "<ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul>",
+    "<li><a href=\"/w\" title=\"W\"><pre><hr>",
+    "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><hr></pre></a></li></ul>",
+    "<ol><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ol>",
+    "<ul><li><blockquote><a href=\"/w\" title=\"W\"><pre><hr></pre></a></blockquote></li></ul>",
+    "<blockquote><ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul></blockquote>",
+    "<ul><li><a href=\"/w\"><pre><hr></pre></a></li></ul>",
+    "<ul><li><pre><hr></pre>t</li></ul>",
+    "<ol><li><pre><hr></pre><b>x</b></li></ol>",
+    "<ul><li><pre><hr></pre><hr></li></ul>",
+    "<ul><li><pre>x<hr></pre>t</li></ul>",
+    "<ul><li><pre><code><hr></code></pre>t</li></ul>",
+    "<ul><li><pre><hr></pre><script>1</script></li><li>z</li></ul>",
+    "<ul><li>a<hr><script>1</script></li><li>z</li></ul>",
+    "<ul><li>p<pre><hr></pre></li></ul>",
+    "<ul><li>p<pre><p>x</p></pre></li></ul>",
+    "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
+    "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HtmlToMarkdownOptions::default());
 }
@@ -3296,6 +3323,161 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
 }
 
 #[test]
+fn builtin_blockquote_alias_streams_as_div() {
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("blockquote".into(), TagOverrideConfig::alias("div"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<blockquote>x</blockquote><p>tail</p>",
+    "<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>",
+    "<blockquote>x</div>tail</blockquote><p>end</p>",
+    "<div>x</blockquote>tail</div><p>end</p>",
+    "<blockquote><p>a</p><p>b</p></blockquote>",
+    "<blockquote><div>x</div>tail</blockquote>",
+    "<ul><li><blockquote>x</blockquote></li></ul>",
+  ] {
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+}
+
+#[test]
+fn raw_text_aliases_use_source_closing_names() {
+  for (html, source, target, expected) in [
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<script>a</div>b</script><p>tail</p>",
+      "script",
+      "div",
+      "ab\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<style>a</div>b</style><p>tail</p>",
+      "style",
+      "div",
+      "ab\n\ntail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
+    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "script",
+      "tail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
+    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "style",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
+    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "script",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
+    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "style",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>a</style>b</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>before <!--unfinished</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>a</script>b</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>before <!--unfinished</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
+    (
+      "<script><!--<script></script>--></script><p>tail</p>",
+      "script",
+      "script",
+      "tail",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "{html} {source}:{target}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
 fn scout9_wrap_setext_boundary_streaming() {
   for (html, expected) in [
     ("<p>aaaaaaaaaa --</p>", "aaaaaaaaaa --"),
@@ -3441,4 +3623,49 @@ fn paragraph_after_empty_nested_quote() {
   );
   assert_stream_matches(html, HtmlToMarkdownOptions::default());
   assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
+
+#[test]
+fn builtin_aliases_preserve_raw_source_boundaries_streaming() {
+  for (html, source, target, expected) in [
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "script",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "style",
+      "tail",
+    ),
+    (
+      "<blockquote>x</blockquote><p>tail</p>",
+      "blockquote",
+      "textarea",
+      "x\n\ntail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{source}:{target}"
+    );
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
 }
