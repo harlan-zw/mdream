@@ -2722,7 +2722,12 @@ impl ConvertState {
   /// so a document with no open quote does not pay for the limit.
   pub(crate) fn flush_settled_blockquote_lines(&mut self) {
     if self.streaming_flush_possible() {
-      let mut flush_limit = trim_ascii_whitespace_end(&self.buffer);
+      let mut flush_limit =
+        self
+          .held_whitespace
+          .start(self.buffer.as_bytes(), self.buffer.len(), |b| {
+            b.is_ascii_whitespace() || b == b'\x0B'
+          });
       if let Some(marker) = self.open_markers.first() {
         flush_limit = flush_limit.min(hold_before(&self.buffer, marker.output_start));
       }
@@ -3349,6 +3354,11 @@ mod tests {
       ("trailing whitespace", "&#32;&#32;</b>", "<p>x"),
       ("vertical tabs", "&#11;<i></i>", "<p>x"),
       ("vertical tabs in emphasis", " &#11;", "<p><em>x"),
+      (
+        "vertical tabs and newlines in quoted emphasis",
+        " &#10;&#11;<span></span>",
+        "<blockquote><em>x",
+      ),
       ("leading whitespace", "&nbsp;</b>", ""),
       ("heading run", "#<span>#</span>", "<h2>x "),
       ("spaces in a code block", "&#32;&#32;</b>", "<pre><code>"),

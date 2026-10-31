@@ -295,6 +295,7 @@ describe('streaming drain parity', () => {
     ['tabs before empty pairs', '<p>a', '&#9;<i></i>', 13, '</p>'],
     ['vertical tabs before empty pairs', '<p>a', '&#11;<i></i>', 13, '</p>'],
     ['vertical tabs in emphasis', '<p><em>a', EMPHASIS_WHITESPACE_UNIT, 7, '</em>x</p>'],
+    ['vertical tabs and newlines in quoted emphasis', '<blockquote><em>a', ' &#10;&#11;<span></span>', 7, '</em>x</blockquote>'],
     ['an open pair at every chunk end', '<p>a', '&#9;<i></i>', 11, '</p>'],
     ['tabs in spans', '<p>a', '<span>&#9;</span>', 17, '</p>'],
     ['tabs before breaks', '<p>a', '&#9;<br>', 8, '</p>'],

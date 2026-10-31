@@ -112,6 +112,94 @@ describe('javascript plugin hard breaks', () => {
 
 describe.each(engines)('$name formatting whitespace', (engine) => {
   it.each([
+    ['<p><em><span>a &#10;&#11;</span> </em>x</p>', '*a* x'],
+    ['<p><strong><span>a &#10;&#11;</span> </strong>x</p>', '**a** x'],
+    ['<ul><li><em><span>a &#10;&#11;</span> </em>x</li></ul>', '- *a* x'],
+    ['<p><em>a<br><span>&#11;</span> </em>x</p>', '*a  \n\u000B* x'],
+  ])('keeps delimiter-owned source tails separate from structural output: %s', async (html, expected) => {
+    expect(engine.markdown(html)).toBe(expected)
+    await assertChunkings(html, engine.markdownStream, expected)
+  })
+
+  it.each([
+    { tag: 'em', marker: '*', wrappers: 0, depth: 1, tail: '&#10;&#11;  ' },
+    { tag: 'em', marker: '*', wrappers: 1, depth: 1, tail: '&#10;&#11;  ' },
+    { tag: 'em', marker: '*', wrappers: 1, depth: 1, tail: '&#11;&#10;  ' },
+    { tag: 'strong', marker: '**', wrappers: 1, depth: 1, tail: '&#10;&#11;  ' },
+    { tag: 'strong', marker: '**', wrappers: 1, depth: 1, tail: '&#11;&#10;  ' },
+    { tag: 'del', marker: '~~', wrappers: 1, depth: 1, tail: '&#10;&#11;  ' },
+    { tag: 'em', marker: '*', wrappers: 2, depth: 2, tail: ' &#10;&#11;' },
+    { tag: 'strong', marker: '**', wrappers: 2, depth: 2, tail: ' &#11;&#10;' },
+  ])('keeps quoted $tag tails mutable through $wrappers wrappers at depth $depth: $tail', async ({ tag, marker, wrappers, depth, tail }) => {
+    const text = 'a'.repeat(8200)
+    const first = `${'<blockquote>'.repeat(depth)}<${tag}>${'<span>'.repeat(wrappers)}${text}${tail}${'</span>'.repeat(wrappers)}`
+    const last = ` </${tag}>x${'</blockquote>'.repeat(depth)}`
+    const html = first + last
+    const expected = `${'> '.repeat(depth)}${marker}${text}${marker} x`
+    expect(engine.markdown(first + last)).toBe(expected)
+    const chunkings = [[first, last]]
+    for (const width of [7, 127, 8191]) {
+      const parts: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        parts.push(html.slice(offset, offset + width))
+      chunkings.push(parts)
+    }
+    for (const parts of chunkings) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of engine.markdownStream(input))
+        output += chunk
+      expect(output).toBe(expected)
+    }
+  })
+
+  it.each([false, true])('preserves quoted vertical-tab content with literal=%s exits', async (literal) => {
+    const text = 'a'.repeat(8200)
+    const first = `<blockquote><em><span>${text}${literal ? '&#10;&#11; ' : '&#11;'}</span>`
+    const last = '</em>x</blockquote>'
+    const expected = literal ? `> *${text}\n> \u000B* x` : `> *${text}\u000B*x`
+    const convert = literal ? (html: string) => engine.literalExit(html, 'em', '*') : engine.markdown
+    expect(convert(first + last)).toBe(expected)
+    const input = new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue(first)
+        controller.enqueue(last)
+        controller.close()
+      },
+    })
+    let output = ''
+    const stream = literal ? engine.literalExitStream(input, 'em', '*') : engine.markdownStream(input)
+    for await (const chunk of stream)
+      output += chunk
+    expect(output).toBe(expected)
+  })
+
+  it('preserves preformatted newlines and vertical tabs in a long quote', async () => {
+    const text = 'a'.repeat(8200)
+    const first = `<blockquote><pre><code>${text}\n\u000B  </code>`
+    const last = '</pre></blockquote>'
+    const expected = `> \`\`\`\n> ${text}\n> \u000B\n> \`\`\``
+    expect(engine.markdown(first + last)).toBe(expected)
+    const input = new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue(first)
+        controller.enqueue(last)
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of engine.markdownStream(input))
+      output += chunk
+    expect(output).toBe(expected)
+  })
+
+  it.each([
     ['<p><em><span>T&#11; </span></em>x</p>', '*T* x'],
     ['<p><em><span>T &#11;</span></em>x</p>', '*T* x'],
     ['<p><strong><span>T&#11; </span></strong>x</p>', '**T** x'],

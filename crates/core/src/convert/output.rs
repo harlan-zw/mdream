@@ -2753,13 +2753,23 @@ impl ConvertState {
         }
       }
     }
+    let mut start = self.buffer.len().checked_sub(self.last_content_cache_len);
+    if contains_whitespace
+      && self.last_text_node_contains_whitespace
+      && !self.last_text_node_in_pre
+      && !plain_text!(self)
+      && self.depth_map[TAG_PRE as usize] == 0
+      && let Some((source_start, source_end)) = self.last_text_output_range
+      && Some(source_end) == start
+      && self.buffer.as_bytes().get(source_end.wrapping_sub(1)) == Some(&b'\x0B')
+      && text.bytes().all(is_whitespace)
+    {
+      start = Some(source_start);
+      self.last_content_cache_len = self.buffer.len() - source_start;
+    }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.last_text_node_in_pre = self.depth_map[TAG_PRE as usize] > 0;
-    self.last_text_output_range = self
-      .buffer
-      .len()
-      .checked_sub(self.last_content_cache_len)
-      .map(|start| (start, self.buffer.len()));
+    self.last_text_output_range = start.map(|start| (start, self.buffer.len()));
     self.has_last_text_node = true;
     self.last_text_node_depth = depth;
     self.last_text_node_index = index;

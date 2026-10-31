@@ -260,8 +260,41 @@ fn transparent_wrappers_preserve_the_formatting_whitespace_tail() {
       "**T\u{b}**x",
     ),
     ("<p><span>T&#11; </span>x</p>", "T\u{b} x"),
+    ("<p><em><span>a &#10;&#11;</span> </em>x</p>", "*a* x"),
+    (
+      "<p><strong><span>a &#10;&#11;</span> </strong>x</p>",
+      "**a** x",
+    ),
+    (
+      "<ul><li><em><span>a &#10;&#11;</span> </em>x</li></ul>",
+      "- *a* x",
+    ),
+    (
+      "<p><em>a<br><span>&#11;</span> </em>x</p>",
+      "*a  \n\u{b}* x",
+    ),
   ] {
     assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn quote_flushing_keeps_the_inline_source_tail_mutable() {
+  let text = "a".repeat(8200);
+  for (tag, marker) in [("em", "*"), ("strong", "**"), ("del", "~~")] {
+    let first = format!("<blockquote><{tag}><span>{text}&#10;&#11;  </span>");
+    let last = format!(" </{tag}>x</blockquote>");
+    let expected = format!("> {marker}{text}{marker} x");
+    let html = format!("{first}{last}");
+    assert_eq!(md(&html), expected);
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut streamed = processor.process_chunk(&first);
+    streamed.push_str(&processor.process_chunk(&last));
+    streamed.push_str(&processor.finish());
+    assert_eq!(streamed, expected);
+    for width in [7, 127, 8191] {
+      assert_eq!(md_streamed(&html, width), expected, "{tag}, width {width}");
+    }
   }
 }
 

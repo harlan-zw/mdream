@@ -45,7 +45,7 @@ function flushBlockquoteLines(state: MarkdownState): boolean {
     return false
 
   const content = buffer.slice(start).join('')
-  const stableEnd = trimAsciiWhitespaceEnd(content).length
+  const stableEnd = trimAsciiWhitespaceEnd(content, true).length
   let end = content.lastIndexOf('\n', stableEnd - 1) + 1
   while (end >= 2 && content.charCodeAt(end - 2) === 10)
     end--
@@ -123,7 +123,7 @@ function prepareQuoteOutput(state: MarkdownState, bufferScan: BufferScanState, q
   for (; quoteScan.fragment < state.buffer.length; quoteScan.fragment++) {
     const fragment = state.buffer[quoteScan.fragment]!
     const lastNewline = fragment.lastIndexOf('\n')
-    const contentEnd = trimAsciiWhitespaceEnd(fragment).length
+    const contentEnd = trimAsciiWhitespaceEnd(fragment, true).length
     if (contentEnd > 0) {
       const settled = lastNewline < contentEnd
         ? lastNewline
