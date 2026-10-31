@@ -214,6 +214,12 @@ export interface TextNode extends Node {
   /** Follows an end tag that closed nothing, so it gets no separator. */
   joinsPrevious?: boolean
   /**
+   * Whitespace that opens an inline element, other than one with a literal
+   * `tagOverrides` opener. While it stays whitespace it is placed as a word
+   * separator, and is not written as text.
+   */
+  leadingBlank?: boolean
+  /**
    * First text with no block ancestor: it drops its leading whitespace when
    * the output is at the start of a line.
    */

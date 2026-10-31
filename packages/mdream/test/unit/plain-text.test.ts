@@ -268,3 +268,89 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
     expect(streamed.trimEnd()).toBe('caf�!')
   })
 })
+
+describe.each(engines)('inline text separators $name', (engineConfig) => {
+  it.each([
+    ['a<figcaption> </figcaption>b', 'ab'],
+    ['<figure>a<figcaption><span> </span></figcaption>b</figure>', 'ab'],
+    ['a<figcaption><span> <span>b</span></span></figcaption>c', 'a\n\nb\n\nc'],
+    ['<p>a<span>x </span>&nbsp;<span>b</span></p>', 'ax \u00A0b'],
+    ['<p>a<span> <span>b</span></span></p>', 'a b'],
+    ['<p>a<span> <strong>b</strong></span></p>', 'a b'],
+    ['<p>a<font> <b>x</b></font></p>', 'a x'],
+    ['<p>a<label> <span>b</span></label></p>', 'a b'],
+    ['<p>a<abbr> <span>b</span></abbr></p>', 'a b'],
+    ['<p>a<small> <span>b</span></small></p>', 'a b'],
+    ['<p>a<u> <span>b</span></u></p>', 'a b'],
+    ['<p>a<span><span> <span>b</span></span></span></p>', 'a b'],
+    ['<p>a<span>\n  <span>b</span></span>c</p>', 'a bc'],
+    ['<p>a<span> </span>b</p>', 'a b'],
+    ['<p>a<span> <strong></strong></span>b</p>', 'a b'],
+    ['<p>a<strong>x<span> <span>b</span></span></strong></p>', 'ax b'],
+    ['<p><strong>a<span> </span></strong>b</p>', 'a b'],
+    ['<p>a <span> <span>b</span></span></p>', 'a b'],
+    ['<p><span> <strong>b</strong></span></p>', 'b'],
+    ['<p>a<br><span> <span>b</span></span></p>', 'a\nb'],
+    ['<p>a<span> </span></p>', 'a'],
+    ['<p>a<span> </span></p><p>b</p>', 'a\n\nb'],
+    ['a<span> <span>b</span></span>', 'a b'],
+    ['<span> <span>b</span></span>', 'b'],
+    ['<p>a<span> </span>&nbsp;<span>b</span></p>', 'a \u00A0b'],
+    ['<p>a<span>x </span>&#160;<span>b</span></p>', 'ax \u00A0b'],
+    ['<p>a<span>x </span>\u00A0<span>b</span></p>', 'ax \u00A0b'],
+    ['<p>a<span>&nbsp;<span>b</span></span></p>', 'a\u00A0b'],
+    ['<p><span>&nbsp;<span>b</span></span></p>', 'b'],
+    ['<p>a<code> <span>b</span></code></p>', 'a b'],
+    ['<p><code>a<span> <span>b</span></span></code></p>', 'a b'],
+    ['<pre>a<span> <span>b</span></span></pre>', 'a b'],
+    ['<p>a<q> <span>b</span></q></p>', 'a "b"'],
+    ['<p>a<q><span> </span></q>b</p>', 'a b'],
+    ['<p>a<a href="/x"> <span>b</span></a></p>', 'a b'],
+    ['<p>a<span> <img src="/i.png" alt="i"></span></p>', 'a i'],
+    ['<ul><li>a<span> <span>b</span></span></li></ul>', 'a b'],
+    ['<h2>a<span> <span>b</span></span></h2>', 'a b'],
+    ['<blockquote><p>a<span> <span>b</span></span></p></blockquote>', 'a b'],
+    ['<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>', 'h\na b'],
+    ['<figure>x<figcaption><span> <span>b</span></span></figcaption></figure>', 'x\n\nb'],
+    ['<p>a</p><p><span> <span>b</span></span></p>', 'a\n\nb'],
+    ['<p>a</p><p><span>&nbsp;<span>b</span></span></p>', 'a\n\n\u00A0b'],
+  ])('preserves inline separators at every chunk width: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      expect(await collect(streamHtmlToMarkdown(stream, { engine, format: 'text' })), `width=${width}`).toBe(expected)
+    }
+  })
+})
+
+describe.each(engines)('wrapped inline text separators $name', (engineConfig) => {
+  it.each([
+    ['<p>aaa<span> <span>b</span></span></p>', 'aaa\nb'],
+    ['<p>aaa<span> </span>b</p>', 'aaa\nb'],
+    ['<p>aaa<span> <span>bb cc</span></span></p>', 'aaa\nbb\ncc'],
+    ['<p>aa<span> <span>b</span></span></p>', 'aa\nb'],
+    ['<p>a<span> <span>b</span></span></p>', 'a b'],
+    ['<pre>aaa<span> <span>b</span></span></pre>', 'aaa b'],
+  ])('wraps recovered separators at every chunk width: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, format: 'text' as const, wrapWidth: 3 }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      expect(await collect(streamHtmlToMarkdown(stream, options)), `width=${width}`).toBe(expected)
+    }
+  })
+})

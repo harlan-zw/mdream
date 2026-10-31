@@ -146,6 +146,13 @@ function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
     && !isInsideRawHtmlBlock(depthMap)
 }
 
+// A blank that opens an inline element can be the only word separator,
+// whether the element writes a delimiter, like `<strong>`, or nothing, like a
+// `<span>`. The output decides where it goes, or that it writes nothing.
+function keepsLeadingBlank(node: ElementNode): boolean {
+  return node.tagHandler?.isInline ?? node.tagId === -1
+}
+
 const SCRIPT_DATA = 0
 const SCRIPT_DATA_ESCAPED = 1
 const SCRIPT_DATA_ESCAPED_DASH = 2
@@ -662,6 +669,7 @@ export interface ParseState {
   tagOverrideHandlers?: Map<string, TagHandler>
   /** Whether emitted text should skip Markdown-only escaping */
   plainText?: boolean
+  keepLeadingBlanks?: boolean
   /** Output state whose `options.origin` the first usable `<base href>` replaces. */
   urlBaseTarget?: { options: EngineOptions }
   /** Only the first `<base href>` counts, even when it is not usable. */
@@ -1379,7 +1387,10 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     || state.currentNode?.excludedFromMarkdown
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
-  if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
+  // Whitespace-only text before an element's first child is indentation, but
+  // in inline content after earlier text it is the only word separator.
+  const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
+  if (isLeadingBlank && ((state.plainText && !state.keepLeadingBlanks) || !keepsLeadingBlank(state.currentNode))) {
     return
   }
 
@@ -1405,6 +1416,31 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     if (start > 0) {
       text = text.substring(start)
     }
+  }
+
+  // The output moves the separator in front of the delimiter; the counters stay
+  // as if the blank were dropped, so it is no content of the element.
+  if (isLeadingBlank) {
+    if (text) {
+      const blank: TextNode = {
+        type: TEXT_NODE,
+        value: text,
+        parent: state.currentNode,
+        index: state.currentNode.currentWalkIndex!,
+        depth: state.depth,
+        containsWhitespace,
+        excludedFromMarkdown: excludesTextNodes,
+        leadingBlank: true,
+      }
+      handleEvent({ type: NodeEventEnter, node: blank })
+      // Plugins can turn the retained separator into actual link content.
+      if (!blank.excludedFromMarkdown && blank.value.trim()) {
+        state.currentNode.currentWalkIndex!++
+        for (const parent of parentsToIncrement)
+          parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+      }
+    }
+    return
   }
 
   if (state.hasEncodedHtmlEntity) {
