@@ -2716,6 +2716,10 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
+    self.get_markdown_chunk_with_final(false)
+  }
+
+  fn get_markdown_chunk_with_final(&mut self, final_chunk: bool) -> String {
     if self.is_html() {
       if let Some(&last) = self.buffer.as_bytes().last() {
         self.flushed_tail[1] = last;
@@ -2746,9 +2750,16 @@ impl ConvertState {
     // a trailing tab that a later trim then removes from the buffer alone.
     // Inside <pre>, that holds for a trailing whitespace run in the current
     // text node: it stays mutable until its inline/code element closes.
-    let mut stable_end = self
-      .held_whitespace
-      .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
+    let hold_vertical_tab = !plain_text!(self);
+    let mut stable_end = if final_chunk {
+      trim_ascii_whitespace_end(&self.buffer)
+    } else {
+      self
+        .held_whitespace
+        .start(self.buffer.as_bytes(), buf_len, |b| {
+          b.is_ascii_whitespace() || (hold_vertical_tab && b == b'\x0B')
+        })
+    };
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
       // line-leading run is the exception: list continuation indentation is
@@ -2894,7 +2905,7 @@ impl ConvertState {
     if !plain_text!(self) && !self.is_html() && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       self.get_markdown()
     } else {
-      self.get_markdown_chunk()
+      self.get_markdown_chunk_with_final(true)
     }
   }
 
@@ -3318,6 +3329,8 @@ mod tests {
   fn a_growing_held_tail_is_read_once() {
     for (name, unit, prefix) in [
       ("trailing whitespace", "&#32;&#32;</b>", "<p>x"),
+      ("vertical tabs", "&#11;<i></i>", "<p>x"),
+      ("vertical tabs in emphasis", " &#11;", "<p><em>x"),
       ("leading whitespace", "&nbsp;</b>", ""),
       ("heading run", "#<span>#</span>", "<h2>x "),
       ("spaces in a code block", "&#32;&#32;</b>", "<pre><code>"),

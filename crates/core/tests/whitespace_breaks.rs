@@ -212,9 +212,7 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
 
 #[test]
 fn a_break_subsumes_the_whitespace_run_before_it() {
-  // HTML's ASCII whitespace, whatever the text's source whitespace, as the JS
-  // engine does. A line feed stops the run: block spacing and an earlier break
-  // end in one.
+  // Source text trims separately; structural line feeds and earlier breaks stay.
   let markdown = HtmlToMarkdownOptions::default();
   for (html, expected_markdown, expected_text) in [
     ("<p>a&#9;<br>b</p>", "a  \nb", "a\nb"),
@@ -225,7 +223,7 @@ fn a_break_subsumes_the_whitespace_run_before_it() {
     ("<p>a&#9;<i></i>&#9;<br>b</p>", "a  \nb", "a\nb"),
     ("<p>a<br>&#9;<br>b</p>", "a  \n  \nb", "a\n\nb"),
     ("<p>a</p>&#9;<br>b", "a\n\n  \nb", "a\n\nb"),
-    ("<p>x y&#10;<br>b</p>", "x y\n  \nb", "x y\n\nb"),
+    ("<p>x y&#10;<br>b</p>", "x y  \nb", "x y\nb"),
     ("<p>x y&#11;<br>b</p>", "x y\u{b}  \nb", "x y\u{b}\nb"),
     ("<code>x y&#9;<br>b</code>", "`x y\nb`", "x y\nb"),
     ("<a href=\"x\">x y&#9;<br>b</a>", "[x y  \nb](x)", "x y\nb"),

@@ -182,8 +182,7 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<h2>a#<i></i>#</h2>', '## a##', 'a##'],
   ['<p><b>x y&#9;</b><br>b</p>', '**x y**  \nb', 'x y\nb'],
   ['<p><span>x y&#9;</span>z</p>', 'x y z', 'x y z'],
-  // A break subsumes the run before it whatever the text's source whitespace,
-  // up to a line feed: block spacing and earlier breaks end in one.
+  // Source text trims separately; structural line feeds and earlier breaks stay.
   ['<p>a&#9;<br>b</p>', 'a  \nb', 'a\nb'],
   ['<p>x y&#9;<br>b</p>', 'x y  \nb', 'x y\nb'],
   ['<p>a&#12;<br>b</p>', 'a  \nb', 'a\nb'],
@@ -192,7 +191,7 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<p>a&#9;<i></i>&#9;<br>b</p>', 'a  \nb', 'a\nb'],
   ['<p>a<br>&#9;<br>b</p>', 'a  \n  \nb', 'a\n\nb'],
   ['<p>a</p>&#9;<br>b', 'a\n\n  \nb', 'a\n\nb'],
-  ['<p>x y&#10;<br>b</p>', 'x y\n  \nb', 'x y\n\nb'],
+  ['<p>x y&#10;<br>b</p>', 'x y  \nb', 'x y\nb'],
   ['<code>x y&#9;<br>b</code>', '`x y\nb`', 'x y\nb'],
   ['<a href="x">x y&#9;<br>b</a>', '[x y  \nb](x)', 'x y\nb'],
   ['<li>a&#9;<br>b</li>', '- a\t  \n  b', 'a\nb'],
@@ -209,7 +208,7 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<blockquote><p>a&#11;<br></p></blockquote>', '> a\u000B', 'a\u000B'],
   ['<h2>a #&#11;</h2>', '## a #\u000B', 'a #\u000B'],
   ['<p>x y&#11;<br>b</p>', 'x y\u000B  \nb', 'x y\u000B\nb'],
-  ['<p><b>x y&#11;</b><br>b</p>', '**x y\u000B**  \nb', 'x y\u000B\nb'],
+  ['<p><b>x y&#11;</b><br>b</p>', '**x y**  \nb', 'x y\u000B\nb'],
   ['<p><span>x y&#11;</span>z</p>', 'x y\u000Bz', 'x y\u000Bz'],
   ['<p>x y&#11;</p><p>b</p>', 'x y\u000B\n\nb', 'x y\u000B\n\nb'],
   ['<pre><code>a&#11;\n</code></pre>', '```\na\u000B\n```', 'a\u000B'],

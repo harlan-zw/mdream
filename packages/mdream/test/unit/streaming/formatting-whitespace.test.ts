@@ -1,0 +1,153 @@
+import { htmlToMarkdown as jsMarkdown, streamHtmlToMarkdown as jsMarkdownStream } from '@mdream/js'
+import { htmlToSafeHtml as jsHtml, streamHtmlToSafeHtml as jsHtmlStream } from '@mdream/js/html'
+import { htmlToText as jsText, streamHtmlToText as jsTextStream } from '@mdream/js/text'
+import { htmlToMarkdown as rustMarkdown, streamHtmlToMarkdown as rustStream } from 'mdream'
+import { describe, expect, it } from 'vitest'
+
+const engines = [
+  {
+    name: 'JavaScript',
+    markdown: jsMarkdown,
+    markdownStream: jsMarkdownStream,
+    text: jsText,
+    textStream: jsTextStream,
+    html: jsHtml,
+    htmlStream: jsHtmlStream,
+    literalText: (html: string) => jsText(html, { tagOverrides: { br: { enter: 'L\n' } } }),
+    literalTextStream: (stream: ReadableStream<string>) => jsTextStream(stream, { tagOverrides: { br: { enter: 'L\n' } } }),
+    literalExit: (html: string, tag: string, exit: string) => jsMarkdown(html, { tagOverrides: { [tag]: { exit } } }),
+    literalExitStream: (stream: ReadableStream<string>, tag: string, exit: string) => jsMarkdownStream(stream, { tagOverrides: { [tag]: { exit } } }),
+  },
+  {
+    name: 'Rust',
+    markdown: (html: string) => rustMarkdown(html),
+    markdownStream: (stream: ReadableStream<string>) => rustStream(stream),
+    text: (html: string) => rustMarkdown(html, { format: 'text' }),
+    textStream: (stream: ReadableStream<string>) => rustStream(stream, { format: 'text' }),
+    html: (html: string) => rustMarkdown(html, { format: 'html' }),
+    htmlStream: (stream: ReadableStream<string>) => rustStream(stream, { format: 'html' }),
+    literalText: (html: string) => rustMarkdown(html, { format: 'text', tagOverrides: { br: { enter: 'L\n' } } }),
+    literalTextStream: (stream: ReadableStream<string>) => rustStream(stream, { format: 'text', tagOverrides: { br: { enter: 'L\n' } } }),
+    literalExit: (html: string, tag: string, exit: string) => rustMarkdown(html, { tagOverrides: { [tag]: { exit } } }),
+    literalExitStream: (stream: ReadableStream<string>, tag: string, exit: string) => rustStream(stream, { tagOverrides: { [tag]: { exit } } }),
+  },
+]
+
+async function assertChunkings(
+  html: string,
+  convert: (stream: ReadableStream<string>) => AsyncIterable<string>,
+  expected: string,
+): Promise<void> {
+  const chunkings: string[][] = []
+  for (let width = 1; width <= html.length; width++) {
+    const parts: string[] = []
+    for (let offset = 0; offset < html.length; offset += width)
+      parts.push(html.slice(offset, offset + width))
+    chunkings.push(parts)
+  }
+  for (let split = 1; split < html.length; split++)
+    chunkings.push([html.slice(0, split), html.slice(split)])
+  for (const parts of chunkings) {
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (const part of parts)
+          controller.enqueue(part)
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of convert(stream))
+      output += chunk
+    expect(output, JSON.stringify(parts)).toBe(expected)
+  }
+}
+
+describe.each(engines)('$name formatting whitespace', (engine) => {
+  it.each([
+    ['<p><em>T&#11; </em>x</p>', '*T* x'],
+    ['<p><em>a &#11;</em>b</p>', '*a* b'],
+    ['<p><strong>T&#11; </strong>x</p>', '**T** x'],
+    ['<p><strong>a &#11;</strong>b</p>', '**a** b'],
+    ['<p><em>T&#11;</em>x</p>', '*T\u000B*x'],
+    ['<p><strong>T&#11;</strong>x</p>', '**T\u000B**x'],
+    ['<p>T&#11; x</p>', 'T\u000B x'],
+    ['<pre><code>T&#11; </code></pre>', '```\nT\u000B\n```'],
+    ['<code>T&#11; </code>', '`T\u000B`'],
+  ])('keeps inline-close trimming local: %s', async (html, expected) => {
+    expect(engine.markdown(html)).toBe(expected)
+    await assertChunkings(html, engine.markdownStream, expected)
+  })
+
+  it.each([
+    ['em', '*', '</em>'],
+    ['strong', '**', '</strong>'],
+    ['em', '*', '*'],
+    ['strong', '**', '**'],
+  ])('preserves vertical tabs before a literal %s exit %s %s', async (tag, enter, exit) => {
+    const html = `<p><${tag}>a &#11; </${tag}>b</p>`
+    const expected = `${enter}a \u000B${exit} b`
+    expect(engine.literalExit(html, tag, exit)).toBe(expected)
+    await assertChunkings(html, stream => engine.literalExitStream(stream, tag, exit), expected)
+  })
+
+  it.each([
+    ['<p><em>T&#11; </em>x</p>', 'T\u000B x'],
+    ['<p><em>a &#11;</em>b</p>', 'a \u000Bb'],
+  ])('preserves vertical tabs in text output: %s', async (html, expected) => {
+    expect(engine.text(html)).toBe(expected)
+    await assertChunkings(html, engine.textStream, expected)
+  })
+
+  it.each([
+    ['<p><em>T&#11; </em>x</p>', '<p><em>T\u000B </em>x</p>'],
+    ['<p><strong>a &#11;</strong>b</p>', '<p><strong>a \u000B</strong>b</p>'],
+  ])('preserves vertical tabs before raw HTML closers: %s', async (html, expected) => {
+    expect(engine.html(html)).toBe(expected)
+    await assertChunkings(html, engine.htmlStream, expected)
+  })
+
+  it.each([
+    ['<p>x y&#10;<br>b</p>', 'x y  \nb'],
+    ['<p>x y&#13;&#10;<br>b</p>', 'x y  \nb'],
+  ])('keeps source line feeds out of paragraph spacing: %s', async (html, expected) => {
+    expect(engine.markdown(html)).toBe(expected)
+    await assertChunkings(html, engine.markdownStream, expected)
+  })
+
+  it.each([
+    ['<p>x y&#10;<i></i><br>b</p>', 'x y\n  \nb'],
+    ['<p>x y<br>&#10;<br>b</p>', 'x y  \n\n  \nb'],
+    ['<p>x y</p>&#10;<br>b', 'x y\n\n\n  \nb'],
+    ['<ul><li>x y&#10;<br>b</li></ul>', '- x y\n  \n  b'],
+    ['<pre>x y\n<br>b</pre>', '```\nx y\n\nb\n```'],
+  ])('preserves existing structural spacing: %s', async (html, expected) => {
+    expect(engine.markdown(html)).toBe(expected)
+    await assertChunkings(html, engine.markdownStream, expected)
+  })
+
+  it('keeps long vertical-tab tails consistent across chunks', async () => {
+    const html = `<p><em>T${' &#11;'.repeat(2048)}</em>x</p>`
+    expect(engine.markdown(html)).toBe('*T* x')
+    for (const width of [1, 7, 1024]) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of engine.markdownStream(stream))
+        output += chunk
+      expect(output, `width=${width}`).toBe('*T* x')
+    }
+  })
+
+  it('preserves source form feeds before a literal text break', async () => {
+    const html = '<p>a&#12;<br>b</p>'
+    expect(engine.literalText(html)).toBe('a\fL\nb')
+    await assertChunkings(html, engine.literalTextStream, 'a\fL\nb')
+    expect(engine.text(html)).toBe('a\nb')
+    await assertChunkings(html, engine.textStream, 'a\nb')
+  })
+})

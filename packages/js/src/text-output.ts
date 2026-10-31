@@ -554,8 +554,13 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     if (element.tagId === TAG_BR && event.type === NodeEventEnter && output) {
       // The break owns the line end, so the whitespace before it goes too,
       // before the line ends it would add are counted, as in Rust.
-      if (!state.depthMap[TAG_PRE] && output.endsWith('\n'))
+      if (!state.depthMap[TAG_PRE] && !element.tagHandler?.literalEnter && output.endsWith('\n')) {
+        if (state.lastTextNode?.containsWhitespace && lastOutputChar(state.buffer) === 10) {
+          const last = state.buffer.at(-1)!
+          state.buffer[state.buffer.length - 1] = trimAsciiWhitespaceEnd(last)
+        }
         trimBeforeBreak(state.buffer)
+      }
       const currentNewlines = trailingNewlines(state.buffer)
       if (!state.depthMap[TAG_PRE] && currentNewlines >= 2)
         output = undefined

@@ -289,6 +289,8 @@ describe('streaming drain parity', () => {
   // long one quadratic, so count what the drain joins.
   it.each([
     ['tabs before empty pairs', '<p>a', '&#9;<i></i>', 13, '</p>'],
+    ['vertical tabs before empty pairs', '<p>a', '&#11;<i></i>', 13, '</p>'],
+    ['vertical tabs in emphasis', '<p><em>a', ' &#11;', 7, '</em>x</p>'],
     ['an open pair at every chunk end', '<p>a', '&#9;<i></i>', 11, '</p>'],
     ['tabs in spans', '<p>a', '<span>&#9;</span>', 17, '</p>'],
     ['tabs before breaks', '<p>a', '&#9;<br>', 8, '</p>'],

@@ -1644,6 +1644,16 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
+      if self.last_text_node_contains_whitespace && self.last_content_cache_len <= self.buffer.len()
+      {
+        let start = (self.buffer.len() - self.last_content_cache_len).max(self.trim_floor());
+        let end = start + trim_ascii_whitespace_end(&self.buffer[start..]);
+        self.last_content_cache_len = self
+          .last_content_cache_len
+          .saturating_sub(self.buffer.len() - end);
+        self.clamp_item_marker_end(end);
+        self.truncate_buffer(end);
+      }
       self.trim_before_break();
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
@@ -2510,7 +2520,13 @@ impl ConvertState {
     }
 
     let output_start = self.buffer.len();
-    self.write_output(false, is_inline, configured_new_lines, effective, false);
+    self.write_output(
+      false,
+      is_inline,
+      configured_new_lines,
+      effective,
+      has_override,
+    );
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
     }
@@ -5221,7 +5237,21 @@ impl ConvertState {
             // set: a trailing U+00A0 (`&nbsp;`) is meaningful content, and once
             // streaming has yielded it the truncation can't un-send its bytes,
             // so the reach-back would drop the next text's leading char.
-            let trimmed_len = trim_ascii_whitespace_end(frag);
+            let mut trimmed_len = trim_ascii_whitespace_end(frag);
+            if !is_enter
+              && is_inline
+              && !plain_text!(self)
+              && !literal
+              && matches!(output_str, "*" | "**" | "~~")
+            {
+              let bytes = frag.as_bytes();
+              while trimmed_len > 0
+                && (bytes[trimmed_len - 1].is_ascii_whitespace()
+                  || bytes[trimmed_len - 1] == b'\x0B')
+              {
+                trimmed_len -= 1;
+              }
+            }
             if start + trimmed_len < buf_len {
               self.clamp_item_marker_end(start + trimmed_len);
               self.truncate_buffer(start + trimmed_len);

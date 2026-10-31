@@ -868,10 +868,14 @@ export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13 && code !== 11)
 }
 
-export function trimAsciiWhitespaceEnd(value: string): string {
+export function trimAsciiWhitespaceEnd(value: string, inlineClose = false): string {
   let end = value.length
-  while (end > 0 && isAsciiWhitespace(value.charCodeAt(end - 1)))
+  while (end > 0) {
+    const code = value.charCodeAt(end - 1)
+    if (!isAsciiWhitespace(code) && (!inlineClose || code !== 11))
+      break
     end--
+  }
   return end === value.length ? value : value.slice(0, end)
 }
 
@@ -1974,8 +1978,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           }
           parent = parent.parent
         }
-        if (!parentInPre || element.parent?.tagId === TAG_PRE)
+        if (!parentInPre || element.parent?.tagId === TAG_PRE) {
+          const fragment = state.lastContentCache
+          if (!parentInPre && breakOutput?.endsWith('\n') && buff.at(-1) === fragment) {
+            const trimmed = trimAsciiWhitespaceEnd(fragment)
+            if (trimmed.length !== fragment.length) {
+              state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
+              buff[buff.length - 1] = trimmed
+              state.lastContentCache = trimmed
+            }
+          }
           state.lastTextNode = undefined
+        }
       }
       // Whitespace before a line break has no visual effect, even when an
       // emptied inline element left it, so the break subsumes it as in Rust.
@@ -2418,7 +2432,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
           if (shouldTrim) {
             const originalLength = lastFragment.length
-            const trimmed = trimAsciiWhitespaceEnd(lastFragment)
+            const trimmed = trimAsciiWhitespaceEnd(lastFragment, eventType === NodeEventExit && isInlineElement
+              && !handler?.literalExit && (handlerOutput === '*' || handlerOutput === '**' || handlerOutput === '~~'))
             const trimmedChars = originalLength - trimmed.length
 
             // Update the last content in buffer regions with trimmed content

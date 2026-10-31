@@ -185,7 +185,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     if (end < heldRunEnd || buffer[heldRunEnd - 1] !== heldRunLast)
       return false
     for (let index = heldRunEnd; index < end; index++) {
-      if (trimAsciiWhitespaceEnd(buffer[index]!).length !== 0)
+      if (trimAsciiWhitespaceEnd(buffer[index]!, true).length !== 0)
         return false
     }
     heldRunEnd = end
@@ -263,12 +263,13 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       }
     }
     else {
-      // The prefix ends before a mutable owner. Its trailing block spacing
-      // stays buffered even when that owner sits inside a preformatted block.
-      // The whole ASCII set stays with it: the trims that reach back here, and
-      // the final one, take a tab, form feed or carriage return as well.
-      while (stableLength > 0 && isAsciiWhitespace(currentContent.charCodeAt(stableLength - 1)))
+      // U+000B stays mutable until an inline closer settles it.
+      while (stableLength > 0) {
+        const code = currentContent.charCodeAt(stableLength - 1)
+        if (!isAsciiWhitespace(code) && (final || code !== 11))
+          break
         stableLength--
+      }
       retainMutableFragments = stableLength < currentContent.length
       heldRunStart = stableLength
     }
