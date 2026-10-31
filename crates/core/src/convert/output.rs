@@ -18,6 +18,21 @@ const fn is_unsafe_fence_info_byte(byte: u8) -> bool {
   byte < 0x20 || matches!(byte, 0x7F | b'`' | b'~' | b'"' | b'\'' | b'<' | b'>' | b'&')
 }
 
+/// A data attribute represents one language token, unlike a class list that
+/// has already been split into tokens. Trim its HTML whitespace and reject an
+/// interior space as well as bytes unsafe in a fence info string.
+fn get_language_from_data_attribute(value: Option<&str>) -> Option<&str> {
+  let value = value?.trim_ascii();
+  if value.is_empty()
+    || value
+      .bytes()
+      .any(|byte| byte == SPACE_CHAR || is_unsafe_fence_info_byte(byte))
+  {
+    return None;
+  }
+  Some(value)
+}
+
 /// Buffer size at which a streaming flush starts quoting completed blockquote
 /// lines, so a long quote releases instead of growing with the document.
 const STREAMING_FLUSH_THRESHOLD: usize = 8 * 1024;
@@ -1373,9 +1388,7 @@ impl ConvertState {
       && !self.pre_fence_pending
       && !self.in_table_cell()
     {
-      let lang =
-        Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
-          .to_string();
+      let lang = Self::get_language_from_attributes(&self.stack[stack_len - 1]).to_string();
       self.pre_fence_pending = true;
       self.pre_fence_pending_depth = self.depth_map[TAG_PRE as usize];
       self.pre_fence_lang = lang;
@@ -1504,9 +1517,10 @@ impl ConvertState {
         && (!tag_id.is_some_and(suppresses_formatting_in_pre) || enter_is_literal)
       {
         if enter_is_literal && code_owns_fence {
-          self.pre_fence_lang =
-            Self::get_language_from_class(self.stack[stack_len - 1].attributes.get("class"))
-              .to_string();
+          let language = Self::get_language_from_attributes(&self.stack[stack_len - 1]);
+          if !language.is_empty() {
+            self.pre_fence_lang = language.to_string();
+          }
         }
         self.flush_pre_fence();
         if tag_id == Some(TAG_CODE) && !enter_is_literal {
@@ -1695,6 +1709,14 @@ impl ConvertState {
       self.flush_streaming_blockquote_lines();
     }
 
+    // Plain text never arms a boundary. The tag is tested again after
+    // `write_output`: a flag kept live across it cost more instructions.
+    if !plain_text!(self) && tag_id.is_some_and(Self::is_raw_html_block_tag) {
+      self.enter_raw_html_boundary(enter_is_literal, output.is_some(), configured_new_lines);
+    }
+
+    let raw_html_quote_boundary =
+      self.pending_raw_html_boundary && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE);
     let output_start = self.buffer.len();
     self.write_output(
       true,
@@ -1751,13 +1773,19 @@ impl ConvertState {
     }
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
-      if !self.blockquotes.is_empty() && self.buffer.ends_with("\n\n") {
+      if !self.blockquotes.is_empty()
+        && self.buffer.ends_with("\n\n")
+        && (!raw_html_quote_boundary || self.buffer.ends_with("\n\n\n"))
+      {
         self.truncate_buffer(self.buffer.len() - 1);
         // Frames anchored at the old end move with the popped byte. Siblings can
         // share an offset, so this is not only the innermost. See `trim_floor`.
         for frame in &mut self.blockquotes {
           frame.content_start = frame.content_start.min(self.buffer.len());
         }
+      }
+      if self.pending_raw_html_boundary {
+        self.finish_raw_html_block(">", false);
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
@@ -1791,9 +1819,12 @@ impl ConvertState {
         && self.buffer.ends_with(emitted)
       {
         let output_start = self.buffer.len() - emitted.len();
-        let language =
-          Self::get_language_from_class(self.stack[stack_len - 1].attributes.get_bit(ATTR_CLASS))
-            .to_string();
+        let code_language = Self::get_language_from_attributes(&self.stack[stack_len - 1]);
+        let language = if code_language.is_empty() {
+          self.pre_fence_lang.clone()
+        } else {
+          code_language.to_string()
+        };
         self.start_code_fence(
           output_start,
           self.buffer.len(),
@@ -2333,8 +2364,13 @@ impl ConvertState {
       self.list_rule_pending = true;
     }
 
-    if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty() {
-      self.finalize_blockquote();
+    if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) {
+      if !self.blockquotes.is_empty() {
+        self.finalize_blockquote();
+      }
+      // The quote's close separates a raw HTML region that ended inside it,
+      // including a literal-enter quote, which pushed no frame.
+      self.pending_raw_html_boundary = false;
     }
 
     let new_line_config = if caption_exit {
@@ -2453,6 +2489,14 @@ impl ConvertState {
       )));
     }
 
+    if !plain_text!(self)
+      && tag_id.is_some_and(Self::is_raw_html_block_tag)
+      && !self.in_table_cell()
+      && self.depth_map[TAG_PRE as usize] == 0
+    {
+      self.exit_raw_html_boundary(has_override, output.is_some());
+    }
+
     // Get effective output
     let effective: Option<&str> = if let Some(ref sep) = table_separator {
       Some(sep.as_str())
@@ -2461,6 +2505,7 @@ impl ConvertState {
     };
 
     if tag_id == Some(TAG_LI) && !plain_text!(self) {
+      self.pending_raw_html_boundary = false;
       self.resolve_item_marker(true);
     }
 
@@ -2482,8 +2527,12 @@ impl ConvertState {
         self.has_last_text_node = false;
         self.pre_fence_owner_depth = 0;
       }
-      if self.pre_fence_pending_depth == self.depth_map[TAG_PRE as usize] {
+      let closes_pending_pre = self.pre_fence_pending_depth == self.depth_map[TAG_PRE as usize];
+      if closes_pending_pre {
         self.pre_fence_pending = false;
+      }
+      if closes_pending_pre || closes_own_pre_fence {
+        self.pre_fence_lang.clear();
       }
     }
     if tag_id == Some(TAG_A) && self.link_caption_break_snapshot_active {
@@ -2582,6 +2631,7 @@ impl ConvertState {
       && self.caption_frames.is_empty()
       && !self.list_rule_pending
       && !self.pending_inline_whitespace
+      && !self.pending_raw_html_boundary
       && !self.pre_fence_pending
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
@@ -2749,6 +2799,15 @@ impl ConvertState {
       self.emit_html_text(text);
       return;
     }
+    let pending_raw_boundary = self.pending_raw_html_boundary;
+    if pending_raw_boundary {
+      self.finish_raw_html_block(text, true);
+    }
+    let text = if pending_raw_boundary && !self.pending_raw_html_boundary {
+      text.trim_start_matches([' ', '\t', '\r', '\n'])
+    } else {
+      text
+    };
     let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
       return;
@@ -2827,12 +2886,7 @@ impl ConvertState {
     }
 
     // Open a deferred <pre> fence before its first non-whitespace text.
-    if self.pre_fence_pending
-      && text
-        .as_bytes()
-        .iter()
-        .any(|&b| b != b' ' && b != b'\t' && b != b'\n' && b != b'\r')
-    {
+    if self.pre_fence_pending && !text.trim_ascii().is_empty() {
       self.flush_pre_fence();
     }
     // Still pending means this <pre> has only seen whitespace so far; drop it
@@ -4109,6 +4163,45 @@ impl ConvertState {
     )
   }
 
+  // Keep boundary tracking out of the common element emitters. These helpers
+  // are reached only for the raw HTML tags above outside plain text, never for
+  // Markdown BR/LI.
+  #[inline(never)]
+  fn enter_raw_html_boundary(&mut self, literal: bool, has_output: bool, new_lines: u8) {
+    if self.raw_html_needs_boundary {
+      self.track_raw_html_markdown_context(self.buffer.len());
+      if self.raw_html_markdown && !self.line_opens_raw_html_block() {
+        self.raw_html_needs_boundary = false;
+      }
+    }
+    if !literal
+      && !self.in_table_cell()
+      && self.depth_map[TAG_PRE as usize] == 0
+      && has_output
+      && (self.pending_raw_html_boundary || new_lines > 0 || !self.block_open_needs_break())
+    {
+      self.raw_html_needs_boundary = true;
+      self.raw_html_markdown = false;
+      self.raw_html_scanned_to = self.buffer.len();
+      self.pending_raw_html_boundary = false;
+    }
+  }
+
+  #[inline(never)]
+  fn exit_raw_html_boundary(&mut self, has_override: bool, has_output: bool) {
+    self.track_raw_html_markdown_context(self.buffer.len());
+    if self.raw_html_needs_boundary && self.raw_html_markdown && !self.line_opens_raw_html_block() {
+      self.raw_html_needs_boundary = false;
+    }
+    if !has_override && has_output && !self.block_open_needs_break() {
+      self.raw_html_needs_boundary = true;
+    }
+    if self.raw_html_block_depth() == 1 {
+      self.pending_raw_html_boundary = self.raw_html_needs_boundary && !has_override;
+      self.raw_html_needs_boundary = false;
+    }
+  }
+
   /// `1` at an enter means this tag begins the region.
   fn raw_html_block_depth(&self) -> u32 {
     u32::from(self.depth_map[TAG_DETAILS as usize])
@@ -4154,6 +4247,18 @@ impl ConvertState {
   /// Separation a block needs to open at the content column `prefix` describes,
   /// or `None` when the buffer already sits there.
   fn block_open_prefix(&self, prefix: &str) -> Option<Cow<'static, str>> {
+    if self.block_open_needs_break() {
+      Some(Cow::Owned(format!("\n\n{prefix}")))
+    } else if !prefix.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') {
+      Some(Cow::Owned(prefix.to_string()))
+    } else {
+      None
+    }
+  }
+
+  /// Whether a block opening here has to break the paragraph with a blank line
+  /// first. Builds nothing, for callers that only need the answer.
+  fn block_open_needs_break(&self) -> bool {
     let bytes = self.buffer.as_bytes();
     // An emptied buffer is the start of the output only while no drain has taken
     // this line away; afterwards `flushed_tail` holds what the block would be
@@ -4163,8 +4268,7 @@ impl ConvertState {
     let drained_onto_content =
       self.has_flushed_tail() && !matches!(self.flushed_tail[1], b'\n' | b' ');
     match bytes.last() {
-      None if drained_onto_content => Some(Cow::Owned(format!("\n\n{prefix}"))),
-      None => None,
+      None => drained_onto_content,
       Some(b' ') => {
         // A trailing space can be a pending list marker already at the content
         // column, or ordinary text (`"item "`) that still has to break as a
@@ -4173,18 +4277,14 @@ impl ConvertState {
         if end == 0 {
           // Every retained byte is a space, so the line's content — and the
           // marker scan's starting point — left with the drain.
-          return drained_onto_content.then(|| Cow::Owned(format!("\n\n{prefix}")));
+          return drained_onto_content;
         }
-        if bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end) {
-          Some(Cow::Owned(format!("\n\n{prefix}")))
-        } else {
-          None
-        }
+        bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end)
       }
-      Some(b'\n') => (!prefix.is_empty()).then(|| Cow::Owned(prefix.to_string())),
+      Some(b'\n') => false,
       // Directly under text the block reads as a setext underline or a lazy
       // continuation, so it has to break the paragraph first.
-      _ => Some(Cow::Owned(format!("\n\n{prefix}"))),
+      _ => true,
     }
   }
 
@@ -4432,7 +4532,12 @@ impl ConvertState {
           if self.pre_fence_owner_depth != 0 {
             return None;
           }
-          let lang = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
+          let code_language = Self::get_language_from_attributes(node);
+          let lang = if code_language.is_empty() {
+            self.pre_fence_lang.as_str()
+          } else {
+            code_language
+          };
           let li_depth = self.depth_map[TAG_LI as usize] as usize;
           if li_depth > 0 {
             let indent = self.list_indent.as_str();
@@ -4866,6 +4971,50 @@ impl ConvertState {
     }
   }
 
+  /// Separate content following a raw HTML region. A capped code span must
+  /// accept the complete separator before this consumes the pending boundary.
+  fn finish_raw_html_block(&mut self, value: &str, indent: bool) {
+    if !self.pending_raw_html_boundary
+      || self.in_raw_html_block()
+      || !value.bytes().any(|byte| !is_whitespace(byte))
+    {
+      return;
+    }
+    let mut newlines = 0;
+    for &byte in self.buffer.as_bytes().iter().rev() {
+      if byte == b'\n' {
+        newlines += 1;
+        if newlines == 2 {
+          self.pending_raw_html_boundary = false;
+          return;
+        }
+      } else if !is_whitespace(byte) {
+        break;
+      }
+    }
+    let indent_len = if indent { self.list_indent.len() } else { 0 };
+    // Charge the complete separator to an open code span. A rejected write
+    // leaves the boundary pending until content can be emitted again.
+    if self.options.max_node_bytes != 0 && !self.code_spans.is_empty() {
+      let mut separator = String::with_capacity(2 - newlines + indent_len);
+      separator.push_str(&"\n\n"[..2 - newlines]);
+      separator.push_str(&self.list_indent[..indent_len]);
+      if self.push_code_span_content(&separator, true) == 0 {
+        return;
+      }
+    } else {
+      // The separator belongs after the HTML close, even when it had no spacing.
+      for _ in newlines..2 {
+        self.buffer.push('\n');
+      }
+      self.buffer.push_str(&self.list_indent[..indent_len]);
+    }
+    self.pending_raw_html_boundary = false;
+    self.last_content_cache_len = 2 - newlines + indent_len;
+    self.has_last_text_node = false;
+    self.last_text_node_contains_whitespace = false;
+  }
+
   #[inline]
   pub(crate) fn write_output(
     &mut self,
@@ -4876,6 +5025,13 @@ impl ConvertState {
     literal: bool,
   ) {
     let output_str = output.unwrap_or("");
+    if is_enter {
+      if configured_new_lines >= 2 {
+        self.pending_raw_html_boundary = false;
+      } else if self.pending_raw_html_boundary {
+        self.finish_raw_html_block(output_str, true);
+      }
+    }
     let is_line_boundary =
       || !literal && (output_str.starts_with('\n') || output_str.starts_with("\\\n"));
 
@@ -5324,6 +5480,22 @@ impl ConvertState {
     ""
   }
 
+  /// Resolve language metadata on a `<code>` or `<pre>` in source order. Not
+  /// inlined: it has several call sites and only runs for `<pre>` and `<code>`.
+  #[inline(never)]
+  pub(crate) fn get_language_from_attributes(node: &ElementNode) -> &str {
+    let class_language = Self::get_language_from_class(node.attributes.get_bit(ATTR_CLASS));
+    if !class_language.is_empty() {
+      return class_language;
+    }
+    if let Some(language) =
+      get_language_from_data_attribute(node.attributes.get_bit(ATTR_DATA_LANGUAGE))
+    {
+      return language;
+    }
+    get_language_from_data_attribute(node.attributes.get_bit(ATTR_DATA_LANG)).unwrap_or("")
+  }
+
   /// The `| ` that opens a top-level row, preceded by whatever line break puts
   /// it on its own line at the list item's content column. `is_inline` is the
   /// node whose enter writes it: the `<tr>`, or a header row's first cell.
@@ -5716,6 +5888,28 @@ mod tests {
         .find(|node| node.tag_id == Some(TAG_A))
         .unwrap();
       assert_eq!(anchor.child_text_node_index, expected, "cap={cap}");
+    }
+  }
+
+  #[test]
+  fn raw_html_boundary_respects_inline_code_cap() {
+    for prefix in ["<code><br>", "<ul><li><code><br>"] {
+      for tag in ["details", "summary", "address", "dl", "dt", "dd"] {
+        for cap in 8..=32 {
+          let mut state = ConvertState::new(
+            HtmlToMarkdownOptions::default().with_max_node_bytes(cap),
+            64,
+            OutputFormat::Markdown,
+          );
+          let html = format!("{prefix}<{tag}>x</{tag}>y<span>");
+          assert_eq!(state.process_html(&html), html.len());
+          let held = state.buffer.len() - state.code_spans[0].content_start;
+          assert!(
+            held <= cap,
+            "{html}: held {held} bytes with a {cap}-byte cap"
+          );
+        }
+      }
     }
   }
 
