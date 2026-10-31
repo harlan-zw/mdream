@@ -124,7 +124,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromClass, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -605,7 +605,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
       return {
         _tag: 'PreEnter',
-        language: getLanguageFromClass(node.attributes?.class),
+        language: getLanguageFromAttributes(node.attributes),
       }
     },
     exit: ({ state }) => {
@@ -628,7 +628,8 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (state.preFenceOwnerDepth) {
           return undefined
         }
-        const language = getLanguageFromClass(node.attributes?.class)
+        const codeLanguage = getLanguageFromAttributes(node.attributes)
+        const language = codeLanguage || state.preFenceLang || ''
         const liDepth = state.depthMap?.[TAG_LI] || 0
         if (liDepth > 0) {
           const indent = state.listIndent

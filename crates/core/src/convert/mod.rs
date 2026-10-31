@@ -939,7 +939,9 @@ pub struct ConvertState {
   /// child) becomes a fenced code block, but the opening fence is deferred
   /// until the first non-whitespace child so empty/whitespace-only blocks emit
   /// nothing. `pre_fence_pending`: inside a `<pre>` whose fence is undecided.
-  /// `pre_fence_lang`: language resolved from the `<pre>`'s own class.
+  /// `pre_fence_lang`: language resolved from the `<pre>`'s own class/data
+  /// attributes; a `<code>` that owns the fence can provide a higher-priority
+  /// value.
   pre_fence_pending: bool,
   /// Depth of the `<pre>` whose fence is pending; nested `<pre>`s defer to it.
   pre_fence_pending_depth: u16,
