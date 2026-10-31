@@ -2849,6 +2849,88 @@ fn a_rule_inside_a_list_item_keeps_its_own_block() {
   );
 }
 
+#[test]
+fn a_rule_around_a_deferred_fence_resumes_the_item() {
+  // The rule's separator is written unconditionally, and the block reads the
+  // output as it was before the fence it opens.
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<li><a href=\"/w\" title=\"W\"><pre><hr>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+    ),
+    (
+      "<ol><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ol>",
+      "1. [\n\n   ```\n   \n\n   ---\n   ```\n\n   \n\n   W](/w)",
+    ),
+    (
+      "<ul><li><blockquote><a href=\"/w\" title=\"W\"><pre><hr></pre></a></blockquote></li></ul>",
+      "- \n  > [\n  >\n  > ```\n  >\n  >\n  > ---\n  > ```\n  >\n  >\n  >\n  > W](/w)",
+    ),
+    (
+      "<blockquote><ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul></blockquote>",
+      "> - [\n>\n>   ```\n>   \n>\n>   ---\n>   ```\n>\n>   \n>\n>   W](/w)",
+    ),
+    (
+      "<ul><li><a href=\"/w\"><pre><hr></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  ](/w)",
+    ),
+    (
+      "<ul><li><pre><hr></pre>t</li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ol><li><pre><hr></pre><b>x</b></li></ol>",
+      "1. ```\n   ***\n   ```\n\n   \n\n   **x**",
+    ),
+    (
+      "<ul><li><pre><hr></pre><hr></li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  ***",
+    ),
+    (
+      "<ul><li><pre>x<hr></pre>t</li></ul>",
+      "- ```\n  x\n\n  ---\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ul><li><pre><code><hr></code></pre>t</li></ul>",
+      "- ```\n  ***\n  ```\n\n  \n\n  t",
+    ),
+    (
+      "<ul><li><pre><hr></pre><script>1</script></li><li>z</li></ul>",
+      "- ```\n  ***\n  ```\n\n- z",
+    ),
+    (
+      "<ul><li>a<hr><script>1</script></li><li>z</li></ul>",
+      "- a\n\n  ---\n- z",
+    ),
+    (
+      "<ul><li>p<pre><hr></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  ---\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><p>x</p></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  x\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
+      "- p\n\n  ```\n  \n\n  x\n  ```",
+    ),
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 // ── Paragraphs and spacing ──
 
 #[test]
@@ -2972,6 +3054,24 @@ fn pre_code_block_unchanged() {
       r#"<pre class="language-py"><figcaption><code class="language-js">x</code></figcaption></pre>"#
     ),
     "```py\nx\n```"
+  );
+}
+
+#[test]
+fn pre_code_block_reads_data_language_attributes_in_precedence_order() {
+  assert_eq!(
+    convert(
+      r#"<pre class="language-rust" data-language="ignored"><code data-language="TypeScript" data-lang="bash">let x = 1;</code></pre>"#
+    ),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-language="Rust"><code data-lang="TypeScript">let x = 1;</code></pre>"#),
+    "```TypeScript\nlet x = 1;\n```"
+  );
+  assert_eq!(
+    convert(r#"<pre data-lang="Rust"><code>let x = 1;</code></pre>"#),
+    "```Rust\nlet x = 1;\n```"
   );
 }
 
@@ -6287,6 +6387,136 @@ fn builtin_blockquote_alias_uses_div_semantics() {
     ("<ul><li><blockquote>x</blockquote></li></ul>", "- x"),
   ] {
     assert_eq!(html_to_markdown(html, opts.clone()), expected, "{html}");
+  }
+}
+
+#[test]
+fn raw_text_aliases_use_source_closing_names() {
+  for (html, source, target, expected) in [
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<script>a</div>b</script><p>tail</p>",
+      "script",
+      "div",
+      "ab\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<style>a</div>b</style><p>tail</p>",
+      "style",
+      "div",
+      "ab\n\ntail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
+    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "script",
+      "tail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
+    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "style",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
+    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "script",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
+    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "style",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>a</style>b</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>before <!--unfinished</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>a</script>b</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>before <!--unfinished</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
+    (
+      "<script><!--<script></script>--></script><p>tail</p>",
+      "script",
+      "script",
+      "tail",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "{html} {source}:{target}"
+    );
   }
 }
 
