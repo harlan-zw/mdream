@@ -130,6 +130,8 @@ export interface MarkdownState {
   emptyItemFragment?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  /** Element whose enter opened the deferred <pre> fence. */
+  preFenceOpener?: ElementNode
 }
 
 interface CodeSpan {
@@ -987,6 +989,7 @@ function finalizeCodeFence(state: MarkdownState): string | undefined {
   if (!fence)
     return
   state.codeFence = undefined
+  state.preFenceOpener = undefined
   const marker = fence.language.includes('`') ? '~' : '`'
   const markerCode = marker.charCodeAt(0)
   const content = state.buffer.slice(fence.fragment + 1).join('')
@@ -1168,6 +1171,7 @@ function consumePendingPreChild(state: MarkdownState, node: Node, eventType: num
       && !suppressesFormattingInPre(element.tagId!)) {
       beforeFlush()
       flushPreFence(state)
+      state.preFenceOpener = element
     }
     return false
   }
@@ -1333,6 +1337,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFencePending: false,
     preFencePendingDepth: 0,
     preFenceOwnerDepth: 0,
+    preFenceOpener: undefined,
   }
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
   let inRawHtmlRegion = false
@@ -1791,12 +1796,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
+        && !(node as TextNode).excludedFromMarkdown
         && hasNonWhitespace((node as TextNode).value)
       const opensVisibleElement = node.type === ELEMENT_NODE
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        const separator = blockOpenPrefix(state.buffer, state.listRulePending)!
+        const separator = `\n\n${state.listRulePending}`
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined
