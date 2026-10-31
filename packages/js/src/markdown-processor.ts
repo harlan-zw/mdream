@@ -1904,7 +1904,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        const separator = blockOpenPrefix(state.buffer, state.listRulePending, state.listIndent.length)!
+        const separator = `\n\n${state.listRulePending}`
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined
