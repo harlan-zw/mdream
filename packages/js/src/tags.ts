@@ -1,4 +1,3 @@
-import type { OutputPositions } from './output-positions'
 import type { ElementNode, HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
@@ -214,9 +213,64 @@ export const breakHandler: TagHandler = {
   isInline: true,
 }
 
+const LEAD_GAP = 0 // spaces between the run and a list marker or the line start
+const LEAD_DIGITS = 1 // an ordered list marker's number
+const LEAD_INDENT = 2 // indentation before a list marker
+
+// Whether only a block lead precedes `buffer[fragment]` at `cursor` on its line:
+// indentation, then optionally a list marker and its space. Nested items indent
+// past the three spaces `listMarkerLineStart` accepts. Parity with the Rust
+// engine's `opens_block_line`.
+export function opensBlockLine(buffer: string[], fragment: number, cursor: number): boolean {
+  let phase = LEAD_GAP
+  let count = 0
+  for (;;) {
+    if (cursor === 0) {
+      if (--fragment < 0)
+        return phase !== LEAD_DIGITS || count > 0
+      cursor = buffer[fragment]!.length
+      continue
+    }
+    const code = buffer[fragment]!.charCodeAt(--cursor)
+    if (code === 10) // \n
+      return phase !== LEAD_DIGITS || count > 0
+    if (phase === LEAD_DIGITS) {
+      if (code >= 48 && code <= 57) {
+        if (++count > 9)
+          return false
+        continue
+      }
+      if (count === 0)
+        return false
+      phase = LEAD_INDENT
+    }
+    if (code === 32) {
+      if (phase === LEAD_GAP)
+        count++
+      continue
+    }
+    if (phase !== LEAD_GAP || count === 0)
+      return false
+    if (code === 45 || code === 42 || code === 43) { // - * +
+      phase = LEAD_INDENT
+    }
+    else if (code === 46 || code === 41) { // . )
+      phase = LEAD_DIGITS
+      count = 0
+    }
+    else {
+      return false
+    }
+  }
+}
+
 // A `#` run closing a heading is an ATX closing sequence and is dropped by the
-// renderer, so the last one is escaped back into content.
-function escapeTrailingHeadingHashes(buffer: string[], positions?: OutputPositions): void {
+// renderer, so the last one is escaped back into content. A run that only the
+// line's block lead precedes is the heading's own marker instead: the heading
+// is empty, and the marker's trailing space would read as a list item's open
+// content column, joining the next block to the heading's line.
+export function escapeTrailingHeadingHashes(state: HandlerContext['state']): void {
+  const buffer = state.buffer
   let index = buffer.length - 1
   while (index >= 0 && buffer[index] === '')
     index--
@@ -233,16 +287,29 @@ function escapeTrailingHeadingHashes(buffer: string[], positions?: OutputPositio
   if (run === end)
     return
 
-  // Only a run opening the heading content or preceded by whitespace closes it.
-  // Requiring a space also rejects the `## ` prefix entry of an empty heading.
-  const previous = buffer[index - 1]
-  const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
-  if (before !== ' ' && before !== '\t')
-    return
-
-  const replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
-  positions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
+  let replacement: string
+  if (opensBlockLine(buffer, index, run)) {
+    let trimmed = entry.length
+    while (trimmed > end && entry.charCodeAt(trimmed - 1) === 32)
+      trimmed--
+    if (trimmed === entry.length)
+      return
+    replacement = entry.slice(0, trimmed)
+    state.outputPositions?.replace(index, index + 1, [replacement])
+  }
+  else {
+    // Only a run opening the heading content or preceded by whitespace closes it.
+    const previous = buffer[index - 1]
+    const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
+    if (before !== ' ' && before !== '\t')
+      return
+    replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
+    state.outputPositions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
+  }
   buffer[index] = replacement
+  // The processor's trailing-whitespace trim finds the last entry by reference.
+  if (state.lastContentCache === entry)
+    state.lastContentCache = replacement
 }
 
 // What the current output line holds where a table row is about to be written.
@@ -356,7 +423,7 @@ function handleHeading(depth: number): TagHandler {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `</h${depth}>`
       }
-      escapeTrailingHeadingHashes(state.buffer, state.outputPositions)
+      escapeTrailingHeadingHashes(state)
     },
     collapsesInnerWhiteSpace: true,
   }
@@ -877,7 +944,10 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_P]: {
     enter: ({ node, state }) => {
-      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
+      // The fence pays the opening separator. A paragraph inside the code
+      // still needs its separator after the fence has already opened.
+      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)
+        && !state.preFencePending && state.preFenceOpener !== node) {
         const lastEntry = state.buffer[enterOutputEnd(node, state) - 1]
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
@@ -886,7 +956,23 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
     },
   },
-  [TAG_DIV]: {},
+  [TAG_DIV]: {
+    enter: ({ state }) => {
+      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
+        let index = state.buffer.length - 1
+        while (index >= 0 && state.buffer[index] === '')
+          index--
+        const entry = state.buffer[index] || ''
+        let marker = entry.length
+        while (marker > 0 && entry.charCodeAt(marker - 1) === 35)
+          marker--
+        const hashes = entry.length - marker
+        if (hashes > 0 && hashes <= 6 && opensBlockLine(state.buffer, index, marker)) {
+          return `\n\n${state.listIndent}`
+        }
+      }
+    },
+  },
   [TAG_SPAN]: {
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,

@@ -2905,16 +2905,8 @@ fn a_rule_around_a_deferred_fence_resumes_the_item() {
       "- p\n\n  ```\n  \n\n  ---\n  ```",
     ),
     (
-      "<ul><li>p<pre><p>x</p></pre></li></ul>",
-      "- p\n\n  ```\n  \n\n  x\n  ```",
-    ),
-    (
       "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
       "- p\n\n  ```\n  \n\n  x\n  ```",
-    ),
-    (
-      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
-      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)",
     ),
   ] {
     assert_eq!(convert(html), expected, "{html}");
@@ -5465,6 +5457,54 @@ fn block_markers_are_escaped_after_a_list_marker() {
 }
 
 #[test]
+fn block_markers_are_escaped_at_a_deep_list_content_column() {
+  // A line indented to the item's content column opens a block there, even
+  // when the column is four or more spaces deep: a wide ordered marker, or a
+  // nested item. A heading's break, a hard break and a paragraph all start one.
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><h3>T</h3># x</li></ol>",
+      "10. ### T\n\n    \\# x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>- x</li></ol>",
+      "10. ### T\n\n    \\- x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>&gt; x</li></ol>",
+      "10. ### T\n\n    \\> x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>1. x</li></ol>",
+      "10. ### T\n\n    1\\. x",
+    ),
+    (
+      "<ul><li>a<ul><li><h3>T</h3># x</li></ul></li></ul>",
+      "- a\n  - ### T\n\n    \\# x",
+    ),
+    (
+      "<ul><li>a<ul><li>T<br>- x</li></ul></li></ul>",
+      "- a\n  - T  \n    \\- x",
+    ),
+    (
+      "<ol start=\"10\"><li><p>a</p><p># x</p></li></ol>",
+      "10. a\n\n    \\# x",
+    ),
+    // Only a block start is escaped, and code keeps its text.
+    (
+      "<ol start=\"10\"><li><p>a</p><p>x # y</p></li></ol>",
+      "10. a\n\n    x # y",
+    ),
+    (
+      "<ol start=\"10\"><li><pre>x\n# y</pre></li></ol>",
+      "10. ```\n    x\n    # y\n    ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn heading_keeps_a_trailing_hash() {
   assert_eq!(convert("<h2>Ends with #</h2>"), "## Ends with \\#");
   assert_eq!(convert("<h3>#</h3>"), "### \\#");
@@ -5472,6 +5512,325 @@ fn heading_keeps_a_trailing_hash() {
   // Not a closing sequence without whitespace before it, so nothing to escape.
   assert_eq!(convert("<h2>C#</h2>"), "## C#");
   assert_eq!(convert("<h2>plain</h2>"), "## plain");
+}
+
+#[test]
+fn an_empty_heading_in_a_list_item_ends_its_line() {
+  // The heading's own `#` marker follows the item marker or the continuation
+  // indent: it is no closing sequence to escape, and its trailing space must not
+  // leave the line open for the next block to join.
+  for (html, expected) in [
+    (
+      "<main><ul><li><h3></h3><p>Partner description</p></li></ul></main>",
+      "- ###\n\n  Partner description",
+    ),
+    (
+      "<ol><li><h3></h3><p>Partner description</p></li></ol>",
+      "1. ###\n\n   Partner description",
+    ),
+    (
+      "<ol start=\"10\"><li><h1></h1><p>b</p></li></ol>",
+      "10. #\n\n    b",
+    ),
+    ("<ul><li><h3></h3></li><li>b</li></ul>", "- ###\n- b"),
+    (
+      "<ul><li>a<ul><li>b<ul><li><h3></h3><p>c</p></li></ul></li></ul></li></ul>",
+      "- a\n  - b\n    - ###\n\n      c",
+    ),
+    (
+      "<ul><li><pre>x</pre><h3></h3><p>b</p></li></ul>",
+      "- ```\n  x\n  ```\n\n  ###\n\n  b",
+    ),
+    (
+      "<ul><li><h2></h2><table><tr><td>x</td></tr></table></li></ul>",
+      "- ##\n\n  | x |\n  | --- |",
+    ),
+    (
+      "<blockquote><ol><li><h3></h3><p>b</p></li></ol></blockquote>",
+      "> 1. ###\n>\n>    b",
+    ),
+    (
+      "<ul><li><blockquote><h3></h3><p>b</p></blockquote></li></ul>",
+      "- \n  > ###\n  >\n  > b",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // A `#` run of the heading's content still closes it.
+  assert_eq!(
+    convert("<ul><li><h3>#</h3><p>b</p></li></ul>"),
+    "- ### \\#\n\n  b"
+  );
+  assert_eq!(
+    convert("<ul><li><pre>x</pre><h3>#</h3></li></ul>"),
+    "- ```\n  x\n  ```\n\n  ### \\#"
+  );
+}
+
+#[test]
+fn a_heading_in_a_list_item_keeps_its_own_line() {
+  // Text before the heading on the item's line, past a space too, and text
+  // after it each get a block of their own, as at the root (#388).
+  for (html, expected) in [
+    (
+      "<ul><li>Intro <h3>Title</h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ### Title\n\n  Body",
+    ),
+    (
+      "<ul><li>Intro\n    <h3>Title</h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ### Title\n\n  Body",
+    ),
+    (
+      "<ul><li><strong>Intro</strong> <h3>Title</h3></li></ul>",
+      "- **Intro**\n\n  ### Title",
+    ),
+    (
+      "<ol><li>a<ol><li>b<ol><li>Intro <h3>T</h3></li></ol></li></ol></li></ol>",
+      "1. a\n   1. b\n      1. Intro\n\n         ### T",
+    ),
+    (
+      "<ul><li>Intro <h3></h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ###\n\n  Body",
+    ),
+    ("<ul><li><h3></h3>Text</li></ul>", "- ###\n\n  Text"),
+    (
+      "<ol><li><h1>T</h1>\nx</li><li>y</li></ol>",
+      "1. # T\n\n   x\n2. y",
+    ),
+    (
+      "<ul><li>a<ul><li>b<ul><li><h3></h3>c</li></ul></li></ul></li></ul>",
+      "- a\n  - b\n    - ###\n\n      c",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>x</li></ol>",
+      "10. ### T\n\n    x",
+    ),
+    (
+      "<ul><li><h3>Title</h3><strong>Text</strong></li></ul>",
+      "- ### Title\n\n  **Text**",
+    ),
+    (
+      "<ul><li><h3></h3><code>x</code></li></ul>",
+      "- ###\n\n  `x`",
+    ),
+    ("<ul><li><h3>T</h3><em></em>x</li></ul>", "- ### T\n\n  x"),
+    ("<ul><li><h3>T</h3># x</li></ul>", "- ### T\n\n  \\# x"),
+    ("<ul><li>x <h2></h2>  y</li></ul>", "- x\n\n  ##\n\n  y"),
+    (
+      "<ul><li><span><h3>T</h3>more</span></li></ul>",
+      "- ### T\n\n  more",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>",
+      "> - ### T\n>\n>   x",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  for (html, expected) in [
+    // The marker's own line, a line break, a nested list or the item's end
+    // already leave the heading its line.
+    ("<ul><li> <h3>Title</h3></li></ul>", "- ### Title"),
+    (
+      "<ul><li>Intro<br> <h3>Title</h3></li></ul>",
+      "- Intro  \n  ### Title",
+    ),
+    ("<ul><li><h3>T</h3><br>more</li></ul>", "- ### T  \n  more"),
+    (
+      "<ul><li><h3>T</h3><ul><li>x</li></ul></li></ul>",
+      "- ### T\n  - x",
+    ),
+    ("<ul><li><h3>T</h3> </li><li>b</li></ul>", "- ### T\n- b"),
+    // An empty marker pair takes no block of its own.
+    (
+      "<ul><li><h3>T</h3><i class=\"icon\"></i></li><li>b</li></ul>",
+      "- ### T\n- b",
+    ),
+    // An inline wrapper keeps the heading inline, as at the root.
+    (
+      "<ul><li><strong><h3>T</h3>more</strong></li></ul>",
+      "- **### T more**",
+    ),
+    (
+      "<ul><li><strong>Intro <h3>T</h3></strong></li></ul>",
+      "- **Intro ### T**",
+    ),
+    // Code and caption emphasis would be split.
+    (
+      "<ul><li><pre><h3>T</h3>b</pre></li></ul>",
+      "- ```\n  ### T b\n  ```",
+    ),
+    (
+      "<ul><li><figure><figcaption><h3>T</h3>b</figcaption></figure></li></ul>",
+      "- *### T b*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_heading_in_a_list_item_breaks_out_of_a_wrapper_without_delimiters() {
+  // A raw tag or a wrapper that writes nothing reads the same on either side of
+  // a block break, so the heading still gets its own block, with text after it
+  // in the next one, however deep the wrappers nest.
+  for (html, expected) in [
+    (
+      "<ul><li>Intro <u><h4>T</h4></u></li></ul>",
+      "- Intro <u>\n\n  #### T</u>",
+    ),
+    (
+      "<ul><li><sup><h4>T</h4></sup>more</li></ul>",
+      "- <sup>\n\n  #### T</sup>\n\n  more",
+    ),
+    (
+      "<ul><li><em>E</em><label><h6>T</h6></label></li></ul>",
+      "- *E*\n\n  ###### T",
+    ),
+    (
+      "<ul><li><button>Intro<h3>T</h3></button></li></ul>",
+      "- Intro\n\n  ### T",
+    ),
+    (
+      "<ul><li>Intro <label><h3>T</h3></label></li></ul>",
+      "- Intro\n\n  ### T",
+    ),
+    (
+      "<ul><li><label>Intro<h3>T</h3>more</label></li></ul>",
+      "- Intro\n\n  ### T\n\n  more",
+    ),
+    (
+      "<ul><li><small><abbr><h3>A</h3><h3>B</h3></abbr></small></li></ul>",
+      "- ### A\n\n  ### B",
+    ),
+    (
+      "<ul><li><label><label><h2>A</h2></label><h2>B</h2></label></li></ul>",
+      "- ## A\n\n  ## B",
+    ),
+    (
+      "<ul><li><small><abbr><h3>T</h3></abbr></small>x</li></ul>",
+      "- ### T\n\n  x",
+    ),
+    (
+      "<ol><li><small><abbr><h2>Title</h2></abbr></small>Body text</li><li>b</li></ol>",
+      "1. ## Title\n\n   Body text\n2. b",
+    ),
+    (
+      "<ul><li>x <address><h4>T</h4></address>more</li></ul>",
+      "- x <address>\n\n  #### T</address>\n\n  more",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Delimiters that pair across the wrapper's content, or a caption's
+  // emphasis, keep the heading inline.
+  for (html, expected) in [
+    (
+      "<ul><li><q><h3>T</h3>more</q></li></ul>",
+      "- \" ### T more\"",
+    ),
+    (
+      "<ul><li><small><strong><h3>T</h3></strong>more</small></li></ul>",
+      "- **### T**more",
+    ),
+    (
+      "<strong><ul><li>Intro <h3>T</h3>more</li></ul></strong>",
+      "**- Intro ### T more**",
+    ),
+    (
+      "<ul><li><figure><figcaption>a <label><h3>T</h3></label>s</figcaption></figure></li></ul>",
+      "- *a ### Ts*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_code_block_after_a_heading_in_a_list_item_keeps_its_content() {
+  // The fence pays the break the heading owes. A `<pre>` whose first child
+  // opens the fence, as highlighted code does, used to get that break again
+  // inside the code.
+  for (html, expected) in [
+    (
+      "<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre>\n<span>x</span></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ol><li><h2>Install</h2><pre class=\"language-sh\"><span class=\"token function\">npm</span> install mdream</pre></li><li>b</li></ol>",
+      "1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b",
+    ),
+    (
+      "<ul><li><h3>T</h3><div class=\"highlight\"><pre><span></span><span class=\"n\">x</span></pre></div></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li><h3>T</h3><pre><div>x</div></pre>y</li></ul></li></ul>",
+      "- a\n  - ### T\n\n    ```\n    x\n    ```\n\n    y",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3><pre><img src=\"a.png\" alt=\"i\">x</pre></li></ul></blockquote>",
+      "> - ### T\n>\n>   ```\n>   ![i](a.png)x\n>   ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>",
+      "- ### T\n\n  ```\n  \n  ```\n\n  x",
+    ),
+    // A `<code>` child or a direct text node already opened the fence first.
+    (
+      "<ul><li><h3>T</h3><pre><code>x</code></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre>x</pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_block_that_opens_a_code_block_in_a_list_item_stays_out_of_the_code() {
+  // The fence a `<p>` or `<div>` child opens is written after that child's own
+  // separator, which then landed inside the code.
+  for (html, expected) in [
+    (
+      "<ul><li><h1></h1><pre><div>x</div></pre></li></ul>",
+      "- #\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h1></h1><pre> <p>x</p></pre></li></ul>",
+      "- #\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<pre><p>x</p></pre></li></ul>",
+      "- a\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><p>x</p></pre></li></ul>",
+      "- p\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+      "- [\n\n  ```\n  x\n  ```\n\n  W](/w)",
+    ),
+    (
+      "<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>",
+      "- a\n\n  ```\n  x\n\n  y\n  ```",
+    ),
+    // Text already opened the fence.
+    (
+      "<ul><li>a<pre>b<p>x</p></pre></li></ul>",
+      "- a\n\n  ```\n  b\n\n  x\n  ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
 }
 
 #[test]
@@ -6313,6 +6672,30 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
 }
 
 #[test]
+fn a_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
+  for (html, expected) in [
+    (
+      r#"<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>"#,
+      "- *\"### T\"s*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>"#,
+      "- *\"### \"s*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>"#,
+      "- *[](/l)### T*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>"#,
+      "- *~~### T~~*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn builtin_blockquote_alias_uses_div_semantics() {
   let opts = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
@@ -6483,6 +6866,38 @@ fn scout9_wrap_setext_boundary() {
       expected,
       "html={html}"
     );
+  }
+}
+
+#[test]
+fn heading_overrides_inside_list_code_keep_their_output() {
+  for (html, expected, tag, config) in [
+    (
+      r#"<ul><li><pre>Intro<span><h3>T</h3></span></pre></li></ul>"#,
+      "- ```\n  Intro ### T\n  ```",
+      "span",
+      TagOverrideConfig::alias("strong"),
+    ),
+    (
+      r#"<ul><li><code><h6>
+</h6><h3></h3>x</code></li></ul>"#,
+      "- `###### ### x`",
+      "h3",
+      TagOverrideConfig {
+        enter: Some("### ".into()),
+        exit: Some(String::new()),
+        ..Default::default()
+      },
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(tag.into(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
   }
 }
 

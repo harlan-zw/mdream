@@ -58,7 +58,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
+import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -130,6 +130,12 @@ export interface MarkdownState {
   emptyItemFragment?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  /**
+   * A heading closed in a list item. Inside the item its block spacing is
+   * collapsed, so the next visible content owes it the block break the root
+   * writes, or that content joins the heading's line.
+   */
+  headingBreakPending?: boolean
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -520,25 +526,33 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
 /**
  * Return the current GFM line indent when a block marker may still start at
  * this position. A non-space byte, or more than three leading spaces, makes
- * the position ordinary inline text.
+ * the position ordinary inline text. A list item's content column (`column`,
+ * zero outside items) opens its blocks, so a line indented to it counts from
+ * there.
  */
-function markdownLineIndent(buffer: string[]): number {
+function markdownLineIndent(buffer: string[], column: number): number {
   let spaces = 0
   for (let fragmentIndex = buffer.length - 1; fragmentIndex >= 0; fragmentIndex--) {
     const fragment = buffer[fragmentIndex]!
     for (let index = fragment.length - 1; index >= 0; index--) {
       const code = fragment.charCodeAt(index)
       if (code === 10)
-        return spaces
+        return indentPastColumn(spaces, column)
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
-      if (code !== 32 || spaces === 3) {
+      if (code !== 32 || spaces === column + 3) {
         return listMarkerLineStart(buffer, fragmentIndex, index) ? 0 : -1
       }
       spaces++
     }
   }
-  return spaces
+  return indentPastColumn(spaces, column)
+}
+
+function indentPastColumn(spaces: number, column: number): number {
+  if (spaces >= column)
+    return spaces - column
+  return spaces <= 3 ? spaces : -1
 }
 
 function isMarkdownMarkerWhitespace(code: number): boolean {
@@ -577,7 +591,7 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
  */
-function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array): boolean {
+function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array, listIndent: string): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true
   if ((depthMap[TAG_TABLE] && value.includes('|'))
@@ -593,7 +607,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
     return false
   }
 
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, depthMap[TAG_LI] ? listIndent.length : 0)
   if (lineIndent < 0)
     return false
 
@@ -615,11 +629,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, listIndent: string): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, depthMap[TAG_LI] ? listIndent.length : 0)
   let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
@@ -808,6 +822,26 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
   if (tagId !== TAG_LI && (depthMap[TAG_LI] || 0) > 0) {
     return NO_SPACING
   }
+  if (collapsedByAncestor(node, state, eventType)) {
+    return NO_SPACING
+  }
+  if (node.tagHandler?.spacing) {
+    return node.tagHandler?.spacing
+  }
+  // Truly unknown tags (no dictionary entry) default to inline zero spacing so
+  // they don't fragment surrounding paragraphs. Built-in tags without a handler
+  // (e.g. caption) keep block-default. Applies whether or not an override
+  // handler is attached — overrides set isInline but inherit zero spacing.
+  if (tagId === -1) {
+    return NO_SPACING
+  }
+  return DEFAULT_BLOCK_SPACING
+}
+
+// Whether a collapsing ancestor keeps the node inline, as the spacing rules do
+// outside list items. Parity with the Rust engine's `collapsed_by_ancestor`.
+function collapsedByAncestor(node: ElementNode, state: MarkdownState, eventType: number): boolean {
+  const tagId = node.tagId
 
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
@@ -828,21 +862,38 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
         currParent = currParent.parent
         continue
       }
-      return NO_SPACING
+      return true
     }
     currParent = currParent.parent
   }
-  if (node.tagHandler?.spacing) {
-    return node.tagHandler?.spacing
+  return false
+}
+
+// Whether a heading stays inline in its list item because a wrapper around it
+// writes delimiters that pair across its content, which a block break would
+// split. A raw tag (`<u>`, `<sup>`) or a wrapper that writes nothing
+// (`<label>`, `<small>`) reads the same either side of it. The caller checks
+// the caption, whose emphasis wraps the heading too. Parity with the Rust
+// engine's `heading_kept_inline_in_item`.
+function headingKeptInlineInItem(heading: ElementNode): boolean {
+  let parent = heading.parent
+  while (parent) {
+    if (parent.tagId !== TAG_SPAN && parent.tagHandler?.collapsesInnerWhiteSpace && wrapperWritesDelimiters(parent))
+      return true
+    parent = parent.parent
   }
-  // Truly unknown tags (no dictionary entry) default to inline zero spacing so
-  // they don't fragment surrounding paragraphs. Built-in tags without a handler
-  // (e.g. caption) keep block-default. Applies whether or not an override
-  // handler is attached — overrides set isInline but inherit zero spacing.
-  if (tagId === -1) {
-    return NO_SPACING
-  }
-  return DEFAULT_BLOCK_SPACING
+  return false
+}
+
+// Emphasis, code, strikethrough and quote wrappers, and an override with
+// output of its own, whose markers are taken as a pair.
+function wrapperWritesDelimiters(node: ElementNode): boolean {
+  const handler = node.tagHandler
+  if ((handler?.literalEnter && node.hasEnterOutput) || (handler?.literalExit && handler.literalExitHasOutput))
+    return true
+  if (handler?.literalEnter && handler.literalExit && !node.hasEnterOutput && !handler.literalExitHasOutput)
+    return false
+  return Boolean(INLINE_MARKER_TYPE[node.tagId!])
 }
 
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
@@ -856,6 +907,13 @@ function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): bo
   return (INLINE_MARKER_TYPE[tagId] !== undefined && INLINE_MARKER_TYPE[tagId] !== 0)
     || (tagId === TAG_A && (node.attributes?.href !== undefined || isInsideRawHtmlBlock(state.depthMap)))
     || tagId === TAG_SUB || tagId === TAG_SUP || tagId === TAG_INS || tagId === TAG_U || tagId === TAG_MARK
+}
+
+function trimLeadingSpaces(value: string): string {
+  let start = 0
+  while (value.charCodeAt(start) === 32)
+    start++
+  return start === 0 ? value : value.slice(start)
 }
 
 export function isAsciiWhitespace(code: number): boolean {
@@ -1138,6 +1196,9 @@ function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputP
  */
 function flushPreFence(state: MarkdownState): void {
   state.preFencePending = false
+  // The fence opens its own block, which is the break a heading before it
+  // owed; written later, that break would land inside the code.
+  state.headingBreakPending = false
   state.preFenceOwnerDepth = state.preFencePendingDepth
   const lang = state.preFenceLang || ''
   const liDepth = state.depthMap[TAG_LI] || 0
@@ -1329,6 +1390,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
+    headingBreakPending: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -1354,6 +1416,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let captionBreakRun = 0
   const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
   let openLinkFragment = -1
+  let openLinkHeadingBreak = false
   let openLinkCaptionBreakRun = 0
   let openLinkCaptionFlags: Uint8Array | undefined
   const clean = options.clean
@@ -1375,7 +1438,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   /** Track a link whose `[` sits at buffer index `fragment`. */
-  function openLink(fragment: number): void {
+  function openLink(fragment: number, headingBreak: boolean): void {
+    openLinkHeadingBreak = headingBreak
     if (!cleanEmptyLinkText) {
       openLinkFragment = -fragment - 2
       return
@@ -1719,9 +1783,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap)
+        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent)
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent)
       }
 
       if (textNode.generatedMarkdown && textNode.value)
@@ -1754,6 +1818,39 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
     state.lastTextNode = textNode
+  }
+
+  /**
+   * Settle a pending heading break at the top of an event: visible text takes
+   * it as a prefix, and the item's exit drops it. Kept out of `processEvent`,
+   * which every event runs, since the break is only ever owed inside a list
+   * item. Returns true for text with nothing visible to write, which leaves
+   * the break to whatever follows.
+   */
+  function settleHeadingBreakAtEvent(node: Node, eventType: number): boolean {
+    if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
+      const textNode = node as TextNode
+      if (textNode.excludedFromMarkdown || !hasNonWhitespace(textNode.value))
+        return true
+      const separator = `\n\n${state.listIndent}`
+      state.buffer.push(separator)
+      state.lastContentCache = separator
+      state.headingBreakPending = false
+      // The text opens the item's next block, where a leading space indents it.
+      if (!state.depthMap[TAG_PRE]) {
+        const value = textNode.value
+        let start = 0
+        let code = value.charCodeAt(0)
+        while (code === 32 || code === 9 || code === 10 || code === 12 || code === 13)
+          code = value.charCodeAt(++start)
+        if (start !== 0)
+          textNode.value = value.slice(start)
+      }
+    }
+    else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
+      state.headingBreakPending = false
+    }
+    return false
   }
 
   /**
@@ -1814,6 +1911,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         return
       }
     }
+
+    if (state.headingBreakPending && settleHeadingBreakAtEvent(node, eventType))
+      return
 
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
@@ -1888,6 +1988,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       buff.push(separator)
       state.lastContentCache = separator
       state.lastTextNode = undefined
+      state.headingBreakPending = false
       lastBuffEntry = separator
       lastChar = separator.charAt(separator.length - 1)
     }
@@ -1930,6 +2031,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       if (state.pendingInlineWhitespace)
         state.pendingInlineWhitespace = false
+
+      if (state.headingBreakPending && breakOutput) {
+        if (breakOutput.includes('\n')) {
+          state.headingBreakPending = false
+        }
+        else if (hasNonWhitespace(breakOutput)) {
+          state.headingBreakPending = false
+          breakOutput = `\n\n${state.listIndent}${breakOutput}`
+        }
+      }
 
       const lastFragment = state.lastContentCache
       const lastTextNode = state.lastTextNode
@@ -2009,11 +2120,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (cleanPass && eventType === NodeEventExit)
       cleanPass.exit(element)
-    if (!output && !suppressedInPre && handler?.[eventFn]) {
+    if (!output && !suppressedInPre && handler?.[eventFn]
+      && (tagId !== TAG_DIV || state.depthMap[TAG_LI] || handler[eventFn] !== tagHandlers[TAG_DIV]!.enter)) {
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
         && tagId === TAG_A) {
         if (dropEmptyLinkText(buff, openLinkFragment, state.outputPositions)) {
+          if (openLinkHeadingBreak) {
+            state.outputPositions?.replace(openLinkFragment - 1, openLinkFragment, [])
+            buff.length--
+            state.headingBreakPending = true
+          }
           if (captionFrameCount !== 0) {
             captionBreakRun = openLinkCaptionBreakRun
             restoreCaptionBreakFlags(captionFrames, openLinkCaptionFlags, captionFrameCount)
@@ -2226,8 +2343,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
-        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
+        const packed = openMarkers[--openMarkerCount]!
+        // Only a heading separator adds a newline to an opener. Whitespace
+        // moved before the opener must not hide the separator it carries.
+        const restoresHeadingBreak = buff[packed >> 3]?.includes('\n')
+        const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
         if (idx >= 0) {
+          if (restoresHeadingBreak)
+            state.headingBreakPending = true
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
@@ -2415,10 +2538,72 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
+    // A pending heading break settles at an element's enter. Output that starts
+    // its own line already ends the heading's, and an item or a caption writes
+    // its own separation. Visible output takes the break as a prefix, so an
+    // empty marker pair dropped later takes it back; a leading space meant to
+    // separate it from text on the same line goes. Output with nothing
+    // visible leaves the break to whatever follows. Parity with the Rust
+    // engine's `settle_heading_break`.
+    let linkHeadingBreak = false
+    if (state.headingBreakPending && eventType === NodeEventEnter) {
+      if (tagId === TAG_LI || tagId === TAG_FIGCAPTION || (output?.[0] && trimLeadingSpaces(output[0]).startsWith('\n'))) {
+        state.headingBreakPending = false
+      }
+      else if (output?.some(hasNonWhitespace)) {
+        state.headingBreakPending = false
+        const separator = `\n\n${state.listIndent}`
+        // A link's bracket stays its own fragment, which is how its open is found.
+        if (tagId === TAG_A && output[0] === '[') {
+          linkHeadingBreak = true
+          buff.push(separator)
+          state.lastContentCache = separator
+          lastChar = ' '
+        }
+        else {
+          const first = output[0]!
+          output[0] = `${separator}${trimLeadingSpaces(first)}`
+          if (handlerOutput === first)
+            handlerOutput = output[0]
+          if (gfmAction?._tag === 'CodeSpanEnter')
+            gfmAction = { _tag: 'CodeSpanEnter', output: `${separator}${trimLeadingSpaces(gfmAction.output)}` }
+        }
+      }
+    }
+    // Inside a list item a heading opens its own block unless a wrapper keeps it
+    // inline: after text on the item's line, even past a space, its `#` prefix
+    // would stay text. The space that ended the text goes too, which the
+    // reach-back trim keeps before a whitespace-collapsing element.
+    if (eventType === NodeEventEnter && tagId >= TAG_H1 && tagId <= TAG_H6
+      && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE] && !isInsideTableCell(state) && !hasPluginOutput
+      && output?.length === 1 && output[0]?.charCodeAt(0) === 35
+      && (handler?.literalEnterHeading || (!handler?.literalEnter && output[0] === `${'#'.repeat(tagId - TAG_H1 + 1)} `))
+      && captionFrameCount === 0 && !headingKeptInlineInItem(element)
+      && buff.length > 0 && !opensBlockLine(buff, buff.length - 1, buff.at(-1)!.length)) {
+      trimTrailingSpaces(buff)
+      output[0] = `\n\n${state.listIndent}${output[0]}`
+      handlerOutput = output[0]
+    }
+
     // Add spacing between inline elements if needed
     if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
+    }
+
+    // Only an ATX prefix can take in the text after it. Inside `<pre>` that
+    // text is code, and inside a caption the emphasis wrapping it, either of
+    // which a break would split.
+    if (eventType === NodeEventExit && tagId >= TAG_H1 && tagId <= TAG_H6
+      && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE] && captionFrameCount === 0 && !state.depthMap[TAG_A]
+      && !isInsideTableCell(state) && (!handler?.literalEnter || handler.literalEnterHeading)
+      && !headingKeptInlineInItem(element)) {
+      if (handler?.literalEnterHeading) {
+        if (handler.literalExit)
+          escapeTrailingHeadingHashes(state)
+        trimTrailingSpaces(buff)
+      }
+      state.headingBreakPending = true
     }
 
     // An overridden <br> skips the break fast path, but its line break still
@@ -2467,7 +2652,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && tagId === TAG_A
       && outputStart < buff.length
       && buff.at(-1) === '[') {
-      openLink(buff.length - 1)
+      openLink(buff.length - 1, linkHeadingBreak)
     }
     if (cleanPass) {
       if (eventType === NodeEventEnter)
@@ -2536,7 +2721,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
           state.emptyItemFragment ?? Infinity,
           state.codeFence?.fragment ?? Infinity,
-          openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
+          openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment - Number(openLinkHeadingBreak),
         )
     // An open link can still be unwrapped at its close.
     if (cleanPass && !final)
