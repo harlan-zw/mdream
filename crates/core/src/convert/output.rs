@@ -2505,6 +2505,17 @@ impl ConvertState {
     };
 
     if tag_id == Some(TAG_LI) && !plain_text!(self) {
+      // A hard break already ended the item. Its continuation indentation
+      // must not become a whitespace-only line before the following block.
+      if self.hard_break_end == self.buffer.len()
+        && !self.empty_item_hazard
+        && !has_override
+        && self.depth_map[TAG_PRE as usize] == 0
+        && !self.in_table_cell()
+      {
+        self.trim_trailing_spaces();
+        self.hard_break_end = self.buffer.len();
+      }
       self.pending_raw_html_boundary = false;
       self.resolve_item_marker(true);
     }
@@ -3248,9 +3259,18 @@ impl ConvertState {
     }
   }
 
-  /// Whether `end` sits just past a list marker that is all its line holds:
-  /// optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
-  fn list_marker_line_start(&self, bytes: &[u8], end: usize) -> bool {
+  /// Deepest indent of a marker a block can share a line with. A list writes the
+  /// open item's marker at its container's content column; a marker past that
+  /// column belongs to a closed nested item, whose line the block must leave.
+  fn pending_marker_indent(&self) -> usize {
+    self.list_indent_widths.last().map_or(3, |&width| {
+      self.list_indent.len().saturating_sub(usize::from(width))
+    })
+  }
+
+  /// Whether `end` sits just past a list marker that is all its line holds: up
+  /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+  fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
     let mut index = end - 1;
     match bytes[index] {
       b'.' | b')' => {
@@ -3266,7 +3286,7 @@ impl ConvertState {
       _ => return false,
     }
     let mut spaces = 0;
-    while index > 0 && bytes[index - 1] == b' ' && spaces < 3 {
+    while index > 0 && bytes[index - 1] == b' ' && spaces < max_spaces {
       index -= 1;
       spaces += 1;
     }
@@ -3525,7 +3545,9 @@ impl ConvertState {
       if byte != b' ' || spaces == 3 {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
-        return self.list_marker_line_start(bytes, offset + 1).then_some(0);
+        return self
+          .list_marker_line_start(bytes, offset + 1, 3)
+          .then_some(0);
       }
       spaces += 1;
     }
@@ -4259,13 +4281,27 @@ impl ConvertState {
           // marker scan's starting point — left with the drain.
           return drained_onto_content;
         }
-        bytes[end - 1] != b'\n' && !self.list_marker_line_start(bytes, end)
+        bytes[end - 1] != b'\n'
+          && !self.list_marker_line_start(bytes, end, self.pending_marker_indent())
       }
       Some(b'\n') => false,
       // Directly under text the block reads as a setext underline or a lazy
       // continuation, so it has to break the paragraph first.
       _ => true,
     }
+  }
+
+  /// Whether the innermost open quote has written nothing yet, so the output
+  /// still sits on the line its opener started. A streaming flush also anchors a
+  /// quote at the buffer end, past a hard break it wrote, so the frame alone
+  /// cannot tell.
+  #[cold]
+  fn quote_at_start(&self) -> bool {
+    self.hard_break_end != self.buffer.len()
+      && self
+        .blockquotes
+        .last()
+        .is_some_and(|frame| frame.content_start == self.buffer.len())
   }
 
   /// Continuation prefix re-emitted at the start of each continued line so the
@@ -4427,6 +4463,22 @@ impl ConvertState {
             static H_OPEN: [&str; 6] = ["<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>"];
             Some(Cow::Borrowed(H_OPEN[depth]))
           }
+        } else if !self.list_indent.is_empty()
+          && self.last_output_byte() == Some(b'\n')
+          && !self.quote_at_start()
+        {
+          let prefix = self.continuation_prefix();
+          Some(Cow::Owned(format!("\n{prefix}{}", HEADING_PREFIXES[depth])))
+        } else if !self.list_indent.is_empty()
+          && _ancestors
+            .last()
+            .is_some_and(|parent| parent.tag_id == Some(TAG_LI))
+        {
+          let prefix = self.continuation_prefix();
+          Some(match self.block_open_prefix(&prefix) {
+            Some(open) => Cow::Owned(format!("{open}{}", HEADING_PREFIXES[depth])),
+            None => Cow::Borrowed(HEADING_PREFIXES[depth]),
+          })
         } else {
           Some(Cow::Borrowed(HEADING_PREFIXES[depth]))
         }
@@ -5553,7 +5605,11 @@ impl ConvertState {
       // start from, and a fully drained line has none to offer.
       Some(_)
         if !bytes.is_empty()
-          && self.list_marker_line_start(bytes, bytes.len() - trailing_spaces(bytes)) =>
+          && self.list_marker_line_start(
+            bytes,
+            bytes.len() - trailing_spaces(bytes),
+            self.pending_marker_indent(),
+          ) =>
       {
         LineBeforeRow::Open
       }
@@ -5599,7 +5655,10 @@ impl ConvertState {
 
 #[cfg(test)]
 mod tests {
-  use super::{ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_LI, TAG_P, push_decimal};
+  use super::{
+    BlockquoteFrame, ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_H2, TAG_LI, TAG_P,
+    push_decimal,
+  };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
   #[test]
@@ -5701,6 +5760,23 @@ mod tests {
     state.emit_enter_element();
 
     assert_eq!(state.buffer, "\n\n  ");
+  }
+
+  // A drain can take the newline a quote opened on, leaving it readable only
+  // through `flushed_tail`. The heading still opens the quote's first line.
+  #[test]
+  fn drained_quote_opener_keeps_the_heading_on_its_line() {
+    let mut state = drained_open_list_item();
+    state.flushed_tail = *b"y\n";
+    state.blockquotes.push(BlockquoteFrame {
+      content_start: 0,
+      list_indent: "  ".to_string(),
+    });
+    state.stack.push(entering_node(TAG_H2, false));
+
+    state.emit_enter_element();
+
+    assert_eq!(state.buffer, "## ");
   }
 
   // A code span after drained content glues with a separator space, the way
