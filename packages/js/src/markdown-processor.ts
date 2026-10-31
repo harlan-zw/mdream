@@ -230,6 +230,8 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
   }
 }
 
+type MarkdownListNode = ElementNode & { hasListItemOutput?: true }
+
 /**
  * Arm the empty-item guard for the `<li>` whose marker was just written. A marker
  * line continuing the paragraph above turns a lone marker into a setext
@@ -550,27 +552,27 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
 }
 
 /**
- * Return the current GFM line indent when a block marker may still start at
- * this position. A non-space byte, or more than three leading spaces, makes
- * the position ordinary inline text.
+ * Return block indentation after the active list continuation prefix.
+ * Four additional spaces make the position ordinary inline text.
  */
 function markdownLineIndent(buffer: string[], listIndent: number): number {
   let spaces = 0
+  const limit = listIndent + 3
   for (let fragmentIndex = buffer.length - 1; fragmentIndex >= 0; fragmentIndex--) {
     const fragment = buffer[fragmentIndex]!
     for (let index = fragment.length - 1; index >= 0; index--) {
       const code = fragment.charCodeAt(index)
       if (code === 10)
-        return spaces
+        return Math.max(0, spaces - listIndent)
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
-      if (code !== 32 || spaces === 3) {
+      if (code !== 32 || spaces === limit) {
         return listMarkerLineStart(buffer, fragmentIndex, index, listIndent) ? 0 : -1
       }
       spaces++
     }
   }
-  return spaces
+  return Math.max(0, spaces - listIndent)
 }
 
 function isMarkdownMarkerWhitespace(code: number): boolean {
@@ -1836,8 +1838,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const opensVisibleElement = node.type === ELEMENT_NODE
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
+        && !(nestedList && ((node as ElementNode).tagId === TAG_UL || (node as ElementNode).tagId === TAG_OL))
       if (nestedList && node.type === ELEMENT_NODE && eventType === NodeEventEnter
-        && ((node as ElementNode).tagId === TAG_UL || (node as ElementNode).tagId === TAG_OL)) {
+        && (node as ElementNode).tagId === TAG_LI) {
         state.listRulePending = undefined
       }
       else if (isVisibleText || opensVisibleElement) {
@@ -2506,6 +2509,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter) {
+        const parent = element.parent as MarkdownListNode | undefined
+        if (parent && (parent.tagId === TAG_UL || parent.tagId === TAG_OL)
+          && outputStart < state.buffer.length
+          && ((!handler?.literalEnter && !hasPluginOutput) || output?.some(hasNonWhitespace))) {
+          parent.hasListItemOutput = true
+        }
         recordItemMarker(state, element, !handler?.literalEnter && !hasPluginOutput)
       }
       else {
@@ -2515,6 +2524,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
     else if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL)
+      && (element as MarkdownListNode).hasListItemOutput
       && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE]
       && !isInsideTableCell(state) && !handler?.literalExit && !hasPluginOutput) {
       state.listRulePending = true

@@ -1329,6 +1329,7 @@ impl ConvertState {
     let configured_new_lines = new_line_config[1];
 
     if matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && node.has_list_item_output
       && self.depth_map[TAG_LI as usize] > 0
       && self.depth_map[TAG_PRE as usize] == 0
       && !self.in_table_cell()
@@ -1767,8 +1768,20 @@ impl ConvertState {
         || tag_id.and_then(Self::inline_marker_type).is_some()
     });
 
-    if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
-      self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+    if !plain_text!(self) && tag_id == Some(TAG_LI) && !self.in_table_cell() {
+      if self.buffer.len() > output_start
+        && (!enter_is_literal
+          || output
+            .as_deref()
+            .is_some_and(|value| has_visible(value.as_bytes())))
+        && stack_len > 1
+        && matches!(self.stack[stack_len - 2].tag_id, Some(TAG_UL | TAG_OL))
+      {
+        self.stack[stack_len - 2].has_list_item_output = true;
+      }
+      if !enter_is_literal {
+        self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+      }
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -2370,7 +2383,9 @@ impl ConvertState {
     if !has_override
       && !plain_text!(self)
       && (tag_id == Some(TAG_HR)
-        || (matches!(tag_id, Some(TAG_UL | TAG_OL)) && self.depth_map[TAG_PRE as usize] == 0))
+        || (matches!(tag_id, Some(TAG_UL | TAG_OL))
+          && node.has_list_item_output
+          && self.depth_map[TAG_PRE as usize] == 0))
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
     {
@@ -3583,12 +3598,13 @@ impl ConvertState {
   #[inline]
   fn markdown_line_indent(&self) -> Option<u8> {
     let bytes = self.buffer.as_bytes();
-    let mut spaces = 0u8;
+    let list_indent = self.list_indent.len();
+    let mut spaces = 0usize;
     for (offset, &byte) in bytes.iter().enumerate().rev() {
       if byte == b'\n' {
-        return Some(spaces);
+        return u8::try_from(spaces.saturating_sub(list_indent)).ok();
       }
-      if byte != b' ' || spaces == 3 {
+      if byte != b' ' || spaces == list_indent + 3 {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
         return self.list_marker_line_start(bytes, offset + 1).then_some(0);
@@ -3602,7 +3618,7 @@ impl ConvertState {
         None
       }
     } else {
-      Some(spaces)
+      u8::try_from(spaces.saturating_sub(list_indent)).ok()
     }
   }
 
@@ -4373,6 +4389,9 @@ impl ConvertState {
     if self.list_rule_pending == ListBoundary::NestedList
       && matches!(enter_tag, Some(TAG_UL | TAG_OL))
     {
+      return;
+    }
+    if self.list_rule_pending == ListBoundary::NestedList && enter_tag == Some(TAG_LI) {
       self.list_rule_pending = ListBoundary::None;
       return;
     }
@@ -5793,7 +5812,7 @@ mod tests {
       current_walk_index: 0,
       child_text_node_index: 0,
       tag_id: Some(tag_id),
-      contains_whitespace: false,
+      has_list_item_output: false,
       excluded_from_markdown: false,
       enter_skipped: false,
       is_inline,
