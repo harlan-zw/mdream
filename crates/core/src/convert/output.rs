@@ -1638,13 +1638,16 @@ impl ConvertState {
     }
 
     // Whitespace immediately before <br> has no visual effect in HTML. Let the
-    // explicit line boundary subsume it so the output has no trailing spaces.
+    // explicit line boundary subsume it so the output has no trailing spaces,
+    // also when a list item's indent follows the line feed.
     if tag_id == Some(TAG_BR)
       && !enter_is_literal
       && self.depth_map[TAG_PRE as usize] == 0
-      && output.as_deref().is_some_and(|value| value.ends_with('\n'))
+      && let Some(indent) = output
+        .as_deref()
+        .and_then(|value| value.rfind('\n').map(|end| value.len() - end - 1))
     {
-      self.trim_trailing_spaces();
+      self.trim_before_break(indent);
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
@@ -3764,6 +3767,63 @@ impl ConvertState {
     }
   }
 
+  /// A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+  /// line feed, which ends block spacing or an earlier break and so stays. The
+  /// run is the same whatever the text's source whitespace; U+000B is content.
+  /// A run that opens a line keeps the `indent` the break writes after its own
+  /// line feed, an earlier break's or a block's, and a run right after a list
+  /// item's marker stays whole, the marker's own space included.
+  fn trim_before_break(&mut self, indent: usize) {
+    let floor = self.trim_floor();
+    if self.buffer.len() > floor {
+      let bytes = self.buffer.as_bytes();
+      let mut trimmed_len = bytes.len();
+      while trimmed_len > floor && matches!(bytes[trimmed_len - 1], b' ' | b'\t' | b'\x0C' | b'\r')
+      {
+        trimmed_len -= 1;
+      }
+      if trimmed_len > floor && bytes[trimmed_len - 1] == b'\n' {
+        trimmed_len = (trimmed_len + indent).min(bytes.len());
+      } else if trimmed_len > floor
+        && self.depth_map[TAG_LI as usize] > 0
+        && Self::follows_item_marker(&bytes[..trimmed_len])
+      {
+        return;
+      }
+      if trimmed_len == bytes.len() {
+        return;
+      }
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
+      self.truncate_buffer(trimmed_len);
+    }
+  }
+
+  /// Whether `text` ends in a list marker that opens its line or follows a
+  /// space: `-`, `*`, `+`, or digits then `.` or `)`.
+  fn follows_item_marker(text: &[u8]) -> bool {
+    let mut end = text.len();
+    match text.last() {
+      Some(b'.' | b')') => {
+        end -= 1;
+        let digits = text[..end]
+          .iter()
+          .rev()
+          .take_while(|byte| byte.is_ascii_digit())
+          .count();
+        if digits == 0 || digits > 9 {
+          return false;
+        }
+        end -= digits;
+      }
+      Some(b'-' | b'*' | b'+') => end -= 1,
+      _ => return false,
+    }
+    end == 0 || matches!(text[end - 1], b' ' | b'\n')
+  }
+
   fn defer_streaming_break(&mut self, fragment: &str) -> bool {
     if !self.blockquotes.is_empty()
       || self.retains_whole_document()
@@ -5838,7 +5898,8 @@ mod tests {
     let html = format!("<p>x{}y</p>", "<br>&#9;".repeat(4096));
     assert_eq!(state.process_html(&html), html.len());
     let out = state.get_markdown_chunk();
-    assert!(out.starts_with("x  \n\t"), "{:.20}", out);
+    // Each later break takes the tab before it, so only the first line is fixed.
+    assert!(out.starts_with("x  \n"), "{:.20}", out);
     assert!(
       state.break_run_scanned <= html.len(),
       "read {} bytes for {} of input",
