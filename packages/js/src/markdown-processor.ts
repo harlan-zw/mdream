@@ -816,7 +816,7 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
     && node.index === 0 && node.parent?.tagId === TAG_OL
     && orderedItemNumber(node.parent, 0) !== 1 && !isInsideTableCell(state)
     && !insideOpenInlineDelimiter(node, state)
-    && (blockOpenPrefix(state.buffer, '') !== undefined || endsAtHardBreak(state.buffer))) {
+    && (blockOpenPrefix(state, '') !== undefined || endsAtHardBreak(state.buffer))) {
     return DEFAULT_BLOCK_SPACING
   }
 
