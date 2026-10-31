@@ -131,6 +131,40 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<p>aaaaaaaaaa =</p>',
   '<p>aaaaaaaaaa --word</p>',
   '<p>aaaaaaaaaa ==word</p>',
+  '<ul><li>x<ol start="10"><script>s</script><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10">t<li>y</li></ol></li></ul>',
+  '<ul><li>a<ul><script>s</script><li></li></ul></li></ul>',
+  '<ul><li>x<br><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ul><li>y</li></ul><ol start="10"><li>z</li></ol></li></ul>',
+  '<ol><li><ol start="10"><li>y</li></ol></li></ol>',
+  '<ul><li>x<ol start="1000000000"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li></li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol><p>tail</p></li></ul>',
+  '<ul><li>alpha beta gamma delta<ol start="10"><li>one two three four five</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><span>x</span><span>z</span><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><strong>x</strong><ol start="10"><li>y</li></ol></li></ul>',
+  '<ol start="5"><li>x<ol start="20"><li>y</li><li>z</li></ol></li></ol>',
+  '<ul><li>x<ol start="0"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="1"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="-1"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start=""><li>y</li></ol></li></ul>',
+  '<ul><li><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><span></span><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"></ol></li><li>z</li></ul>',
+  '<ul><li>x<ol reversed start="10"><li value="20">y</li><li>z</li></ol></li></ul>',
+  '<ul><li>x<ol reversed><li value="10">y</li></ol></li></ul>',
+  '<blockquote><ul><li>x<ol start="10"><li>y</li></ol></li></ul></blockquote>',
+  '<ul><li>x<ul><li>z<ol start="10"><li>y</li></ol></li></ul></li></ul>',
+  '<ul><li><p>x</p><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>',
+  '<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>',
+  '<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>',
+  '<ul><li><a href="u"><small>x<ol start="10"><li>y</li></ol></small></a></li></ul>',
+  '<ul><li><strong>x<ol start="10"><li>y</li></ol></strong></li></ul>',
+  '<ul><li><a>x<ol start="10"><li>y</li></ol></a></li></ul>',
+  '<ul><li><mark>x<ol start="10"><li>y</li></ol></mark></li></ul>',
+  '<details><ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul></details>',
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',
@@ -152,7 +186,7 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<p>🎉</p>',
 ]
 
-describe('cross-engine streaming byte parity', () => {
+describe.each([undefined, 12])('cross-engine streaming byte parity wrapWidth=%s', (wrapWidth) => {
   it.each(LINK_SPACE_CASES)('trims link label spaces at every split: %s', async (html, expected) => {
     for (const { engine, name } of engines) {
       for (let split = 0; split <= html.length; split++) {
@@ -176,7 +210,7 @@ describe('cross-engine streaming byte parity', () => {
     const engineOutputs: string[] = []
 
     for (const { engine, name } of engines) {
-      const expected = engine.htmlToMarkdown(html, options)
+      const expected = engine.htmlToMarkdown(html, { wrapWidth, ...options })
       engineOutputs.push(expected)
 
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
@@ -188,7 +222,7 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, { wrapWidth, ...options }))
           streamed += chunk
         expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
       }
@@ -201,7 +235,7 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        for await (const chunk of engine.streamHtmlToMarkdown(input, { wrapWidth, ...options }))
           streamed += chunk
         expect(streamed, `engine=${name} split=${split}`).toBe(expected)
       }
