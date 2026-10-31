@@ -25,6 +25,11 @@ const SELF_CLOSING_CASES: [string, Record<string, any>, string][] = [
   ['<ul><li><hr>x</hr></li></ul>', { hr: { isSelfClosing: false } }, '- ***\n\n  x'],
   ['<ul><li>a<hr>x</hr>b</li></ul>', { hr: { isSelfClosing: false } }, '- a\n\n  ---\n\n  x b'],
   ['<br><h1></h1></br>b c', { br: { isSelfClosing: false } }, '# b c'],
+  ['<p>a</p><hr>x<p>b</p>', { hr: { isSelfClosing: false } }, 'a\n\n---\n\nx\n\nb'],
+  ['<p>a<hr></p><p>b</p>', { hr: { isSelfClosing: false } }, 'a\n\n---\n\nb'],
+  ['<p>a<img src="a.png">x</p>', { img: { isSelfClosing: false } }, 'a![](a.png)x'],
+  ['<p>a</p><hr>x<p>b</p>', {}, 'a\n\n---\n\nx\n\nb'],
+  ['<p>a</p><hr>x<p>b</p>', { em: { isSelfClosing: false } }, 'a\n\n---\n\nx\n\nb'],
 ]
 
 function streamInChunksOf(html: string, width: number, engine: any, tagOverrides: Record<string, any>, format?: 'text' | 'html') {

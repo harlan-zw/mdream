@@ -176,3 +176,25 @@ fn end_tag_closes_a_reopened_void_past_the_depth_limit() {
     "a b c\n\nd"
   );
 }
+
+#[test]
+fn open_thematic_break_keeps_block_spacing_after_it() {
+  let config = [("hr", flag(false))];
+  assert_converts("<p>a</p><hr>x<p>b</p>", &config, "a\n\n---\n\nx\n\nb");
+  assert_converts("<p>a<hr></p><p>b</p>", &config, "a\n\n---\n\nb");
+}
+
+#[test]
+fn open_void_keeps_inline_children_inline() {
+  // The image's block spacing is zero, so text it holds stays in its line.
+  let config = [("img", flag(false))];
+  assert_converts(r#"<p>a<img src="a.png">x</p>"#, &config, "a![](a.png)x");
+}
+
+#[test]
+fn void_spacing_unchanged_without_an_open_override() {
+  let html = "<p>a</p><hr>x<p>b</p>";
+  assert_converts(html, &[], "a\n\n---\n\nx\n\nb");
+  let unrelated = [("em", flag(false))];
+  assert_converts(html, &unrelated, "a\n\n---\n\nx\n\nb");
+}

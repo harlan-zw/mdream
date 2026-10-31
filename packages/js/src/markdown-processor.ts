@@ -2377,6 +2377,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (eventType === NodeEventExit && (tagId === TAG_LI || tagId === TAG_BLOCKQUOTE))
       pendingRawHtmlBoundary = false
 
+    // An open void tag (override `isSelfClosing: false`) has no exit before its
+    // children, so the block spacing its exit would write follows its start tag.
+    if (eventType === NodeEventEnter && handler?.isSelfClosing === false && tagHandlers[tagId]?.isSelfClosing) {
+      const exitLines = suppressedInPre ? 0 : calculateNewLineConfig(element, state, NodeEventExit)[1]
+      // Same cap as the exit path: a thematic break in a blockquote takes one line.
+      const owedLines = tagId === TAG_HR && state.blockquotes.length > 0 ? Math.min(1, exitLines) : exitLines
+      if (owedLines > 0)
+        output = [...(output || []), '\n'.repeat(owedLines)]
+    }
+
     // Handle newlines
     const newLineConfig = suppressedInPre
       ? NO_SPACING

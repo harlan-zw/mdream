@@ -1486,13 +1486,38 @@ impl ConvertState {
 
       // Check override enter string
       output = if let Some(ov) = override_config {
-        if let Some(ref s) = ov.enter {
+        let mut enter = if let Some(ref s) = ov.enter {
           enter_is_literal = true;
           Some(Cow::Owned(s.clone()))
         } else {
           enter_is_literal = false;
           self.get_enter_output(node, ancestors)
+        };
+        // A built-in void tag an override holds open has no exit before its
+        // children, so the block spacing its exit would write follows its enter
+        // here. Only the newlines the enter output does not already end with.
+        if ov.is_self_closing == Some(false)
+          && tag_id
+            .and_then(get_tag_handler)
+            .is_some_and(|handler| handler.is_self_closing)
+        {
+          let after = self.calculate_new_line_config(tag_id, ov.spacing.or(node.spacing), false)[1];
+          let after = if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
+            after.min(1)
+          } else {
+            after
+          };
+          let have = enter.as_deref().map_or(0, |text| {
+            text.bytes().rev().take_while(|&b| b == b'\n').count()
+          });
+          let owed = usize::from(after).saturating_sub(have);
+          if owed > 0 {
+            let mut text = enter.map_or_else(String::new, Cow::into_owned);
+            text.push_str(&"\n".repeat(owed));
+            enter = Some(Cow::Owned(text));
+          }
         }
+        enter
       } else {
         enter_is_literal = false;
         self.get_enter_output(node, ancestors)
