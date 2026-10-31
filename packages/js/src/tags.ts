@@ -125,7 +125,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -187,7 +187,7 @@ function isAutolinkUri(s: string): boolean {
   return true
 }
 
-export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
+export function renderBreak(state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
   const depthMap = state.depthMap!
@@ -198,16 +198,11 @@ export function renderBreak(node: HandlerContext['node'], state: HandlerContext[
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
     return '\n'
 
-  const prefix = continuationPrefix(
-    node,
-    state.listIndentWidths || [],
-    !state.bufferedBlockquoteDepth,
-  )
-  return `  \n${prefix}`
+  return `  \n${state.listIndent ?? ''}`
 }
 
 export const breakHandler: TagHandler = {
-  enter: ({ node, state }) => renderBreak(node, state),
+  enter: ({ state }) => renderBreak(state),
   isSelfClosing: true,
   spacing: NO_SPACING,
   collapsesInnerWhiteSpace: true,
@@ -473,19 +468,10 @@ export const tagHandlers: Record<number, TagHandler> = {
       // A thematic break cannot end a GFM row; raw <hr> can sit in a cell.
       if (isInsideTableCell(state))
         return '<hr>'
-      // `continuationPrefix` allocates an ancestor chain, so only a rule that
-      // can actually carry a prefix asks for one.
-      if (!(state.depthMap?.[TAG_LI] || state.bufferedBlockquoteDepth))
+      if (!state.depthMap?.[TAG_LI])
         return MARKDOWN_HORIZONTAL_RULE
-      const prefix = continuationPrefix(
-        node,
-        state.listIndentWidths || [],
-        !state.bufferedBlockquoteDepth,
-      )
-      if (!prefix)
-        return MARKDOWN_HORIZONTAL_RULE
-      if (state.depthMap?.[TAG_LI])
-        state.listRulePending = prefix
+      const prefix = state.listIndent
+      state.listRulePending = prefix
       const end = enterOutputEnd(node, state)
       // A <code> fence opener stops at column 0 and leaves the first line's
       // indent to the content, which this rule is. It opens no new block.
@@ -494,9 +480,9 @@ export const tagHandlers: Record<number, TagHandler> = {
       const open = blockOpenPrefix(state.buffer, prefix, end)
       // Sharing the marker's line, where `---` would make the whole line a
       // thematic break and take the item with it.
-      return open === undefined
+      return open === undefined && prefix
         ? MARKDOWN_HORIZONTAL_RULE_ALT
-        : `${open}${MARKDOWN_HORIZONTAL_RULE}`
+        : `${open ?? ''}${MARKDOWN_HORIZONTAL_RULE}`
     },
     isSelfClosing: true,
   },

@@ -55,6 +55,22 @@ describe('text stream', () => {
     expect(output).toBe(expected)
   })
 
+  // The space `</a>` trims leaves an empty fragment, which still ends at a column.
+  it.each([
+    ['<p>wwww<a href="/c"><span>x</span> </a>yyyy end</p>', 12, 'wwwwx yyyy\nend'],
+    ['<p>wwww<a href="/c" aria-label="L"><span hidden>x</span> </a>yyyy end</p>', 12, 'wwwwx yyyy\nend'],
+    ['<p><span>aaaaa </span>bbbb</p>', 6, 'aaaaa\nbbbb'],
+    ['<p><em>aaaaaaaaaaa </em>b</p>', 12, 'aaaaaaaaaaa\nb'],
+  ] as const)('wraps at a separator trimmed from an inline element: %s', async (html, wrapWidth, expected) => {
+    expect(htmlToText(html, { wrapWidth })).toBe(expected)
+    for (let size = 1; size <= html.length; size++) {
+      let output = ''
+      for await (const chunk of streamHtmlToText(chunkedStream(html, size), { wrapWidth }))
+        output += chunk
+      expect(output, `chunk size ${size}`).toBe(expected)
+    }
+  })
+
   const pages = [
     ['paragraphs', '<p>Some <b>bold</b> text, a <q>quote</q> and a <a href="/x">link</a>.</p>'.repeat(4000)],
     ['one long line', `<p>${'alpha <b>beta</b> gamma <i>delta</i> '.repeat(4000)}</p>`],

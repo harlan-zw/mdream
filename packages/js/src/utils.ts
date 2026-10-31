@@ -1,5 +1,5 @@
 import type { ElementNode, Node, TextNode } from './types'
-import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_ABBR, TAG_BDO, TAG_BLOCKQUOTE, TAG_FIGCAPTION, TAG_H1, TAG_H6, TAG_INS, TAG_KBD, TAG_LI, TAG_S, TAG_SMALL, TAG_SPAN, TAG_STRIKE, TAG_STRONG, TAG_TD, TAG_TH, TAG_U } from './const'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_ABBR, TAG_BDO, TAG_FIGCAPTION, TAG_H1, TAG_H6, TAG_INS, TAG_KBD, TAG_S, TAG_SMALL, TAG_SPAN, TAG_STRIKE, TAG_STRONG, TAG_TD, TAG_TH, TAG_U } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
@@ -145,38 +145,6 @@ export function escapeHtml(value: string, attribute = false, protectMarkdown = f
     }
   }
   return copiedUntil === 0 ? value : escaped + value.slice(copiedUntil)
-}
-
-/**
- * Build the Markdown prefix needed to keep a continued line inside its open
- * blockquotes and list items. Ancestors are emitted outermost-first so mixed
- * nesting retains its real structure.
- */
-export function continuationPrefix(
-  node: Pick<Node, 'parent'>,
-  listIndentWidths: readonly number[],
-  includeBlockquotes = true,
-): string {
-  const chain: ElementNode[] = []
-  let current = node.parent
-  while (current) {
-    chain.push(current)
-    current = current.parent
-  }
-
-  let prefix = ''
-  let listIndex = 0
-  for (let i = chain.length - 1; i >= 0; i--) {
-    const tagId = chain[i]!.tagId
-    if (tagId === TAG_BLOCKQUOTE && includeBlockquotes) {
-      prefix += '> '
-    }
-    else if (tagId === TAG_LI) {
-      prefix += ' '.repeat(listIndentWidths[listIndex] ?? 2)
-      listIndex++
-    }
-  }
-  return prefix
 }
 
 // U+0080–U+009F replacements from the numeric character reference end state.

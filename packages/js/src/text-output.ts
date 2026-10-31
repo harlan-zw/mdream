@@ -71,7 +71,8 @@ function currentColumn(buffer: string[], base: number, scan: [fragments: number,
     scan[1] = columnAt(value, value.length, scan[1])
   }
   const tail = buffer.at(-1)
-  return tail ? columnAt(tail, tail.length, scan[1]) : base
+  // A tail trimmed to '' leaves the column where the earlier fragments end.
+  return tail ? columnAt(tail, tail.length, scan[1]) : scan[1]
 }
 
 /**

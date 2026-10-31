@@ -5282,6 +5282,44 @@ fn wrap_never_splits_a_long_token() {
 }
 
 #[test]
+fn wrap_distinguishes_raw_text_from_block_markers() {
+  for (marker, can_wrap) in [
+    ("**", true),
+    ("_", true),
+    ("__", true),
+    ("*", false),
+    ("***", false),
+    ("___", false),
+  ] {
+    let html = format!("<details><summary>S</summary><code>aaaaaaaa</code> {marker} x</details>");
+    let expected = if can_wrap {
+      format!(
+        "<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code>\n{marker} x</details>"
+      )
+    } else {
+      format!(
+        "<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> {marker}\nx</details>"
+      )
+    };
+    assert_eq!(convert_wrapped(&html, 12), expected, "marker {marker}");
+    for size in 1..=html.len() {
+      let mut stream =
+        MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default().with_wrap_width(12));
+      let mut out = String::new();
+      for chunk in html.as_bytes().chunks(size) {
+        out.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      out.push_str(&stream.finish());
+      assert_eq!(
+        out.trim_end(),
+        expected,
+        "marker {marker}, chunk size {size}"
+      );
+    }
+  }
+}
+
+#[test]
 fn wrap_skips_code_tables_and_headings() {
   // Fenced code is emitted verbatim.
   let code = convert_wrapped(
