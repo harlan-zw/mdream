@@ -2235,6 +2235,58 @@ fn streaming_block_open_after_drained_line_matches_one_shot() {
   }
 }
 
+// A marker nested past three spaces is recognized from its whole line lead, so
+// the lead has to survive a drain for streaming to match one-shot.
+#[test]
+fn streaming_nested_list_markers_match_one_shot() {
+  let nested = [
+    (
+      "<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>",
+      "-\n  -\n    - \\# h",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - | a |\n      | --- |",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ***",
+    ),
+    ("<ul><li><ul><li></li></ul></li></ul>", "-\n  -"),
+    (
+      "<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-\n  - \n    > q",
+    ),
+  ];
+  for (html, expected) in nested {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected
+    );
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+    for width in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, width, HtmlToMarkdownOptions::default()),
+        expected,
+        "width={width}"
+      );
+    }
+  }
+  let lead = "x".repeat(9000);
+  let prefix = format!("<p>{lead}</p>");
+  for (html, expected) in nested {
+    let html = format!("{prefix}{html}");
+    let expected = format!("{lead}\n\n{expected}");
+    for chunk in [1, 7, 64, 4096] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk}"
+      );
+    }
+  }
+}
+
 // The newline an empty item inserts at its marker line moves every buffer offset
 // at or past it. An inline element still open across the insertion measures its
 // own emptiness from one of them, so leaving it unshifted stops an empty element
@@ -3500,6 +3552,450 @@ fn scout9_wrap_setext_boundary_streaming() {
 }
 
 #[test]
+fn empty_nested_list_tail_stays_in_parent_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><ol><li></li></ol>text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>",
+      "-\n  -\n- next",
+    ),
+    (
+      "<ul><li><ul><li></li></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><span>te</span><span>xt</span></li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><em>text</em></li></ul>",
+      "-\n  -\n\n  *text*",
+    ),
+    (
+      "<ol start=\"10\"><li><ul><li></li></ul>text</li></ol>",
+      "10.\n    -\n\n    text",
+    ),
+    (
+      "<blockquote><ul><li><ul><li></li></ul>text</li></ul></blockquote>",
+      "> -\n>   -\n>\n>   text",
+    ),
+    (
+      "<ul><li><ul><li><ul><li></li></ul>text</li></ul></li></ul>",
+      "-\n  -\n    -\n\n    text",
+    ),
+    ("<ul><li><ul><li></li></ul></li></ul>", "-\n  -"),
+    ("<ul><li><ul></ul>text</li></ul>", "- text"),
+    (
+      "<ul><li><ul><li></li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  -\n- next",
+    ),
+    (
+      "<ul><li><ul><li>inner</li></ul></li><li>next</li></ul>",
+      "-\n  - inner\n- next",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn filled_nested_list_tail_stays_in_parent_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li></li><li>a</li></ul>text</li></ul>",
+      "-\n  -\n  - a\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>text</li></ul>",
+      "-\n  - a\n\n  text",
+    ),
+    (
+      "<ul><li>lead<ul><li>a</li></ul>text</li></ul>",
+      "- lead\n  - a\n\n  text",
+    ),
+    (
+      "<ol><li><ol><li>a</li></ol>text</li></ol>",
+      "1.\n   1. a\n\n   text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><em>text</em></li></ul>",
+      "-\n  - a\n\n  *text*",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span>te</span><span>xt</span> more</li></ul>",
+      "-\n  - a\n\n  text more",
+    ),
+    (
+      "<ul><li><ul><li>a<ul><li>b</li></ul>c</li></ul>d</li></ul>",
+      "-\n  - a\n    - b\n\n    c\n\n  d",
+    ),
+    (
+      "<blockquote><ul><li><ul><li>a</li></ul>text</li></ul></blockquote>",
+      "> -\n>   - a\n>\n>   text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>t<ul></ul>u</li></ul>",
+      "-\n  - a\n\n  t u",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  - a\n- next",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>1. x</li></ul>",
+      "-\n  - a\n\n  1\\. x",
+    ),
+    (
+      "<ul><li><div><ul><li>a</li></ul></div><ul></ul>t</li></ul>",
+      "-\n  - a\n\n  t",
+    ),
+    (
+      "<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>",
+      "-\n  -\n- z",
+    ),
+    (
+      "<ul><li>x<ul><li>z<br></li></ul>y</li></ul>",
+      "- x\n  - z  \n\n  y",
+    ),
+    (
+      "<ul><li><ul><li>a<br></li></ul>text</li></ul>",
+      "-\n  - a  \n\n  text",
+    ),
+    (
+      "<ul><li><a href=\"x\"><ul><li>a</li></ul></a>t<ul></ul>u</li></ul>",
+      "- [  - a](x)t u",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn empty_nested_list_review_regressions() {
+  for (id, html, expected, options) in [
+    (
+      "F8-1",
+      "<ul><li>lead<br><ul><li></li></ul>text</li></ul>",
+      "- lead  \n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F8-2",
+      "<ul><li>lead<br><ol><li></li></ol>text</li></ul>",
+      "- lead  \n\n  1.\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F8-3",
+      "<ul><li>lead<br><ul><li></li></ul></li></ul>",
+      "- lead  \n\n  -",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-1",
+      "<ul><li>lead<ul><li></li></ul>text</li></ul>",
+      "- lead\n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-2",
+      "<ul><li><p>lead</p><ul><li></li></ul>text</li></ul>",
+      "- lead\n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-3",
+      "<ul><li><blockquote><ul><li></li></ul>text</blockquote></li></ul>",
+      "- \n  >\n  > -\n  >\n  > text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-4",
+      "<ul><li><ul><li></li></ul>a<ul><li></li></ul>b</li></ul>",
+      "-\n  -\n\n  a\n\n  -\n\n  b",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F2-1",
+      "<ul><li><ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>text</li></ul>",
+      "-\n  -\n    -\n      -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F2-2",
+      "<ol><li><ol><li><ol><li><ol><li></li></ol></li></ol></li></ol>t</li></ol>",
+      "1.\n   1.\n      1.\n         1.\n\n   t",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F3-1",
+      "<ul><li><ul><li></li></ul><span>t</span></li></ul>",
+      "-\n  -\n\n  XtY",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "span".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("X".to_string()),
+              exit: Some("Y".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F3-2",
+      "<ul><li><ul><li></li></ul><span></span></li><li>n</li></ul>",
+      "-\n  -\n\n  XY\n- n",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "span".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("X".to_string()),
+              exit: Some("Y".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F3-3",
+      "<ul><li><ul><li></li></ul><em></em></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "em".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("".to_string()),
+              exit: Some("".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F4-1",
+      "<ul><li><hr><br>text</li></ul>",
+      "- ***\n\n    \n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F4-2",
+      "<ul><li><ul><li></li></ul><br>text</li></ul>",
+      "-\n  -\n\n    \n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F4-3",
+      "<ul><li><ul><li></li></ul><br></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-1",
+      "<ul><li><ul><li></li></ul><div></div></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-2",
+      "<ul><li><ul><li></li></ul><p></p></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-3",
+      "<ul><li><ul><li></li></ul><em></em></li><li>next</li></ul>",
+      "-\n  -\n- next",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-4",
+      "<ul><li><ul><li></li></ul><code></code></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F6-1",
+      "<ul><li><ul><li>a<br>-</li></ul>text</li></ul>",
+      "-\n  - a  \n    -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F6-2",
+      "<ul><li><ul><li>a<br>1.</li></ul>text</li></ul>",
+      "-\n  - a  \n    1.\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F7-1",
+      "<ul><li><ul><li></li></ul><blockquote>q</blockquote></li></ul>",
+      "-\n  - \n  > q",
+      HtmlToMarkdownOptions::default(),
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{id}: {html}"
+    );
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn empty_list_marker_releases_non_text_content_before_item_close() {
+  for content in [
+    "<img src='/x'>",
+    "<br><img src='/x'>",
+    "<hr>",
+    "<span></span>",
+  ] {
+    let mut html = String::from("<ul><li>");
+    for _ in 0..8192 {
+      html.push_str(content);
+    }
+    html.push_str("</li></ul>");
+    let mut options = HtmlToMarkdownOptions::default();
+    if content == "<span></span>" {
+      options.plugins = Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "span".to_string(),
+          TagOverrideConfig {
+            enter: Some("X".repeat(32)),
+            exit: Some(String::new()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      });
+    }
+    for streaming_options in [options.clone(), options.clone().with_max_node_bytes(64)] {
+      let mut processor = MarkdownStreamProcessor::new(streaming_options);
+      let open_item = html.strip_suffix("</li></ul>").unwrap();
+      let mut before_close = 0;
+      for chunk in open_item.as_bytes().chunks(512) {
+        before_close += processor
+          .process_chunk(std::str::from_utf8(chunk).unwrap())
+          .len();
+      }
+      assert!(
+        before_close > 0,
+        "{content}: output must drain before the item closes"
+      );
+    }
+    let capped = options.clone().with_max_node_bytes(64);
+    let (capped_peak, capped_emitted) = measure_peak(&html, 512, capped.clone());
+    assert!(
+      capped_emitted > 0,
+      "capped conversion must emit before finish: {content}"
+    );
+    assert!(
+      capped_peak < 128 * 1024,
+      "{content}: capped peak {capped_peak} retains non-text output"
+    );
+    assert_eq!(
+      stream_chunks(&html, 512, capped.clone()),
+      html_to_markdown(&html, capped)
+    );
+    let (peak, emitted) = measure_peak(&html, 512, options);
+    assert!(
+      emitted > 32 * 1024,
+      "conversion must produce substantial output: {content}, emitted={emitted}, peak={peak}"
+    );
+    assert!(
+      peak < 128 * 1024,
+      "{content}: peak {peak} pins the item until its close"
+    );
+  }
+}
+
+#[test]
+fn deep_bare_markers_preserve_expected_bytes_in_ancestor_contexts() {
+  for depth in [50, 200] {
+    for (open, close, marker) in [
+      ("<ul><li>", "</li></ul>", "-"),
+      ("<ol start=\"10\"><li>", "</li></ol>", "10."),
+    ] {
+      let indent = marker.len() + 1;
+      let body = format!("{}# h{}", open.repeat(depth), close.repeat(depth));
+      let mut expected = (0..depth)
+        .map(|level| format!("{}{marker}", " ".repeat(level * indent)))
+        .collect::<Vec<_>>()
+        .join("\n");
+      expected.push_str(" \\# h");
+      for (prefix, suffix, rendered) in [
+        ("".to_owned(), "", expected.clone()),
+        ("<div>".to_owned(), "</div>", expected.clone()),
+        (
+          "<blockquote>".to_owned(),
+          "</blockquote>",
+          expected
+            .lines()
+            .map(|line| format!("> {line}"))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        ),
+        (
+          format!("<p>{}</p>", "x".repeat(9000)),
+          "",
+          format!("{}\n\n{expected}", "x".repeat(9000)),
+        ),
+      ] {
+        let html = format!("{prefix}{body}{suffix}");
+        assert_eq!(
+          html_to_markdown(&html, HtmlToMarkdownOptions::default()),
+          rendered,
+          "depth={depth}"
+        );
+        for chunk in [1, 7, 64, 4096] {
+          assert_eq!(
+            stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+            rendered,
+            "depth={depth}, chunk={chunk}"
+          );
+        }
+      }
+    }
+  }
+}
+
+#[test]
 fn scout9_excluded_list_spacing_streaming() {
   for (html, expected) in [
     (
@@ -3667,5 +4163,191 @@ fn builtin_aliases_preserve_raw_source_boundaries_streaming() {
     );
     assert_stream_matches(html, options.clone());
     assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn empty_ancestor_list_markers_match_every_split() {
+  for html in [
+    "<ol><li>lead<ul><li><ol><li></li></ol></li></ul></li></ol>",
+    "<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>",
+    "<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>",
+    "<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn empty_quote_keeps_nested_list_tail() {
+  for (html, expected) in [
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote> </blockquote><p>parent</p></li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote><blockquote></blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><h2>h</h2></li></ul>",
+      "- A\n  - inner\n\n  ## h",
+    ),
+    (
+      "<ul><li>A<ul><li></li></ul><blockquote></blockquote>parent</li></ul>",
+      "- A\n\n  - \n\n  parent",
+    ),
+    (
+      "<ol><li>A<ol><li>inner</li></ol><blockquote></blockquote>parent</li></ol>",
+      "1. A\n   1. inner\n\n   parent",
+    ),
+    (
+      "<blockquote><ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul></blockquote>",
+      "> - A\n>   - inner\n>\n>   parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote></li><li>n</li></ul>",
+      "- A\n  - inner\n- n",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote>q</blockquote></li></ul>",
+      "- A\n  - inner\n  > q",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+      "- A\n  - inner\n\n  > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// An empty exit override writes nothing, so the list still ends before the
+// parent's text. One with output keeps its text in place of the separator.
+#[test]
+fn empty_list_exit_override_keeps_nested_list_tail() {
+  for (tag, exit, html, expected) in [
+    (
+      "ul",
+      "",
+      "<ul><li><ul><li>a</li></ul>tail</li></ul>",
+      "-\n  - a\n\n  tail",
+    ),
+    (
+      "ol",
+      "",
+      "<ol><li><ol><li>a</li></ol>tail</li></ol>",
+      "1.\n   1. a\n\n   tail",
+    ),
+    (
+      "ul",
+      "",
+      "<ul><li><ul><li></li></ul><em>tail</em></li></ul>",
+      "-\n  -\n\n  *tail*",
+    ),
+    (
+      "ul",
+      "",
+      "<ul><li>A<ul><li>a</li></ul><blockquote></blockquote>t</li></ul>",
+      "- A\n  - a\n\n  t",
+    ),
+    (
+      "ul",
+      "",
+      "<ul><li>A<ul><li>a</li></ul><span></span></li><li>n</li></ul>",
+      "- A\n  - a\n- n",
+    ),
+    (
+      "ul",
+      "X",
+      "<ul><li><ul><li>a</li></ul>tail</li></ul>",
+      "-\n  - aX tailX",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          tag.to_string(),
+          TagOverrideConfig {
+            exit: Some(exit.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, opts.clone()), expected, "{html}");
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+// A flush rewrites the quoted lines before a tail that `</li>` may still retract,
+// and a `<code>` enter runs that flush during one-shot conversion too.
+#[test]
+fn quote_flush_leaves_nested_list_tail_retractable() {
+  let lines = "<p>quoted paragraph</p>".repeat(512);
+  for (open, close, expected) in [
+    (
+      "<blockquote>",
+      "</blockquote>",
+      ">\n> - A\n>   - inner\n> - next",
+    ),
+    (
+      "<blockquote><blockquote>",
+      "</blockquote></blockquote>",
+      "> >\n> > - A\n> >   - inner\n> > - next",
+    ),
+    (
+      "<blockquote><p>lead</p><blockquote>",
+      "</blockquote></blockquote>",
+      "> >\n> > - A\n> >   - inner\n> > - next",
+    ),
+    (
+      "<ul><li><blockquote>",
+      "</blockquote></li></ul>",
+      "  > - A\n  >   - inner\n  > - next",
+    ),
+  ] {
+    for empty in [
+      "<code></code>",
+      "<em></em>",
+      "<span></span>",
+      "<a></a>",
+      "<p></p>",
+      "<pre></pre>",
+    ] {
+      let tail = format!("<ul><li>A<ul><li>inner</li></ul>{empty}</li><li>next</li></ul>{close}");
+      let html = format!("{open}{lines}{tail}");
+      let one_shot = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+      assert!(
+        one_shot.ends_with(&format!("quoted paragraph\n{expected}")),
+        "{open}{empty}: {:?}",
+        &one_shot[one_shot.len() - 80..]
+      );
+      for split in html.len() - tail.len()..html.len() {
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut streamed = processor.process_chunk(&html[..split]);
+        streamed.push_str(&processor.process_chunk(&html[split..]));
+        streamed.push_str(&processor.finish());
+        assert_eq!(streamed, one_shot, "{open}{empty} split={split}");
+      }
+    }
   }
 }

@@ -78,6 +78,70 @@ const LINK_SPACE_CASES: [string, string][] = [
 
 const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { tagOverrides: Record<string, string> } } }> = [
   ...LINK_SPACE_CASES.map(([html]) => html),
+  '<ol><li>lead<ul><li><ol><li></li></ol></li></ul></li></ol>',
+  '<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>',
+  '<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>',
+  '<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>',
+  '<ul><li><ul><li></li><li>a</li></ul>text</li></ul>',
+  '<ul><li><ul><li>a</li></ul>text</li></ul>',
+  '<ul><li>lead<ul><li>a</li></ul>text</li></ul>',
+  '<ol><li><ol><li>a</li></ol>text</li></ol>',
+  '<ul><li><ul><li>a</li></ul><em>text</em></li></ul>',
+  '<ul><li><ul><li>a</li></ul><span>te</span><span>xt</span> more</li></ul>',
+  '<ul><li><ul><li>a<ul><li>b</li></ul>c</li></ul>d</li></ul>',
+  '<blockquote><ul><li><ul><li>a</li></ul>text</li></ul></blockquote>',
+  '<ul><li><ul><li>a</li></ul>t<ul></ul>u</li></ul>',
+  '<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>',
+  '<ul><li><ul><li>a</li></ul>1. x</li></ul>',
+  '<ul><li><ul><li>a<br></li></ul>text</li></ul>',
+  '<ul><li><div><ul><li>a</li></ul></div><ul></ul>t</li></ul>',
+  '<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>',
+  '<ul><li>x<ul><li>z<br></li></ul>y</li></ul>',
+  '<ul><li><a href="x"><ul><li>a</li></ul></a>t<ul></ul>u</li></ul>',
+  '<ul><li><em><ul><li>a</li></ul></em>t</li></ul>',
+  '<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>',
+  '<ul><li>A<ul><li>inner</li></ul><blockquote> </blockquote><p>parent</p></li></ul>',
+  '<ul><li>A<ul><li>inner</li></ul><blockquote><blockquote></blockquote></blockquote>parent</li></ul>',
+  '<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote></blockquote>parent</li></ul>',
+  '<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><h2>h</h2></li></ul>',
+  '<ul><li>A<ul><li></li></ul><blockquote></blockquote>parent</li></ul>',
+  '<ol><li>A<ol><li>inner</li></ol><blockquote></blockquote>parent</li></ol>',
+  '<blockquote><ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul></blockquote>',
+  '<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote></li><li>n</li></ul>',
+  '<ul><li>A<ul><li>inner</li></ul><blockquote>q</blockquote></li></ul>',
+  '<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote>q</blockquote></li></ul>',
+  '<ul><li>lead<br><ul><li></li></ul>text</li></ul>',
+  '<ul><li>lead<br><ol><li></li></ol>text</li></ul>',
+  '<ul><li>lead<br><ul><li></li></ul></li></ul>',
+  '<ul><li>lead<ul><li></li></ul>text</li></ul>',
+  '<ul><li><p>lead</p><ul><li></li></ul>text</li></ul>',
+  '<ul><li><blockquote><ul><li></li></ul>text</blockquote></li></ul>',
+  '<ul><li><ul><li></li></ul>a<ul><li></li></ul>b</li></ul>',
+  '<ul><li><ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>text</li></ul>',
+  '<ol><li><ol><li><ol><li><ol><li></li></ol></li></ol></li></ol>t</li></ol>',
+  '<ul><li><hr><br>text</li></ul>',
+  '<ul><li><ul><li></li></ul><br>text</li></ul>',
+  '<ul><li><ul><li></li></ul><br></li><li>n</li></ul>',
+  '<ul><li><ul><li></li></ul><div></div></li><li>n</li></ul>',
+  '<ul><li><ul><li></li></ul><p></p></li><li>n</li></ul>',
+  '<ul><li><ul><li></li></ul><em></em></li><li>next</li></ul>',
+  '<ul><li><ul><li></li></ul><code></code></li><li>n</li></ul>',
+  '<ul><li><ul><li>a<br>-</li></ul>text</li></ul>',
+  '<ul><li><ul><li>a<br>1.</li></ul>text</li></ul>',
+  '<ul><li><ul><li></li></ul><blockquote>q</blockquote></li></ul>',
+  '<ul><li><ol><li></li></ol>text</li></ul>',
+  '<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>',
+  '<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>',
+  '<ul><li><ul><li></li></ul>text</li></ul>',
+  '<ul><li><ul><li></li></ul><span>te</span><span>xt</span></li></ul>',
+  '<ul><li><ul><li></li></ul><em>text</em></li></ul>',
+  '<ol start="10"><li><ul><li></li></ul>text</li></ol>',
+  '<blockquote><ul><li><ul><li></li></ul>text</li></ul></blockquote>',
+  '<ul><li><ul><li><ul><li></li></ul>text</li></ul></li></ul>',
+  '<ul><li><ul><li></li></ul></li></ul>',
+  '<ul><li><ul></ul>text</li></ul>',
+  '<ul><li><ul><li></li></ul><span></span> </li><li>next</li></ul>',
+  '<ul><li><ul><li>inner</li></ul></li><li>next</li></ul>',
   '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
   '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
   '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
@@ -150,6 +214,10 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<>',
   // String chunks split the UTF-16 surrogate pair at width 1.
   '<p>🎉</p>',
+  // A marker nested past three spaces is recognized from its whole line lead.
+  '<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>',
+  '<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>',
+  '<ul><li><ul><li></li></ul></li></ul>',
 ]
 
 describe('cross-engine streaming byte parity', () => {
@@ -171,7 +239,7 @@ describe('cross-engine streaming byte parity', () => {
     }
   })
 
-  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width: %s', async (testCase) => {
+  it.each(BYTE_PARITY_CASES)('matches one-shot output at every chunk width and split: %s', async (testCase) => {
     const { html, options } = typeof testCase === 'string' ? { html: testCase, options: undefined } : testCase
     const engineOutputs: string[] = []
 
@@ -207,7 +275,46 @@ describe('cross-engine streaming byte parity', () => {
       }
     }
 
+    for (const { engine, name } of engines) {
+      for (let split = 1; split < html.length; split++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(engineOutputs[0])
+      }
+    }
+
     expect(engineOutputs[1]).toBe(engineOutputs[0])
+  })
+
+  it.each(['<code></code>', '<em></em>', '<span></span>'])('retracts a nested list tail after %s at every split past a quote flush', async (empty) => {
+    const tail = `<ul><li>A<ul><li>inner</li></ul>${empty}</li><li>next</li></ul></blockquote>`
+    const html = `<blockquote>${'<p>quoted paragraph</p>'.repeat(512)}${tail}`
+    const expected = engines[0]!.engine.htmlToMarkdown(html)
+
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html), `engine=${name}`).toBe(expected)
+      for (let split = html.length - tail.length; split < html.length; split++) {
+        const htmlStream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let streamed = ''
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream))
+          streamed += chunk
+        expect(streamed, `engine=${name} split=${split}`).toBe(expected)
+      }
+    }
   })
 })
 
@@ -559,6 +666,27 @@ describe('scout9_wrap_setext_boundary streaming', () => {
         for await (const part of engine.streamHtmlToMarkdown(stream, options))
           actual += part
         expect(actual, name).toBe(expected)
+      }
+    }
+  })
+})
+
+describe('empty nested list tail overrides', () => {
+  it.each([{ id: 'F3-1', html: '<ul><li><ul><li></li></ul><span>t</span></li></ul>', expected: '-\n  -\n\n  XtY', overrides: { span: { enter: 'X', exit: 'Y' } } }, { id: 'F3-2', html: '<ul><li><ul><li></li></ul><span></span></li><li>n</li></ul>', expected: '-\n  -\n\n  XY\n- n', overrides: { span: { enter: 'X', exit: 'Y' } } }, { id: 'F3-3', html: '<ul><li><ul><li></li></ul><em></em></li><li>n</li></ul>', expected: '-\n  -\n- n', overrides: { em: { enter: '', exit: '' } } }, { id: 'G1-1', html: '<ul><li><ul><li>a</li></ul>tail</li></ul>', expected: '-\n  - a\n\n  tail', overrides: { ul: { exit: '' } } }, { id: 'G1-2', html: '<ol><li><ol><li>a</li></ol>tail</li></ol>', expected: '1.\n   1. a\n\n   tail', overrides: { ol: { exit: '' } } }, { id: 'G1-3', html: '<ul><li><ul><li></li></ul><em>tail</em></li></ul>', expected: '-\n  -\n\n  *tail*', overrides: { ul: { exit: '' } } }, { id: 'G1-4', html: '<ul><li>A<ul><li>a</li></ul><blockquote></blockquote>t</li></ul>', expected: '- A\n  - a\n\n  t', overrides: { ul: { exit: '' } } }, { id: 'G1-5', html: '<ul><li>A<ul><li>a</li></ul><span></span></li><li>n</li></ul>', expected: '- A\n  - a\n- n', overrides: { ul: { exit: '' } } }, { id: 'G1-6', html: '<ul><li><ul><li>a</li></ul>tail</li></ul>', expected: '-\n  - aX tailX', overrides: { ul: { exit: 'X' } } }])('preserves $id at every width and split', async ({ html, expected, overrides }) => {
+    for (const { engine } of engines) {
+      const options = { plugins: { tagOverrides: overrides } }
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        for (const split of [false, true]) {
+          const chunks = split ? [html.slice(0, width), html.slice(width)] : Array.from({ length: Math.ceil(html.length / width) }, (_, index) => html.slice(index * width, (index + 1) * width))
+          const input = new ReadableStream<string>({ start(controller) {
+            for (const chunk of chunks) controller.enqueue(chunk)
+            controller.close()
+          } })
+          let actual = ''
+          for await (const chunk of engine.streamHtmlToMarkdown(input, options)) actual += chunk
+          expect(actual, `width=${width} split=${split}`).toBe(expected)
+        }
       }
     }
   })

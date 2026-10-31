@@ -458,6 +458,10 @@ const CLEAN_SELF_LINK_HEADINGS: u8 = 8;
 const CLEAN_EMPTY_IMAGES: u8 = 16;
 const CLEAN_EMPTY_LINK_TEXT: u8 = 32;
 
+// `list_pending` bits: separators deferred until visible content follows.
+const LIST_RULE_PENDING: u8 = 1;
+const LIST_TAIL_PENDING: u8 = 2;
+
 const SCRIPT_DATA: u8 = 0;
 const SCRIPT_DATA_ESCAPED: u8 = 1;
 const SCRIPT_DATA_ESCAPED_DASH: u8 = 2;
@@ -953,8 +957,31 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
-  /// A list item rule waiting to see whether visible content follows it.
-  list_rule_pending: bool,
+  /// Set with `empty_item_hazard`, `empty_list_marker_end` or `list_tail_start`
+  /// and recomputed by `settle_item_marker`, so the token loop and the hot
+  /// paths test one flag. It may stay set after all three clear, never the
+  /// other way round.
+  item_settle_pending: bool,
+  /// Last built-in marker end, excluding its trailing space.
+  last_item_marker_end: usize,
+  #[cfg(test)]
+  parent_marker_scans: usize,
+  /// `LIST_RULE_PENDING`: a list item rule waiting to see whether visible
+  /// content follows it. `LIST_TAIL_PENDING`: a nested list ended and the
+  /// parent item's text, if any, needs its own paragraph.
+  list_pending: u8,
+  /// `blockquotes` depth of the quote that took a pending tail, 0 for none.
+  list_tail_quote_depth: usize,
+  /// Actual built-in item marker end, distinct from marker-like source text.
+  empty_list_marker_end: usize,
+  /// `<li>` nesting level of the latest built-in item marker.
+  empty_list_marker_depth: usize,
+  /// A tentative separator retractable while following wrappers are empty.
+  list_tail_start: usize,
+  list_tail_scanned_to: usize,
+  empty_list_marker_scanned_to: usize,
+  #[cfg(test)]
+  list_settlement_bytes_read: usize,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1203,7 +1230,19 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
-      list_rule_pending: false,
+      item_settle_pending: false,
+      last_item_marker_end: usize::MAX,
+      #[cfg(test)]
+      parent_marker_scans: 0,
+      list_pending: 0,
+      list_tail_quote_depth: 0,
+      empty_list_marker_end: usize::MAX,
+      empty_list_marker_depth: 0,
+      list_tail_start: usize::MAX,
+      list_tail_scanned_to: 0,
+      empty_list_marker_scanned_to: 0,
+      #[cfg(test)]
+      list_settlement_bytes_read: 0,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -1354,7 +1393,14 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
-    if self.empty_item_hazard {
+    debug_assert!(
+      self.item_settle_pending
+        || (!self.empty_item_hazard
+          && self.empty_list_marker_end == usize::MAX
+          && self.list_tail_start == usize::MAX),
+      "list item state is pending without item_settle_pending"
+    );
+    if self.item_settle_pending {
       self.settle_item_marker();
     }
     self.check_held_output();
@@ -2611,6 +2657,21 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    // Both scan cursors restart whenever their start is set, so they only
+    // matter while the settle flag is.
+    if self.item_settle_pending {
+      self.list_tail_scanned_to = self.list_tail_scanned_to.min(offset);
+      self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.min(offset);
+      if offset < self.empty_list_marker_end {
+        self.empty_list_marker_end = usize::MAX;
+      }
+      if offset < self.list_tail_start {
+        self.list_tail_start = usize::MAX;
+      }
+    }
+    if self.last_item_marker_end != usize::MAX && offset < self.last_item_marker_end {
+      self.last_item_marker_end = usize::MAX;
+    }
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -2631,6 +2692,14 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    self.list_tail_scanned_to = self.list_tail_scanned_to.saturating_sub(removed);
+    self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.saturating_sub(removed);
+    if self.last_item_marker_end != usize::MAX {
+      self.last_item_marker_end = self
+        .last_item_marker_end
+        .checked_sub(removed)
+        .unwrap_or(usize::MAX);
+    }
     if self.blockquote_line_scanned_to != 0 {
       self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
       self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);
@@ -2802,6 +2871,12 @@ impl ConvertState {
     if self.empty_item_hazard {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.empty_list_marker_end != usize::MAX {
+      stable_end = stable_end.min(self.empty_list_marker_end);
+    }
+    if self.list_tail_start != usize::MAX {
+      stable_end = stable_end.min(self.list_tail_start);
+    }
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
     // closes) until the heading is complete.
@@ -2964,6 +3039,12 @@ impl ConvertState {
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.empty_list_marker_end != usize::MAX {
+      drain_end = drain_end.min(self.empty_list_marker_end);
+    }
+    if self.list_tail_start != usize::MAX {
+      drain_end = drain_end.min(self.list_tail_start);
+    }
     if drain_end == 0 {
       return;
     }
@@ -3036,6 +3117,12 @@ impl ConvertState {
     }
     self.empty_item_line_start = self.empty_item_line_start.saturating_sub(drain_end);
     self.empty_item_len = self.empty_item_len.saturating_sub(drain_end);
+    if self.empty_list_marker_end != usize::MAX {
+      self.empty_list_marker_end -= drain_end;
+    }
+    if self.list_tail_start != usize::MAX {
+      self.list_tail_start -= drain_end;
+    }
     // Buffer-indexed like every other stored offset: left alone, streaming reads
     // a different line start than one-shot.
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
