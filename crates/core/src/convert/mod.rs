@@ -169,6 +169,9 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// The opener carries the block break a heading in a list item owed, so
+  /// dropping the empty pair owes it again.
+  restores_heading_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -253,6 +256,8 @@ struct LinkOutputState {
   /// The `[` starts where the latest hard break ends; see
   /// `OpenMarker::starts_at_hard_break`.
   starts_at_hard_break: bool,
+  /// Bytes before the link bracket owned by a pending heading break.
+  heading_break_prefix_len: usize,
 }
 
 struct FragmentLink {
@@ -961,6 +966,10 @@ pub struct ConvertState {
   empty_item_after_cr: bool,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  /// A heading closed in a list item. Inside the item its block spacing is
+  /// collapsed, so the next visible content owes it the block break the root
+  /// writes, or that content joins the heading's line.
+  heading_break_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1212,6 +1221,7 @@ impl ConvertState {
       empty_item_len: 0,
       empty_item_after_cr: false,
       list_rule_pending: false,
+      heading_break_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -2687,7 +2697,7 @@ impl ConvertState {
     if let Some(bracket_pos) = std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| link.open && (link.pins_output || link.empty_text_pending))
-      .map(|link| link.bracket_pos)
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
     {
       floor = floor.min(bracket_pos);
@@ -2911,7 +2921,7 @@ impl ConvertState {
     std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| self.link_hold_required(link))
-      .map(|link| link.bracket_pos)
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
   }
 

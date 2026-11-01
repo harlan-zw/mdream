@@ -2040,6 +2040,250 @@ fn streaming_heading_trailing_hashes_matches_one_shot() {
   }
 }
 
+// An empty heading in a list item drops its marker's trailing space at its exit,
+// so that space must still be held when the exit runs.
+#[test]
+fn streaming_empty_heading_in_list_item_matches_one_shot() {
+  for html in [
+    "<ul><li><h3></h3><p>b</p></li></ul>",
+    "<ol start=\"10\"><li><h1></h1><p>b</p></li></ol>",
+    "<ul><li>a<ul><li>b<ul><li><h3></h3><p>c</p></li></ul></li></ul></li></ul>",
+    "<ul><li><pre>x</pre><h3></h3><p>b</p></li></ul>",
+    "<ul><li><blockquote><h3></h3><p>b</p></blockquote></li></ul>",
+    "<blockquote><ul><li><h3></h3><p>b</p></li></ul></blockquote>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_block_after_empty_list_heading_keeps_its_boundary() {
+  for (html, expected) in [
+    (
+      "<ul><li><h3></h3><div>Next</div></li></ul>",
+      "- ###\n\n  Next",
+    ),
+    (
+      "<ul><li><h3></h3><h2>Next</h2></li></ul>",
+      "- ###\n\n  ## Next",
+    ),
+    (
+      "<ol start=\"10\"><li><h3></h3><div>Next</div></li></ol>",
+      "10. ###\n\n    Next",
+    ),
+    (
+      "<ul><li>Parent<ul><li><h3></h3><div>Next</div></li></ul></li></ul>",
+      "- Parent\n  - ###\n\n    Next",
+    ),
+    (
+      "<blockquote><ul><li><h3></h3><div>Next</div></li></ul></blockquote>",
+      "> - ###\n>\n>   Next",
+    ),
+    ("<ul><li><h3></h3></li><li>Next</li></ul>", "- ###\n- Next"),
+    ("<ul><li><h3></h3></li></ul>", "- ###"),
+    ("<h3></h3><div>Next</div>", "###\n\nNext"),
+    ("<li>q<br>t<div>X", "- q  \n  t X"),
+    ("<ul><li>Text #<div>Next</div></li></ul>", "- Text # Next"),
+    (
+      "<ul><li><h3></h3><span></span><div>Next</div></li></ul>",
+      "- ###\n\n  Next",
+    ),
+    (
+      "<table><tr><td><ul><li><h3></h3><div>Next</div></li></ul></td></tr></table>",
+      "| <ul><li><h3></h3>Next</li></ul> |\n| --- |",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// The break a heading in a list item owes the text after it is written when
+// that text arrives, and taken back with an empty marker pair, so it has to
+// hold at every cut (#388).
+#[test]
+fn streaming_heading_in_list_item_keeps_its_own_line() {
+  for (html, expected) in [
+    (
+      "<ul><li>Intro <h3>Title</h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ### Title\n\n  Body",
+    ),
+    (
+      "<ul><li>Intro\n    <h3>Title</h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ### Title\n\n  Body",
+    ),
+    (
+      "<ol><li>a<ol><li>b<ol><li>Intro <h3>T</h3></li></ol></li></ol></li></ol>",
+      "1. a\n   1. b\n      1. Intro\n\n         ### T",
+    ),
+    ("<ul><li><h3></h3>Text</li></ul>", "- ###\n\n  Text"),
+    (
+      "<ol><li><h1>T</h1>\nx</li><li>y</li></ol>",
+      "1. # T\n\n   x\n2. y",
+    ),
+    (
+      "<ul><li>a<ul><li>b<ul><li><h3></h3>c</li></ul></li></ul></li></ul>",
+      "- a\n  - b\n    - ###\n\n      c",
+    ),
+    (
+      "<ul><li><h3>Title</h3><strong>Text</strong></li></ul>",
+      "- ### Title\n\n  **Text**",
+    ),
+    (
+      "<ul><li><h3></h3><code>x</code></li></ul>",
+      "- ###\n\n  `x`",
+    ),
+    ("<ul><li><h3>T</h3><em></em>x</li></ul>", "- ### T\n\n  x"),
+    (
+      "<ul><li><h3>T</h3><i class=\"icon\"></i></li><li>b</li></ul>",
+      "- ### T\n- b",
+    ),
+    ("<ul><li>x <h2></h2>  y</li></ul>", "- x\n\n  ##\n\n  y"),
+    (
+      "<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>",
+      "> - ### T\n>\n>   x",
+    ),
+    (
+      "<ul><li><strong><h3>T</h3>more</strong></li></ul>",
+      "- **### T more**",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// A heading in a wrapper that writes no delimiters breaks out of it before and
+// after, however deep the wrappers nest, at every cut.
+#[test]
+fn streaming_heading_in_list_item_breaks_out_of_a_wrapper_without_delimiters() {
+  for (html, expected) in [
+    (
+      "<ul><li><u><h4>T</h4></u>more</li></ul>",
+      "- <u>\n\n  #### T</u>\n\n  more",
+    ),
+    (
+      "<ul><li><label>Intro<h3>T</h3>more</label></li></ul>",
+      "- Intro\n\n  ### T\n\n  more",
+    ),
+    (
+      "<ul><li><small><abbr><h3>A</h3><h3>B</h3></abbr></small></li></ul>",
+      "- ### A\n\n  ### B",
+    ),
+    (
+      "<ol><li><small><abbr><h2>Title</h2></abbr></small>Body text</li><li>b</li></ol>",
+      "1. ## Title\n\n   Body text\n2. b",
+    ),
+    (
+      "<ul><li><small><strong><h3>T</h3></strong>more</small></li></ul>",
+      "- **### T**more",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// A block marker at a list item's content column four or more spaces deep is
+// escaped, at every cut.
+#[test]
+fn streaming_block_markers_at_a_deep_list_content_column_are_escaped() {
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><h3>T</h3># x</li></ol>",
+      "10. ### T\n\n    \\# x",
+    ),
+    (
+      "<ul><li>a<ul><li>T<br>- x</li></ul></li></ul>",
+      "- a\n  - T  \n    \\- x",
+    ),
+    (
+      "<ol start=\"10\"><li><p>a</p><p>&gt; x</p></li><li>b</li></ol>",
+      "10. a\n\n    \\> x\n11. b",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// A `<p>` or `<div>` that opens a `<pre>` fence in a list item leaves its
+// separator to the fence, at every cut.
+#[test]
+fn streaming_block_that_opens_a_list_code_block_stays_out_of_the_code() {
+  for (html, expected) in [
+    (
+      "<ul><li><h1></h1><pre><div>x</div></pre></li></ul>",
+      "- #\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>",
+      "- a\n\n  ```\n  x\n\n  y\n  ```",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// A `<pre>` fence opened by its first child pays the break a heading in the
+// list item owes, at every cut.
+#[test]
+fn streaming_code_block_after_list_heading_keeps_its_content() {
+  for (html, expected) in [
+    (
+      "<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ol><li><h2>Install</h2><pre class=\"language-sh\"><span class=\"token function\">npm</span> install mdream</pre></li><li>b</li></ol>",
+      "1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3><pre>\n<span>x</span></pre></li></ul></blockquote>",
+      "> - ### T\n>\n>   ```\n>   x\n>   ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>",
+      "- ### T\n\n  ```\n  \n  ```\n\n  x",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // An empty `<li>` inserts a newline at its marker's line start when it resolves,
 // so the line stays mutable. Streaming used to yield the marker first, turning
 // one-shot's `- a\n\n  -` into `- a\n  --`.
@@ -3333,6 +3577,192 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
       output.push_str(&processor.finish());
       assert_eq!(output, expected, "tail={tail}");
     }
+  }
+}
+
+#[test]
+fn streaming_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
+  for html in [
+    r#"<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>"#,
+    r#"<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>"#,
+    r#"<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>"#,
+    r#"<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>"#,
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_heading_overrides_inside_list_code_keep_their_output() {
+  for (html, expected, tag, config) in [
+    (
+      r#"<ul><li><pre>Intro<span><h3>T</h3></span></pre></li></ul>"#,
+      "- ```\n  Intro ### T\n  ```",
+      "span",
+      TagOverrideConfig::alias("strong"),
+    ),
+    (
+      r#"<ul><li><code><h6>
+</h6><h3></h3>x</code></li></ul>"#,
+      "- `###### ### x`",
+      "h3",
+      TagOverrideConfig {
+        enter: Some("### ".into()),
+        exit: Some(String::new()),
+        ..Default::default()
+      },
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(tag.into(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn streaming_literal_heading_overrides_preserve_block_boundaries() {
+  for (html, enter, expected) in [
+    ("<ul><li><h3></h3>x</li></ul>", "### ", "- ###\n\n  x"),
+    (
+      "<ul><li><h3>T</h3><h3>U</h3></li></ul>",
+      "### ",
+      "- ### T\n\n  ### U",
+    ),
+    (
+      "<ul><li><h3></h3><h3>U</h3></li></ul>",
+      "### Label ",
+      "- ### Label\n\n  ### Label U",
+    ),
+    ("<ul><li><h3>T</h3>x</li></ul>", "###\t", "- ###\tT\n\n  x"),
+    ("<ul><li><h3>T</h3>x</li></ul>", "### ", "- ### T\n\n  x"),
+    (
+      "<ul><li>Intro <h3>T</h3></li></ul>",
+      "### ",
+      "- Intro\n\n  ### T",
+    ),
+    (
+      "<ul><li>Intro <h3>T</h3>x</li></ul>",
+      "## ",
+      "- Intro\n\n  ## T\n\n  x",
+    ),
+    (
+      "<ul><li>Intro <h3>T</h3>x</li></ul>",
+      "### Label ",
+      "- Intro\n\n  ### Label T\n\n  x",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>",
+      "### ",
+      "> - ### T\n>\n>   x",
+    ),
+    (
+      "<ul><li>outer<ul><li><h3>T</h3>x</li></ul></li></ul>",
+      "### ",
+      "- outer\n  - ### T\n\n    x",
+    ),
+    (
+      "<ul><li><h3>T</h3><strong> </strong>x</li></ul>",
+      "### ",
+      "- ### T\n\n  x",
+    ),
+    ("<ul><li><h3>T</h3>x</li></ul>", "", "- T x"),
+    ("<ul><li><h3>T</h3>x</li></ul>", "Title ", "- Title T x"),
+    (
+      "<ul><li><h3>T</h3>x</li></ul>",
+      "prefix ### ",
+      "- prefix ### T x",
+    ),
+    ("<ul><li><h3>T</h3>x</li></ul>", "####### ", "- ####### T x"),
+    (
+      "<ul><li><h3>T</h3>x</li></ul>",
+      "###inline ",
+      "- ###inline T x",
+    ),
+    (
+      "<ul><li><code><h3>T</h3>x</code></li></ul>",
+      "### ",
+      "- `### T x`",
+    ),
+    (
+      "<ul><li><strong><h3>T</h3>x</strong></li></ul>",
+      "### ",
+      "- **### T x**",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "h3".into(),
+          TagOverrideConfig {
+            enter: Some(enter.into()),
+            exit: Some(String::new()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn streaming_literal_heading_overrides_preserve_content() {
+  for (html, enter, exit, expected) in [
+    (
+      "<ul><li><h3>T #</h3>x</li></ul>",
+      "### ",
+      "",
+      "- ### T \\#\n\n  x",
+    ),
+    (
+      "<ul><li><h3>T ## </h3>x</li></ul>",
+      "### ",
+      "",
+      "- ### T \\##\n\n  x",
+    ),
+    (
+      "<ul><li><u><h3></h3>x</u></li></ul>",
+      "### ",
+      " END",
+      "- <u>\n\n  ### END\n\n  x</u>",
+    ),
+    ("<ul><li><h3></h3></li></ul>", "###\t", "", "- ###"),
+    (
+      "<ul><li><h3></h3>x</li></ul>",
+      "###\t",
+      "",
+      "- ###\t\n\n  x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "h3".into(),
+          TagOverrideConfig {
+            enter: Some(enter.into()),
+            exit: Some(exit.into()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
   }
 }
 
