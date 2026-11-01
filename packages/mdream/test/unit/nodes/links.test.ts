@@ -356,6 +356,163 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('[![A](/i)](/x) Caption')
   })
 
+  // Text in a block nested in a link, such as the `<text>` of an `<svg>`, is
+  // written like any link text, so the link takes no label.
+  it.each([
+    ['<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>', 'Go [x](/cart)'],
+    ['<p>Go <a href="/cart" aria-label="Cart"><svg aria-hidden="true"><text>x</text></svg></a></p>', 'Go [x](/cart)'],
+    ['<div><a href="/x" title="Title"><div>Text</div></a></div>', '[Text](/x "Title")'],
+    ['<p><a href="/c"><svg><text>x</text></svg></a> now</p>', '[x](/c) now'],
+    ['<div><a href="/x"><div>Text</div></a> now</div>', '[Text](/x) now'],
+  ])('treats text in a block inside a link as link text in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+  })
+
+  it('treats text in a block inside a link as link text in every format', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>Go <a href="/cart" aria-label="Cart"><svg><text>x</text></svg></a></p>'
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe('Go x')
+    expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe('<p>Go <a href="/cart">x</a></p>')
+    // Hidden text in the block is still no link text.
+    expect(htmlToMarkdown('<p>Go <a href="/cart" aria-label="Cart"><svg><text hidden>x</text></svg></a></p>', { engine, plugins: { filter: {} } }))
+      .toBe('Go [Cart](/cart)')
+  })
+
+  // Text in a block nested in a link counts for the link around that block. A
+  // block of the next link, or a link opened inside the block, counts for its
+  // own link, so neither takes its label next to visible text.
+  it.each([
+    ['<a href="/a" title="A"><p>x</p></a><a href="/b" title="B"><p>y</p></a>', '[x](/a "A") [y](/b "B")'],
+    ['<a href="/a"><div>x<a href="/b" title="B"><p>y</p></a></div></a>', '[x [y](/b "B")](/a)'],
+    ['<a href="/a" title="A"><ul><li>x<ul><li>y<ul><li>z</li></ul></li></ul></li></ul></a>', '[- x  - y    - z](/a "A")'],
+    ['<a href="/a" title="A"><div><p>x</p><p>y</p></div></a>', '[x y](/a "A")'],
+    ['<a href="/a" title="A"><p>x</a><a href="/b" title="B"><p>y</a>', '[x](/a "A") [y](/b "B")'],
+    ['<a href="/a" title="A"><div><a href="/b" title="B"><p>y</p>z</a>w</div></a>', '[[y z](/b "B")w](/a "A")'],
+    ['<a href="/a" title="A"><div><a href="/b"><p>y</p></a></div><p>z</p></a>', '[[y](/b) z](/a "A")'],
+    ['<a href="/a" title="A"><div><img src="/i" alt="I"></div></a><a href="/b" title="B"><div><img src="/i" alt="J"></div></a>', '[![I](/i)](/a "A") [![J](/i)](/b "B")'],
+    ['<a href="/a" title="A"><div><img src="/i" alt="I"><a href="/b" title="B"><p>y</p></a></div></a>', '[![I](/i) [y](/b "B")](/a "A")'],
+    ['<div><p><img src="/i" alt="I"></p><a href="/b" title="B"><p>y</p></a></div>', '![I](/i)\n\n[y](/b "B")'],
+  ])('counts text in a nested block for its own link in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
+  // An empty link still writes `[](url)`, so the text after it keeps its space.
+  it.each([
+    ['<p><a href="/x"></a> tail</p>', '[](/x) tail'],
+    ['<p><a href="/x"></a>tail</p>', '[](/x)tail'],
+    ['<p><a href="/x"></a> <a href="/y"></a> tail</p>', '[](/x) [](/y) tail'],
+    ['<ul><li><a href="/x"></a> tail</li></ul>', '- [](/x) tail'],
+    ['<p><span><a href="/x"></a></span> tail</p>', '[](/x) tail'],
+    ['<p><a href="/x"> </a> tail</p>', '[](/x) tail'],
+    ['<p><a name="x"></a> tail</p>', 'tail'],
+    ['<a href="/a" title="A"><div><a href="/b"></a></div></a>', '[[](/b)](/a "A")'],
+  ])('keeps the space after an empty link in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe(html.includes('title') ? 'A' : 'tail')
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
+  it('drops an empty link and its space in clean mode', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p><a href="/x"></a> tail</p>', { engine, clean: { emptyLinkText: true } })).toBe('tail')
+  })
+
+  // A link in a block of another link stays nested, as the parser only closes
+  // an open link at a new one in the same block. Its content is content of the
+  // outer link too, so the outer link takes no label.
+  it.each([
+    ['<a href="/a" title="A"><div><a href="/b"><p>y</p></a></div></a>', '[[y](/b)](/a "A")', 'y'],
+    ['<a href="/a" title="A"><div><a href="/b">y</a></div></a>', '[[y](/b)](/a "A")', 'y'],
+    ['<a href="/a" title="A"><div><a href="/b" title="B"></a></div></a>', '[[B](/b)](/a "A")', 'B'],
+    ['<a href="/a" title="A"><div><a href="/b"><img src="/i" alt="I"></a></div></a>', '[[![I](/i)](/b)](/a "A")', 'I'],
+    ['<a href="/a" title="A"><div><a href="/c" title="C"><div><a href="/b"><p>y</p></a></div></a></div></a>', '[[[y](/b)](/c "C")](/a "A")', 'y'],
+    ['<div><a href="/a" title="A"><section><div><a href="/b">y</a></div></section></a> tail</div>', '[[y](/b)](/a "A") tail', 'y tail'],
+  ])('counts a link nested in a block for the link around it in %s', async (html, expected, text) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe(text)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
+  // Whitespace in a `<pre>` nested in a link shows nothing, so the link keeps its label.
+  it.each([
+    ['<a href="/p" aria-label="L"><pre> </pre></a>', '[L](/p)'],
+    ['<a href="/p" aria-label="L"><pre>&#32;</pre></a>', '[L](/p)'],
+    ['<a href="/p" title="T"><pre> </pre></a>', '[T](/p)'],
+    ['<a href="/p" aria-label="L"><div><pre> </pre></div></a>', '[L](/p)'],
+    ['<pre>a <a href="/c" aria-label="Item"><svg><text> </text></svg></a> Next</pre>', '```\na Item Next\n```'],
+  ])('keeps the label of a link holding a blank pre in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, clean: true })).toBe(expected)
+  })
+
+  it('keeps the label of a link holding a blank pre in html output', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<a href="/p" aria-label="L"><pre> </pre></a>', { engine, format: 'html' }))
+      .toBe('<a href="/p"><pre tabindex="0"><code> </code></pre>L</a>')
+    expect(htmlToMarkdown('<pre>a <a href="/c" aria-label="Item"><svg><text> </text></svg></a> Next</pre>', { engine, format: 'text' }))
+      .toBe('a Item Next')
+  })
+
+  // Text longer than the 64 KiB cut is read in pieces; a last piece that only
+  // decodes to spaces does not make the whole link text blank.
+  it.each([
+    ['plain', (text: string) => `<p><a href="/c" aria-label="Item">${text}</a> next</p>`],
+    ['span', (text: string) => `<p><a href="/c" aria-label="Item"><span>${text}</span></a> next</p>`],
+    ['svg text', (text: string) => `<p><a href="/c" aria-label="Item"><svg><text>${text}</text></svg></a> next</p>`],
+  ])('keeps long link text ending in encoded blanks as link text (%s)', async (_id, wrap) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const words = 'word '.repeat(13100)
+    const html = wrap(`${words}${'&#32;'.repeat(20)}`)
+    const expected = `[${words.trimEnd()}](/c) next`
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, format: 'html' })).not.toContain('Item')
+  })
+
   it('preserves empty-image and empty-link fallback behavior', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<a href="/file" title="File:Photo"><img src="/photo.jpg" alt=""></a>'
@@ -466,6 +623,101 @@ describe.each(engines)('links $name', (engineConfig) => {
     const html = `<a href="https://nuxt.new/s/v3" tabindex="-1" rel="noopener noreferrer" target="_blank" aria-label="Open on StackBlitz" class="focus:outline-none"><!--[--><!--[--><span class="absolute inset-0" aria-hidden="true"></span><!--]--><!--]--></a>`
     const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('[Open on StackBlitz](https://nuxt.new/s/v3)')
+  })
+
+  it('uses the link label in every format when a filter hides all link text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<main><p><a href="/cart" aria-label="Cart"><span hidden>🛒</span></a></p></main>'
+    const plugins = { filter: {} }
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe('[Cart](/cart)')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'text' })).toBe('Cart')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'html' })).toBe('<main><p><a href="/cart">Cart</a></p></main>')
+    expect(htmlToMarkdown(html, { engine })).toBe('[🛒](/cart)')
+  })
+
+  it.each([
+    ['<p><a href="/cart" title="Cart"><span style="display:none">x</span></a></p>', { filter: {} }, '[Cart](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><span class="icon">x</span></a></p>', { filter: { exclude: ['.icon'] } }, '[Cart](/cart)'],
+    ['<div><a href="/cart" aria-label="Cart"><span>x</span></a></div>', { filter: { include: ['a'], processChildren: false } }, '[Cart](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><span class="hidden">x</span></a></p>', { tailwind: true }, '[Cart](/cart)'],
+    // The space after excluded text moves past the link, as trailing link text space does.
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></p>', { filter: {} }, '[Cart](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart">\n  <span hidden>x</span>\n</a></p>', { filter: {} }, '[Cart](/cart)'],
+    ['<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> </a>now</p>', { filter: {} }, 'Go [Cart](/cart) now'],
+    ['<p><strong><a href="/cart" aria-label="Cart"><span hidden>x</span> </a></strong>B</p>', { filter: {} }, '**[Cart](/cart)** B'],
+    ['<p><a href="/cart" aria-label="Cart"><b><span hidden>x</span> </b></a></p>', { filter: {} }, '[Cart](/cart)'],
+    ['<p>Go <a href="/cart" aria-label="Cart"><span hidden>x</span></a> now</p>', { filter: {} }, 'Go [Cart](/cart) now'],
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span>Go</a></p>', { filter: {} }, '[Go](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span> <b>Go</b></a></p>', { filter: {} }, '[ **Go**](/cart)'],
+    ['<p><a href="/cart" aria-label="Cart"><span hidden>x</span><img src="/c.png" alt="C"></a></p>', { filter: {} }, '[![C](/c.png)](/cart)'],
+  ])('uses the link label only when excluded content leaves no link text in %s', async (html, plugins, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
+  })
+
+  it('moves a pending blank before the link label past the link', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    // Clean mode drops the image, so the blank before the label is still pending.
+    const html = '<p>Go<a href="/cart" aria-label="Cart"><span hidden>x</span> <img src="/c.png" alt=""> </a>now</p>'
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} }, clean: true })).toBe('Go [Cart](/cart) now')
+  })
+
+  // A blank after link content the parser leaves out spaces that content like
+  // the blank after hidden text, whether a plain space or a decoded `&#32;`.
+  it.each([
+    ['<p>Go <a href="/cart" aria-label="Cart"><style>.i{}</style>&#32;</a></p>', 'Go [Cart](/cart)'],
+    ['<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>', '[Cart](/cart)'],
+    ['<p><a href="/c" aria-label="Item"><svg></svg> </a>Next</p>', '[Item](/c) Next'],
+    ['<p><a href="/c" aria-label="Item"><svg></svg>&#32;</a>Next</p>', '[Item](/c) Next'],
+    ['<p><a href="/c" aria-label="Item">\n  <svg aria-hidden="true"></svg>\n</a>Next</p>', '[Item](/c) Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><style>.i{}</style> </a>now</p>', 'Go [Item](/c) now'],
+    ['<ul><li><a href="/c" aria-label="Item"><svg></svg> </a>item</li></ul>', '- [Item](/c) item'],
+    ['<p><a href="/c"><svg></svg> </a>Next</p>', '[](/c)Next'],
+  ])('moves the blank after excluded link content past the label in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+  })
+
+  it('uses the link label for an encoded blank after excluded content in every format', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>Go<a href="/cart" aria-label="Cart"><svg></svg>&#32;</a>now</p>'
+    expect(htmlToMarkdown(html, { engine, clean: true })).toBe('Go [Cart](/cart) now')
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe('Go Cartnow')
+    expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe('<p>Go<a href="/cart"> Cart</a>now</p>')
+  })
+
+  // A blank between two children of a link is part of the content the label
+  // replaces; only a blank after the last child moves past the link.
+  it.each([
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><span></span> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> <svg></svg></a>Next</p>', 'Go [Item](/c)Next'],
+    ['<p>Go<a href="/c" aria-label="Item"><svg></svg> <svg></svg> </a>Next</p>', 'Go [Item](/c) Next'],
+    ['<p>Go <a href="/c" aria-label="A"><svg></svg> <!-- c --></a>Next</p>', 'Go [A](/c) Next'],
+  ])('keeps a blank between excluded link content in the label in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, clean: true })).toBe(expected)
+  })
+
+  it('keeps the space after excluded link text in every format', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>See<a href="/x"><span class="icon">arrow</span> <span>docs</span></a></p>'
+    const plugins = { filter: { exclude: ['.icon'] } }
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe('See [ docs](/x)')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'text' })).toBe('See docs')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'html' })).toBe('<p>See<a href="/x"> <span>docs</span></a></p>')
+  })
+
+  it('uses the link label of a heading link in every format', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<h2>Title <a href="#t" aria-label="Permalink"><span hidden>#</span></a></h2><p>body</p>'
+    const plugins = { filter: {} }
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe('## Title [Permalink](#t)\n\nbody')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'text' })).toBe('Title Permalink\n\nbody')
+    expect(htmlToMarkdown(html, { engine, plugins, format: 'html' })).toBe('<h2 id="title-permalink">Title <a href="#t">Permalink</a></h2><p>body</p>')
   })
 
   it('breaking title link', async () => {

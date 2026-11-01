@@ -22,6 +22,7 @@ function createParseState(processor: OutputProcessor, options: OutputOptions): P
     depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins: options.plugins,
+    outputEvent: processor.processEvent,
     tagHandlers: options.tagHandlers,
     tagOverrideHandlers: options.tagOverrideHandlers,
     plainText: options.plainText,
