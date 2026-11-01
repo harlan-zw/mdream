@@ -63,6 +63,11 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     expect(markdown).toBe('> Outer quote\n> > Inner quote')
   })
 
+  it('keeps root text outside a quote after a thematic break', () => {
+    expect(engineConfig.engine.htmlToMarkdown('<hr><blockquote>q</blockquote>tail'))
+      .toBe('---\n\n> q\n\ntail')
+  })
+
   it('handles blockquotes with paragraphs', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<blockquote><p>First paragraph</p><p>Second paragraph</p></blockquote>'
@@ -277,6 +282,7 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
     const html = `<p>prefix</p><ul><li><blockquote>${body}</blockquote><em></em><span> </span>tail</li></ul>`
     const expected = htmlToMarkdown(html, { engine })
     expect(expected.endsWith('\n\n  tail')).toBe(true)
+    expect(expected.match(/streamed quote paragraph/g)).toHaveLength(512)
     for (const width of [1, 31, 8192]) {
       const stream = new ReadableStream<string>({
         start(controller) {

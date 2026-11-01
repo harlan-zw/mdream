@@ -3718,11 +3718,19 @@ fn blockquote_parent_continuation_after_drains_and_inside_capped_code() {
   );
   let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
   assert!(expected.ends_with("\n\n  tail"));
+  assert_eq!(expected.matches("streamed quote paragraph").count(), 512);
   for chunk in [1, 31, 8192] {
-    assert_eq!(
-      stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
-      expected
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut actual = String::new();
+    for part in html.as_bytes().chunks(chunk) {
+      actual.push_str(&processor.process_chunk(std::str::from_utf8(part).unwrap()));
+    }
+    assert!(
+      actual.contains("streamed quote paragraph"),
+      "quote output must drain before finish, chunk={chunk}"
     );
+    actual.push_str(&processor.finish());
+    assert_eq!(actual, expected, "chunk={chunk}");
   }
   for cap in [32, 128, 1024] {
     for html in [
@@ -3735,6 +3743,18 @@ fn blockquote_parent_continuation_after_drains_and_inside_capped_code() {
     ] {
       let options = HtmlToMarkdownOptions::default().with_max_node_bytes(cap);
       let expected = html_to_format_result(&html, options.clone(), OutputFormat::Markdown);
+      let uncapped = html_to_format_result(
+        &html,
+        HtmlToMarkdownOptions::default(),
+        OutputFormat::Markdown,
+      );
+      if html.contains("quote quote") && cap < 384 {
+        assert!(expected.truncated, "long code content must hit cap={cap}");
+        assert!(expected.markdown.len() < uncapped.markdown.len());
+      } else {
+        assert!(!expected.truncated, "short code content must fit cap={cap}");
+        assert_eq!(expected.markdown, uncapped.markdown, "cap={cap}");
+      }
       for width in [1, 31, 8192] {
         let mut processor = MarkdownStreamProcessor::new(options.clone());
         let mut actual = String::new();
