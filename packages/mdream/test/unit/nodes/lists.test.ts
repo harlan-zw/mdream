@@ -272,6 +272,15 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['ul', '\n\n* x', '* x\n\n- b\n\n* x', ''],
     ['ol', '\n\n1) x', '1) x\n\n1. b\n\n1) x', ''],
     ['ul', 'END\n\n', '- aEND\n\n\n\n* bEND'],
+    // CR alone ends a line too.
+    ['ul', 'END\r\r* x', '- aEND\r\r* x\n\n- bEND\r\r* x'],
+    ['ul', 'END\r\n\r\n- x', '- aEND\r\n\r\n- x\n\n* bEND\r\n\r\n- x'],
+    // An indented line continues the item above it; a suffix line keeps the item's marker.
+    ['ul', '\n\n- x\n  continuation', '- a\n\n- x\n  continuation\n\n* b\n\n- x\n  continuation'],
+    ['ul', 'END\n  continuation', '- aEND\n  continuation\n\n* bEND\n  continuation'],
+    // An empty list's output opens its own line.
+    ['ul', '- x', '- x\n\n* b- x', ''],
+    ['ol', '1. x', '1. x\n\n1) b1. x', ''],
   ])('keeps siblings separate after exit-written list markers: %s %j', async (tag, exit, expected, first = '<li>a</li>') => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<${tag}>${first}</${tag}><${tag}><li>b</li></${tag}>`

@@ -958,6 +958,33 @@ function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): bo
 }
 
 /**
+ * List marker character code a list's exit output leaves for the next list:
+ * that of the last line opening with a marker or unindented text. Blank lines,
+ * and indented lines with no marker, which continue the item above them, are
+ * passed over. CR, LF and CRLF all end a line. `undefined` keeps the marker the
+ * list already has: the output shows nothing, or its text stays on the line of
+ * the item it follows (`continuesItem`). After an empty list it opens a line.
+ */
+function exitListMarker(output: string, continuesItem: boolean): number | undefined {
+  let end = output.length
+  while (end > 0 && isAsciiWhitespace(output.charCodeAt(end - 1)))
+    end--
+  if (end === 0)
+    return undefined
+  for (;;) {
+    let start = end
+    while (start > 0 && output.charCodeAt(start - 1) !== 10 && output.charCodeAt(start - 1) !== 13)
+      start--
+    if (start === 0 && continuesItem)
+      return undefined
+    const marker = writtenListMarker(output.slice(start, end))
+    if (marker !== 0 || start === 0 || (start < end && !isAsciiWhitespace(output.charCodeAt(start))))
+      return marker
+    end = start - 1
+  }
+}
+
+/**
  * List marker character code opening the last visible line of `output`: a
  * bullet, or the delimiter of an ordered marker. 0 when that line opens with
  * neither. A marker ending `output` counts, as the item's text is spaced from it.
@@ -2014,12 +2041,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     let marker = state.listMarkers.pop()
     if (exitOutput && marker !== undefined) {
-      let last = exitOutput.length - 1
-      while (last >= 0 && isAsciiWhitespace(exitOutput.charCodeAt(last)))
-        last--
-      // A suffix on the item's own line still belongs to its existing marker.
-      if (last >= 0 && exitOutput.lastIndexOf('\n', last) >= 0) {
-        marker = (marker & LIST_SELECTED_MASK) | writtenListMarker(exitOutput) << LIST_WRITTEN_SHIFT
+      const written = exitListMarker(exitOutput, marker > LIST_SELECTED_MASK)
+      if (written !== undefined) {
+        marker = (marker & LIST_SELECTED_MASK) | written << LIST_WRITTEN_SHIFT
         siblingListMarker = 0
       }
     }

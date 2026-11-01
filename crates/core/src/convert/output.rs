@@ -94,6 +94,30 @@ fn has_visible(bytes: &[u8]) -> bool {
 /// List marker character opening the last visible line of `output`: a bullet,
 /// or the delimiter of an ordered marker. 0 when that line opens with neither.
 /// A marker ending `output` counts, as the item's text is spaced from it.
+/// The list marker a list's exit output leaves for the next list: that of the
+/// last line opening with a marker or unindented text. Blank lines, and
+/// indented lines with no marker, which continue the item above them, are
+/// passed over. CR, LF and CRLF all end a line. `None` keeps the marker the list
+/// already has: the output shows nothing, or its text stays on the line of the
+/// item it follows (`continues_item`). After an empty list it opens a line.
+fn exit_list_marker(output: &[u8], continues_item: bool) -> Option<u8> {
+  let mut end = output.iter().rposition(|&b| !is_whitespace(b))? + 1;
+  loop {
+    let start = output[..end]
+      .iter()
+      .rposition(|&b| b == b'\n' || b == b'\r')
+      .map_or(0, |i| i + 1);
+    if start == 0 && continues_item {
+      return None;
+    }
+    let marker = written_list_marker(&output[start..end]);
+    if marker != 0 || start == 0 || (start < end && !is_whitespace(output[start])) {
+      return Some(marker);
+    }
+    end = start - 1;
+  }
+}
+
 fn written_list_marker(output: &[u8]) -> u8 {
   let Some(last) = output.iter().rposition(|&b| !is_whitespace(b)) else {
     return 0;
@@ -2615,13 +2639,10 @@ impl ConvertState {
     if has_override
       && matches!(tag_id, Some(TAG_UL | TAG_OL))
       && let Some(exit) = effective
-      && let Some(last) = exit.as_bytes().iter().rposition(|&b| !is_whitespace(b))
-      // A suffix on the item's own line still belongs to its existing marker.
-      && exit.as_bytes()[..last].contains(&b'\n')
+      && let Some(marker) = self.list_markers.last_mut()
+      && let Some(written) = exit_list_marker(exit.as_bytes(), marker.written != 0)
     {
-      if let Some(marker) = self.list_markers.last_mut() {
-        marker.written = written_list_marker(exit.as_bytes());
-      }
+      marker.written = written;
       self.sibling_list_marker = 0;
     }
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {

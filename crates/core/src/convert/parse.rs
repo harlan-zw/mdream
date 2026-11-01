@@ -1480,16 +1480,24 @@ impl ConvertState {
     }
 
     match tag_id {
-      Some(TAG_OL) => {
-        self.ordered_starts.push(
-          tag
-            .attributes
-            .get_bit(ATTR_START)
-            .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
-        );
+      Some(list @ (TAG_UL | TAG_OL)) => {
+        let ordered = list == TAG_OL;
+        if ordered {
+          self.ordered_starts.push(
+            tag
+              .attributes
+              .get_bit(ATTR_START)
+              .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
+          );
+        }
         self.list_item_counts.push(0);
+        // A skipped node writes nothing and takes no part, as its events take
+        // none in the JS engine. Lists are blocks unless an override makes one
+        // inline, and the close takes the same test, so push and pop pair up.
+        if !self.stack[idx].is_inline || self.has_tag_overrides {
+          self.push_list_marker(ordered, skip_node);
+        }
       }
-      Some(TAG_UL) => self.list_item_counts.push(0),
       // An item's position counts only the items before it: a script, template
       // or stray text ahead of it must not renumber it or make it a later item.
       Some(TAG_LI) => {
@@ -1502,14 +1510,6 @@ impl ConvertState {
         }
       }
       _ => {}
-    }
-    // A skipped node writes nothing and takes no part, as its events take none
-    // in the JS engine. Lists are blocks unless an override makes one inline,
-    // and the close takes the same test, so push and pop pair up.
-    if (!self.stack[idx].is_inline || self.has_tag_overrides)
-      && matches!(tag_id, Some(TAG_UL | TAG_OL))
-    {
-      self.push_list_marker(tag_id == Some(TAG_OL), skip_node);
     }
 
     if let Some(p) = parent {
@@ -1792,22 +1792,25 @@ impl ConvertState {
       }
       self.refresh_raw_html_block(id);
       self.update_in_pre_on_close(id);
-      if id == TAG_OL {
-        self.ordered_starts.pop();
-        self.list_item_counts.pop();
-      } else if id == TAG_UL {
-        self.list_item_counts.pop();
-      }
-      if (!node_is_inline || self.has_tag_overrides)
-        && matches!(id, TAG_UL | TAG_OL | TAG_BLOCKQUOTE)
-      {
-        self.pop_list_marker(id);
-      }
-      if id == TAG_LI
-        && let Some(w) = self.list_indent_widths.pop()
-      {
-        let new_len = self.list_indent.len().saturating_sub(w as usize);
-        self.list_indent.truncate(new_len);
+      match id {
+        TAG_UL | TAG_OL | TAG_BLOCKQUOTE => {
+          if id == TAG_OL {
+            self.ordered_starts.pop();
+          }
+          if id != TAG_BLOCKQUOTE {
+            self.list_item_counts.pop();
+          }
+          if !node_is_inline || self.has_tag_overrides {
+            self.pop_list_marker(id);
+          }
+        }
+        TAG_LI => {
+          if let Some(w) = self.list_indent_widths.pop() {
+            let new_len = self.list_indent.len().saturating_sub(w as usize);
+            self.list_indent.truncate(new_len);
+          }
+        }
+        _ => {}
       }
     }
 
