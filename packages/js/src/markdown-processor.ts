@@ -1948,8 +1948,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     state.lastTextNode = textNode
   }
 
-  function flushListTail(): void {
-    trimTrailingSpaces(state.buffer)
+  function flushListTail(preserveMarkerSpace = false): void {
+    if (!preserveMarkerSpace)
+      trimTrailingSpaces(state.buffer)
     state.listTailStart = state.buffer.length
     state.listTailScanFrom = state.listTailStart
     // A hard break has already ended the line; write only the newlines the
@@ -2029,12 +2030,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // Empty lists cannot settle the parent paragraph boundary.
         }
         else if (tagId === TAG_BLOCKQUOTE || tagId === TAG_LI
-          || (tagId! >= TAG_H1 && tagId! <= TAG_H6) || tagId === TAG_PRE || tagId === TAG_TABLE || tagId === TAG_HR) {
+          || (tagId! >= TAG_H1 && tagId! <= TAG_H6) || tagId === TAG_HR) {
           state.listTailPending = false
           state.emptyListMarkerFragment = undefined
         }
         else if (!node.tagHandler?.excludesTextNodes) {
-          flushListTail()
+          flushListTail((tagId === TAG_PRE || tagId === TAG_TABLE) && state.emptyListMarkerFragment !== undefined)
         }
       }
       else if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
@@ -2865,6 +2866,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     return heldFragment > state.buffer.length ? Infinity : heldFragment
   }
 
+  let settledWhitespaceFragment = -1
+  let settledWhitespaceValue: string | undefined
+  function hasUnsettledListContent(from: number): boolean {
+    const buffer = state.buffer
+    // Strings are immutable. An unchanged last fragment needs no character
+    // scan; appends and replacements still go through the full content check.
+    if (from === settledWhitespaceFragment && buffer[from] === settledWhitespaceValue)
+      from++
+    const visible = hasNonWhitespaceFrom(buffer, from)
+    if (!visible && from < buffer.length) {
+      settledWhitespaceFragment = buffer.length - 1
+      settledWhitespaceValue = buffer[settledWhitespaceFragment]
+    }
+    return visible
+  }
+
   const processor = {
     processEvent,
     getMarkdown,
@@ -2919,18 +2936,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (unresolvedCaptionFragment === -1 && !state.codeFence) {
         const marker = state.emptyListMarkerFragment
         if (marker !== undefined) {
-          if (marker >= state.buffer.length || hasNonWhitespaceFrom(state.buffer, Math.max(marker + 1, state.emptyListMarkerScanFrom ?? marker + 1)))
+          if (marker >= state.buffer.length || hasUnsettledListContent(Math.max(marker + 1, state.emptyListMarkerScanFrom ?? marker + 1)))
             state.emptyListMarkerFragment = undefined
           state.emptyListMarkerScanFrom = Math.max(marker + 1, state.buffer.length - 1)
         }
         const start = state.listTailStart
         if (start !== undefined) {
-          if (start > state.buffer.length || hasNonWhitespaceFrom(state.buffer, Math.max(start, state.listTailScanFrom ?? start)))
+          if (start > state.buffer.length || hasUnsettledListContent(Math.max(start, state.listTailScanFrom ?? start)))
             state.listTailStart = undefined
           state.listTailScanFrom = Math.max(start, state.buffer.length - 1)
         }
       }
       resolveItemMarker(state, false, unresolvedCaptionFragment)
+      if (state.emptyListMarkerFragment === undefined && state.listTailStart === undefined) {
+        settledWhitespaceFragment = -1
+        settledWhitespaceValue = undefined
+      }
     },
     markYielded() { hasYieldedContent = true },
   }) }

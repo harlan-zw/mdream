@@ -7755,3 +7755,19 @@ fn empty_nested_list_review_regressions() {
     );
   }
 }
+
+#[test]
+fn empty_blocks_preserve_nested_list_tail() {
+  for block in ["<table></table>", "<pre></pre>"] {
+    let html = format!("<ul><li>A<ul><li>inner</li></ul>{block}parent</li></ul>");
+    let expected = "- A\n  - inner\n\n  parent";
+    assert_eq!(convert(&html), expected, "{block}");
+    for split in 0..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut actual = stream.process_chunk(&html[..split]);
+      actual.push_str(&stream.process_chunk(&html[split..]));
+      actual.push_str(&stream.finish());
+      assert_eq!(actual, expected, "{block} split={split}");
+    }
+  }
+}

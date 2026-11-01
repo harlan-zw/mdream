@@ -579,3 +579,29 @@ describe('recorded parent markers', () => {
     }
   })
 })
+
+it('does not rescan an unchanged whitespace fragment on every settlement', () => {
+  let settle = () => {}
+  const processor = createMarkdownProcessor({}, (context) => {
+    settle = context.settleItemMarker
+    return createMarkdownDrain(context, false)
+  })
+  const state = processor.state
+  state.buffer.push('- ', ' '.repeat(8192))
+  state.emptyListMarkerFragment = 0
+  state.listTailStart = 1
+  settle()
+  const reads = vi.spyOn(String.prototype, 'charCodeAt')
+  try {
+    for (let index = 0; index < 32; index++)
+      settle()
+    expect(reads.mock.calls.length).toBeLessThan(128)
+  }
+  finally {
+    reads.mockRestore()
+  }
+  state.buffer[1] += 'x'
+  settle()
+  expect(state.emptyListMarkerFragment).toBeUndefined()
+  expect(state.listTailStart).toBeUndefined()
+})
