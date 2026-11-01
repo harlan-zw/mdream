@@ -963,6 +963,22 @@ function isBreakWhitespace(code: number): boolean {
   return code === 32 || code === 9 || code === 12 || code === 13
 }
 
+/** A plugin break takes preceding whitespace only before its first content. */
+function startsWithBreak(fragments: string[] | undefined): boolean {
+  if (!fragments)
+    return false
+  for (const fragment of fragments) {
+    for (let index = 0; index < fragment.length; index++) {
+      const code = fragment.charCodeAt(index)
+      if (code === 10)
+        return true
+      if (!isBreakWhitespace(code))
+        return false
+    }
+  }
+  return false
+}
+
 /** HTML's ASCII whitespace, as in Rust: U+000B is content. */
 export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13 && code !== 11)
@@ -2538,7 +2554,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // Don't trim before block elements that need their own spacing
       if (lastFragment && state.lastTextNode?.containsWhitespace && (!!node.parent || isInlineElement) && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
         const breakConsumesSourceWhitespace = eventType === NodeEventEnter && tagId === TAG_BR
-          && !state.depthMap[TAG_PRE] && !handler?.literalEnter && output?.at(-1)?.endsWith('\n')
+          && !state.depthMap[TAG_PRE] && !handler?.literalEnter && startsWithBreak(output)
         // A plugin break consumes source whitespace, while closed pre content keeps its newlines.
         let parent = breakConsumesSourceWhitespace ? state.lastTextNode.parent : node.parent
         let parentInPre = false
@@ -2600,7 +2616,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An overridden <br> skips the break fast path, but its line break still
     // subsumes the whitespace before it.
     if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
-      && !handler?.literalEnter && output?.at(-1)?.endsWith('\n') && isBreakWhitespace(lastOutputChar(buff))) {
+      && !handler?.literalEnter && isBreakWhitespace(lastOutputChar(buff)) && startsWithBreak(output)) {
       trimBeforeBreak(buff)
     }
 

@@ -393,6 +393,17 @@ fn vertical_tab_does_not_collapse_into_a_pending_space() {
 }
 
 #[test]
+fn mixed_vertical_tab_and_space_keeps_emphasis() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p><em>T&#11; </em>x</p>", "*T* x"),
+    ("<p><em>a &#11;</em>b</p>", "*a* b"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
 fn heading_closing_run_is_read_at_the_real_end() {
   // An emptied inline element can leave spacing after the run, and the run can
   // be split around one; the escape still sees the run the renderer would.
