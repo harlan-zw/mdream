@@ -545,8 +545,9 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_BLOCKQUOTE]: {
     enter: ({ state }) => {
       // The processor prefixes the completed subtree once every structural
-      // newline is known. Preserve the list marker's trailing space here.
-      const output = (state.depthMap?.[TAG_LI] || 0) > 0 ? '\n' : undefined
+      // newline is known. Preserve the list marker's trailing space here. A
+      // table cell renders its list as raw HTML on the row's own line.
+      const output = (state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state) ? '\n' : undefined
       return { _tag: 'BlockquoteEnter', output }
     },
     exit: () => ({ _tag: 'BlockquoteExit' }),

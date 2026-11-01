@@ -600,6 +600,12 @@ impl ConvertState {
     };
     let max_run =
       Self::max_line_leading_run(&self.buffer[fence.content_start..], marker, &fence.indent);
+    // The opener reserves the first content line's list indent. With no body,
+    // remove that reservation so the empty line stays blank, as in JS.
+    if self.buffer.len() == fence.content_start && !fence.indent.is_empty() {
+      debug_assert!(self.buffer.ends_with(&fence.indent));
+      self.truncate_buffer(fence.content_start - fence.indent.len());
+    }
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;
     if self.replace_code_span_content(
@@ -750,6 +756,11 @@ impl ConvertState {
       }
     };
     for span in &mut self.code_spans {
+      // A span opened before the quote holds the prefix written at its content
+      // start, as in JS, so `<code><blockquote>` keeps its opener in place.
+      if span.output_start < frame.content_start && span.content_start == frame.content_start {
+        continue;
+      }
       for offset in [&mut span.output_start, &mut span.content_start] {
         *offset = remap(*offset);
       }
@@ -1284,6 +1295,7 @@ impl ConvertState {
       }
       self.last_content_cache_len = 0;
       self.reset_empty_tentative_caption_frames();
+      self.restore_quote_parent_boundary();
       self.last_node_is_inline = is_inline;
       return true;
     }
@@ -1577,6 +1589,38 @@ impl ConvertState {
       });
     }
 
+    // Empty list containers emit nothing. Only an actual item replaces the
+    // quote's pending continuation with list structure.
+    if matches!(
+      self.caption_boundary,
+      CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+    ) {
+      if tag_id == Some(TAG_LI) {
+        self.restore_quote_parent_boundary();
+        self.caption_boundary = CaptionBoundary::None;
+      } else if !is_inline && self.open_markers.is_empty() {
+        // Once its wrappers closed, a block settles the tentative spacing. One
+        // that survived took the separator, so the block spaces itself; if all
+        // dropped, the boundary is pending again and writes the quote's break.
+        self.restore_quote_parent_boundary();
+        if matches!(self.caption_boundary, CaptionBoundary::QuoteTentative(_)) {
+          self.caption_boundary = CaptionBoundary::None;
+        } else if tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal {
+          output = None;
+        }
+      } else if tag_id == Some(TAG_BR) && self.caption_boundary != CaptionBoundary::QuoteParent {
+        // The break's whitespace would pass for the spacing at the buffer tail.
+        self.caption_boundary = CaptionBoundary::QuoteTentative(0);
+      }
+      // Paragraph, HR and fence fragments can already carry their block separator.
+      if self.caption_boundary == CaptionBoundary::QuoteParent
+        && output
+          .as_deref()
+          .is_some_and(|fragment| fragment.starts_with("\n\n"))
+      {
+        self.caption_boundary = CaptionBoundary::ConsumeSpace;
+      }
+    }
     let caption_active =
       self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
     let visible_output = caption_active
@@ -1587,11 +1631,22 @@ impl ConvertState {
       !enter_is_literal && visible_output && tag_id.and_then(Self::inline_marker_type).is_some();
     let tentative_caption_output =
       default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
-    if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
+    let structural_quote = tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal;
+    let quote_parent = self.caption_boundary == CaptionBoundary::QuoteParent;
+    // A sibling quote keeps the separator after a closed quote's content. An
+    // empty quote left the item's opening line, where a blank would end it.
+    let quote_sibling_separator =
+      quote_parent && structural_quote && self.last_output_byte().is_some_and(|byte| byte != b'\n');
+    if visible_output || structural_quote {
       self.expand_deferred_caption_breaks();
     }
-    let consumes_caption_boundary = if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
-      self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)))
+    let consumes_caption_boundary = if visible_output || structural_quote {
+      // An anchor without an href writes nothing, so it cannot carry the boundary.
+      if visible_output && is_inline && self.quote_boundary_pending() {
+        self.prepare_inline_quote_boundary(enter_is_literal)
+      } else {
+        self.prepare_caption_boundary(tag_id != Some(TAG_LI) && !structural_quote)
+      }
     } else {
       false
     };
@@ -1780,6 +1835,7 @@ impl ConvertState {
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
       if !self.blockquotes.is_empty()
+        && !quote_sibling_separator
         && self.buffer.ends_with("\n\n")
         && (!raw_html_quote_boundary || self.buffer.ends_with("\n\n\n"))
       {
@@ -1795,7 +1851,12 @@ impl ConvertState {
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
-        list_indent: self.list_indent.clone(),
+        // A quote in a table cell starts mid-row, past any list indent.
+        list_indent: if self.in_table_cell() {
+          String::new()
+        } else {
+          self.list_indent.clone()
+        },
       });
     }
 
@@ -2006,6 +2067,7 @@ impl ConvertState {
       }
     }
     self.reset_empty_tentative_caption_frames();
+    self.restore_quote_parent_boundary();
     self.link_caption_break_snapshot_active = false;
     self.link_caption_break_snapshot.clear();
     self.end_link();
@@ -2164,6 +2226,13 @@ impl ConvertState {
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
+      if matches!(
+        self.caption_boundary,
+        CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+      ) {
+        self.restore_quote_parent_boundary();
+        self.caption_boundary = CaptionBoundary::None;
+      }
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
     // Only the <pre> owning the open fence may close it; a nested one closing
@@ -2298,8 +2367,11 @@ impl ConvertState {
     if !caption_exit {
       if visible_output {
         self.expand_deferred_caption_breaks();
-        consumes_caption_boundary =
-          self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)));
+        consumes_caption_boundary = if is_inline && self.quote_boundary_pending() {
+          self.prepare_inline_quote_boundary(has_override)
+        } else {
+          self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)))
+        };
         self.materialize_caption_frames(if default_inline_marker {
           CaptionMaterialization::Tentative
         } else {
@@ -2370,10 +2442,12 @@ impl ConvertState {
       self.list_rule_pending = true;
     }
 
+    let closes_quote =
+      !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty();
+    if closes_quote {
+      self.finalize_blockquote();
+    }
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) {
-      if !self.blockquotes.is_empty() {
-        self.finalize_blockquote();
-      }
       // The quote's close separates a raw HTML region that ended inside it,
       // including a literal-enter quote, which pushed no frame.
       self.pending_raw_html_boundary = false;
@@ -2541,11 +2615,28 @@ impl ConvertState {
 
     let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
-    if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
-      self.caption_boundary = CaptionBoundary::None;
+    if consumes_caption_boundary {
+      if !is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR)) {
+        self.caption_boundary = CaptionBoundary::None;
+      } else if !caption_exit && self.quote_boundary_pending() {
+        self.close_quote_wrapper();
+      }
     }
     if caption_exit_spacing > 0 {
       self.caption_boundary = CaptionBoundary::Pending(caption_exit_spacing);
+    }
+    // Reuse the deferred block boundary: it already ignores invisible output
+    // and supplies list continuation indentation, without taxing plain text.
+    if closes_quote
+      && !has_override
+      && self.depth_map[TAG_LI as usize] > 0
+      && self.depth_map[TAG_PRE as usize] == 0
+      && !self.in_raw_html_block()
+      && !self.in_table_cell()
+    {
+      self.caption_boundary = CaptionBoundary::QuoteParent;
+      // An HR inside this quote cannot own the parent's deferred separator.
+      self.list_rule_pending = false;
     }
     self.settle_empty_text_pending(output_start, || false);
     // Reset <pre> fence deferral once the element closes (issue #97).
@@ -2857,7 +2948,10 @@ impl ConvertState {
           .caption_frames
           .iter()
           .any(|frame| !matches!(frame.state, CaptionState::Committed));
-      if owns_leading_space && text.as_bytes().first() == Some(&b' ') {
+      if owns_leading_space
+        && self.caption_boundary != CaptionBoundary::QuoteTentative(QUOTE_CLOSED)
+        && text.as_bytes().first() == Some(&b' ')
+      {
         text = &text[1..];
         if text.is_empty() {
           return;
@@ -3980,11 +4074,71 @@ impl ConvertState {
     }
   }
 
+  fn quote_boundary_pending(&self) -> bool {
+    matches!(
+      self.caption_boundary,
+      CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+    )
+  }
+
+  // Default inline output takes the separator without settling it, so the next
+  // list or block transition still spaces itself. Literal output settles it.
+  #[cold]
+  fn prepare_inline_quote_boundary(&mut self, literal: bool) -> bool {
+    let separator_start = self.buffer.len();
+    let consumes_boundary = self.prepare_caption_boundary(true);
+    if literal {
+      self.caption_boundary = CaptionBoundary::None;
+    } else if matches!(
+      self.caption_boundary,
+      CaptionBoundary::ConsumeSpace | CaptionBoundary::QuoteTentative(QUOTE_CLOSED)
+    ) {
+      self.caption_boundary = CaptionBoundary::QuoteTentative(self.buffer.len() - separator_start);
+    }
+    consumes_boundary
+  }
+
+  // Text after a closing delimiter continues its line, so its first space
+  // separates words. It is not the block's first text, which the parser trims.
+  #[cold]
+  fn close_quote_wrapper(&mut self) {
+    self.caption_boundary = CaptionBoundary::QuoteTentative(QUOTE_CLOSED);
+    if let Some(block) = self.first_block_parent_index {
+      self.stack[block].child_text_node_index += 1;
+    }
+  }
+
+  // Marker streaming holds already retain the preceding whitespace. Only a
+  // fully dropped wrapper exposes this tentative separator at the buffer tail.
+  #[cold]
+  fn restore_quote_parent_boundary(&mut self) {
+    let CaptionBoundary::QuoteTentative(length) = self.caption_boundary else {
+      return;
+    };
+    if length > 0
+      && length <= self.buffer.len()
+      && self.buffer.as_bytes()[self.buffer.len() - length..]
+        .iter()
+        .all(|&byte| is_whitespace(byte))
+    {
+      self.truncate_buffer(self.buffer.len() - length);
+      self.last_content_cache_len = 0;
+      self.last_text_node_contains_whitespace = false;
+      self.has_last_text_node = false;
+      self.caption_boundary = CaptionBoundary::QuoteParent;
+    }
+  }
+
   #[inline]
   fn prepare_caption_boundary(&mut self, include_list_indent: bool) -> bool {
     let consumes_boundary = self.caption_boundary != CaptionBoundary::None;
-    if let CaptionBoundary::Pending(configured_new_lines) = self.caption_boundary {
-      self.write_caption_boundary(configured_new_lines, include_list_indent);
+    let spacing = match self.caption_boundary {
+      CaptionBoundary::Pending(spacing) => Some(spacing),
+      CaptionBoundary::QuoteParent => Some(2),
+      _ => None,
+    };
+    if let Some(spacing) = spacing {
+      self.write_caption_boundary(spacing, include_list_indent);
       self.caption_boundary = CaptionBoundary::ConsumeSpace;
     }
     consumes_boundary
@@ -4667,9 +4821,14 @@ impl ConvertState {
       }
       TAG_BLOCKQUOTE => {
         // The completed subtree receives quote prefixes once every structural
-        // newline is known. Preserve the list marker's trailing space here.
+        // newline is known. Preserve the list marker's trailing space here. A
+        // table cell renders its list as raw HTML on the row's own line.
         (self.depth_map[TAG_LI as usize] > 0
-          && !matches!(self.caption_boundary, CaptionBoundary::Pending(_)))
+          && !self.in_table_cell()
+          && !matches!(
+            self.caption_boundary,
+            CaptionBoundary::Pending(_) | CaptionBoundary::QuoteParent
+          ))
         .then_some(Cow::Borrowed("\n"))
       }
       TAG_CODE => {
@@ -4730,12 +4889,14 @@ impl ConvertState {
           // separated with a space so CommonMark parses them as two
           // code spans rather than merging into one (` `a``b` ` →
           // single span with literal content ``a``b``).
-          if self.last_output_byte().is_some_and(|last_char| {
-            !matches!(
-              last_char,
-              b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
-            )
-          }) {
+          if self.caption_boundary != CaptionBoundary::QuoteParent
+            && self.last_output_byte().is_some_and(|last_char| {
+              !matches!(
+                last_char,
+                b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
+              )
+            })
+          {
             Some(Cow::Borrowed(" `"))
           } else {
             Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))

@@ -59,7 +59,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -1338,16 +1338,20 @@ function commitGfmAction(
   lifecycle: GfmLifecycleState,
   outputStart: number,
   owner: ElementNode,
-  preserveSeparator = false,
+  keepsQuoteSeparator: boolean,
+  rawHtmlQuoteBoundary = false,
 ): void {
   switch (action._tag) {
     case 'BlockquoteEnter': {
-      if (state.blockquotes.length > 0 && (!preserveSeparator || newlineRunBefore(state.buffer, state.buffer.length) > 2))
+      if (state.blockquotes.length > 0 && !keepsQuoteSeparator
+        && (!rawHtmlQuoteBoundary || newlineRunBefore(state.buffer, state.buffer.length) > 2)) {
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
+      }
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
         fragment: state.buffer.length,
-        listIndent: state.listIndent,
+        // A quote in a table cell starts mid-row, past any list indent.
+        listIndent: isInsideTableCell(state) ? '' : state.listIndent,
         // Snapshot the pre-quote context now: streaming can flush these
         // characters before the quote's exit needs them. When the buffer is
         // empty the last written content stands in for compacted output.
@@ -1449,8 +1453,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let openMarkerCount = 0
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
-  // 1 needs a boundary; 2 emitted one and still owns the next source space.
+  // 1 needs caption spacing; 2 owns the next source space after a boundary;
+  // 3 needs quote-parent spacing; 4 wrote tentative spacing before inline
+  // output. Empty markers retract that spacing before the next list transition.
+  // 5 is 4 past a closing delimiter, where the next source space separates words.
   let captionBoundary = 0
+  let quoteTentativeSpacing: string | undefined
   let captionBoundarySpacing = 0
   let captionBreakRun = 0
   const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
@@ -1532,7 +1540,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     const lastIndex = beforeFragment - 1
     const last = state.buffer[lastIndex]
-    if (prefix.charCodeAt(0) === 10 && last?.endsWith(' ')) {
+    if (captionBoundary !== 3 && captionBoundary !== 4
+      && prefix.charCodeAt(0) === 10 && last?.endsWith(' ')) {
       const trimmed = last.slice(0, -1)
       state.outputPositions?.replace(lastIndex, lastIndex + 1, [trimmed])
       state.buffer[lastIndex] = trimmed
@@ -1553,9 +1562,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     return true
   }
 
+  function restoreQuoteParentBoundary(): void {
+    if (captionBoundary === 4 && quoteTentativeSpacing
+      && state.buffer.at(-1) === quoteTentativeSpacing) {
+      const index = state.buffer.length - 1
+      state.outputPositions?.replace(index, index + 1, [])
+      state.buffer.pop()
+      state.lastContentCache = state.buffer.at(-1)
+      state.lastTextNode = undefined
+      captionBoundary = 3
+      quoteTentativeSpacing = undefined
+    }
+  }
+
   function prepareCaptionOutput(explicitTop: boolean, includeBoundaryListIndent = true): boolean {
     let changed = false
-    if (captionBoundary === 1)
+    if (captionBoundary === 1 || captionBoundary === 3)
       changed = appendCaptionSpacing(captionBoundarySpacing, includeBoundaryListIndent)
 
     const frames = captionFrames
@@ -1625,7 +1647,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   function consumeCaptionTransition(isInlineElement: boolean, tagId: number): void {
-    captionBoundary = isInlineElement && tagId !== TAG_IMG && tagId !== TAG_BR ? 2 : 0
+    if (!isInlineElement || tagId === TAG_IMG || tagId === TAG_BR) {
+      captionBoundary = 0
+    }
+    // Inline output takes a quote's separator without settling it, so the next
+    // list or block transition still spaces itself.
+    else if (captionBoundary === 3) {
+      captionBoundary = 4
+      quoteTentativeSpacing = undefined
+    }
+    else if (captionBoundary < 4) {
+      captionBoundary = 2
+    }
   }
 
   function anchorPendingCaptions(fragment: number): void {
@@ -1696,8 +1729,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.buffer.length = anchor
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
+      restoreQuoteParentBoundary()
     }
-    else if (captionBreakRun !== 0 && captionFrameCount === 0) {
+    else if (captionBreakRun !== 0 && captionFrameCount === 0 && captionBoundary < 3) {
       captionBoundary = 2
     }
   }
@@ -1766,7 +1800,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const ownsCaptionSpace = captionNeedsPreparation()
       if (ownsCaptionSpace) {
-        if (textNode.value.charCodeAt(0) === 32)
+        if (captionBoundary !== 5 && textNode.value.charCodeAt(0) === 32)
           textNode.value = textNode.value.slice(1)
         if (!hasNonWhitespace(textNode.value))
           return
@@ -1979,6 +2013,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
+    if (captionBoundary >= 3 && tagId === TAG_LI) {
+      restoreQuoteParentBoundary()
+      captionBoundary = 0
+    }
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
     if (eventType === NodeEventEnter && state.depthMap[TAG_LI] && !insideRawHtmlRegion
@@ -2008,6 +2046,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       let breakOutput: string | undefined = renderBreak(element, state)
 
       if (captionBoundary !== 0 || captionFrameCount !== 0) {
+        // The break's whitespace would pass for the spacing at the buffer tail.
+        if (captionBoundary === 5)
+          captionBoundary = 4
         const pendingCaption = captionFrameCount !== 0
           && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
         if (!inPre
@@ -2107,6 +2148,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const eventFn = eventType === NodeEventEnter ? 'enter' : 'exit'
     // An unknown tag with no handler is inline, as in the Rust engine.
     const isInlineElement = handler ? handler.isInline === true : tagId === -1
+    let closesQuote = false
+    let closesQuoteWrapper = false
+    let keepsQuoteSeparator = false
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
     const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
@@ -2133,6 +2177,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastContentCache = buff.at(-1)
           state.lastTextNode = undefined
           openLinkFragment = -1
+          restoreQuoteParentBoundary()
           return
         }
       }
@@ -2185,6 +2230,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         else {
           gfmAction = res
+          if (res._tag === 'BlockquoteExit')
+            closesQuote = state.blockquotes.length > 0
+          if (res._tag === 'CodeSpanEnter' && captionBoundary === 3 && res.output === ' `')
+            res.output = MARKDOWN_INLINE_CODE
           handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
         }
         if (handlerOutput)
@@ -2224,13 +2273,35 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const captionEvent = tagId === TAG_FIGCAPTION
     let captionTransition = false
     if (captionEvent || captionBoundary !== 0 || captionFrameCount !== 0) {
+      // An enter fragment that owns its block separator fulfills this boundary.
+      if (captionBoundary === 3 && eventType === NodeEventEnter && output?.[0]?.startsWith('\n\n'))
+        captionBoundary = 2
+      // Once its wrappers closed, a block settles the tentative spacing and
+      // spaces itself.
+      if (captionBoundary >= 4 && eventType === NodeEventEnter && !isInlineElement && !openMarkerCount)
+        captionBoundary = 0
+      // A link close stays on the quote's last line, as in the Rust engine. The
+      // boundary keeps waiting for the content after the link.
+      const holdsQuoteBoundary = captionBoundary === 3 && tagId === TAG_A && eventType === NodeEventExit
+        && handlerOutput !== undefined && !handler?.literalExit && !insideRawHtmlRegion
+      if (holdsQuoteBoundary)
+        captionBoundary = 0
       const captionEnter = captionEvent && eventType === NodeEventEnter && !state.depthMap[TAG_PRE]
       const captionExit = captionEvent && eventType === NodeEventExit && !state.depthMap[TAG_PRE]
       if (captionEnter)
         pushCaptionFrame(element, handler)
 
       let dropBlockquoteOutput = false
-      if (captionBoundary === 1 && eventType === NodeEventEnter && tagId === TAG_BLOCKQUOTE) {
+      if ((captionBoundary === 1 || captionBoundary === 3)
+        && eventType === NodeEventEnter && gfmAction?._tag === 'BlockquoteEnter') {
+        // A sibling quote keeps the separator after a closed quote's content. An
+        // empty quote left the item's opening line, where a blank would end it.
+        if (captionBoundary === 3) {
+          let last = lastOutputChar(state.buffer)
+          if (last === -1 && state.lastContentCache)
+            last = state.lastContentCache.charCodeAt(state.lastContentCache.length - 1)
+          keepsQuoteSeparator = last !== -1 && last !== 10
+        }
         captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, false) || captionBufferChanged
         captionTransition = true
         captionBoundary = 0
@@ -2241,13 +2312,24 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const literalOutput = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
       let meaningfulOutput = !dropBlockquoteOutput && output?.some(hasNonWhitespace) === true
+      closesQuoteWrapper = meaningfulOutput && eventType === NodeEventExit && isInlineElement && !captionExit
+        && captionBoundary >= 3 && tagId !== TAG_A && !handler?.literalExit
+      // Past a new opener the next source space belongs to its wrapper again.
+      if (captionBoundary === 5 && meaningfulOutput && eventType === NodeEventEnter) {
+        captionBoundary = 4
+        quoteTentativeSpacing = undefined
+      }
       if (meaningfulOutput && handlerOutput !== undefined) {
         const markerType = INLINE_MARKER_TYPE[tagId]!
         if ((markerType || (tagId === TAG_A && eventType === NodeEventEnter)) && !literalOutput) {
-          if (captionBoundary === 1) {
-            captionBufferChanged = appendCaptionSpacing(captionBoundarySpacing, true) || captionBufferChanged
+          if (captionBoundary === 1 || captionBoundary === 3) {
+            const quoteBoundary = captionBoundary === 3
+            const appended = appendCaptionSpacing(captionBoundarySpacing, true)
+            captionBufferChanged = appended || captionBufferChanged
             captionTransition = true
-            captionBoundary = 2
+            captionBoundary = quoteBoundary ? 4 : 2
+            if (quoteBoundary)
+              quoteTentativeSpacing = appended ? state.buffer.at(-1) : undefined
           }
           if (eventType === NodeEventEnter) {
             // Inside an opened caption the marker follows its text and takes
@@ -2291,6 +2373,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
       if (meaningfulOutput)
         commitCaptionFrames()
+      if (holdsQuoteBoundary)
+        captionBoundary = 3
     }
 
     // A hard break already supplies the item boundary. Its continuation
@@ -2341,10 +2425,20 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (idx >= 0) {
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+          restoreQuoteParentBoundary()
           return
         }
         openMarkerCount = 0
       }
+    }
+
+    // Text after a closing delimiter continues its line, so its first space
+    // separates words. It is not the block's first text, which the parser trims.
+    if (closesQuoteWrapper) {
+      captionBoundary = 5
+      quoteTentativeSpacing = undefined
+      const block = traverseUpToFirstBlockNode(element.parent as ElementNode).at(-1)!
+      block.childTextNodeIndex = (block.childTextNodeIndex || 0) + 1
     }
 
     // A <br> can introduce one blank line, but never needs 3+ consecutive
@@ -2444,7 +2538,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           }
         }
         if (gfmAction)
-          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
+          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element, keepsQuoteSeparator)
         updateListIndent(state, element, eventType)
         return
       }
@@ -2570,7 +2664,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (gfmAction)
-      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, rawHtmlQuoteBoundary)
+      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, keepsQuoteSeparator, rawHtmlQuoteBoundary)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
@@ -2620,6 +2714,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       openLinkFragment = -1
     }
 
+    // The existing deferred block boundary ignores invisible output and adds
+    // the parent's list indentation only when a continuation actually arrives.
+    if (closesQuote && state.depthMap[TAG_LI]
+      && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion && !isInsideTableCell(state)) {
+      captionBoundary = 3
+      captionBoundarySpacing = 2
+      state.listRulePending = undefined
+    }
     updateListIndent(state, element, eventType)
 
     if (!insideRawHtmlRegion && inRawHtmlRegion) {
