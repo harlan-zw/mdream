@@ -1519,13 +1519,29 @@ impl ConvertState {
       self.block_parent_indices.push(idx);
     }
 
-    if tag_id == Some(TAG_OL) {
-      self.ordered_starts.push(
-        tag
-          .attributes
-          .get_bit(ATTR_START)
-          .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
-      );
+    match tag_id {
+      Some(TAG_OL) => {
+        self.ordered_starts.push(
+          tag
+            .attributes
+            .get_bit(ATTR_START)
+            .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
+        );
+        self.list_item_counts.push(0);
+      }
+      Some(TAG_UL) => self.list_item_counts.push(0),
+      // An item's position counts only the items before it: a script, template
+      // or stray text ahead of it must not renumber it or make it a later item.
+      Some(TAG_LI) => {
+        if let Some(p) = parent
+          && matches!(self.stack[p].tag_id, Some(TAG_OL | TAG_UL))
+          && let Some(count) = self.list_item_counts.last_mut()
+        {
+          self.stack[idx].index = *count;
+          *count += 1;
+        }
+      }
+      _ => {}
     }
 
     if let Some(p) = parent {
@@ -1769,6 +1785,9 @@ impl ConvertState {
           self.update_in_pre_on_close(id);
           if id == TAG_OL {
             self.ordered_starts.pop();
+            self.list_item_counts.pop();
+          } else if id == TAG_UL {
+            self.list_item_counts.pop();
           }
           if id == TAG_LI
             && let Some(w) = self.list_indent_widths.pop()
@@ -1809,6 +1828,9 @@ impl ConvertState {
       self.update_in_pre_on_close(id);
       if id == TAG_OL {
         self.ordered_starts.pop();
+        self.list_item_counts.pop();
+      } else if id == TAG_UL {
+        self.list_item_counts.pop();
       }
       if id == TAG_LI
         && let Some(w) = self.list_indent_widths.pop()

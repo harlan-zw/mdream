@@ -1,5 +1,5 @@
-import type { ElementNode, Node, TextNode } from './types'
-import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_BLOCKQUOTE, TAG_H1, TAG_H6, TAG_LI, TAG_SPAN, TAG_TD, TAG_TH } from './const'
+import type { ElementNode, MdreamRuntimeState, Node, TextNode } from './types'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_ABBR, TAG_BDO, TAG_BLOCKQUOTE, TAG_FIGCAPTION, TAG_H1, TAG_H6, TAG_INS, TAG_KBD, TAG_LI, TAG_S, TAG_SMALL, TAG_SPAN, TAG_STRIKE, TAG_STRONG, TAG_TD, TAG_TH, TAG_U } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
@@ -264,6 +264,50 @@ export function getLanguageFromClass(className: string | undefined): string {
   return ''
 }
 
+// One `data-*` language token: HTML whitespace is trimmed; an interior space or
+// a byte unsafe in a fence info string (see `isUnsafeFenceInfoCode`) rejects it.
+// eslint-disable-next-line no-control-regex
+const DATA_LANGUAGE_RE = /^[\t\n\f\r ]*([^\0-\x20"&'<>`~\x7F]+)[\t\n\f\r ]*$/
+
+function getLanguageFromDataAttribute(value: string | undefined): string {
+  return value ? DATA_LANGUAGE_RE.exec(value)?.[1] ?? '' : ''
+}
+
+/** Resolve language metadata in the order used for a `<code>` or `<pre>`. */
+export function getLanguageFromAttributes(attributes: ElementNode['attributes'] | undefined): string {
+  return getLanguageFromClass(attributes?.class)
+    || getLanguageFromDataAttribute(attributes?.['data-language'])
+    || getLanguageFromDataAttribute(attributes?.['data-lang'])
+}
+
+/**
+ * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
+ * Used to decide if a <pre>'s content warrants opening a fenced code block.
+ */
+export function hasNonWhitespace(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c !== 32 && c !== 9 && c !== 10 && c !== 12 && c !== 13) {
+      return true
+    }
+  }
+  return false
+}
+
+// Inline tags whose Markdown delimiters are literal text inside a `<pre>`, so
+// only their content is emitted there. `<code>` and `<br>` are absent: both
+// already have `<pre>`-aware handlers.
+export function suppressesFormattingInPre(tagId: number): boolean {
+  return tagId === TAG_A
+    || tagId === TAG_KBD
+    || tagId === TAG_S
+    || tagId === TAG_STRIKE
+    || tagId === TAG_FIGCAPTION
+    || (tagId >= TAG_STRONG && tagId <= TAG_INS)
+    || (tagId >= TAG_ABBR && tagId <= TAG_SMALL)
+    || (tagId >= TAG_U && tagId <= TAG_BDO)
+}
+
 // Strict u32 parsing shared by numeric HTML attributes. Partial reads such as
 // `2x` and values outside Rust's u32 range must be rejected consistently.
 export function parseUnsignedInteger(raw: string | undefined): number | undefined {
@@ -341,6 +385,9 @@ export function lastOutputChar(buffer: readonly string[], end = buffer.length): 
   return -1
 }
 
+/** What placing a block on the current output line reads from the state. */
+type ListLineState = Pick<MdreamRuntimeState, 'buffer' | 'listIndent' | 'listIndentWidths'>
+
 /** Whether only indentation follows a prose hard break. */
 export function endsAtHardBreak(buffer: readonly string[]): boolean {
   let fragment = buffer.length - 1
@@ -375,10 +422,11 @@ export function endsAtHardBreak(buffer: readonly string[]): boolean {
  * `undefined` when the buffer already sits there.
  */
 export function blockOpenPrefix(
-  buffer: readonly string[],
+  state: ListLineState,
   prefix: string | undefined,
-  end = buffer.length,
+  end = state.buffer.length,
 ): string | undefined {
+  const buffer = state.buffer
   switch (lastOutputChar(buffer, end)) {
     // Empty output.
     case -1:
@@ -398,7 +446,7 @@ export function blockOpenPrefix(
         }
         const code = buffer[fragment]!.charCodeAt(--index)
         if (code !== SPACE_CHAR) {
-          return code === NEWLINE_CHAR || listMarkerLineStart(buffer, fragment, index)
+          return code === NEWLINE_CHAR || listMarkerLineStart(buffer, fragment, index, pendingMarkerIndent(state))
             ? undefined
             : `\n\n${prefix ?? ''}`
         }
@@ -426,10 +474,21 @@ export function figcaptionOwnsBlockSpacing(node: Node, plainText: boolean): bool
 }
 
 /**
- * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
- * line holds: optional indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+ * Deepest indent of a marker a block can share a line with. A list writes the
+ * open item's marker at its container's content column; a marker past that
+ * column belongs to a closed nested item, whose line the block must leave.
  */
-export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: number, markerIndex: number): boolean {
+export function pendingMarkerIndent(state: ListLineState): number {
+  const widths = state.listIndentWidths
+  return widths?.length ? state.listIndent!.length - widths[widths.length - 1]! : 3
+}
+
+/**
+ * Whether the list marker ending at `fragmentIndex`/`markerIndex` is all its
+ * line holds: up to `maxIndent` spaces, `-`/`*`/`+` or `N.`/`N)`, and nothing
+ * else.
+ */
+export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: number, markerIndex: number, maxIndent = 3): boolean {
   const marker = buffer[fragmentIndex]!.charCodeAt(markerIndex)
   const ordered = marker === 46 || marker === 41 // . )
   if (!ordered && marker !== 45 && marker !== 42 && marker !== 43) // - * +
@@ -455,11 +514,16 @@ export function listMarkerLineStart(buffer: readonly string[], fragmentIndex: nu
     if (ordered && digits === 0)
       return false
     if (code === 32) {
-      if (++spaces > 3)
+      // The space after a decoded `\r` separates the marker from the line end
+      // before it; it is not indentation, so it never counts against the cap.
+      const afterCr = cursor > 0
+        ? buffer[fragment]!.charCodeAt(cursor - 1) === 13
+        : fragment > 0 && buffer[fragment - 1]!.endsWith('\r')
+      if (!afterCr && ++spaces > maxIndent)
         return false
       continue
     }
-    return code === 10
+    return code === 10 || code === 13
   }
 }
 

@@ -82,6 +82,82 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
   '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
   '<ul><li>a</li><template>hidden</template><li>b</li></ul>',
+  '<ul><li>x<ul><li>a<br># b</li></ul></li></ul>',
+  '<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>',
+  '<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>',
+  '<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>',
+  '<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>',
+  '<p>aaaaa<br>===</p>',
+  '<p>aaaaa<br><span>=</span><span>==</span></p>',
+  '<p>aaaaa<br> <span></span>===</p>',
+  '<p>aaaaa<br>=</p>',
+  '<p>aaaaa<br>==</p>',
+  '<p>=SUM(A1:A3)</p>',
+  '<p>aaaaa<br>= b</p>',
+  '<p>aaaaa<br>=b</p>',
+  '<p>aaaaa<br>== =</p>',
+  '<p>aaaaa<br>=== x</p>',
+  '<p>aaaaa<br>=== </p>',
+  '<ul><li>x<ul><li>a<br>= b</li></ul></li></ul>',
+  '<blockquote><p>x<br>= b</p></blockquote>',
+  '<blockquote><p>x<br>==</p></blockquote>',
+  '<p>aaaaa<br><span></span></p>',
+  '<p>a = b and x===y</p>',
+  '<p>a<span>=</span><span>==</span>b</p>',
+  '<p><code>===</code></p>',
+  '<p></p>',
+  '<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>',
+  '<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>',
+  '<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>',
+  '<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>',
+  '<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>',
+  '<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>',
+  '<p>aaaaa<br>--</p>',
+  '<p>aaaaa<br>-- </p>',
+  '<p>aaaaa<br>--<br>b</p>',
+  '<p>aaaaa<br>-- a</p>',
+  '<ul><li>x<br>--</li></ul>',
+  '<ul><li>x<ul><li>y<br>--</li></ul></li></ul>',
+  '<blockquote><p>x<br>--</p></blockquote>',
+  '<ul><li>a<ul><li>b<br></li></ul><table><tr><th>h</th></tr><tr><td>v</td></tr></table></li></ul>',
+  '<ul><li>a<ul><li>b<br></li></ul><pre><code>x</code></pre></li></ul>',
+  '<ul><li>a<ul><li>b<br></li></ul><hr></li></ul>',
+  '<ul><li>a<ul><li>b<br></li></ul><blockquote>q</blockquote></li></ul>',
+  '<blockquote><ul><li><p>a</p><h2>h</h2></li></ul></blockquote>',
+  '<ul><li><p>a</p><h2>h</h2></li></ul>',
+  '<ol start="10"><li><p>a</p><h2>h</h2></li></ol>',
+  '<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>',
+  '<ol start="10"><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ol>',
+  '<blockquote><ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul></blockquote>',
+  '<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>',
+  '<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>',
+  { html: '<script><b>x</b></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'div' } } } },
+  { html: '<script>a</div>b</script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'div' } } } },
+  { html: '<style><b>x</b></style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'div' } } } },
+  { html: '<style>a</div>b</style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'div' } } } },
+  { html: '<x><b>x</b></x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'script' } } } },
+  { html: '<x>a</script>b</x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'script' } } } },
+  { html: '<x>before <!--unfinished</x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'script' } } } },
+  { html: '<x><b>x</b></x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'style' } } } },
+  { html: '<x>a</style>b</x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'style' } } } },
+  { html: '<x>before <!--unfinished</x><p>tail</p>', options: { plugins: { tagOverrides: { x: 'style' } } } },
+  { html: '<div><b>x</b></div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'script' } } } },
+  { html: '<div>a</script>b</div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'script' } } } },
+  { html: '<div>before <!--unfinished</div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'script' } } } },
+  { html: '<div><b>x</b></div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'style' } } } },
+  { html: '<div>a</style>b</div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'style' } } } },
+  { html: '<div>before <!--unfinished</div><p>tail</p>', options: { plugins: { tagOverrides: { div: 'style' } } } },
+  { html: '<script><b>x</b></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'style' } } } },
+  { html: '<script>a</style>b</script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'style' } } } },
+  { html: '<script>before <!--unfinished</script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'style' } } } },
+  { html: '<style><b>x</b></style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'script' } } } },
+  { html: '<style>a</script>b</style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'script' } } } },
+  { html: '<style>before <!--unfinished</style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'script' } } } },
+  { html: '<script><b>x</b></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'textarea' } } } },
+  { html: '<style><b>x</b></style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'textarea' } } } },
+  { html: '<X>hidden</X><p>tail</p>', options: { plugins: { tagOverrides: { x: 'script' } } } },
+  { html: '<script><!--<script></script>--></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'script' } } } },
+
   ...[
     '<blockquote>x</blockquote><p>tail</p>',
     '<BLOCKQUOTE>x</BLOCKQUOTE><p>tail</p>',
@@ -104,6 +180,40 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<p>aaaaaaaaaa =</p>',
   '<p>aaaaaaaaaa --word</p>',
   '<p>aaaaaaaaaa ==word</p>',
+  '<ul><li>x<ol start="10"><script>s</script><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10">t<li>y</li></ol></li></ul>',
+  '<ul><li>a<ul><script>s</script><li></li></ul></li></ul>',
+  '<ul><li>x<br><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ul><li>y</li></ul><ol start="10"><li>z</li></ol></li></ul>',
+  '<ol><li><ol start="10"><li>y</li></ol></li></ol>',
+  '<ul><li>x<ol start="1000000000"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li></li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol><p>tail</p></li></ul>',
+  '<ul><li>alpha beta gamma delta<ol start="10"><li>one two three four five</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><span>x</span><span>z</span><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><strong>x</strong><ol start="10"><li>y</li></ol></li></ul>',
+  '<ol start="5"><li>x<ol start="20"><li>y</li><li>z</li></ol></li></ol>',
+  '<ul><li>x<ol start="0"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="1"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="-1"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start=""><li>y</li></ol></li></ul>',
+  '<ul><li><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li><span></span><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"></ol></li><li>z</li></ul>',
+  '<ul><li>x<ol reversed start="10"><li value="20">y</li><li>z</li></ol></li></ul>',
+  '<ul><li>x<ol reversed><li value="10">y</li></ol></li></ul>',
+  '<blockquote><ul><li>x<ol start="10"><li>y</li></ol></li></ul></blockquote>',
+  '<ul><li>x<ul><li>z<ol start="10"><li>y</li></ol></li></ul></li></ul>',
+  '<ul><li><p>x</p><ol start="10"><li>y</li></ol></li></ul>',
+  '<ul><li>x<ol start="10"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>',
+  '<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>',
+  '<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>',
+  '<ul><li><a href="u"><small>x<ol start="10"><li>y</li></ol></small></a></li></ul>',
+  '<ul><li><strong>x<ol start="10"><li>y</li></ol></strong></li></ul>',
+  '<ul><li><a>x<ol start="10"><li>y</li></ol></a></li></ul>',
+  '<ul><li><mark>x<ol start="10"><li>y</li></ol></mark></li></ul>',
+  '<details><ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul></details>',
   '<div>Alpha</div>',
   '<div>Alpha</div><div>Beta</div>',
   '<div>Alpha</div><em></em>',
@@ -125,7 +235,7 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<p>🎉</p>',
 ]
 
-describe('cross-engine streaming byte parity', () => {
+describe.each([undefined, 12])('cross-engine streaming byte parity wrapWidth=%s', (wrapWidth) => {
   it.each(LINK_SPACE_CASES)('trims link label spaces at every split: %s', async (html, expected) => {
     for (const { engine, name } of engines) {
       for (let split = 0; split <= html.length; split++) {
@@ -149,7 +259,7 @@ describe('cross-engine streaming byte parity', () => {
     const engineOutputs: string[] = []
 
     for (const { engine, name } of engines) {
-      const expected = engine.htmlToMarkdown(html, options)
+      const expected = engine.htmlToMarkdown(html, { wrapWidth, ...options })
       engineOutputs.push(expected)
 
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
@@ -161,7 +271,7 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, options))
+        for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, { wrapWidth, ...options }))
           streamed += chunk
         expect(streamed, `engine=${name} chunkSize=${chunkSize}`).toBe(expected)
       }
@@ -174,7 +284,7 @@ describe('cross-engine streaming byte parity', () => {
           },
         })
         let streamed = ''
-        for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        for await (const chunk of engine.streamHtmlToMarkdown(input, { wrapWidth, ...options }))
           streamed += chunk
         expect(streamed, `engine=${name} split=${split}`).toBe(expected)
       }
@@ -476,6 +586,257 @@ describe.each(engines)('hTML to Markdown Streaming $name', (engineConfig) => {
       expect(markdown).toContain('# Main Content')
       expect(markdown).toContain('This is the main content.')
     })
+  })
+})
+
+describe('scout9_list_tail_quote_spacing streaming', () => {
+  it.each([
+    [
+      '<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>',
+      '-\n  - a  \n\n  > q',
+    ],
+    [
+      '<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>',
+      '1.\n   - a  \n\n   > q',
+    ],
+  ])('matches every split and chunk width: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      const options = {}
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream, options))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
+  })
+})
+
+describe('blocks opening a quote in an item streaming', () => {
+  it.each([
+    [
+      '<ul><li><blockquote><h1>h</h1></blockquote></li></ul>',
+      '- \n  > # h',
+    ],
+    [
+      '<ol><li><blockquote><h2>h</h2></blockquote></li></ol>',
+      '1. \n   > ## h',
+    ],
+    [
+      '<ol start="10"><li><blockquote><h3>h</h3></blockquote></li></ol>',
+      '10. \n    > ### h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<blockquote><h2>h</h2></blockquote></li></ul></li></ul>',
+      '- a\n  - b\n    > ## h',
+    ],
+    [
+      '<ul><li>a<ul><li><blockquote><h2>h</h2></blockquote></li></ul></li></ul>',
+      '- a\n\n  - \n    > ## h',
+    ],
+    [
+      '<ul><li>a<blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  > ## h',
+    ],
+    [
+      '<ul><li><p>a</p><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  > ## h',
+    ],
+    [
+      '<ul><li>a<br><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a  \n  \n  > ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<br></li></ul><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  - b  \n\n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><div><h2>h</h2></div></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><blockquote><h2>h</h2></blockquote></blockquote></li></ul>',
+      '- \n  > > ## h',
+    ],
+    [
+      '<ul><li><blockquote> <h2>h</h2></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><b></b><h2>h</h2></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><h2>h</h2><p>x</p></blockquote></li></ul>',
+      '- \n  > ## h\n  >\n  > x',
+    ],
+    [
+      '<ul><li><blockquote><p>x</p></blockquote></li></ul>',
+      '- \n  > x',
+    ],
+    [
+      '<ul><li><blockquote><pre>x</pre></blockquote></li></ul>',
+      '- \n  > ```\n  > x\n  > ```',
+    ],
+    [
+      '<ul><li><blockquote><hr></blockquote></li></ul>',
+      '- \n  > ---',
+    ],
+    [
+      '<ul><li><blockquote><ul><li>y</li></ul></blockquote></li></ul>',
+      '- \n  > - y',
+    ],
+    [
+      '<ul><li><blockquote><table><tr><th>t</th></tr><tr><td>c</td></tr></table></blockquote></li></ul>',
+      '- \n  > | t |\n  > | --- |\n  > | c |',
+    ],
+    [
+      '<ul><li><blockquote><ul><li>y<br></li></ul><h2>h</h2></blockquote></li></ul>',
+      '- \n  > - y  \n  >\n  > ## h',
+    ],
+  ])('matches every split and chunk width: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
+  })
+
+  // An empty `<code>` flushes the quote up to the hard break in the Rust engine,
+  // leaving its anchor at the buffer end as if the quote had written nothing.
+  it('keeps the blank quote line after a flushed hard break', async () => {
+    const lead = '<p>line</p>'.repeat(2000)
+    const html = `<ul><li><blockquote>${lead}<ul><li>y<br></li></ul><code></code><h2>h</h2></blockquote></li></ul>`
+    for (const { engine, name } of engines) {
+      const expected = engine.htmlToMarkdown(html)
+      expect(expected.slice(-23), name).toBe('\n  > - y  \n  >\n  > ## h')
+      for (const width of [1, 7, 64, 4096, html.length]) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
+  })
+})
+
+describe('blocks around nested pending markers streaming', () => {
+  it.each([
+    [
+      '<ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ## h',
+    ],
+    [
+      '<ol><li>a<ol><li>a<ol><li><h2>h</h2></li></ol></li></ol></li></ol>',
+      '1. a\n   1. a\n      1. ## h',
+    ],
+    [
+      '<ol start="100"><li>a<ul><li><h2>h</h2></li></ul></li></ol>',
+      '100. a\n     - ## h',
+    ],
+    [
+      '<ul><li><ul><li><ul><li><h2>h</h2></li></ul></li></ul></li></ul>',
+      '-\n  -\n    - ## h',
+    ],
+    [
+      '<blockquote><ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul></blockquote>',
+      '> - a\n>   - a\n>     - ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><pre>x</pre></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ```\n      x\n      ```',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><hr></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ***',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - | t |\n      | --- |\n      | c |',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
+      '- a\n\n  - \n\n  ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
+      '- a\n  - b\n\n    - \n\n    ## h',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
+      '- a\n\n  - \n\n  ```\n  x\n  ```',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><hr></li></ul>',
+      '- a\n\n  - \n\n  ---',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
+      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
+    ],
+  ])('matches every split and chunk width: %s', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      const options = {}
+      expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+      const chunks: string[][] = []
+      for (let width = 1; width <= html.length; width++) {
+        const parts: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          parts.push(html.slice(offset, offset + width))
+        chunks.push(parts)
+      }
+      for (let split = 1; split < html.length; split++)
+        chunks.push([html.slice(0, split), html.slice(split)])
+      for (const parts of chunks) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream, options))
+          actual += part
+        expect(actual, name).toBe(expected)
+      }
+    }
   })
 })
 

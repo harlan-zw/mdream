@@ -1,5 +1,7 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
-use mdream::types::{CleanConfig, HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig};
+use mdream::types::{
+  CleanConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+};
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
 fn md(html: &str) -> String {
@@ -25,6 +27,32 @@ fn md_wrapped(html: &str, width: usize) -> String {
     html,
     HtmlToMarkdownOptions::default().with_wrap_width(width),
   )
+}
+
+#[test]
+fn relocated_link_space_is_a_wrap_boundary() {
+  for (html, expected) in [
+    (
+      r#"<a href="x">text <span></span></a>tail"#,
+      "[text](x)\ntail",
+    ),
+    (
+      r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+      "[![A](i)](x)\ntail",
+    ),
+  ] {
+    assert_eq!(md_wrapped(html, 12), expected);
+    for width in 1..=html.len() {
+      let mut processor =
+        MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default().with_wrap_width(12));
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "chunk width={width}");
+    }
+  }
 }
 
 // ── Block spacing after a one-character line ──
@@ -236,6 +264,143 @@ fn br_after_whitespace_in_pre_stays_a_line_break() {
   assert_eq!(md("<pre>a<br>b</pre>"), "```\na\nb\n```");
 }
 
+// ── Raw <pre> in a table cell ──
+
+/// Like `assert_every_chunking`, plus every two-piece split.
+fn assert_every_split(html: &str, options: &HtmlToMarkdownOptions, expected: &str) {
+  assert_every_chunking(html, options, expected);
+  for split in (1..html.len()).filter(|&split| html.is_char_boundary(split)) {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} split={split}");
+  }
+}
+
+#[test]
+fn raw_pre_in_a_table_cell_keeps_its_trailing_whitespace() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    (
+      "<table><tr><td><pre>a </pre></td></tr></table>",
+      "| <pre>a </pre> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><pre>  a  </pre>x</td></tr></table>",
+      "| <pre>  a  </pre>x |\n| --- |",
+    ),
+    (
+      "<table><tr><td><pre>a <b>x</b> </pre></td></tr></table>",
+      "| <pre>a x </pre> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><pre>a &#10; </pre></td></tr></table>",
+      "| <pre>a <br> </pre> |\n| --- |",
+    ),
+    (
+      "<table><tr><th><pre>* </pre></th><td>z</td></tr></table>",
+      "| <pre>* </pre> | z |\n| --- | --- |",
+    ),
+    // Outside a cell the fence still drops the trailing spaces.
+    ("<pre>a </pre>", "```\na\n```"),
+  ] {
+    assert_every_split(html, &options, expected);
+  }
+}
+
+// ── Trailing tabs at a plain-text line end ──
+
+fn assert_text_every_split(html: &str, expected: &str) {
+  assert_eq!(text(html), expected, "html={html}");
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HtmlToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} chunk={chunk}");
+  }
+  for split in 1..html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HtmlToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} split={split}");
+  }
+}
+
+#[test]
+fn plain_text_line_end_drops_a_trailing_tab_run() {
+  for (html, expected) in [
+    ("<p>a&#9;<br>x</p>", "a\nx"),
+    ("<p>a &#9;<br>x</p>", "a\nx"),
+    ("<p><span>a&#9;</span><br>x</p>", "a\nx"),
+    ("<p>a&#9; &#9;</p><p>b</p>", "a\n\nb"),
+    ("<ul><li>a&#9;<ul><li>b</li></ul></li></ul>", "a\nb"),
+    ("<pre>a&#9;</pre>x", "a\n\nx"),
+    ("<div><pre>x<b>a&#9;</b></pre>y</div>", "xa\n\ny"),
+    // Preformatted text and table cells keep their tabs: in a row, the tab
+    // before a non-first cell is the column separator.
+    ("<pre>a&#9;<br>x</pre>", "a\t\nx"),
+    ("<pre>a&#9;<p>b</p></pre>", "a\t\n\nb"),
+    (
+      "<table><tr><td>a&#9;</td></tr><tr><td>b</td></tr></table>",
+      "a\t\nb",
+    ),
+    ("<table><tr><td>a&#9;<br>x</td></tr></table>", "a\t\nx"),
+    ("<table><tr><td>a</td><td><br>b</td></tr></table>", "a\t\nb"),
+    (
+      "<table><tr><td>a</td><td>&#9;<br>b</td></tr></table>",
+      "a\t\t\nb",
+    ),
+    (
+      "<table><tr><td>a</td><td>b&#9;<br>c</td></tr></table>",
+      "a\tb\t\nc",
+    ),
+    (
+      "<table><tr><td>a</td><td>b&#9; <br>c</td></tr></table>",
+      "a\tb\t\nc",
+    ),
+    ("<table><tr><th>a</th><th><br>b</th></tr></table>", "a\t\nb"),
+    (
+      "<table><tr><td><pre>a &#9;</pre><br>c</td></tr></table>",
+      "a \t\nc",
+    ),
+  ] {
+    assert_text_every_split(html, expected);
+  }
+  // Markdown keeps the tab before its hard break.
+  assert_eq!(md("<p>a&#9;<br>x</p>"), "a\t  \nx");
+}
+
+// ── Raw <br> after a closed inline element ──
+
+#[test]
+fn raw_br_keeps_the_space_a_closed_inline_element_deferred() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<h2>a<em>x </em><br>x</h2>", "## a*x* <br>x"),
+    ("<h2><em>x </em><br><br>x</h2>", "## *x* <br><br>x"),
+    ("<h2>a<a href=\"/l\">x </a><br>x</h2>", "## a [x](/l) <br>x"),
+    (
+      "<table><tr><td>a<em>x </em><br>x</td></tr></table>",
+      "| a*x* <br>x |\n| --- |",
+    ),
+    // A Markdown hard break still subsumes the space.
+    ("<p>a<em>x </em><br>x</p>", "a*x*  \nx"),
+  ] {
+    assert_every_split(html, &options, expected);
+  }
+}
+
 // ── Empty figcaption ──
 
 #[test]
@@ -325,4 +490,211 @@ fn link_text_drops_the_space_before_an_empty_element() {
     md(r#"<ul><li><a href="/x">q<br> </a></li></ul>"#),
     "- [q  \n  ](/x)"
   );
+}
+
+#[test]
+fn raw_html_blocks_end_before_following_markdown() {
+  let cases = [
+    (
+      "<dl><dd><details>X</details></dd></dl><strong>B</strong>",
+      "<dl><dd>\n\n<details>X</details>\n\n\n\n</dd></dl>\n\n**B**",
+    ),
+    (
+      "<blockquote><address>A</address><blockquote><strong>B</strong></blockquote></blockquote>",
+      "> <address>A</address>\n>\n> > **B**",
+    ),
+    (
+      "<address>A</address><sup>Z</sup> tail",
+      "<address>A</address>\n\n<sup>Z</sup> tail",
+    ),
+    ("<address>A</address> tail", "<address>A</address>\n\ntail"),
+    (
+      "<address>A</address>&#32;&#32;&#32;&#32;tail",
+      "<address>A</address>\n\ntail",
+    ),
+    (
+      "<address>A</address>&#9;tail",
+      "<address>A</address>\n\ntail",
+    ),
+    (
+      "<address>A</address>&#13;&#10;tail",
+      "<address>A</address>\n\ntail",
+    ),
+    (
+      "<address>A</address>&nbsp;tail",
+      "<address>A</address>\n\n\u{a0}tail",
+    ),
+    (
+      "<address>A</address>&#32;&#11;tail",
+      "<address>A</address>\n\n\u{b}tail",
+    ),
+    (
+      "<ul><li><address>A</address> tail</li></ul>",
+      "- <address>A</address>\n\n  tail",
+    ),
+    (
+      "<blockquote><address>A</address> tail</blockquote>",
+      "> <address>A</address>\n>\n> tail",
+    ),
+    (
+      "<address>A</address> <b>x</b>",
+      "<address>A</address> \n\n**x**",
+    ),
+    (
+      "<ul><li><address>A</address><blockquote><strong>B</strong></blockquote></li></ul>",
+      "- <address>A</address>\n\n  > **B**",
+    ),
+    (
+      "<p>PPPPPPPPPPPPPPPPPP</p><blockquote><dl>A</dl><strong>B</strong></blockquote>",
+      "PPPPPPPPPPPPPPPPPP\n\n> <dl>A</dl>\n>\n> **B**",
+    ),
+    (
+      "<address>A</address><strong>B</strong>",
+      "<address>A</address>\n\n**B**",
+    ),
+    (
+      "<ul><li><address>A</address><strong>B</strong></li></ul>",
+      "- <address>A</address>\n\n  **B**",
+    ),
+    (
+      "prefix <address>A</address><strong>B</strong>",
+      "prefix <address>A</address>**B**",
+    ),
+    ("<dl>A</dl><strong>B</strong>", "<dl>A</dl>\n\n**B**"),
+    (
+      "<ul><li><dl>A</dl><strong>B</strong></li></ul>",
+      "- <dl>A</dl>\n\n  **B**",
+    ),
+    (
+      "prefix <dl>A</dl><strong>B</strong>",
+      "prefix <dl>A</dl>**B**",
+    ),
+    ("<dt>A</dt><strong>B</strong>", "<dt>A</dt>\n\n**B**"),
+    (
+      "<ul><li><dt>A</dt><strong>B</strong></li></ul>",
+      "- <dt>A</dt>\n\n  **B**",
+    ),
+    (
+      "prefix <dt>A</dt><strong>B</strong>",
+      "prefix <dt>A</dt>\n**B**",
+    ),
+    ("<dd>A</dd><strong>B</strong>", "<dd>A</dd>\n\n**B**"),
+    (
+      "<ul><li><dd>A</dd><strong>B</strong></li></ul>",
+      "- <dd>A</dd>\n\n  **B**",
+    ),
+    (
+      "prefix <dd>A</dd><strong>B</strong>",
+      "prefix <dd>A</dd>\n**B**",
+    ),
+    (
+      "<details>A</details><strong>B</strong>",
+      "<details>A</details>\n\n\n\n**B**",
+    ),
+    (
+      "<ul><li><details>A</details><strong>B</strong></li></ul>",
+      "- <details>A</details>\n\n**B**",
+    ),
+    (
+      "prefix <details>A</details><strong>B</strong>",
+      "prefix\n\n<details>A</details>\n\n\n\n**B**",
+    ),
+    (
+      "<summary>A</summary><strong>B</strong>",
+      "<summary>A</summary>\n\n\n\n**B**",
+    ),
+    (
+      "<ul><li><summary>A</summary><strong>B</strong></li></ul>",
+      "- <summary>A</summary>\n\n**B**",
+    ),
+    (
+      "prefix <summary>A</summary><strong>B</strong>",
+      "prefix\n\n<summary>A</summary>\n\n\n\n**B**",
+    ),
+    (
+      "<ul><li><dl><dt>T</dt><dd>D</dd></dl><strong>B</strong></li></ul>",
+      "- <dl><dt>T</dt><dd>D</dd></dl>\n\n  **B**",
+    ),
+    (
+      "<address>A</address><code>C</code>",
+      "<address>A</address>\n\n`C`",
+    ),
+    ("<dd>D</dd><a href=\"/x\">L</a>", "<dd>D</dd>\n\n[L](/x)"),
+    (
+      "<blockquote><address>A</address><em>E</em></blockquote>",
+      "> <address>A</address>\n>\n> *E*",
+    ),
+    (
+      "<ol start=\"12\"><li><address>A</address><em>E</em></li></ol>",
+      "12. <address>A</address>\n\n    *E*",
+    ),
+    (
+      "<ul><li>outer<ul><li><address>A</address><strong>B</strong></li></ul></li></ul>",
+      "- outer\n  - <address>A</address>\n\n    **B**",
+    ),
+    (
+      "<address>A</address><br><strong>B</strong>",
+      "<address>A</address>  \n\n**B**",
+    ),
+    ("<dt>A</dt><br><strong>B</strong>", "<dt>A</dt>\n  \n**B**"),
+    (
+      "<dt>A</dt><h2><a href=\"/x\">Heading</a></h2>",
+      "<dt>A</dt>\n\n## [Heading](/x)",
+    ),
+    (
+      "<ul><li><address>A</address><pre>C</pre></li></ul>",
+      "- <address>A</address>\n\n  ```\n  C\n  ```",
+    ),
+    (
+      "<ul><li><address>A</address><ul><li>B</li></ul></li></ul>",
+      "- <address>A</address>\n\n  - B",
+    ),
+    (
+      "<address><p>A</p></address><strong>B</strong>",
+      "<address>A</address>\n\n**B**",
+    ),
+    (
+      "<address>A</address>&lt;literal&gt; *text*",
+      "<address>A</address>\n\n\\<literal> \\*text\\*",
+    ),
+    (
+      "<address>A</address><address>B</address><strong>B</strong>",
+      "<address>A</address><address>B</address>\n\n**B**",
+    ),
+    ("<address>A</address>", "<address>A</address>"),
+    (
+      "<ul><li><address>A</address></li><li><strong>B</strong></li></ul>",
+      "- <address>A</address>\n- **B**",
+    ),
+    (
+      "<table><tr><th>H</th></tr><tr><td><address>A</address><strong>B</strong></td></tr></table>",
+      "| H |\n| --- |\n| <address>A</address>**B** |",
+    ),
+    (
+      "<table><tr><th>H</th></tr><tr><td><dl>A</dl><strong>B</strong></td></tr></table>",
+      "| H |\n| --- |\n| <dl>A</dl>**B** |",
+    ),
+    (
+      "<table><tr><th>H</th></tr><tr><td><dt>A</dt><strong>B</strong></td></tr></table>",
+      "| H |\n| --- |\n| <dt>A</dt>**B** |",
+    ),
+    (
+      "<table><tr><th>H</th></tr><tr><td><dd>A</dd><strong>B</strong></td></tr></table>",
+      "| H |\n| --- |\n| <dd>A</dd>**B** |",
+    ),
+    (
+      "<table><tr><th>H</th></tr><tr><td><details>A</details><strong>B</strong></td></tr></table>",
+      "| H |\n| --- |\n| <details>A</details>**B** |",
+    ),
+    (
+      "<table><tr><th>H</th></tr><tr><td><summary>A</summary><strong>B</strong></td></tr></table>",
+      "| H |\n| --- |\n| <summary>A</summary>**B** |",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(md(html), expected, "{html}");
+    for width in 1..=html.len() {
+      assert_eq!(md_streamed(html, width), expected, "{html}, width {width}");
+    }
+  }
 }
