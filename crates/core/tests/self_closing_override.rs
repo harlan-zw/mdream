@@ -199,6 +199,13 @@ fn end_tag_closes_a_reopened_void_past_the_depth_limit() {
     html_to_markdown(&html, options(config.to_vec())),
     "a b c\n\nd"
   );
+  for offset in 1.."<br>".len() {
+    assert_eq!(
+      stream_at(&html, &config, open.len() + offset),
+      "a b c\n\nd",
+      "start-tag split {offset}"
+    );
+  }
 }
 
 #[test]
@@ -218,6 +225,13 @@ fn aliased_builtin_end_tag_closes_its_overflow_root() {
     html_to_markdown(&html, options(config.to_vec())),
     "a b c\n\nd"
   );
+  for offset in 1.."<br>".len() {
+    assert_eq!(
+      stream_at(&html, &config, open.len() + offset),
+      "a b c\n\nd",
+      "aliased start-tag split {offset}"
+    );
+  }
 }
 
 #[test]
@@ -280,6 +294,18 @@ fn custom_exit_keeps_spacing_after_its_output() {
 
 #[test]
 fn reopened_void_keeps_its_explicit_spacing() {
+  assert_converts(
+    "<hr>x</hr>y",
+    &[(
+      "hr",
+      TagOverrideConfig {
+        enter: Some("[\n".to_string()),
+        exit: Some("]".to_string()),
+        ..spaced(false, [0, 2])
+      },
+    )],
+    "[\nx]\n\ny",
+  );
   assert_converts(
     "a<br>x</br>y",
     &[("br", spaced(false, [0, 2]))],
