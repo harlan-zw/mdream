@@ -202,6 +202,25 @@ fn end_tag_closes_a_reopened_void_past_the_depth_limit() {
 }
 
 #[test]
+fn aliased_builtin_end_tag_closes_its_overflow_root() {
+  let open = "<div>".repeat(512);
+  let close = "</div>".repeat(512);
+  let html = format!("{open}<br>a</br><div>b</div><p>c</p>{close}<p>d</p>");
+  let config = [(
+    "br",
+    TagOverrideConfig {
+      alias_tag_id: get_tag_id("img"),
+      is_self_closing: Some(false),
+      ..Default::default()
+    },
+  )];
+  assert_eq!(
+    html_to_markdown(&html, options(config.to_vec())),
+    "a b c\n\nd"
+  );
+}
+
+#[test]
 fn open_thematic_break_keeps_block_spacing_after_it() {
   let config = [("hr", flag(false))];
   assert_converts("<p>a</p><hr>x<p>b</p>", &config, "a\n\n---\n\nx\n\nb");

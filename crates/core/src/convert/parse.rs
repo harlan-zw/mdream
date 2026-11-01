@@ -1958,7 +1958,7 @@ impl ConvertState {
     }
 
     if self.overflow_same_name_depth > 0 {
-      if self.end_tag_is_void(tag_name.as_ref(), tag_id, builtin_tag_id.is_some()) {
+      if self.end_tag_is_void(name, tag_id, is_builtin) {
         self.just_closed_tag = true;
         return true;
       }

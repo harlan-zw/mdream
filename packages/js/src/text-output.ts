@@ -279,13 +279,15 @@ function trailingNewlines(buffer: string[]): number {
   return count
 }
 
-function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined): void {
+function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined, hasVisiblePluginOutput = false): void {
   const buffer = state.buffer
   const config = newlineConfig(element, state.depthMap)
   // An open void writes its block boundary after its enter, as the void it
-  // replaces would. A custom exit has output of its own, so the boundary stays
-  // after that exit.
-  const voidSpacingAtEnter = isOpenVoidTag(element.tagHandler, element.tagId) && !element.tagHandler?.literalExitHasOutput
+  // replaces would. A custom exit or a visible plugin exit has output of its
+  // own, so the boundary stays after that exit.
+  const voidSpacingAtEnter = isOpenVoidTag(element.tagHandler, element.tagId)
+    && !element.tagHandler?.literalExitHasOutput
+    && !(eventType === NodeEventExit && hasVisiblePluginOutput)
   let wantedNewlines = voidSpacingAtEnter && eventType === NodeEventExit ? 0 : config[eventType] || 0
   if (voidSpacingAtEnter && eventType === NodeEventEnter) {
     let end = output ? output.length : 0
@@ -506,6 +508,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
 
     const element = event.node as ElementNode
     let output: string | undefined
+    let hasVisiblePluginOutput = false
     // A quotation with only whitespace since its opener emits nothing, but
     // keeps the space its opener added. Openers above this one belong to
     // quotations inside it whose exit never came.
@@ -543,6 +546,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     if (element.pluginOutput?.length) {
       output = element.pluginOutput.join('')
       element.pluginOutput = undefined
+      hasVisiblePluginOutput = hasNonWhitespace(output)
     }
     else {
       output = elementOutput(element, event.type, state)
@@ -585,7 +589,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       state.pendingInlineWhitespace = false
     }
 
-    appendOutput(state, element, event.type, output)
+    appendOutput(state, element, event.type, output, hasVisiblePluginOutput)
     if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {
       openQuotes.push(state.buffer.length - 1)
       openQuoteNodes.push(element)

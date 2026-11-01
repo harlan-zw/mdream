@@ -56,6 +56,47 @@ describe('root conversion', () => {
     }
   })
 
+  it('keeps exit spacing after plugin exit output on a reopened void', async () => {
+    const html = 'x<hr>y</hr>z'
+    const tagOverrides = { hr: { isSelfClosing: false, spacing: [0, 2] as [number, number] } }
+    const options = {
+      tagOverrides,
+      plugins: [createPlugin({
+        onNodeExit(node) {
+          if (node.name === 'hr')
+            return ']'
+        },
+      })],
+    }
+    const markdown = 'x ---\n\ny]\n\nz'
+    const text = 'x\n\ny]\n\nz'
+    expect(htmlToMarkdown(html, options)).toBe(markdown)
+    expect(htmlToText(html, options)).toBe(text)
+
+    const noopOptions = {
+      tagOverrides,
+      plugins: [createPlugin({ onNodeExit() {} })],
+    }
+    expect(htmlToMarkdown(html, noopOptions)).toBe('x ---\n\nyz')
+    expect(htmlToText(html, noopOptions)).toBe('x\n\nyz')
+
+    const input = () => new ReadableStream<string>({
+      start(controller) {
+        for (const char of html)
+          controller.enqueue(char)
+        controller.close()
+      },
+    })
+    let streamed = ''
+    for await (const chunk of streamHtmlToMarkdown(input(), options))
+      streamed += chunk
+    expect(streamed).toBe(markdown)
+    streamed = ''
+    for await (const chunk of streamHtmlToText(input(), options))
+      streamed += chunk
+    expect(streamed).toBe(text)
+  })
+
   it.each([0, 1, 7])('supports mutable processAttributes with chunk size %i', async (chunkSize) => {
     const html = '<a>first</a><a href="/old" title="keep">second</a><a>third</a>'
     const attributes: ElementNode['attributes'][] = []

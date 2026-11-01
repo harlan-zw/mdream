@@ -2101,6 +2101,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // every enter/exit event adds pure GC pressure.
     let output: string[] | undefined
     const hasPluginOutput = !!element.pluginOutput?.length
+    const hasVisiblePluginOutput = hasPluginOutput && element.pluginOutput!.some(hasNonWhitespace)
     if (hasPluginOutput) {
       output = element.pluginOutput
       element.pluginOutput = undefined
@@ -2383,8 +2384,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     // An open void tag (override `isSelfClosing: false`) has no exit before its
     // children, so the block spacing its exit would write follows its start tag.
-    // A custom exit has output of its own, so the spacing stays after that exit.
-    const voidSpacingAtEnter = isOpenVoidTag(handler, tagId) && !handler?.literalExitHasOutput
+    // A custom exit or a visible plugin exit has output of its own, so the
+    // spacing stays after that exit.
+    const voidSpacingAtEnter = isOpenVoidTag(handler, tagId)
+      && !handler?.literalExitHasOutput
+      && !(eventType === NodeEventExit && hasVisiblePluginOutput)
     let openVoidLines = 0
     if (eventType === NodeEventEnter && voidSpacingAtEnter) {
       const exitLines = suppressedInPre ? 0 : calculateNewLineConfig(element, state, NodeEventExit)[1]
