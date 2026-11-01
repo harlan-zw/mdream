@@ -193,6 +193,154 @@ fn assert_every_chunking(html: &str, options: &HtmlToMarkdownOptions, expected: 
   }
 }
 
+/// Text output one-shot, and streamed at every chunk size, equal `expected`.
+fn assert_every_text_chunking(html: &str, expected: &str) {
+  assert_eq!(text(html), expected, "html={html}");
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(
+      HtmlToMarkdownOptions::default(),
+      OutputFormat::Text,
+    );
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} chunk={chunk}");
+  }
+}
+
+#[test]
+fn whitespace_before_a_final_break_never_reaches_the_stream() {
+  // End-of-output trimming takes the whole ASCII set, so none of it can be
+  // yielded while later input may still end the document.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a&#9;<br></p>", "a"),
+    ("<p>a&#12;<br></p>", "a"),
+    ("<p>a&#13;<br></p>", "a"),
+    ("<p>a <br></p>", "a"),
+    ("<p>a&#9;&#12;&#13; <br></p>", "a"),
+    ("<p>a&#9;<br>&#12;<br></p>", "a"),
+    ("<p>a&#9;</p>", "a"),
+    ("<li>a&#9;<br></li>", "- a"),
+    ("<blockquote><p>a&#9;<br></p></blockquote>", "> a"),
+    ("<h2>a #&#9;</h2>", "## a \\#"),
+    // Content after the break settles the tail; see
+    // `a_break_subsumes_the_whitespace_run_before_it`.
+    ("<p>a&#9;<br>b</p>", "a  \nb"),
+    ("<p>a&#12;<br>b</p>", "a  \nb"),
+    ("<p>a <br>b</p>", "a  \nb"),
+    ("<li>a&#9;<br>b</li>", "- a  \n  b"),
+    (
+      "<ul><li>a<ul><li>b&#9;<br>c</li></ul></li></ul>",
+      "- a\n  - b  \n    c",
+    ),
+    // An earlier break's indent and a list marker's space are not the run.
+    ("<li>a<br><br>b</li>", "- a  \n    \n  b"),
+    ("<li>a&#9;<br>&#9;<br>b</li>", "- a  \n    \n  b"),
+    ("<li>&#9;<br>b</li>", "- \t  \n  b"),
+    ("<ol><li>&#9;<br>b</li></ol>", "1. \t  \n   b"),
+    (
+      "<ul><li>a<ul><li><br><br>x</li></ul></li></ul>",
+      "- a\n\n  -   \n      \n    x",
+    ),
+    ("<blockquote>a&#9;<br>b</blockquote>", "> a  \n> b"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn a_break_subsumes_the_whitespace_run_before_it() {
+  // HTML's ASCII whitespace, whatever the text's source whitespace, as the JS
+  // engine does. A line feed stops the run: block spacing and an earlier break
+  // end in one.
+  let markdown = HtmlToMarkdownOptions::default();
+  for (html, expected_markdown, expected_text) in [
+    ("<p>a&#9;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>x y&#9;<br>b</p>", "x y  \nb", "x y\nb"),
+    ("<p>a&#12;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a&#13;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a &#9; &#12;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a&#9;<i></i>&#9;<br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a<br>&#9;<br>b</p>", "a  \n  \nb", "a\n\nb"),
+    ("<p>a</p>&#9;<br>b", "a\n\n  \nb", "a\n\nb"),
+    ("<p>x y&#10;<br>b</p>", "x y\n  \nb", "x y\n\nb"),
+    ("<p>x y&#11;<br>b</p>", "x y\u{b}  \nb", "x y\u{b}\nb"),
+    ("<code>x y&#9;<br>b</code>", "`x y\nb`", "x y\nb"),
+    ("<a href=\"x\">x y&#9;<br>b</a>", "[x y  \nb](x)", "x y\nb"),
+    ("<blockquote>a&#9;<br>b</blockquote>", "> a  \n> b", "a\nb"),
+    ("<pre>a&#9;<br>b</pre>", "```\na\t\nb\n```", "a\t\nb"),
+  ] {
+    assert_every_chunking(html, &markdown, expected_markdown);
+    assert_every_text_chunking(html, expected_text);
+  }
+}
+
+#[test]
+fn vertical_tab_does_not_collapse_into_a_pending_space() {
+  // Only HTML's ASCII whitespace collapses into the space an inline close
+  // left pending; U+000B and U+00A0 are content, as in the JS engine.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected_markdown, expected_text) in [
+    ("<b>a </b>&#11;", "**a** \u{b}", "a \u{b}"),
+    ("<span>a </span>&#11;<b>z</b>", "a \u{b}**z**", "a \u{b}z"),
+    (
+      "<p><span>a </span>&#11;</p><p>b</p>",
+      "a \u{b}\n\nb",
+      "a \u{b}\n\nb",
+    ),
+    (
+      "<span>a </span>&#160;<b>z</b>",
+      "a \u{a0}**z**",
+      "a \u{a0}z",
+    ),
+    ("<span>a </span>&#9;<b>z</b>", "a **z**", "a z"),
+  ] {
+    assert_every_chunking(html, &options, expected_markdown);
+    assert_every_text_chunking(html, expected_text);
+  }
+}
+
+#[test]
+fn heading_closing_run_is_read_at_the_real_end() {
+  // An emptied inline element can leave spacing after the run, and the run can
+  // be split around one; the escape still sees the run the renderer would.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<h2>a #&#9;<i></i>&#9;<i></i></h2>", "## a \\#"),
+    ("<h2>a #<i></i> <i></i></h2>", "## a \\#"),
+    ("<h2>a ##<i></i>#</h2>", "## a \\###"),
+    ("<h2>#<i></i>&#9;</h2>", "## \\#"),
+    ("<h2>a #<q></q></h2>", "## a \\#"),
+    ("<li><h2>a #&#9;<i></i></h2></li>", "- ## a \\#"),
+    ("<h2>a#<i></i>#</h2>", "## a##"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn vertical_tab_is_content_to_the_trailing_trims() {
+  // HTML's ASCII whitespace leaves out U+000B, so it stops a trim and stays in
+  // the output, as it does in the JS engine.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a&#11;<br></p>", "a\u{b}"),
+    ("<p>a&#11;</p>", "a\u{b}"),
+    ("a&#11;", "a\u{b}"),
+    ("<p>a&#9;&#11;<br></p>", "a\t\u{b}"),
+    ("<p>a&#11;&#9;<br></p>", "a\u{b}"),
+    ("<li>a&#11;<br></li>", "- a\u{b}"),
+    ("<blockquote><p>a&#11;<br></p></blockquote>", "> a\u{b}"),
+    ("<h2>a #&#11;</h2>", "## a #\u{b}"),
+    ("<p>x y&#11;<br>b</p>", "x y\u{b}  \nb"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
 #[test]
 fn output_after_a_hard_break_leaves_one_paragraph_separator() {
   // Output after the break reopens its line, so a block inside the item gets
@@ -377,8 +525,8 @@ fn plain_text_line_end_drops_a_trailing_tab_run() {
   ] {
     assert_text_every_split(html, expected);
   }
-  // Markdown keeps the tab before its hard break.
-  assert_eq!(md("<p>a&#9;<br>x</p>"), "a\t  \nx");
+  // The hard break also owns trailing whitespace in Markdown.
+  assert_eq!(md("<p>a&#9;<br>x</p>"), "a  \nx");
 }
 
 // ── Raw <br> after a closed inline element ──

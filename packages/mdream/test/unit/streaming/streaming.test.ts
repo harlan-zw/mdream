@@ -235,6 +235,174 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<p>🎉</p>',
 ]
 
+// Trailing bytes one-shot trims, either at the end of the output or when a
+// later close reaches back. `text` is left out where the engines' one-shot
+// output differs.
+const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string][] = [
+  ['<p>a&#9;<br></p>', 'a', 'a'],
+  ['<p>a&#12;<br></p>', 'a', 'a'],
+  ['<p>a&#13;<br></p>', 'a', 'a'],
+  ['<p>a <br></p>', 'a', 'a'],
+  ['<p>a&#9;&#12;&#13; <br></p>', 'a', 'a'],
+  ['<p>a&#9;</p>', 'a', 'a'],
+  ['a&#9;', 'a', 'a'],
+  ['<p>a&#9;<br>&#12;<br></p>', 'a', 'a'],
+  ['<p>a&#9;<span></span><br></p>', 'a', 'a'],
+  ['<li>a&#9;<br></li>', '- a', 'a'],
+  ['<ul><li>a<ul><li>b&#12;<br></li></ul></li></ul>', '- a\n  - b', 'a\nb'],
+  ['<blockquote><p>a&#9;<br></p></blockquote>', '> a', 'a'],
+  ['<ul><li><blockquote>a&#13;<br></blockquote></li></ul>', '- \n  > a', 'a'],
+  ['<h2>a&#9;</h2>', '## a', 'a'],
+  ['<h2>a #&#9;</h2>', '## a \\#', 'a #'],
+  // The closing-sequence escape reads the heading's real end, past spacing an
+  // emptied element left and across a run split between fragments.
+  ['<h2>a #&#9;<i></i>&#9;<i></i></h2>', '## a \\#', 'a #'],
+  ['<h2>a #<i></i> <i></i></h2>', '## a \\#', 'a #'],
+  ['<h2>a ##<i></i>#</h2>', '## a \\###', 'a ###'],
+  ['<h2>#<i></i>&#9;</h2>', '## \\#', '#'],
+  ['<h2>a #<q></q></h2>', '## a \\#', 'a #'],
+  ['<li><h2>a #&#9;<i></i></h2></li>', '- ## a \\#', 'a #'],
+  ['<h2>a#<i></i>#</h2>', '## a##', 'a##'],
+  ['<p><b>x y&#9;</b><br>b</p>', '**x y**  \nb', 'x y\nb'],
+  ['<p><span>x y&#9;</span>z</p>', 'x y z', 'x y z'],
+  // A break subsumes the run before it whatever the text's source whitespace,
+  // up to a line feed: block spacing and earlier breaks end in one.
+  ['<p>a&#9;<br>b</p>', 'a  \nb', 'a\nb'],
+  ['<p>x y&#9;<br>b</p>', 'x y  \nb', 'x y\nb'],
+  ['<p>a&#12;<br>b</p>', 'a  \nb', 'a\nb'],
+  ['<p>a&#13;<br>b</p>', 'a  \nb', 'a\nb'],
+  ['<p>a &#9; &#12;<br>b</p>', 'a  \nb', 'a\nb'],
+  ['<p>a&#9;<i></i>&#9;<br>b</p>', 'a  \nb', 'a\nb'],
+  ['<p>a<br>&#9;<br>b</p>', 'a  \n  \nb', 'a\n\nb'],
+  ['<p>a</p>&#9;<br>b', 'a\n\n  \nb', 'a\n\nb'],
+  ['<p>x y&#10;<br>b</p>', 'x y\n  \nb', 'x y\n\nb'],
+  ['<code>x y&#9;<br>b</code>', '`x y\nb`', 'x y\nb'],
+  ['<a href="x">x y&#9;<br>b</a>', '[x y  \nb](x)', 'x y\nb'],
+  ['<li>a&#9;<br>b</li>', '- a  \n  b', 'a\nb'],
+  ['<ul><li>a<ul><li>b&#9;<br>c</li></ul></li></ul>', '- a\n  - b  \n    c', 'a\nb\nc'],
+  // An earlier break's indent and a list marker's space are not the run.
+  ['<li>a<br><br>b</li>', '- a  \n    \n  b', 'a\n\nb'],
+  ['<li>a&#9;<br>&#9;<br>b</li>', '- a  \n    \n  b', 'a\n\nb'],
+  ['<li>&#9;<br>b</li>', '- \t  \n  b'],
+  ['<ol><li>&#9;<br>b</li></ol>', '1. \t  \n   b'],
+  ['<ul><li>a<ul><li><br><br>x</li></ul></li></ul>', '- a\n\n  -   \n      \n    x'],
+  ['<blockquote>a&#9;<br>b</blockquote>', '> a  \n> b', 'a\nb'],
+  // HTML's ASCII whitespace leaves out U+000B, so it is content and stops a trim.
+  ['<p>a&#11;<br></p>', 'a\u000B', 'a\u000B'],
+  ['<p>a&#11;</p>', 'a\u000B', 'a\u000B'],
+  ['a&#11;', 'a\u000B', 'a\u000B'],
+  ['<p>a&#9;&#11;<br></p>', 'a\t\u000B', 'a\t\u000B'],
+  ['<p>a&#11;&#9;<br></p>', 'a\u000B', 'a\u000B'],
+  ['<p>a&#11;&#11;&#32;</p>', 'a\u000B\u000B', 'a\u000B\u000B'],
+  ['<li>a&#11;<br></li>', '- a\u000B', 'a\u000B'],
+  ['<ul><li>a<ul><li>b&#11;<br></li></ul></li></ul>', '- a\n  - b\u000B', 'a\nb\u000B'],
+  ['<blockquote><p>a&#11;<br></p></blockquote>', '> a\u000B', 'a\u000B'],
+  ['<h2>a #&#11;</h2>', '## a #\u000B', 'a #\u000B'],
+  ['<p>x y&#11;<br>b</p>', 'x y\u000B  \nb', 'x y\u000B\nb'],
+  ['<p><b>x y&#11;</b><br>b</p>', '**x y\u000B**  \nb', 'x y\u000B\nb'],
+  ['<p><span>x y&#11;</span>z</p>', 'x y\u000Bz', 'x y\u000Bz'],
+  ['<p>x y&#11;</p><p>b</p>', 'x y\u000B\n\nb', 'x y\u000B\n\nb'],
+  ['<pre><code>a&#11;\n</code></pre>', '```\na\u000B\n```', 'a\u000B'],
+  // Nor does it collapse into the space an inline close left pending, and
+  // neither does other non-ASCII whitespace.
+  ['<b>a </b>&#11;', '**a** \u000B', 'a \u000B'],
+  ['<span>a </span>&#11;<b>z</b>', 'a \u000B**z**', 'a \u000Bz'],
+  ['<p><span>a </span>&#11;</p><p>b</p>', 'a \u000B\n\nb', 'a \u000B\n\nb'],
+  ['<span>a </span>&#160;<b>z</b>', 'a \u00A0**z**', 'a \u00A0z'],
+  ['<span>a </span>&#9;<b>z</b>', 'a **z**', 'a z'],
+]
+
+describe('trailing whitespace at every chunking', () => {
+  it.each(TRAILING_WHITESPACE_CASES)('%s', async (html, markdown, text) => {
+    const chunkings: string[][] = []
+    for (let width = 1; width <= html.length; width++) {
+      const parts: string[] = []
+      for (let offset = 0; offset < html.length; offset += width)
+        parts.push(html.slice(offset, offset + width))
+      chunkings.push(parts)
+    }
+    for (let split = 1; split < html.length; split++)
+      chunkings.push([html.slice(0, split), html.slice(split)])
+
+    for (const { engine, name } of engines) {
+      for (const [format, expected] of [['markdown', markdown], ['text', text]] as const) {
+        if (expected === undefined)
+          continue
+        expect(engine.htmlToMarkdown(html, { format }), `engine=${name} format=${format}`).toBe(expected)
+        for (const parts of chunkings) {
+          const htmlStream = new ReadableStream<string>({
+            start(controller) {
+              for (const part of parts)
+                controller.enqueue(part)
+              controller.close()
+            },
+          })
+          let streamed = ''
+          for await (const chunk of engine.streamHtmlToMarkdown(htmlStream, { format }))
+            streamed += chunk
+          expect(streamed, `engine=${name} format=${format} parts=${JSON.stringify(parts)}`).toBe(expected)
+        }
+      }
+    }
+  })
+})
+
+// Longer than the run the JS drain rejoins on every chunk, so these reach the
+// path that reads only the fragments after it.
+const longRun = (unit: string) => unit.repeat(1200)
+
+const LONG_HELD_RUN_CASES = [
+  `<p>a${longRun('&#9;<i></i>')}</p>`,
+  `<p>a${longRun('&#9;<i></i>')}b</p>`,
+  `<p>a${longRun('&#12;<span></span>')}</p><p>b</p>`,
+  `<p>a${longRun('&#13;<b></b>')}<b>x</b></p>`,
+  `<p>a${longRun('<span>&#9;</span>')}<em>x</em> y</p>`,
+  `<p>a${longRun('<br>')}</p>`,
+  `<p>a${longRun('<br>')}b</p>`,
+  `<p>a${longRun('&#9;<br>')}b</p>`,
+  `<ul><li>a${longRun('&#9;<i></i>')}</li><li>b</li></ul>`,
+  `<h2>a${longRun('&#9;<i></i>')}</h2><p>b</p>`,
+  `<p>a${longRun('&#9;<i></i>')}</p><blockquote>${'<p>line</p>'.repeat(1200)}</blockquote>`,
+  `<p>a${longRun('&#9;<i></i>')}<a href="x"></a></p>`,
+  `<p>a${longRun('&#9;<i></i>')}</p><pre>${longRun('&#9;<i></i>')}</pre><p>b</p>`,
+  `${longRun('&#9;<i></i>')}a`,
+  `${longRun('<span>&#9;</span>')}<p>a</p>`,
+  `<p>${longRun('&#9;<i></i>')}a</p>`,
+  `<p>a${longRun('&#9;<i></i>')}<q></q>b</p>`,
+  `<p>a${longRun('&#9;<i></i>')}<q>${longRun('&#9;<i></i>')}c</q>b</p>`,
+  `<p>a${longRun('&#9;<i></i>')}&#11;</p>`,
+  `<p>a${longRun('&#9;<i></i>')}<figure><figcaption>${longRun('&#9;<br>')}c</figcaption></figure></p>`,
+]
+
+describe('long held whitespace run', () => {
+  it.each(LONG_HELD_RUN_CASES.map(html => [`${html.slice(0, 24)}...${html.slice(-24)}`, html]))('matches one-shot output: %s', async (_, html) => {
+    // Text one-shot output still differs between the engines when a tab meets
+    // a block boundary, so only Markdown compares across them.
+    for (const format of ['markdown', 'text'] as const) {
+      const outputs: string[] = []
+      for (const { engine, name } of engines) {
+        const expected = engine.htmlToMarkdown(html, { format })
+        outputs.push(expected)
+        for (const width of [1, 7, 11, 13, 64, 1024, html.length]) {
+          const stream = new ReadableStream<string>({
+            start(controller) {
+              for (let offset = 0; offset < html.length; offset += width)
+                controller.enqueue(html.slice(offset, offset + width))
+              controller.close()
+            },
+          })
+          let streamed = ''
+          for await (const chunk of engine.streamHtmlToMarkdown(stream, { format }))
+            streamed += chunk
+          expect(streamed === expected, `engine=${name} format=${format} width=${width}`).toBe(true)
+        }
+      }
+      if (format === 'markdown')
+        expect(outputs[1] === outputs[0]).toBe(true)
+    }
+  })
+})
+
 describe.each([undefined, 12])('cross-engine streaming byte parity wrapWidth=%s', (wrapWidth) => {
   it.each(LINK_SPACE_CASES)('trims link label spaces at every split: %s', async (html, expected) => {
     for (const { engine, name } of engines) {
