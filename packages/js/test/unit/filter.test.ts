@@ -209,4 +209,31 @@ describe('filter plugin', () => {
     expect(htmlToMarkdown('<p><a href="/x" aria-label="L"><span hidden>x</span> </a></p>', { plugins: [filterPlugin(), same] })).toBe('[L](/x)')
     expect(htmlToMarkdown('<p><a href="/x" aria-label="L">Go</a></p>', { plugins: [rewrite('Stop')] })).toBe('[Stop](/x)')
   })
+
+  it('counts visible hook output in a link as its text', async () => {
+    const skipText = { processTextNode: () => ({ content: '', skip: true }) }
+    const cases: [string, Plugin, string][] = [
+      ['<a href="/x" aria-label="Label"><span>source</span></a>', createPlugin({ onNodeEnter: node => node.name === 'span' ? 'Visible' : undefined, ...skipText }), '[Visible](/x)'],
+      ['<a href="/x" aria-label="Label"><span>source</span></a>', createPlugin({ onNodeExit: node => node.name === 'span' ? 'Visible' : undefined, ...skipText }), '[Visible](/x)'],
+      ['<a href="/a" title="A"><div><a href="/b"><span>y</span></a></div></a>', createPlugin({ onNodeEnter: node => node.name === 'span' ? 'Visible' : undefined, ...skipText }), '[[Visible](/b)](/a "A")'],
+      // Blank hook output shows nothing, so the link still takes its label.
+      ['<a href="/x" aria-label="Label"><span>source</span></a>', createPlugin({ onNodeEnter: node => node.name === 'span' ? ' ' : undefined, ...skipText }), '[Label](/x)'],
+    ]
+    for (const [html, plugin, expected] of cases) {
+      expect(htmlToMarkdown(html, { plugins: [plugin] }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        let output = ''
+        const stream = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        for await (const chunk of streamHtmlToMarkdown(stream, { plugins: [plugin] }))
+          output += chunk
+        expect(output, `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
 })

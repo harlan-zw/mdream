@@ -1,5 +1,6 @@
 import type { ElementNode, MdreamRuntimeState, NodeEvent, PluginState, TextNode, TransformPlugin } from './types'
 import { ELEMENT_NODE, NodeEventEnter, TAG_A, TAG_PRE, TEXT_NODE } from './const'
+import { countContentInEnclosingLink } from './utils'
 
 /** Whether text shows nothing: empty, or only the parser's whitespace outside `<pre>`. */
 function isBlankText(value: string, inPreTag: boolean): boolean {
@@ -101,6 +102,10 @@ export function processPluginsForEvent(
       // Store plugin outputs on the element for processing
       if (pluginOutputs) {
         element.pluginOutput = element.pluginOutput ? element.pluginOutput.concat(pluginOutputs) : pluginOutputs
+        // Output that shows is text of the links around the element, so a link
+        // whose own text a hook skips takes no title or aria-label after it.
+        if (state.depthMap?.[TAG_A] && pluginOutputs.some(output => !isBlankText(output, (state.depthMap?.[TAG_PRE] || 0) > 0)))
+          countContentInEnclosingLink(element.tagId === TAG_A ? element.parent : element)
       }
     }
     else if (event.node.type === TEXT_NODE && event.type === NodeEventEnter) {

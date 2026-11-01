@@ -93,29 +93,36 @@ fn cleaned_links_do_not_allocate_intermediate_urls() {
 #[test]
 fn excluded_links_do_not_allocate_per_link() {
   const COUNT: usize = 1024;
-  let links = "<a href='/x'><span>Item</span> <span>more</span></a>".repeat(COUNT);
-  // The nav links are excluded; the header links are skipped until main is found.
-  for (html, plugins) in [
-    (
-      format!("<nav>{links}</nav><main><p>body</p></main>"),
-      PluginConfig {
-        filter: Some(FilterConfig::exclude(&["nav"])),
-        ..Default::default()
-      },
-    ),
-    (
-      format!("<header>{links}</header><main><p>body</p></main>"),
-      PluginConfig {
-        isolate_main: Some(IsolateMainConfig),
-        ..Default::default()
-      },
-    ),
+  // An icon link's trailing blank comes after a child but no text, which a
+  // link that can take its label records.
+  for link in [
+    "<a href='/x'><span>Item</span> <span>more</span></a>",
+    "<a href='/x'><svg></svg> </a>",
   ] {
-    let options = HtmlToMarkdownOptions {
-      plugins: Some(plugins),
-      ..Default::default()
-    };
-    assert_budget(&html, options, "body", 64);
+    let links = link.repeat(COUNT);
+    // The nav links are excluded; the header links are skipped until main is found.
+    for (html, plugins) in [
+      (
+        format!("<nav>{links}</nav><main><p>body</p></main>"),
+        PluginConfig {
+          filter: Some(FilterConfig::exclude(&["nav"])),
+          ..Default::default()
+        },
+      ),
+      (
+        format!("<header>{links}</header><main><p>body</p></main>"),
+        PluginConfig {
+          isolate_main: Some(IsolateMainConfig),
+          ..Default::default()
+        },
+      ),
+    ] {
+      let options = HtmlToMarkdownOptions {
+        plugins: Some(plugins),
+        ..Default::default()
+      };
+      assert_budget(&html, options, "body", 64);
+    }
   }
 }
 

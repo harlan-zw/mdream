@@ -567,11 +567,14 @@ impl ConvertState {
   /// in `<a><svg></svg> </a>Next`, still spaces that content from what follows:
   /// a label written in its place moves the blank past the link. A blank with
   /// more children after it, as in `<a><svg></svg> <svg></svg></a>`, does not.
+  /// Excluded and skipped links never take the label, so they record nothing.
   #[inline(never)]
   fn note_trailing_link_blank(&mut self) {
     if let Some(node) = self.stack.last_mut()
       && node.tag_id == Some(TAG_A)
       && node.current_walk_index > 0
+      && !node.excluded_from_markdown
+      && !node.enter_skipped
     {
       let children = node.current_walk_index;
       node.extras.get_or_insert_default().trailing_blank_at = Some(children);
