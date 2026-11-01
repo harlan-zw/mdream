@@ -2,7 +2,7 @@ import type { ElementNode } from '@mdream/js'
 import { ReadableStream } from 'node:stream/web'
 import { createPlugin, htmlToMarkdown as jsHtmlToMarkdown, streamHtmlToMarkdown as jsStreamHtmlToMarkdown } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
-import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 const RULES_AROUND_DEFERRED_FENCE: [string, string][] = [
   [
@@ -105,10 +105,24 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
     ['<ul><li><hr><blockquote><blockquote></blockquote></blockquote>tail</li></ul>', 'END', '- ***\n\n  > ENDEND tail'],
     ['<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>', 'END', '- ***\n\n  > > qENDEND tail'],
     ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', '', '- ***\n\n  tail'],
-    ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', ' ', '- ***\n\n tail'],
+    ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', ' ', '- ***\n\n   tail'],
   ])('keeps the list separator before quote exit override output: %s with %j', async (html, exit, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides: { blockquote: { exit } } } })).toBe(expected)
+    const options = { engine, plugins: { tagOverrides: { blockquote: { exit } } } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(stream, options))
+        output += chunk
+      expect(output, `split=${split}`).toBe(expected)
+    }
   })
 
   it('converts hr elements', async () => {

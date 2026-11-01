@@ -676,8 +676,7 @@ impl ConvertState {
       // Nested quote entry collapses one separator newline; an empty rollback
       // must restore it before the rule's list continuation is flushed.
       if frame.list_rule_pending && !self.list_rule_after_quote && !self.blockquotes.is_empty() {
-        self.buffer.push('\n');
-        self.last_content_cache_len = 1;
+        self.last_content_cache_len = self.push_code_span_content("\n", true);
       }
       return;
     }
@@ -2394,13 +2393,10 @@ impl ConvertState {
       if !self.blockquotes.is_empty() {
         let rule_was_pending = self.list_rule_pending;
         self.finalize_blockquote();
-        // An empty quote hands its rule back. Visible override output belongs
-        // after that rule's separator, inside the item.
+        // Literal exit output follows the restored list continuation indentation.
         if !rule_was_pending
           && self.list_rule_pending
-          && output
-            .as_deref()
-            .is_some_and(|value| value.bytes().any(|byte| !is_whitespace(byte)))
+          && output.as_deref().is_some_and(|value| !value.is_empty())
         {
           self.flush_list_rule(false);
         }

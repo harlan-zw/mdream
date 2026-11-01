@@ -2260,9 +2260,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const rulePending = state.listRulePending
       finalizeBlockquote(state)
       captionBufferChanged = true
-      // An empty quote hands its rule back. Visible output belongs after that
-      // rule's separator, inside the item.
-      if (rulePending === undefined && state.listRulePending !== undefined && output?.some(hasNonWhitespace)) {
+      // Literal exit output follows the restored list continuation indentation.
+      if (rulePending === undefined && state.listRulePending !== undefined && output?.some(value => value.length > 0)) {
         const separator = blockOpenPrefix(state, state.listRulePending) ?? ''
         if (separator)
           state.buffer.push(separator)

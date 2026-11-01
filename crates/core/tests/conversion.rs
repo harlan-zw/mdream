@@ -7294,7 +7294,7 @@ fn quote_exit_override_output_stays_after_the_list_rule() {
       "<ul><li><blockquote>x<hr></blockquote>tail</li></ul>",
       "- \n  > x\n  >\n  > ---END\n\n  tail",
     ),
-    // Without visible output the next node still flushes the rule.
+    // An empty override leaves the continuation for the next node.
     (
       "",
       "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
@@ -7303,7 +7303,7 @@ fn quote_exit_override_output_stays_after_the_list_rule() {
     (
       " ",
       "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n tail",
+      "- ***\n\n   tail",
     ),
   ] {
     let options = HtmlToMarkdownOptions {
