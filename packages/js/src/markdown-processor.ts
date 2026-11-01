@@ -909,7 +909,10 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
         currParent = currParent.parent
         continue
       }
-      return NO_SPACING
+      // A block child of an open br or img override keeps its block spacing.
+      if (!isBlockChildOfOpenVoid(node))
+        return NO_SPACING
+      break
     }
     currParent = currParent.parent
   }
@@ -924,6 +927,31 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
     return NO_SPACING
   }
   return DEFAULT_BLOCK_SPACING
+}
+
+/**
+ * Whether a block child keeps its block spacing because every collapsing
+ * ancestor is an open `br` or `img` override. Headings keep the suppression,
+ * so a reopened break still continues a heading's line. Mirrors
+ * `block_child_of_open_void` in the Rust engine.
+ */
+function isBlockChildOfOpenVoid(node: ElementNode): boolean {
+  const tagId = node.tagId
+  if (tagId === undefined || (tagId >= TAG_H1 && tagId <= TAG_H6) || !node.tagHandler || node.tagHandler.isInline)
+    return false
+  // A span keeps only the block children its own exemption keeps.
+  const spanExempt = tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (!parent.tagHandler?.collapsesInnerWhiteSpace)
+      continue
+    const parentId = parent.tagId
+    if (parentId === TAG_BR || parentId === TAG_IMG)
+      continue
+    if (parentId === TAG_SPAN && spanExempt)
+      continue
+    return false
+  }
+  return true
 }
 
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {

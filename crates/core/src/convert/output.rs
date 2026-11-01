@@ -5612,7 +5612,11 @@ impl ConvertState {
     let span_depth = self
       .collapse_span_depth
       .saturating_sub(u8::from(counted_self && is_span));
-    if non_span_depth > 0 && !heading_owns_collapse && !heading_exit_in_markerless_collapse {
+    if non_span_depth > 0
+      && !heading_owns_collapse
+      && !heading_exit_in_markerless_collapse
+      && !(self.has_tag_overrides && self.block_child_of_open_void(tag_id, is_enter))
+    {
       return NO_SPACING;
     }
     if span_depth > 0 {
@@ -5624,6 +5628,38 @@ impl ConvertState {
       }
     }
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
+  }
+
+  /// Whether a block child keeps its block spacing because every collapsing
+  /// ancestor is an open `br` or `img` override. An override holds content, so
+  /// it does not wrap inline text the way `<a>` or `<strong>` do. Any other
+  /// collapsing ancestor keeps the suppression, and so does a heading, whose
+  /// line a reopened break must continue. Runs only where the caller already
+  /// found a collapsing ancestor.
+  #[inline]
+  fn block_child_of_open_void(&self, tag_id: Option<u8>, is_enter: bool) -> bool {
+    let Some(id) = tag_id else {
+      return false;
+    };
+    if (TAG_H1..=TAG_H6).contains(&id)
+      || !get_tag_handler(id).is_some_and(|handler| !handler.is_inline)
+    {
+      return false;
+    }
+    // A span keeps only the block children its own exemption keeps.
+    let span_exempt = matches!(id, TAG_P | TAG_DIV | TAG_LI);
+    // On enter the node is the stack top, and it is not one of its own ancestors.
+    let ancestors = self.stack.len().saturating_sub(usize::from(is_enter));
+    self.stack[..ancestors].iter().all(|node| {
+      if !node.collapses_inner_white_space || node.excluded_from_markdown {
+        return true;
+      }
+      match node.tag_id {
+        Some(TAG_BR | TAG_IMG) => true,
+        Some(TAG_SPAN) => span_exempt,
+        _ => false,
+      }
+    })
   }
 
   /// Whether the tag writes visible inline Markdown around its content:

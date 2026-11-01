@@ -192,6 +192,30 @@ fn open_void_keeps_inline_children_inline() {
 }
 
 #[test]
+fn open_void_block_child_keeps_block_spacing() {
+  // The same output as the default path, which has no open void to collapse.
+  let img = [("img", flag(false))];
+  assert_converts(
+    r#"<p>a</p><img src="a.png">x<p>b</p>"#,
+    &img,
+    "a\n\n![](a.png)x\n\nb",
+  );
+  let br = [("br", flag(false))];
+  assert_converts("<p>a</p><br>x<p>b</p>", &br, "a\n\n  \nx\n\nb");
+}
+
+#[test]
+fn open_void_inline_wrapper_still_keeps_block_child_inline() {
+  // Only a br or img ancestor lifts the suppression, so a wrapper keeps it.
+  let config = [("br", flag(false))];
+  assert_converts(
+    "<p>a</p><br><strong>x<p>b</p></strong>y",
+    &config,
+    "a\n\n  \n**x b**y",
+  );
+}
+
+#[test]
 fn void_spacing_unchanged_without_an_open_override() {
   let html = "<p>a</p><hr>x<p>b</p>";
   assert_converts(html, &[], "a\n\n---\n\nx\n\nb");

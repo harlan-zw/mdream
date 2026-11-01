@@ -28,6 +28,9 @@ const SELF_CLOSING_CASES: [string, Record<string, any>, string][] = [
   ['<p>a</p><hr>x<p>b</p>', { hr: { isSelfClosing: false } }, 'a\n\n---\n\nx\n\nb'],
   ['<p>a<hr></p><p>b</p>', { hr: { isSelfClosing: false } }, 'a\n\n---\n\nb'],
   ['<p>a<img src="a.png">x</p>', { img: { isSelfClosing: false } }, 'a![](a.png)x'],
+  ['<p>a</p><img src="a.png">x<p>b</p>', { img: { isSelfClosing: false } }, 'a\n\n![](a.png)x\n\nb'],
+  ['<p>a</p><br>x<p>b</p>', { br: { isSelfClosing: false } }, 'a\n\n  \nx\n\nb'],
+  ['<p>a</p><br><strong>x<p>b</p></strong>y', { br: { isSelfClosing: false } }, 'a\n\n  \n**x b**y'],
   ['<p>a</p><hr>x<p>b</p>', {}, 'a\n\n---\n\nx\n\nb'],
   ['<p>a</p><hr>x<p>b</p>', { em: { isSelfClosing: false } }, 'a\n\n---\n\nx\n\nb'],
 ]
