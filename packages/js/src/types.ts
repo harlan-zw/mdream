@@ -370,7 +370,7 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   /** Fragments the buffered blockquotes' content starts at, innermost last. */
   blockquotes?: ReadonlyArray<{ readonly fragment: number }>
   /** Content-column prefix deferred after a list item rule. */
-  listRulePending?: string
+  listRulePending?: string | true
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
 }

@@ -233,6 +233,10 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<>',
   // String chunks split the UTF-16 surrogate pair at width 1.
   '<p>🎉</p>',
+  // A marker nested past three spaces is recognized from its whole line lead.
+  '<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>',
+  '<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>',
+  '<ul><li><ul><li></li></ul></li></ul>',
 ]
 
 describe.each([undefined, 12])('cross-engine streaming byte parity wrapWidth=%s', (wrapWidth) => {
@@ -794,23 +798,23 @@ describe('blocks around nested pending markers streaming', () => {
     ],
     [
       '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
-      '- a\n\n  - \n\n  ## h',
+      '- a\n\n  -\n\n  ## h',
     ],
     [
       '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
-      '- a\n  - b\n\n    - \n\n    ## h',
+      '- a\n  - b\n\n    -\n\n    ## h',
     ],
     [
       '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
-      '- a\n\n  - \n\n  ```\n  x\n  ```',
+      '- a\n\n  -\n\n  ```\n  x\n  ```',
     ],
     [
       '<ul><li>a<ul><li></li></ul><hr></li></ul>',
-      '- a\n\n  - \n\n  ---',
+      '- a\n\n  -\n\n  ***',
     ],
     [
       '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
-      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
+      '- a\n\n  -\n\n  | t |\n  | --- |\n  | c |',
     ],
   ])('matches every split and chunk width: %s', async (html, expected) => {
     for (const { engine, name } of engines) {

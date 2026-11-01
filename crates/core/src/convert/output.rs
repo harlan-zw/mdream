@@ -1138,8 +1138,10 @@ impl ConvertState {
       self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
       return;
     }
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+    if self.list_rule_pending != ListBoundary::None
+      && !self.stack[stack_len - 1].excludes_text_nodes
+    {
+      self.flush_list_rule(self.stack[stack_len - 1].tag_id);
     }
 
     let tag_id: Option<u8>;
@@ -1326,6 +1328,15 @@ impl ConvertState {
     let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
     let configured_new_lines = new_line_config[1];
 
+    if matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && node.has_list_item_output
+      && self.depth_map[TAG_LI as usize] > 0
+      && self.depth_map[TAG_PRE as usize] == 0
+      && !self.in_table_cell()
+    {
+      self.list_rule_pending = ListBoundary::NestedList;
+    }
+
     if self.drop_empty_marker_pair(tag_id, output.as_deref(), is_inline) {
       return;
     }
@@ -1373,8 +1384,10 @@ impl ConvertState {
       return;
     }
 
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+    if self.list_rule_pending != ListBoundary::None
+      && !self.stack[stack_len - 1].excludes_text_nodes
+    {
+      self.flush_list_rule(self.stack[stack_len - 1].tag_id);
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -1761,8 +1774,20 @@ impl ConvertState {
         || tag_id.and_then(Self::inline_marker_type).is_some()
     });
 
-    if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
-      self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+    if !plain_text!(self) && tag_id == Some(TAG_LI) && !self.in_table_cell() {
+      if self.buffer.len() > output_start
+        && (!enter_is_literal
+          || output
+            .as_deref()
+            .is_some_and(|value| has_visible(value.as_bytes())))
+        && stack_len > 1
+        && matches!(self.stack[stack_len - 2].tag_id, Some(TAG_UL | TAG_OL))
+      {
+        self.stack[stack_len - 2].has_list_item_output = true;
+      }
+      if !enter_is_literal {
+        self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+      }
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -2163,7 +2188,7 @@ impl ConvertState {
 
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
-      self.list_rule_pending = false;
+      self.list_rule_pending = ListBoundary::None;
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
     // Only the <pre> owning the open fence may close it; a nested one closing
@@ -2363,11 +2388,18 @@ impl ConvertState {
 
     if !has_override
       && !plain_text!(self)
-      && tag_id == Some(TAG_HR)
+      && (tag_id == Some(TAG_HR)
+        || (matches!(tag_id, Some(TAG_UL | TAG_OL))
+          && node.has_list_item_output
+          && self.depth_map[TAG_PRE as usize] == 0))
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
     {
-      self.list_rule_pending = true;
+      self.list_rule_pending = if tag_id == Some(TAG_HR) {
+        ListBoundary::Rule
+      } else {
+        ListBoundary::NestedList
+      };
     }
 
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) {
@@ -2659,7 +2691,7 @@ impl ConvertState {
       && self.wrap_width == 0
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
-      && !self.list_rule_pending
+      && self.list_rule_pending == ListBoundary::None
       && !self.pending_inline_whitespace
       && !self.pending_raw_html_boundary
       && !self.pre_fence_pending
@@ -2896,11 +2928,11 @@ impl ConvertState {
       return;
     }
 
-    if self.list_rule_pending {
+    if self.list_rule_pending != ListBoundary::None {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_list_rule();
+      self.flush_list_rule(None);
     }
 
     let mut relocated_space = false;
@@ -3323,6 +3355,13 @@ impl ConvertState {
       _ => return false,
     }
     let mut spaces = 0;
+    while index >= 8
+      && max_spaces.saturating_sub(spaces) >= 8
+      && bytes[index - 8..index] == [b' '; 8]
+    {
+      index -= 8;
+      spaces += 8;
+    }
     while index > 0 && bytes[index - 1] == b' ' {
       // The space after a decoded `\r` separates the marker from the line end
       // before it; it is not indentation, so it never counts against the cap.
@@ -3346,6 +3385,8 @@ impl ConvertState {
   /// marker into a setext underline: the text becomes a heading and the item
   /// disappears. A blank line, or a sibling marker, opens its own block instead.
   fn record_item_marker(&mut self, index: usize, output_start: usize) {
+    let parent_marker_end = self.last_item_marker_end;
+    self.last_item_marker_end = usize::MAX;
     // Only a list's first item can follow a paragraph, so every later sibling
     // skips the line scan below.
     if index != 0 {
@@ -3375,7 +3416,46 @@ impl ConvertState {
       b'\r' => matches!(before(2), b'\n' | b'\r'),
       _ => true,
     };
-    self.empty_item_hazard = !starts_document && !blank_above;
+    // Cache only a built-in marker actually written on its own line. Literal
+    // overrides, raw HTML and a cap rejecting output cannot create a shortcut.
+    let marker_end = self.buffer.trim_end_matches(' ').len();
+    if (starts_document || before(1) == b'\n')
+      && self.buffer.len() > output_start
+      && bytes
+        .get(marker_end.wrapping_sub(1))
+        .is_some_and(|byte| matches!(byte, b'-' | b'.' | b')'))
+    {
+      self.last_item_marker_end = marker_end;
+    }
+    // A parent's bare marker is no paragraph, and a blank line under it would
+    // end that item and turn this one into its sibling. A marker outside the
+    // innermost blockquote keeps the blank line it already had, which the
+    // quote's prefix makes harmless.
+    let above_end = line_start.saturating_sub(1);
+    let follows_marker = if starts_document || blank_above {
+      false
+    } else if above_end > 0 && above_end == parent_marker_end {
+      self
+        .blockquotes
+        .last()
+        .is_none_or(|frame| above_end > frame.content_start)
+    } else {
+      #[cfg(test)]
+      {
+        self.parent_marker_scans += 1;
+      }
+      let mut above_end = above_end;
+      while above_end > 0 && bytes[above_end - 1] == b' ' {
+        above_end -= 1;
+      }
+      above_end > 0
+        && self
+          .blockquotes
+          .last()
+          .is_none_or(|frame| above_end > frame.content_start)
+        && self.list_marker_line_start(bytes, above_end, self.list_indent.len() + 3)
+    };
+    self.empty_item_hazard = !starts_document && !blank_above && !follows_marker;
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
@@ -3503,6 +3583,9 @@ impl ConvertState {
 
   /// Move every cached offset at or past `at` one byte right, for a newline inserted at `at`.
   fn shift_offsets_at_or_after(&mut self, at: usize) {
+    if self.last_item_marker_end != usize::MAX && self.last_item_marker_end >= at {
+      self.last_item_marker_end += 1;
+    }
     for marker in &mut self.open_markers {
       if marker.output_start >= at {
         marker.output_start += 1;
@@ -3633,7 +3716,7 @@ impl ConvertState {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
         return self
-          .list_marker_line_start(bytes, offset + 1, 3)
+          .list_marker_line_start(bytes, offset + 1, structural_indent + 3)
           .then_some(0);
       }
       spaces += 1;
@@ -4446,18 +4529,35 @@ impl ConvertState {
     p
   }
 
-  fn flush_list_rule(&mut self) {
+  fn flush_list_rule(&mut self, enter_tag: Option<u8>) {
+    if self.list_rule_pending == ListBoundary::NestedList
+      && matches!(enter_tag, Some(TAG_UL | TAG_OL))
+    {
+      return;
+    }
+    if self.list_rule_pending == ListBoundary::NestedList
+      && matches!(enter_tag, Some(TAG_LI | TAG_BLOCKQUOTE))
+    {
+      self.list_rule_pending = ListBoundary::None;
+      return;
+    }
     let prefix = self.continuation_prefix();
-    if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
-      self.buffer.reserve(2 + prefix.len());
-      self.buffer.push_str("\n\n");
-      self.buffer.push_str(&prefix);
-      self.last_content_cache_len = 2 + prefix.len();
+    let new_lines = if self.list_rule_pending == ListBoundary::NestedList {
+      self.trim_trailing_spaces();
+      usize::from(2_u8.saturating_sub(self.trailing_new_lines()))
     } else {
-      let output = format!("\n\n{prefix}");
+      2
+    };
+    if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
+      self.buffer.reserve(new_lines + prefix.len());
+      self.buffer.push_str(&"\n\n"[..new_lines]);
+      self.buffer.push_str(&prefix);
+      self.last_content_cache_len = new_lines + prefix.len();
+    } else {
+      let output = format!("{}{prefix}", &"\n\n"[..new_lines]);
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
-    self.list_rule_pending = false;
+    self.list_rule_pending = ListBoundary::None;
   }
 
   /// Only the word's own line counts: a decoded line ending or a trailing tab
@@ -5836,6 +5936,42 @@ mod tests {
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
   #[test]
+  fn bare_parent_markers_skip_indent_recognition_at_depth() {
+    for depth in [50, 200] {
+      let mut state =
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      state.process_html(&"<ul><li>".repeat(depth));
+      assert!(
+        state.parent_marker_scans <= 1,
+        "depth={depth}: {} parent scans",
+        state.parent_marker_scans
+      );
+    }
+  }
+
+  #[test]
+  fn list_marker_indent_cap_survives_word_skips() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    for indent in 0..=24 {
+      state.list_indent = " ".repeat(indent);
+      let max_spaces = indent + 3;
+      for spaces in 0..=60 {
+        for lead in ["", "\n", "x"] {
+          for marker in ["-", "3."] {
+            let line = format!("{lead}{}{marker}", " ".repeat(spaces));
+            let expected = (lead.is_empty() || lead == "\n") && spaces <= max_spaces;
+            assert_eq!(
+              state.list_marker_line_start(line.as_bytes(), line.len(), max_spaces),
+              expected,
+              "indent={indent} spaces={spaces} lead={lead:?} marker={marker}"
+            );
+          }
+        }
+      }
+    }
+  }
+
+  #[test]
   fn push_decimal_matches_display() {
     for value in [0, 1, 9, 10, 99, 100, 4_294_967_295] {
       let mut out = String::from("x");
@@ -5926,7 +6062,7 @@ mod tests {
       current_walk_index: 0,
       child_text_node_index: 0,
       tag_id: Some(tag_id),
-      contains_whitespace: false,
+      has_list_item_output: false,
       excluded_from_markdown: false,
       enter_skipped: false,
       is_inline,

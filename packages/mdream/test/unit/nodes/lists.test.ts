@@ -232,6 +232,28 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('- <mark>`x`</mark>')
   })
 
+  it.each([
+    ['<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>', '-\n  -\n    - \\# h'],
+    ['<ul><li><ul><li><ul><li>1. x</li></ul></li></ul></li></ul>', '-\n  -\n    - 1\\. x'],
+    ['<ol><li><ol><li><ol><li>&gt; q</li></ol></li></ol></li></ol>', '1.\n   1.\n      1. \\> q'],
+    ['<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>', '-\n  -\n    - | a |\n      | --- |'],
+    ['<ul><li><ul><li><ul><li><pre>code</pre></li></ul></li></ul></li></ul>', '-\n  -\n    - ```\n      code\n      ```'],
+    ['<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>', '-\n  -\n    - ***'],
+    ['<ul><li><ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>', '-\n  -\n    - \n      > q'],
+    ['<ol start="10"><li><ol start="10"><li><table><tr><td>a</td></tr></table></li></ol></li></ol>', '10.\n    10. | a |\n        | --- |'],
+  ])('opens a block at a marker nested past three spaces: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li><ul><li></li></ul></li></ul>', '-\n  -'],
+    ['<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-\n  - \n    > q'],
+  ])('keeps a nested item under its parent\'s bare marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>
@@ -415,23 +437,23 @@ describe.each(engines)('blocks around nested pending markers $name', (engineConf
   it.each([
     [
       '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
-      '- a\n\n  - \n\n  ## h',
+      '- a\n\n  -\n\n  ## h',
     ],
     [
       '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
-      '- a\n  - b\n\n    - \n\n    ## h',
+      '- a\n  - b\n\n    -\n\n    ## h',
     ],
     [
       '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
-      '- a\n\n  - \n\n  ```\n  x\n  ```',
+      '- a\n\n  -\n\n  ```\n  x\n  ```',
     ],
     [
       '<ul><li>a<ul><li></li></ul><hr></li></ul>',
-      '- a\n\n  - \n\n  ---',
+      '- a\n\n  -\n\n  ***',
     ],
     [
       '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
-      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
+      '- a\n\n  -\n\n  | t |\n  | --- |\n  | c |',
     ],
   ])('leaves the marker of a closed item: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
@@ -440,7 +462,7 @@ describe.each(engines)('blocks around nested pending markers $name', (engineConf
 
   it('keeps escaping text after a closed item', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('<ul><li>a<ul><li></li></ul># t</li></ul>', { engine })).toBe('- a\n\n  - \\# t')
+    expect(htmlToMarkdown('<ul><li>a<ul><li></li></ul># t</li></ul>', { engine })).toBe('- a\n\n  -\n\n  \\# t')
   })
 })
 

@@ -415,7 +415,7 @@ impl ConvertState {
       current_walk_index: 0,
       child_text_node_index: 0,
       tag_id,
-      contains_whitespace: false,
+      has_list_item_output: false,
       excluded_from_markdown: false,
       enter_skipped: false,
       is_inline: handler.is_inline,
@@ -1267,7 +1267,7 @@ impl ConvertState {
     tag.index = current_walk_index;
     tag.current_walk_index = 0;
     tag.child_text_node_index = 0;
-    tag.contains_whitespace = false;
+    tag.has_list_item_output = false;
     tag.excluded_from_markdown = false;
     tag.enter_skipped = false;
     tag.is_inline = h_inline;

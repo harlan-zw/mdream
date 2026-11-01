@@ -16,6 +16,38 @@ async function streamConvert(chunks: string[]): Promise<string> {
 }
 
 describe('inline whitespace', () => {
+  it.each([
+    ['<ul><li><ul></ul>text</li></ul>', '- text'],
+    ['<ul><li><ol></ol>text</li></ul>', '- text'],
+    ['<ul><li>before<ul></ul>text</li></ul>', '- before text'],
+    ['<ul><li><ul><template><li></li></template></ul>text</li></ul>', '- text'],
+    ['<ul><li><ul><span></span></ul>text</li></ul>', '- text'],
+    ['<ul><li><ul> \n </ul>text</li></ul>', '- text'],
+    ['<ul><li><ul></ul><strong>text</strong></li></ul>', '- **text**'],
+    ['<ul><li><ul><li></li></ul><ul></ul>text</li></ul>', '-\n  -\n\n  text'],
+    ['<ol start="10"><li><ul><li>child</li></ul># h</li></ol>', '10.\n    - child\n\n    \\# h'],
+    ['<ol start="10"><li><ul><li>child</li></ul>1. x</li></ol>', '10.\n    - child\n\n    1\\. x'],
+    ['<ol start="10"><li><ul><li>child</li></ul>---<br>1) x<br>+ x<br>&gt; q</li></ol>', '10.\n    - child\n\n    \\---  \n    1\\) x  \n    \\+ x  \n    \\> q'],
+    ['<ul><li><ol><li></li></ol>text</li></ul>', '-\n  1.\n\n  text'],
+    ['<blockquote><ul><li><ol><li></li></ol>text</li></ul></blockquote>', '> -\n>   1.\n>\n>   text'],
+    ['<ul><li><blockquote><ol><li></li></ol>text</blockquote></li></ul>', '- \n  >\n  > 1.\n  >\n  > text'],
+    ['<ul><li><ul><li></li></ul>text</li></ul>', '-\n  -\n\n  text'],
+    ['<ol start="10"><li><ul><li></li></ul>text</li></ol>', '10.\n    -\n\n    text'],
+    ['<ul><li><ol><li>child</li></ol>text</li></ul>', '-\n  1. child\n\n  text'],
+    ['<ul><li><ol><li></li></ol><strong>text</strong></li></ul>', '-\n  1.\n\n  **text**'],
+    ['<ul><li><ol><li></li></ol><script>hidden</script> text</li></ul>', '-\n  1.\n\n  text'],
+    ['<ul><li><ol><li></li></ol></li><li>next</li></ul>', '-\n  1.\n- next'],
+    ['<ul><li><pre><ul></ul>x</pre></li></ul>', '- ```\n  x\n  ```'],
+    ['<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>', '- x\n\n  - \n  \n\n  y'],
+    ['<table><tr><td><ul><li><ol><li></li></ol>text</li></ul></td></tr></table>', '| <ul><li><ol><li></li></ol>text</li></ul> |\n| --- |'],
+    ['<ul><li><a href="/w" title="W"><pre><hr></pre></a></li></ul>', '- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)'],
+    ['<ul><li><a href="x"><ul><li></li></ul></a><ul><li># h</li></ul></li></ul>', '- [  -](x)\n  - \\# h'],
+  ])('preserves list content boundaries: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+
   it('preserves whitespace between root-level inline siblings', () => {
     expect(htmlToMarkdown('<span>One</span> <span>Two</span>')).toBe('One Two')
     expect(htmlToMarkdown('<strong>One</strong>\n<strong>Two</strong>')).toBe('**One** **Two**')

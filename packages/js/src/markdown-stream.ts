@@ -281,7 +281,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     const wrapping = !!options.wrapWidth
     if (hasYieldedContent && fragmentHeld && state.blockquotes.length > 0 && !headingHeld && !inPre && (!wrapping || leadingTrimmed === 0)) {
       observeStableOutput(content, stableLength + leadingTrimmed)
-      let retainedStart = stableLength + leadingTrimmed - 17
+      let retainedStart = stableLength + leadingTrimmed - 17 - state.listIndent.length
       if (wrapping)
         retainedStart = Math.min(retainedStart, content.lastIndexOf('\n', stableLength + leadingTrimmed - 1))
       const removed = compactQuotePrefix(heldFragment, content, Math.max(0, retainedStart))
@@ -293,7 +293,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       observeStableOutput(content, stableLength + leadingTrimmed)
       // A list prefix can contain three spaces, nine digits, a delimiter,
       // and three trailing spaces. Keep its preceding byte to classify it.
-      let contextStart = stableLength - 17
+      let contextStart = stableLength - 17 - state.listIndent.length
       if (wrapping) {
         const lineStart = currentContent.lastIndexOf('\n', stableLength - 1)
         if (lineStart < contextStart)

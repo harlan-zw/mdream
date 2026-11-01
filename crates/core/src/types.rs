@@ -238,7 +238,7 @@ pub(crate) struct ElementNode {
   pub child_text_node_index: u32,
   // Small fields grouped to minimize padding
   pub tag_id: Option<u8>,
-  pub contains_whitespace: bool,
+  pub has_list_item_output: bool,
   pub excluded_from_markdown: bool,
   /// A plugin skipped this node's start, so its end must not be emitted either.
   /// Unlike `excluded_from_markdown`, the node's descendants stay eligible.
