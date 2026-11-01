@@ -365,7 +365,7 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   }
   // Unknown tags are inline, as in the Rust engine; an end tag that closed
   // nothing is no boundary.
-  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || lastNode.tagHandler.isSelfClosing === false : (lastNode as ElementNode).tagId === -1))) {
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || (lastNode.tagHandler.isSelfClosing === false && tagHandlers[(lastNode as ElementNode).tagId ?? -1]?.isSelfClosing) : (lastNode as ElementNode).tagId === -1))) {
     return false
   }
   const firstChar = textNode.value[0]
@@ -2409,7 +2409,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (eventType === NodeEventEnter && handler?.isSelfClosing === false && tagHandlers[tagId]?.isSelfClosing) {
       const exitLines = suppressedInPre ? 0 : calculateNewLineConfig(element, state, NodeEventExit)[1]
       // Same cap as the exit path: a thematic break in a blockquote takes one line.
-      const owedLines = tagId === TAG_HR && state.blockquotes.length > 0 ? Math.min(1, exitLines) : exitLines
+      let enterNewlines = 0
+      for (let i = (output?.length || 0) - 1; i >= 0; i--) {
+        const fragment = output![i]!
+        let end = fragment.length
+        while (end > 0 && fragment.charCodeAt(end - 1) === 10) {
+          end--
+          enterNewlines++
+        }
+        if (end > 0)
+          break
+      }
+      const cappedLines = tagId === TAG_HR && state.blockquotes.length > 0 ? Math.min(1, exitLines) : exitLines
+      const owedLines = Math.max(0, cappedLines - enterNewlines)
       if (owedLines > 0)
         output = [...(output || []), '\n'.repeat(owedLines)]
     }

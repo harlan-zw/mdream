@@ -25,6 +25,7 @@ import {
   TAG_TH,
   TEXT_NODE,
 } from './const'
+import { tagHandlers } from './tags'
 import { resolveUrl } from './url'
 import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
 
@@ -54,7 +55,7 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
     return false
   // Unknown tags are inline, as in the Rust engine; an end tag that closed
   // nothing is no boundary.
-  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || lastNode.tagHandler.isSelfClosing === false : (lastNode as ElementNode).tagId === -1)))
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || (lastNode.tagHandler.isSelfClosing === false && tagHandlers[(lastNode as ElementNode).tagId ?? -1]?.isSelfClosing) : (lastNode as ElementNode).tagId === -1)))
     return false
   const firstChar = textNode.value[0]
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
