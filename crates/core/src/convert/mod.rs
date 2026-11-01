@@ -142,7 +142,7 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
   }
   t[b'\n' as usize] |= GFM_NEWLINE_BIT;
   t[b'\r' as usize] |= GFM_NEWLINE_BIT;
-  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let active = b"\\*_~`[]|><\n\r#-+=.) 0123456789";
   let mut i = 0usize;
   while i < active.len() {
     t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
@@ -801,6 +801,7 @@ pub struct ConvertState {
   /// The trailing whitespace, `<pre>` space and heading `#` runs `get_markdown_chunk`
   /// holds back.
   held_whitespace: TailRun,
+  held_emphasis_whitespace: TailRun,
   held_spaces: TailRun,
   held_heading_run: TailRun,
   /// Bytes at the buffer start known to be whitespace, for the leading trim.
@@ -931,6 +932,9 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
+  /// `<li>` children opened so far in each open `<ol>` or `<ul>`, innermost
+  /// last. An item's position among them numbers it and marks the list's first.
+  list_item_counts: Vec<u32>,
 
   /// `<pre>` fenced-code deferral (issue #97). A bare `<pre>` (no `<code>`
   /// child) becomes a fenced code block, but the opening fence is deferred
@@ -953,6 +957,9 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// That line follows a decoded `\r`, which a single `\n` only turns into one
+  /// `\r\n` line ending.
+  empty_item_after_cr: bool,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
@@ -1131,6 +1138,7 @@ impl ConvertState {
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
       held_whitespace: TailRun::default(),
+      held_emphasis_whitespace: TailRun::default(),
       held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
       leading_whitespace: 0,
@@ -1195,6 +1203,7 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       ordered_starts: Vec::new(),
+      list_item_counts: Vec::new(),
 
       pre_fence_pending: false,
       pre_fence_pending_depth: 0,
@@ -1203,6 +1212,7 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      empty_item_after_cr: false,
       list_rule_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
@@ -2613,6 +2623,7 @@ impl ConvertState {
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
+    self.held_emphasis_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
     if offset < self.leading_whitespace {
@@ -2641,6 +2652,7 @@ impl ConvertState {
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
     self.held_whitespace.note_drain(removed);
+    self.held_emphasis_whitespace.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
     self.leading_whitespace = 0;
@@ -2749,10 +2761,7 @@ impl ConvertState {
     let mut stable_end = self
       .held_whitespace
       .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
-    // A Markdown emphasis closer moves a trailing run that holds a vertical tab
-    // after itself, so the whole run stays mutable while emphasis is open. The
-    // cache keeps the plain predicate: its carried start would go stale once
-    // the emphasis closes, so the vertical tab part is scanned without it.
+    // Separate predicates keep cached runs valid when emphasis closes.
     if stable_end > 0
       && self.buffer.as_bytes()[stable_end - 1] == 11
       && !plain_text!(self)
@@ -2766,12 +2775,11 @@ impl ConvertState {
         || self.depth_map[TAG_S as usize] != 0
         || self.depth_map[TAG_STRIKE as usize] != 0)
     {
-      let bytes = self.buffer.as_bytes();
-      while stable_end > 0
-        && (bytes[stable_end - 1].is_ascii_whitespace() || bytes[stable_end - 1] == 11)
-      {
-        stable_end -= 1;
-      }
+      stable_end = self
+        .held_emphasis_whitespace
+        .start(self.buffer.as_bytes(), buf_len, |byte| {
+          byte.is_ascii_whitespace() || byte == 11
+        });
     }
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
@@ -2984,7 +2992,15 @@ impl ConvertState {
     }
     // Settle a pending marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
-    self.resolve_item_marker(false);
+    // Like `settle_item_marker`, only content ending in a non-blank byte settles it.
+    if self
+      .buffer
+      .as_bytes()
+      .last()
+      .is_some_and(|byte| !byte.is_ascii_whitespace())
+    {
+      self.resolve_item_marker(false);
+    }
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }

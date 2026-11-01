@@ -125,7 +125,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger } from './utils'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -254,7 +254,8 @@ const LINE_CONTENT = 2 // other content, so the row needs a block break
 // A row must open its own line at the item's content column: sharing one with
 // preceding content (a `<caption>`) leaves the header as prose and the
 // delimiter row never forms a table.
-function lineStateBeforeRow(buffer: string[]): number {
+function lineStateBeforeRow(state: HandlerContext['state']): number {
+  const buffer = state.buffer
   let fragment = buffer.length - 1
   while (fragment >= 0 && buffer[fragment]!.length === 0)
     fragment--
@@ -291,19 +292,19 @@ function lineStateBeforeRow(buffer: string[]): number {
 
   if (firstNonSpace === -1)
     return LINE_OPEN
-  // A row already open only needs its line broken, not a new block.
-  if (firstNonSpace === 124) // |
-    return LINE_ROW
   // A pending list marker is block prefix, not content: a table's first row
-  // belongs on it.
-  return listMarkerLineStart(buffer, markerFragment, markerIndex) ? LINE_OPEN : LINE_CONTENT
+  // belongs on it, whatever the text before a decoded CR led with.
+  if (listMarkerLineStart(buffer, markerFragment, markerIndex, pendingMarkerIndent(state)))
+    return LINE_OPEN
+  // A row already open only needs its line broken, not a new block.
+  return firstNonSpace === 124 ? LINE_ROW : LINE_CONTENT // |
 }
 
 // A row's own line at the enclosing list item's content column. Outside a list
 // the marker is constant, which covers most tables.
 export function rowMarker(state: HandlerContext['state']): string {
   const indent = state.listIndent
-  const lineState = lineStateBeforeRow(state.buffer)
+  const lineState = lineStateBeforeRow(state)
   if (!indent) {
     return lineState === LINE_ROW ? '\n| ' : lineState === LINE_CONTENT ? '\n\n| ' : '| '
   }
@@ -346,11 +347,24 @@ function cellExit(node: HandlerContext['node'], state: HandlerContext['state']):
 function handleHeading(depth: number): TagHandler {
   return {
     // A `#` prefix needs its own line, which a GFM row cannot give it.
-    enter: ({ state }) => {
+    enter: ({ node, state }) => {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `<h${depth}>`
       }
-      return `${'#'.repeat(depth)} `
+      const heading = `${'#'.repeat(depth)} `
+      // The newline a quote opened on already starts the heading's line.
+      if (state.listIndent && lastOutputChar(state.buffer) === 10
+        && state.blockquotes?.at(-1)?.fragment !== state.buffer.length) {
+        const prefix = continuationPrefix(node, state.listIndentWidths || [], !state.bufferedBlockquoteDepth)
+        return `\n${prefix}${heading}`
+      }
+      if (state.listIndent && node.parent?.tagId === TAG_LI) {
+        const prefix = continuationPrefix(node, state.listIndentWidths || [], !state.bufferedBlockquoteDepth)
+        const open = blockOpenPrefix(state, prefix)
+        if (open !== undefined)
+          return `${open}${heading}`
+      }
+      return heading
     },
     exit: ({ state }) => {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
@@ -491,7 +505,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       // indent to the content, which this rule is. It opens no new block.
       if (state.codeFence?.fragment === end - 1 && state.buffer[end - 1]!.endsWith('\n'))
         return `${prefix}${MARKDOWN_HORIZONTAL_RULE_ALT}`
-      const open = blockOpenPrefix(state.buffer, prefix, end)
+      const open = blockOpenPrefix(state, prefix, end)
       // Sharing the marker's line, where `---` would make the whole line a
       // thematic break and take the item with it.
       return open === undefined
@@ -581,7 +595,7 @@ export const tagHandlers: Record<number, TagHandler> = {
           const indent = state.listIndent
           // A blank line between the marker and the fence ends the item, leaving
           // the block a sibling of the list.
-          const open = blockOpenPrefix(state.buffer, indent) ?? ''
+          const open = blockOpenPrefix(state, indent) ?? ''
           return {
             _tag: 'CodeFenceEnter',
             language,
@@ -769,7 +783,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     enter: ({ node, state }) => {
       if ((state.depthMap?.[TAG_LI] || 0) === 0 || isInsideTableCell(state))
         return undefined
-      return blockOpenPrefix(state.buffer, state.listIndent, enterOutputEnd(node, state))
+      return blockOpenPrefix(state, state.listIndent, enterOutputEnd(node, state))
     },
   },
   [TAG_THEAD]: {
