@@ -142,7 +142,7 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
   }
   t[b'\n' as usize] |= GFM_NEWLINE_BIT;
   t[b'\r' as usize] |= GFM_NEWLINE_BIT;
-  let active = b"\\*_~`[]|><\n\r#-+.) 0123456789";
+  let active = b"\\*_~`[]|><\n\r#-+=.) 0123456789";
   let mut i = 0usize;
   while i < active.len() {
     t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
@@ -931,6 +931,9 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
+  /// `<li>` children opened so far in each open `<ol>` or `<ul>`, innermost
+  /// last. An item's position among them numbers it and marks the list's first.
+  list_item_counts: Vec<u32>,
 
   /// `<pre>` fenced-code deferral (issue #97). A bare `<pre>` (no `<code>`
   /// child) becomes a fenced code block, but the opening fence is deferred
@@ -953,6 +956,9 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// That line follows a decoded `\r`, which a single `\n` only turns into one
+  /// `\r\n` line ending.
+  empty_item_after_cr: bool,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
@@ -1195,6 +1201,7 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       ordered_starts: Vec::new(),
+      list_item_counts: Vec::new(),
 
       pre_fence_pending: false,
       pre_fence_pending_depth: 0,
@@ -1203,6 +1210,7 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      empty_item_after_cr: false,
       list_rule_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
@@ -2960,7 +2968,15 @@ impl ConvertState {
     }
     // Settle a pending marker-line guard when the item's first content already
     // answers it, so the hold below never outlives the marker's own line.
-    self.resolve_item_marker(false);
+    // Like `settle_item_marker`, only content ending in a non-blank byte settles it.
+    if self
+      .buffer
+      .as_bytes()
+      .last()
+      .is_some_and(|byte| !byte.is_ascii_whitespace())
+    {
+      self.resolve_item_marker(false);
+    }
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
