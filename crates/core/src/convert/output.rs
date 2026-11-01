@@ -1417,17 +1417,7 @@ impl ConvertState {
           .plugins
           .as_ref()
           .and_then(|p| p.tag_overrides.as_ref());
-        let config = Self::override_for_node(ovs, self.override_idx.as_deref(), node);
-        // A rule an override keeps open owes the separator before its children.
-        if tag_id == Some(TAG_HR)
-          && config.is_some_and(|ov| ov.is_self_closing == Some(false) && ov.enter.is_none())
-          && !plain_text!(self)
-          && !self.in_table_cell()
-          && self.depth_map[TAG_LI as usize] > 0
-        {
-          self.list_rule_pending = true;
-        }
-        config
+        Self::override_for_node(ovs, self.override_idx.as_deref(), node)
       } else {
         None
       };
@@ -1499,27 +1489,38 @@ impl ConvertState {
         // here. Only the newlines the enter output does not already end with.
         // The enter-side call keeps the node out of its own ancestors.
         open_void_enter = Self::is_open_void(tag_id, Some(ov));
-        if open_void_enter && Self::void_spacing_follows_enter(ov) {
-          let after = self.calculate_new_line_config(tag_id, node_spacing, true)[1];
-          let after = if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
-            after.min(1)
-          } else {
-            after
-          };
-          let text = enter.as_deref().unwrap_or("");
-          let have = text.bytes().rev().take_while(|&b| b == b'\n').count();
-          let owed = after.saturating_sub(u8::try_from(have).unwrap_or(u8::MAX));
-          if have == text.len() {
-            // Nothing visible separates these newlines from the ones before the
-            // enter, so they join that run and merge with what the buffer ends on.
-            // The spacing call above returned this spacing, so the enter's own
-            // call returns the raised value too.
-            let [before, after] = node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING);
-            node_spacing = Some([before.max(owed), after]);
-          } else if owed > 0 {
-            let mut text = enter.map_or_else(String::new, Cow::into_owned);
-            text.push_str(&"\n".repeat(owed.into()));
-            enter = Some(Cow::Owned(text));
+        if open_void_enter {
+          // A rule an override keeps open owes the separator before its children.
+          if tag_id == Some(TAG_HR)
+            && ov.enter.is_none()
+            && !plain_text!(self)
+            && !self.in_table_cell()
+            && self.depth_map[TAG_LI as usize] > 0
+          {
+            self.list_rule_pending = true;
+          }
+          if Self::void_spacing_follows_enter(ov) {
+            let after = self.calculate_new_line_config(tag_id, node_spacing, true)[1];
+            let after = if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
+              after.min(1)
+            } else {
+              after
+            };
+            let text = enter.as_deref().unwrap_or("");
+            let have = text.bytes().rev().take_while(|&b| b == b'\n').count();
+            let owed = after.saturating_sub(u8::try_from(have).unwrap_or(u8::MAX));
+            if have == text.len() {
+              // Nothing visible separates these newlines from the ones before the
+              // enter, so they join that run and merge with what the buffer ends on.
+              // The spacing call above returned this spacing, so the enter's own
+              // call returns the raised value too.
+              let [before, after] = node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING);
+              node_spacing = Some([before.max(owed), after]);
+            } else if owed > 0 {
+              let mut text = enter.map_or_else(String::new, Cow::into_owned);
+              text.push_str(&"\n".repeat(owed.into()));
+              enter = Some(Cow::Owned(text));
+            }
           }
         }
         enter
@@ -5625,7 +5626,7 @@ impl ConvertState {
     if non_span_depth > 0
       && !heading_owns_collapse
       && !heading_exit_in_markerless_collapse
-      && !(self.has_tag_overrides && self.block_child_of_open_void(tag_id, is_enter))
+      && (!self.has_tag_overrides || !self.block_child_of_open_void(tag_id, is_enter))
     {
       return NO_SPACING;
     }
@@ -5741,9 +5742,6 @@ impl ConvertState {
           | TAG_CITE
           | TAG_DFN
           | TAG_Q
-          // Only an override keeps these open around a heading.
-          | TAG_BR
-          | TAG_IMG
       ),
       None => false,
     }

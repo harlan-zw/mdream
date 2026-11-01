@@ -950,7 +950,7 @@ impl ConvertState {
   /// Whether a start tag of this element has no content. An `isSelfClosing`
   /// override decides; without one the handler does, aliases included.
   #[inline(always)]
-  pub(crate) fn tag_is_self_closing(
+  fn tag_is_self_closing(
     &self,
     tag_name: &str,
     tag_id: Option<u8>,
@@ -966,7 +966,9 @@ impl ConvertState {
   }
 
   /// The override branch of `tag_is_self_closing`, kept out of line so the
-  /// no-override path stays one field test at every start-tag call site.
+  /// no-override path stays one field test at every start-tag call site. A
+  /// built-in name is looked up by id: the source spelling can be `<BR>`, and
+  /// the id of an aliased custom name would find the target's override instead.
   #[cold]
   #[inline(never)]
   fn overridden_self_closing(
@@ -976,8 +978,23 @@ impl ConvertState {
     is_builtin: bool,
     handler_value: bool,
   ) -> bool {
-    self
-      .self_closing_override(tag_name, tag_id, is_builtin)
+    let Some(overrides) = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|plugins| plugins.tag_overrides.as_ref())
+    else {
+      return handler_value;
+    };
+    let tag_override = match tag_id.filter(|_| is_builtin) {
+      Some(id) => Self::override_by_id(Some(overrides), self.override_idx.as_deref(), id),
+      None => overrides
+        .iter()
+        .find(|(name, _)| name == tag_name)
+        .map(|(_, config)| config),
+    };
+    tag_override
+      .and_then(|config| config.is_self_closing)
       .unwrap_or(handler_value)
   }
 
@@ -988,26 +1005,6 @@ impl ConvertState {
     let tag_handler = tag_id.and_then(get_tag_handler);
     tag_handler.is_some_and(|handler| handler.is_self_closing)
       && self.tag_is_self_closing(tag_name, tag_id, is_builtin, tag_handler)
-  }
-
-  /// A built-in name is looked up by id: the source spelling can be `<BR>`, and
-  /// the id of an aliased custom name would find the target's override instead.
-  #[cold]
-  fn self_closing_override(
-    &self,
-    tag_name: &str,
-    tag_id: Option<u8>,
-    is_builtin: bool,
-  ) -> Option<bool> {
-    let overrides = self.options.plugins.as_ref()?.tag_overrides.as_ref()?;
-    let tag_override = match tag_id.filter(|_| is_builtin) {
-      Some(id) => Self::override_by_id(Some(overrides), self.override_idx.as_deref(), id),
-      None => overrides
-        .iter()
-        .find(|(name, _)| name == tag_name)
-        .map(|(_, config)| config),
-    };
-    tag_override?.is_self_closing
   }
 
   /// The attributes this tag's handler asks for, or all of them when a plugin
