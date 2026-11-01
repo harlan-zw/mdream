@@ -76,12 +76,25 @@ const LINK_SPACE_CASES: [string, string][] = [
   ],
 ]
 
-const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { tagOverrides: Record<string, string> } } }> = [
+const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { tagOverrides: Record<string, string | { exit: string }> } } }> = [
   ...LINK_SPACE_CASES.map(([html]) => html),
   '<ul><li>a</li><script>hidden</script><li>b</li></ul>',
   '<ul><li>a</li><style>hidden</style><li>b</li></ul>',
   '<ul><li>a</li><noscript>hidden</noscript><li>b</li></ul>',
   '<ul><li>a</li><template>hidden</template><li>b</li></ul>',
+  '<ul><li><hr><blockquote><br></blockquote>tail</li></ul>',
+  '<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>',
+  '<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>',
+  '<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>',
+  '<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>',
+  '<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>',
+  '<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>',
+  '<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>',
+  '<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>',
+  '<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>',
+  '<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>',
+  '<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>',
+  '<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>',
   '<ul><li>x<ul><li>a<br># b</li></ul></li></ul>',
   '<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>',
   '<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>',
@@ -173,6 +186,13 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
     ['<blockquote>x</blockquote><p>tail</p>', 'blockquote', 'textarea'],
     ['<script><b>x</b></script><p>tail</p>', 'script', 'div'],
   ] as const).map(([html, source, target]) => ({ html, options: { plugins: { tagOverrides: { [source]: target } } } })),
+  ...[
+    '<ul><li><hr><blockquote></blockquote>tail</li></ul>',
+    '<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>',
+    '<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>',
+    '<ul><li><hr><blockquote>q</blockquote>tail</li></ul>',
+    '<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>',
+  ].map(html => ({ html, options: { plugins: { tagOverrides: { blockquote: { exit: 'END' } } } } })),
   '<p>aaaaaaaaaa --</p>',
   '<p>aaaaaaaaaa ==</p>',
   '<p>aaaaaaaaaa -</p>',
@@ -233,6 +253,7 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<>',
   // String chunks split the UTF-16 surrogate pair at width 1.
   '<p>🎉</p>',
+  '<ul><li><hr><blockquote>q</blockquote></li></ul>',
 ]
 
 describe.each([undefined, 12])('cross-engine streaming byte parity wrapWidth=%s', (wrapWidth) => {

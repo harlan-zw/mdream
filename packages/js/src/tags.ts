@@ -498,8 +498,11 @@ export const tagHandlers: Record<number, TagHandler> = {
       )
       if (!prefix)
         return MARKDOWN_HORIZONTAL_RULE
-      if (state.depthMap?.[TAG_LI])
+      if (state.depthMap?.[TAG_LI]) {
         state.listRulePending = prefix
+        state.listRuleAfterQuote = false
+        state.listRuleRestored = false
+      }
       const end = enterOutputEnd(node, state)
       // A <code> fence opener stops at column 0 and leaves the first line's
       // indent to the content, which this rule is. It opens no new block.

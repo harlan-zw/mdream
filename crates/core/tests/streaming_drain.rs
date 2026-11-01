@@ -909,6 +909,7 @@ fn streaming_cmark_block_structure_matches_every_split() {
   for html in [
     "<ul><li>text <hr>after</li></ul>",
     "<ul><li><blockquote>text<hr></blockquote>after</li></ul>",
+    "<ul><li><hr><blockquote><p>q</p><p>r</p></blockquote>after</li></ul>",
     "<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
@@ -4205,6 +4206,90 @@ fn builtin_aliases_preserve_raw_source_boundaries_streaming() {
     assert_stream_matches(html, options.clone());
     assert_stream_matches_every_split(html, options);
   }
+}
+
+#[test]
+fn empty_quote_after_rule_streaming() {
+  assert_stream_matches_every_split(
+    "<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+}
+
+#[test]
+fn quote_exit_override_after_rule_at_every_split() {
+  for html in [
+    "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+    "<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>",
+    "<ol><li><hr><blockquote></blockquote>tail</li></ol>",
+    "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+    "<blockquote><ul><li><hr><blockquote></blockquote>tail</li></ul></blockquote>",
+    "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
+  ] {
+    assert_stream_matches_every_split(
+      html,
+      HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![(
+            "blockquote".to_string(),
+            TagOverrideConfig {
+              exit: Some("END".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    );
+  }
+}
+
+#[test]
+fn pending_rule_quote_review_boundaries_at_every_split() {
+  for html in [
+    "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
+    "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+    "<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>",
+    "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+    "<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>",
+    "<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+    "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn pending_list_rule_survives_a_long_quote_and_its_sibling() {
+  let body = "<p>quoted line</p>".repeat(650);
+  let html = format!(
+    "<ul><li><blockquote>{body}<hr></blockquote><blockquote>next</blockquote>tail</li></ul>"
+  );
+  let options = HtmlToMarkdownOptions::default();
+  let expected = html_to_markdown(&html, options.clone());
+  assert!(expected.len() > 8 * 1024);
+  assert_eq!(expected.matches("quoted line").count(), 650);
+  assert!(expected.contains("> next"));
+  assert!(expected.ends_with("tail"));
+  assert_stream_matches_every_split(&html, options);
 }
 
 #[test]
