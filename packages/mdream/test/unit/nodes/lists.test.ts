@@ -10,6 +10,82 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, clean: { emptyLinkText: true } })).toBe(expected)
   })
 
+  it.each([
+    ['<ul><li>x<ol start="10"><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li><span>x</span><span>z</span><ol start="10"><li>y</li></ol></li></ul>', '- xz\n\n  10. y'],
+    ['<ul><li><strong>x</strong><ol start="10"><li>y</li></ol></li></ul>', '- **x**\n\n  10. y'],
+    ['<ol start="5"><li>x<ol start="20"><li>y</li><li>z</li></ol></li></ol>', '5. x\n\n   20. y\n   21. z'],
+    ['<ul><li>x<ol start="0"><li>y</li></ol></li></ul>', '- x\n\n  0. y'],
+    ['<ul><li>x<ol start="1"><li>y</li></ol></li></ul>', '- x\n  1. y'],
+    ['<ul><li>x<ol start="-1"><li>y</li></ol></li></ul>', '- x\n  1. y'],
+    ['<ul><li>x<ol start=""><li>y</li></ol></li></ul>', '- x\n  1. y'],
+    ['<ul><li><ol start="10"><li>y</li></ol></li></ul>', '-\n  10. y'],
+    ['<ul><li><span></span><ol start="10"><li>y</li></ol></li></ul>', '-\n  10. y'],
+    ['<ul><li>x<ol start="10"></ol></li><li>z</li></ul>', '- x\n- z'],
+    ['<ul><li>x<ol reversed start="10"><li value="20">y</li><li>z</li></ol></li></ul>', '- x\n\n  10. y\n  11. z'],
+    ['<ul><li>x<ol reversed><li value="10">y</li></ol></li></ul>', '- x\n  1. y'],
+    ['<blockquote><ul><li>x<ol start="10"><li>y</li></ol></li></ul></blockquote>', '> - x\n>\n>   10. y'],
+    ['<ul><li>x<ul><li>z<ol start="10"><li>y</li></ol></li></ul></li></ul>', '- x\n  - z\n\n    10. y'],
+    ['<ul><li><p>x</p><ol start="10"><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li>x<ol start="10"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>', '- x\n\n  10. y\n  - z\n- after'],
+    ['<ul><li>x<br><ol start="10"><li>y</li></ol></li></ul>', '- x  \n\n  10. y'],
+    ['<ul><li>x<ul><li>y</li></ul><ol start="10"><li>z</li></ol></li></ul>', '- x\n  - y\n\n  10. z'],
+    ['<ol><li><ol start="10"><li>y</li></ol></li></ol>', '1.\n   10. y'],
+    ['<ul><li>x<ol start="1000000000"><li>y</li></ol></li></ul>', '- x\n  1. y'],
+    ['<ul><li>x<ol start="10"><li></li></ol></li></ul>', '- x\n\n  10.'],
+    ['<ul><li>x<ol start="10"><li>y</li></ol><p>tail</p></li></ul>', '- x\n\n  10. y\n\n  tail'],
+    ['<ul><li>x<ol start="10"><script>s</script><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li>x<ol start="10"><style>a{}</style><li>y</li><li>z</li></ol></li></ul>', '- x\n\n  10. y\n  11. z'],
+    ['<ul><li>x<ol start="10"><noscript>n</noscript><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li>x<ol start="10"><template>t</template><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li>x<ol start="10">t<li>y</li></ol></li></ul>', '- x t\n\n  10. y'],
+  ])('separates nested ordered starts from parent paragraphs: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li>x<a href="u"><ol start="10"><li>y</li></ol></a></li></ul>', '- x [  10. y](u)'],
+    ['<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>', '- [x  10. y](u)'],
+    ['<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>', '- [x  \n    10. y](u)'],
+    ['<a href="u"><ul><li>x<ol start="10"><li>y</li></ol></li></ul></a>', '[- x  10. y](u)'],
+    ['<ul><li><a href="u"><small>x<ol start="10"><li>y</li></ol></small></a></li></ul>', '- [x  10. y](u)'],
+    ['<ul><li><span><a href="u">x<ol start="10"><li>y</li></ol></a></span></li></ul>', '- [x  10. y](u)'],
+    ['<ul><li><strong>x<ol start="10"><li>y</li></ol></strong></li></ul>', '- **x  10. y**'],
+    ['<ul><li><em>x<ol start="10"><li>y</li></ol></em></li></ul>', '- *x  10. y*'],
+    ['<ul><li><del>x<ol start="10"><li>y</li></ol></del></li></ul>', '- ~~x  10. y~~'],
+    ['<ul><li><code>x<ol start="10"><li>y</li></ol></code></li></ul>', '- `x  10. y`'],
+  ])('keeps a nested ordered start tight inside an open delimiter: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li><a>x<ol start="10"><li>y</li></ol></a></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li><span>x<ol start="10"><li>y</li></ol></span></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li><small>x<ol start="10"><li>y</li></ol></small></li></ul>', '- x\n\n  10. y'],
+    ['<ul><li><mark>x<ol start="10"><li>y</li></ol></mark></li></ul>', '- <mark>x\n\n  10. y</mark>'],
+    ['<details><ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul></details>', '<details>\n\n- <a href="u">x\n\n  10. y</a>\n\n</details>'],
+  ])('separates a nested ordered start inside a wrapper a blank line cannot break: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ol><script>s</script><li>y</li></ol>', '1. y'],
+    ['<ol start="3"><li>a</li><template>t</template><li>b</li></ol>', '3. a\n4. b'],
+    ['<ul><li>a<ul><script>s</script><li></li></ul></li></ul>', '- a\n\n  -'],
+    ['<ul><li>a<ol><template>t</template><li></li></ol></li></ul>', '- a\n\n  1.'],
+  ])('positions items among their list items only: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it('wraps paragraphs around a nested ordered start at their content columns', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<ul><li>alpha beta gamma delta<ol start="10"><li>one two three four five</li></ol></li></ul>', { engine, wrapWidth: 12 })).toBe('- alpha beta\n  gamma\n  delta\n\n  10. one\n      two\n      three\n      four\n      five')
+  })
+
   it('converts unordered lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Item 1</li><li>Item 2</li></ul>'
@@ -349,6 +425,193 @@ line2</code></pre></li></ol>`
 `
     const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('- Active\n- Future')
+  })
+})
+
+describe.each(engines)('scout9_list_tail_quote_spacing $name', (engineConfig) => {
+  it.each([
+    [
+      '<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>',
+      '-\n  - a  \n\n  > q',
+    ],
+    [
+      '<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>',
+      '1.\n   - a  \n\n   > q',
+    ],
+  ])('preserves structure: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('parent heading after nested hard break $name', (engineConfig) => {
+  it.each([
+    ['<ul><li><p>a</p><h2>h</h2></li></ul>', '- a\n\n  ## h'],
+    ['<ol start="10"><li><p>a</p><h2>h</h2></li></ol>', '10. a\n\n    ## h'],
+    ['<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>', '- a\n  - b  \n\n  ## h'],
+    ['<ol start="10"><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ol>', '10. a\n    - b  \n\n    ## h'],
+  ])('keeps the heading in its parent item: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('blocks opening a quote in an item $name', (engineConfig) => {
+  it.each([
+    [
+      '<ul><li><blockquote><h1>h</h1></blockquote></li></ul>',
+      '- \n  > # h',
+    ],
+    [
+      '<ol><li><blockquote><h2>h</h2></blockquote></li></ol>',
+      '1. \n   > ## h',
+    ],
+    [
+      '<ol start="10"><li><blockquote><h3>h</h3></blockquote></li></ol>',
+      '10. \n    > ### h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<blockquote><h2>h</h2></blockquote></li></ul></li></ul>',
+      '- a\n  - b\n    > ## h',
+    ],
+    [
+      '<ul><li>a<ul><li><blockquote><h2>h</h2></blockquote></li></ul></li></ul>',
+      '- a\n\n  - \n    > ## h',
+    ],
+    [
+      '<ul><li>a<blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  > ## h',
+    ],
+    [
+      '<ul><li><p>a</p><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  > ## h',
+    ],
+    [
+      '<ul><li>a<br><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a  \n  \n  > ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<br></li></ul><blockquote><h2>h</h2></blockquote></li></ul>',
+      '- a\n  - b  \n\n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><div><h2>h</h2></div></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><blockquote><h2>h</h2></blockquote></blockquote></li></ul>',
+      '- \n  > > ## h',
+    ],
+    [
+      '<ul><li><blockquote> <h2>h</h2></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><b></b><h2>h</h2></blockquote></li></ul>',
+      '- \n  > ## h',
+    ],
+    [
+      '<ul><li><blockquote><h2>h</h2><p>x</p></blockquote></li></ul>',
+      '- \n  > ## h\n  >\n  > x',
+    ],
+    [
+      '<ul><li><blockquote><p>x</p></blockquote></li></ul>',
+      '- \n  > x',
+    ],
+    [
+      '<ul><li><blockquote><pre>x</pre></blockquote></li></ul>',
+      '- \n  > ```\n  > x\n  > ```',
+    ],
+    [
+      '<ul><li><blockquote><hr></blockquote></li></ul>',
+      '- \n  > ---',
+    ],
+    [
+      '<ul><li><blockquote><ul><li>y</li></ul></blockquote></li></ul>',
+      '- \n  > - y',
+    ],
+    [
+      '<ul><li><blockquote><table><tr><th>t</th></tr><tr><td>c</td></tr></table></blockquote></li></ul>',
+      '- \n  > | t |\n  > | --- |\n  > | c |',
+    ],
+    [
+      '<ul><li><blockquote><ul><li>y<br></li></ul><h2>h</h2></blockquote></li></ul>',
+      '- \n  > - y  \n  >\n  > ## h',
+    ],
+  ])('keeps the block on the first quote line: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('blocks around nested pending markers $name', (engineConfig) => {
+  it.each([
+    [
+      '<ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ## h',
+    ],
+    [
+      '<ol><li>a<ol><li>a<ol><li><h2>h</h2></li></ol></li></ol></li></ol>',
+      '1. a\n   1. a\n      1. ## h',
+    ],
+    [
+      '<ol start="100"><li>a<ul><li><h2>h</h2></li></ul></li></ol>',
+      '100. a\n     - ## h',
+    ],
+    [
+      '<ul><li><ul><li><ul><li><h2>h</h2></li></ul></li></ul></li></ul>',
+      '-\n  -\n    - ## h',
+    ],
+    [
+      '<blockquote><ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul></blockquote>',
+      '> - a\n>   - a\n>     - ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><pre>x</pre></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ```\n      x\n      ```',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><hr></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - ***',
+    ],
+    [
+      '<ul><li>a<ul><li>a<ul><li><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul></li></ul></li></ul>',
+      '- a\n  - a\n    - | t |\n      | --- |\n      | c |',
+    ],
+  ])('opens the block on the marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    [
+      '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
+      '- a\n\n  - \n\n  ## h',
+    ],
+    [
+      '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
+      '- a\n  - b\n\n    - \n\n    ## h',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
+      '- a\n\n  - \n\n  ```\n  x\n  ```',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><hr></li></ul>',
+      '- a\n\n  - \n\n  ---',
+    ],
+    [
+      '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
+      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
+    ],
+  ])('leaves the marker of a closed item: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it('keeps escaping text after a closed item', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<ul><li>a<ul><li></li></ul># t</li></ul>', { engine })).toBe('- a\n\n  - \\# t')
   })
 })
 

@@ -205,4 +205,30 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
     })
     expect(markdown).toBe('__keep__')
   })
+
+  it.each([
+    ['<ul><li>x<ol start="10"><li>y</li></ol></li></ul>', [0, 0], '- x\n\n  10. y'],
+    ['<ul><li>x<ol start="10"><li>y</li></ol></li></ul>', [0, 1], '- x\n\n  10. y'],
+    ['<ul><li>x<br><ol start="10"><li>y</li></ol></li></ul>', [0, 0], '- x  \n\n  10. y'],
+    ['<ul><li>x<ol start="10"><li>y</li><li>z</li></ol></li></ul>', [0, 0], '- x\n\n  10. y  11. z'],
+    ['<ul><li>x<ol><li>y</li></ol></li></ul>', [0, 0], '- x  1. y'],
+    ['<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>', [0, 0], '- [x  10. y](u)'],
+  ] as [string, [number, number], string][])('lets the nested ordered start rule outrank an li spacing override: %s %j', async (html, spacing, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { plugins: { tagOverrides: { li: { spacing } } } }
+    expect(htmlToMarkdown(html, { ...options, engine })).toBe(expected)
+    for (let split = 1; split < html.length; split++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let streamed = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(stream, options))
+        streamed += chunk
+      expect(streamed, `split=${split}`).toBe(expected)
+    }
+  })
 })
