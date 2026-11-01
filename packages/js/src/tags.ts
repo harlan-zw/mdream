@@ -434,11 +434,6 @@ const INERT_RAWTEXT: TagHandler = {
   spacing: NO_SPACING,
 }
 
-/** A built-in void tag that an override holds open (`isSelfClosing: false`). */
-export function isOpenVoidTag(handler: TagHandler | undefined, tagId: number | undefined): boolean {
-  return handler?.isSelfClosing === false && !!tagHandlers[tagId ?? -1]?.isSelfClosing
-}
-
 export const tagHandlers: Record<number, TagHandler> = {
   // Numeric tag constants
   [TAG_HEAD]: {
@@ -1228,4 +1223,9 @@ export const tagHandlers: Record<number, TagHandler> = {
     collapsesInnerWhiteSpace: true,
     isInline: true,
   },
+}
+
+/** A built-in void tag that an override holds open (`isSelfClosing: false`). */
+export function isOpenVoidTag(handler: TagHandler | undefined, tagId: number | undefined): boolean {
+  return handler?.isSelfClosing === false && !!tagHandlers[tagId ?? -1]?.isSelfClosing
 }
