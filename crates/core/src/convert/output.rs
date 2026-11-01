@@ -1541,7 +1541,8 @@ impl ConvertState {
     if !plain_text!(self)
       && self.hard_break_end == self.buffer.len()
       && !enter_is_literal
-      && matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
+      && (matches!(tag_id, Some(TAG_P | TAG_DIV | TAG_PRE | TAG_TABLE))
+        || (tag_id == Some(TAG_HR) && self.list_indent.is_empty()))
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
       // At a <pre>'s own enter the parser has already counted it (depth 1);
@@ -2711,6 +2712,7 @@ impl ConvertState {
     hazard: bool,
     inside_raw_html_block: bool,
     scratch: &mut String,
+    ordered_digits: u8,
   ) -> bool {
     if !hazard
       || (inside_raw_html_block && !(self.raw_html_markdown && !self.line_opens_raw_html_block()))
@@ -2721,7 +2723,7 @@ impl ConvertState {
     {
       self.gfm_escape_slow_path_calls += 1;
     }
-    self.escape_gfm_text_into(text, scratch)
+    self.escape_gfm_text_into(text, scratch, ordered_digits)
   }
 
   #[inline(always)]
@@ -2801,15 +2803,31 @@ impl ConvertState {
     let context_hazard =
       !inside_raw_html_block && context_gfm_hazard(text, in_table, in_link, in_quote);
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
-    let hazard =
-      has_inline_gfm_hazard || context_hazard || self.starts_with_gfm_block_candidate(text);
-    let text = if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
+    let ordered_digits = if matches!(last_char, Some(b'0'..=b'9'))
+      && matches!(text.as_bytes().first(), Some(b'0'..=b'9' | b'.' | b')'))
+      && !self.should_add_spacing_before_text(last_char, text)
+    {
+      self.line_start_digits(text)
+    } else {
+      0
+    };
+    let hazard = ordered_digits > 0
+      || has_inline_gfm_hazard
+      || context_hazard
+      || self.starts_with_gfm_block_candidate(text);
+    let text = if self.escape_text_node(
+      text,
+      hazard,
+      inside_raw_html_block,
+      &mut escape_scratch,
+      ordered_digits,
+    ) {
       escape_scratch.as_str()
     } else {
       text
     };
 
-    let add_space = self.should_add_spacing_before_text(last_char, text);
+    let add_space = ordered_digits == 0 && self.should_add_spacing_before_text(last_char, text);
     self.push_text_uncapped(text, add_space);
     self.finish_text_node(text, contains_whitespace, depth, index);
     self.return_escape_scratch(escape_scratch);
@@ -2903,7 +2921,7 @@ impl ConvertState {
       self.flush_list_rule();
     }
 
-    let mut relocated_space = false;
+    let mut wrap_separator = false;
     if self.pending_inline_whitespace {
       if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
         return;
@@ -2911,8 +2929,9 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None) && !is_whitespace(first) {
+        // Wrapped text writes the separator itself, so it can become the break.
         if self.wrap_width != 0 && self.can_wrap_here() {
-          relocated_space = true;
+          wrap_separator = true;
         } else {
           self.push_code_span_content(" ", true);
         }
@@ -3045,13 +3064,33 @@ impl ConvertState {
     let context_has_gfm_hazard =
       |text: &str| !inside_raw_html_block && context_gfm_hazard(text, in_table, in_link, in_quote);
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
+    let ordered_digits = if matches!(last_char, Some(b'0'..=b'9'))
+      && matches!(text.as_bytes().first(), Some(b'0'..=b'9' | b'.' | b')'))
+      && !plain_text!(self)
+      && !wrap_separator
+      && generated_prefix.is_none_or(str::is_empty)
+      && (owns_leading_space || !self.should_add_spacing_before_text(last_char, text))
+    {
+      self.line_start_digits(text)
+    } else {
+      0
+    };
+    // Spacing was decided on the raw text; the escape may put `\` first.
+    let owns_leading_space = owns_leading_space || ordered_digits > 0;
     let hazard = !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
-      && (has_inline_gfm_hazard
+      && (ordered_digits > 0
+        || has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
         || self.starts_with_gfm_block_candidate(text));
-    let text = if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
+    let text = if self.escape_text_node(
+      text,
+      hazard,
+      inside_raw_html_block,
+      &mut escape_scratch,
+      ordered_digits,
+    ) {
       escape_scratch.as_str()
     } else {
       text
@@ -3073,7 +3112,7 @@ impl ConvertState {
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     if self.wrap_width != 0 && self.can_wrap_here() {
-      self.push_text_wrapped(text, last_char, owns_leading_space, relocated_space);
+      self.push_text_wrapped(text, last_char, owns_leading_space, wrap_separator);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
@@ -3111,14 +3150,71 @@ impl ConvertState {
     }
   }
 
+  /// Digits that end the buffer at a line start. The escape pass counts them
+  /// as the start of an ordered list marker that `text` may complete. After a
+  /// soft break, which is what wrapping writes, only a list starting at one
+  /// interrupts the paragraph. After a blank line or a hard break any number
+  /// counts, as it does for a marker inside one text node.
+  fn line_start_digits(&self, text: &str) -> u8 {
+    let bytes = self.buffer.as_bytes();
+    let mut digits = 0u8;
+    let mut spaces = 0usize;
+    let lead = &text.as_bytes()[..text.bytes().take_while(u8::is_ascii_digit).count()];
+    // Whether the buffered digits and those `text` adds read as one.
+    let mut one = match lead.split_last() {
+      Some((&last, rest)) => last == b'1' && rest.iter().all(|&byte| byte == b'0'),
+      None => true,
+    };
+    for (offset, &byte) in bytes.iter().enumerate().rev() {
+      if spaces == 0 && byte.is_ascii_digit() {
+        if digits == 9 {
+          return 0;
+        }
+        // Only the number's final digit may be the one.
+        one &= byte == b'0' + u8::from(digits == 0 && lead.is_empty());
+        digits += 1;
+        continue;
+      }
+      if byte == b' ' {
+        spaces += 1;
+        if spaces > self.list_indent.len() + 3 {
+          return 0;
+        }
+        continue;
+      }
+      let opens = if byte == b'\n' {
+        // A blank line or the spaces or backslash of a hard break; any other
+        // byte ends the line at a soft break.
+        let before = match offset {
+          0 if self.has_flushed_tail() => self.flushed_tail[1],
+          0 => b'\n',
+          _ => bytes[offset - 1],
+        };
+        (spaces <= 3 || spaces >= self.list_indent.len())
+          && (one || matches!(before, b'\n' | b' ' | b'\t' | b'\\'))
+      } else {
+        // A list item's content opens a block, so `- 1` + `. x` nests a list.
+        (1..=3).contains(&spaces) && self.list_marker_line_start(bytes, offset + 1, 3)
+      };
+      return if opens { digits } else { 0 };
+    }
+    let opens = !self.has_flushed_tail()
+      || (self.flushed_tail[1] == b'\n'
+        && (one || matches!(self.flushed_tail[0], b'\n' | b' ' | b'\t' | b'\\')));
+    if opens && (spaces <= 3 || spaces >= self.list_indent.len()) {
+      digits
+    } else {
+      0
+    }
+  }
+
   /// Escape GFM syntax into `out`; returns false and leaves `out` alone if none is needed.
   #[inline]
-  fn escape_gfm_text_into(&self, text: &str, out: &mut String) -> bool {
+  fn escape_gfm_text_into(&self, text: &str, out: &mut String, mut ordered_digits: u8) -> bool {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
     let in_link = self.depth_map[TAG_A as usize] > 0;
     let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
     let mut line_indent = self.markdown_line_indent();
-    let mut ordered_digits = 0u8;
     let bytes = text.as_bytes();
     let mut escaped = false;
     let mut copied_until = 0usize;
@@ -4412,35 +4508,28 @@ impl ConvertState {
   }
 
   /// Continuation prefix re-emitted at the start of each continued line so the
-  /// content stays inside its block context. Built by walking the open
-  /// ancestor stack outermost-first so blockquote markers (`> `) and list-item
-  /// indentation interleave in the real nesting order: `<li><blockquote>` →
-  /// `  > `, `<blockquote><li>` → `>   `. A flat "all quotes then all indent"
-  /// prefix would corrupt the Markdown structure of nested blocks.
+  /// content stays inside its list items: the marker width of every open
+  /// `<li>`, outermost first. Quote markers are never part of it. A rendered
+  /// blockquote buffers its content and prefixes every line when it closes,
+  /// and one the filter or a literal override dropped writes no `>` at all.
   fn continuation_prefix(&self) -> String {
-    // Only `<li>` and `<blockquote>` contribute, so with neither open there is
-    // nothing to walk and nothing to allocate.
-    if plain_text!(self)
-      || (self.depth_map[TAG_LI as usize] == 0 && self.depth_map[TAG_BLOCKQUOTE as usize] == 0)
-    {
+    // Only `<li>` contributes, so with none open there is nothing to walk and
+    // nothing to allocate.
+    if plain_text!(self) || self.depth_map[TAG_LI as usize] == 0 {
       return String::new();
     }
 
     let mut p = String::new();
     let mut li_idx = 0usize;
     for node in &self.stack {
-      match node.tag_id {
-        Some(TAG_BLOCKQUOTE) if self.blockquotes.is_empty() => p.push_str("> "),
-        Some(TAG_LI) => {
-          // Each open <li> contributes its marker-width of spaces, in
-          // the same order they were pushed onto list_indent_widths.
-          let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
-          for _ in 0..w {
-            p.push(' ');
-          }
-          li_idx += 1;
+      if node.tag_id == Some(TAG_LI) {
+        // Each open <li> contributes its marker-width of spaces, in
+        // the same order they were pushed onto list_indent_widths.
+        let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
+        for _ in 0..w {
+          p.push(' ');
         }
-        _ => {}
+        li_idx += 1;
       }
     }
     p
@@ -4463,8 +4552,7 @@ impl ConvertState {
   /// Only the word's own line counts: a decoded line ending or a trailing tab
   /// inside the word still leaves the marker alone on the wrapped line.
   #[cold]
-  fn is_setext_marker_run(word: &str) -> bool {
-    let bytes = word.as_bytes();
+  fn is_setext_marker_run(bytes: &[u8]) -> bool {
     match bytes[0] {
       b'-' => Self::is_dash_line(bytes),
       b'=' => Self::is_equals_line(bytes),
@@ -4476,24 +4564,27 @@ impl ConvertState {
   /// exceeds `self.wrap_width` characters. Words are never split, so a single
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
-  /// inline boundaries (e.g. `foo**bar**`) stay intact.
+  /// inline boundaries (e.g. `foo**bar**`) stay intact. In Markdown a word
+  /// that would open a block at the start of a line keeps its space and
+  /// overflows too (`opens_block_at_line_start`). `separator` is a
+  /// pending space trimmed from a closed inline element, which wraps like a
+  /// leading space of `text`.
   fn push_text_wrapped(
     &mut self,
     text: &str,
     last_char: Option<u8>,
     owns_leading_space: bool,
-    relocated_space: bool,
+    separator: bool,
   ) {
     let width = self.wrap_width;
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
     // it by pushing `text` verbatim, so preserve it here too. `split(' ')`
     // would otherwise discard it as an empty segment.
-    let leading_space = text.starts_with(' ');
+    let leading_space = separator || text.starts_with(' ');
     let trailing_space = text.ends_with(' ');
     // A caption owns the space before its first text, as on the unwrapped path.
-    let first_needs_space = relocated_space
-      || leading_space
+    let first_needs_space = leading_space
       || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
@@ -4511,7 +4602,7 @@ impl ConvertState {
       if need_space
         && col > prefix_len
         && col + 1 + word_len > width
-        && (plain_text!(self) || !Self::is_setext_marker_run(word))
+        && (plain_text!(self) || !Self::opens_block_at_line_start(word.as_bytes()))
       {
         self.push_code_span_content("\n", true);
         self.push_code_span_content(&prefix, true);
@@ -4531,6 +4622,32 @@ impl ConvertState {
       self.push_code_span_content(" ", true);
     }
     self.last_content_cache_len = self.buffer.len() - buf_start;
+  }
+
+  /// Whether `word`, moved to the start of a line, would open a block there: a
+  /// quote, an ATX heading, a list item, a code fence, a setext underline or a
+  /// thematic break. Text escaped mid-line leaves these markers bare, so a wrap
+  /// must not be what puts one at the start of a line.
+  fn opens_block_at_line_start(word: &[u8]) -> bool {
+    let Some(&first) = word.first() else {
+      return false;
+    };
+    match first {
+      b'>' => true,
+      b'#' => word.len() <= 6 && word.iter().all(|&byte| byte == b'#'),
+      b'+' => word.len() == 1,
+      b'-' | b'=' => Self::is_setext_marker_run(word),
+      b'*' => word.len() != 2 && word.iter().all(|&byte| byte == first),
+      b'_' => word.len() >= 3 && word.iter().all(|&byte| byte == first),
+      b'`' | b'~' => word.len() >= 3 && word[..3].iter().all(|&byte| byte == first),
+      b'0' | b'1' => {
+        // Only a list starting at one can interrupt a paragraph. Leading zeros
+        // still count, within CommonMark's nine-digit marker limit.
+        let zeros = word.iter().take_while(|&&byte| byte == b'0').count();
+        zeros <= 8 && matches!(&word[zeros..], b"1." | b"1)")
+      }
+      _ => false,
+    }
   }
 
   /// Emit frontmatter content.
@@ -4614,13 +4731,14 @@ impl ConvertState {
           return Some(Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE));
         }
         let prefix = self.continuation_prefix();
-        if prefix.is_empty() {
+        if prefix.is_empty() && self.depth_map[TAG_LI as usize] == 0 {
           return Some(Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE));
         }
         Some(match self.block_open_prefix(&prefix) {
           // Sharing the marker's line, where `---` would make the whole line a
           // thematic break and take the item with it.
-          None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT),
+          None if !prefix.is_empty() => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT),
+          None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE),
           Some(open) => Cow::Owned(format!("{open}{MARKDOWN_HORIZONTAL_RULE}")),
         })
       }
@@ -5870,6 +5988,38 @@ mod tests {
     state.write_output(true, false, 2, Some("next"), false);
 
     assert_eq!(state.buffer, "c\n\nnext");
+  }
+
+  // A rewrite can trim the buffer back to the digits, so the bytes before them
+  // come from `flushed_tail`.
+  #[test]
+  fn line_start_digits_reads_the_flushed_tail() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.buffer.push('2');
+    assert_eq!(state.line_start_digits(". x"), 1);
+
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Content;
+    for (tail, buffer, digits) in [
+      (*b"\n\n", "2", 1),
+      (*b" \n", "2", 1),
+      (*b"x\n", "2", 0),
+      (*b"x\n", "1", 1),
+      (*b"xy", "1", 0),
+      (*b"x\n", "\n2", 1),
+      (*b"x ", "\n2", 1),
+      (*b"xy", "\n2", 0),
+      (*b"xy", "\n1", 1),
+    ] {
+      state.flushed_tail = tail;
+      state.buffer.clear();
+      state.buffer.push_str(buffer);
+      assert_eq!(
+        state.line_start_digits(". x"),
+        digits,
+        "tail={tail:?} buffer={buffer:?}"
+      );
+    }
   }
 
   // Draining, and then a rewrite trimming what draining retained, leaves the
