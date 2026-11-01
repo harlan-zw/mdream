@@ -4278,6 +4278,21 @@ fn pending_rule_quote_review_boundaries_at_every_split() {
 }
 
 #[test]
+fn pending_list_rule_survives_a_long_quote_and_its_sibling() {
+  let body = "<p>quoted line</p>".repeat(650);
+  let html = format!(
+    "<ul><li><blockquote>{body}<hr></blockquote><blockquote>next</blockquote>tail</li></ul>"
+  );
+  let options = HtmlToMarkdownOptions::default();
+  let expected = html_to_markdown(&html, options.clone());
+  assert!(expected.len() > 8 * 1024);
+  assert_eq!(expected.matches("quoted line").count(), 650);
+  assert!(expected.contains("> next"));
+  assert!(expected.ends_with("tail"));
+  assert_stream_matches_every_split(&html, options);
+}
+
+#[test]
 fn scout9_list_tail_quote_spacing_streaming() {
   for (html, expected) in [
     (
