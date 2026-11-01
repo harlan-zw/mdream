@@ -6391,6 +6391,155 @@ fn builtin_blockquote_alias_uses_div_semantics() {
 }
 
 #[test]
+fn bogus_comments_end_at_the_first_gt_without_opening_elements() {
+  for (html, expected) in [
+    ("<p>a<!x>b</p>", "ab"),
+    ("<p>a<?x", "a"),
+    ("<p>a<!x", "a"),
+    ("<p>a</ x", "a"),
+    ("<p>a <?x?>b</p>", "a b"),
+    ("<p>a<?x?> b</p>", "a b"),
+    ("<p>a&amp;<?x?>b</p>", "a&b"),
+    ("<code>a<?x?>b</code>", "`ab`"),
+    ("<pre>a<!x>b</pre>", "```\nab\n```"),
+    ("<textarea>a</ x>b</textarea>", "a\\</ x>b"),
+    ("<textarea>a<!x", "a\\<!x"),
+    ("<p>a<!dud>b</p>", "ab"),
+    ("<p>a</ x>b</p>", "ab"),
+    ("<p>a<?x?>b</p>", "ab"),
+    ("<pre>a<?x?>b</pre>", "```\nab\n```"),
+    ("<textarea>a<!x>b</textarea>", "a\\<!x>b"),
+    ("<p>a</>b</p>", "ab"),
+    ("<p>a</1x>b</p>", "ab"),
+    ("<p>a</?x>b</p>", "ab"),
+    (r#"<p>a<?x y=">">b</p>"#, r#"a">b"#),
+    (r#"<p>a</ x y=">">b</p>"#, r#"a">b"#),
+    ("<p><a href=\"/c\">x<?x?> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><?x?><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x<?x y?> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><?x y?><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x<!x> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><!x><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x</ x> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li></ x><li>b</li></ol>", "1. a\n2. b"),
+    ("<p>before<?x y=\">after</p>", "beforeafter"),
+    ("<p>before<!x y=\">after</p>", "beforeafter"),
+    ("<p>before</ x y=\">after</p>", "beforeafter"),
+    ("<p>before<?--x>after</p>", "beforeafter"),
+    ("<p>before<?[CDATA[x>after</p>", "beforeafter"),
+    ("<p>before</p><?x", "before"),
+    ("<p>before</p><!x", "before"),
+    ("<p>before</p></ x", "before"),
+    ("<textarea>a<?x?>b</textarea>", "a\\<?x?>b"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output.trim_end(), expected, "{html} chunk width {width}");
+    }
+  }
+}
+
+fn convert_stream(html: &str, options: &HtmlToMarkdownOptions, width: usize) -> String {
+  let mut stream = MarkdownStreamProcessor::new(options.clone());
+  let mut output = String::new();
+  for chunk in html.as_bytes().chunks(width) {
+    output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+  }
+  output.push_str(&stream.finish());
+  output
+}
+
+/// A discarded token ends the DOM text node before it, so no character reference
+/// spans it. Each input converts like the HTML that spells out its DOM text.
+#[test]
+fn character_references_end_at_discarded_tokens() {
+  let zeros = "0".repeat(100);
+  for (html, dom_html) in [
+    ("<p>a&<?x?>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>a&</ x>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>a&am<!x>p;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>a&lt<!x>;b</p>".to_string(), "<p>a&lt;;b</p>"),
+    ("<p>a&#65<?x?>66;b</p>".to_string(), "<p>aA66;b</p>"),
+    (format!("<p>a&#{zeros}6<?x?>5;b</p>"), "<p>a&#6;5;b</p>"),
+    ("<p>a&#x4<?x?>1;b</p>".to_string(), "<p>a&#x4;1;b</p>"),
+    ("<p>a&#<?x?>65;b</p>".to_string(), "<p>a&amp;#65;b</p>"),
+    ("<p>a&amp<?x?>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>a&not<?x?>in;b</p>".to_string(), "<p>a&not;in;b</p>"),
+    ("<p>a&zz<?x?>z;b</p>".to_string(), "<p>a&amp;zzz;b</p>"),
+    ("<p>a&amp;<?x?>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    (
+      "<p>a&<?x?>&<?x?>amp;b</p>".to_string(),
+      "<p>a&amp;&amp;amp;b</p>",
+    ),
+    ("<p>a&<?x?><?y?>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>&<?x?>amp; b</p>".to_string(), "<p>&amp;amp; b</p>"),
+    (
+      "<pre>a&<?x?>amp;b</pre>".to_string(),
+      "<pre>a&amp;amp;b</pre>",
+    ),
+  ] {
+    let expected = convert(dom_html);
+    assert_eq!(convert(&html), expected, "{html}");
+    assert_eq!(
+      html_to_text(&html, HtmlToMarkdownOptions::default()),
+      html_to_text(dom_html, HtmlToMarkdownOptions::default()),
+      "text {html}"
+    );
+    let options = HtmlToMarkdownOptions::default();
+    for width in 1..=html.len() {
+      assert_eq!(
+        convert_stream(&html, &options, width).trim_end(),
+        expected,
+        "{html} chunk width {width}"
+      );
+    }
+  }
+  for (html, expected) in [
+    ("<p>a&<?x?>amp;b</p>", "a\\&amp;b"),
+    ("<p>a&</ x>amp;b</p>", "a\\&amp;b"),
+    ("<p>a&am<!x>p;b</p>", "a\\&amp;b"),
+    ("<p>a&lt<!x>;b</p>", "a<;b"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+/// A run past 64 KiB is emitted in pieces. Seals before, around and after the
+/// cut must stay with their own piece, rebased into the tail.
+#[test]
+fn character_references_end_at_discarded_tokens_across_run_pieces() {
+  let filler = "lorem ipsum dolor sit amet ".repeat(2420);
+  let sealed = "x&<?x?>amp;y ".repeat(40);
+  let spelled = "x&amp;amp;y ".repeat(40);
+  let html = format!("<p>a&<?x?>amp;b {filler}{sealed}c&<?x?>amp;d</p>");
+  let dom_html = format!("<p>a&amp;amp;b {filler}{spelled}c&amp;amp;d</p>");
+  // The run crosses the 64 KiB cut inside the sealed tokens.
+  assert!(filler.len() < 64 * 1024 && filler.len() + 40 * "x&amp;y ".len() > 64 * 1024);
+  let expected = convert(&dom_html);
+  assert!(expected.starts_with("a\\&amp;b lorem"), "{:.40}", expected);
+  assert!(
+    expected.ends_with("x\\&amp;y c\\&amp;d"),
+    "{}",
+    &expected[expected.len() - 40..]
+  );
+  assert_eq!(convert(&html), expected);
+  let options = HtmlToMarkdownOptions::default();
+  for width in [1, 7, 4096, 65_536, html.len()] {
+    assert_eq!(
+      convert_stream(&html, &options, width).trim_end(),
+      expected,
+      "chunk width {width}"
+    );
+  }
+}
+
+#[test]
 fn setext_equals_text_preserves_paragraphs() {
   for (html, expected) in [
     (
@@ -6620,6 +6769,35 @@ fn raw_text_aliases_use_source_closing_names() {
       expected,
       "{html} {source}:{target}"
     );
+  }
+}
+
+/// The node cap counts the source text, so a reference ended at a discarded
+/// token keeps the cut where it was, whether ending it lengthens or shortens it.
+#[test]
+fn node_cap_counts_source_text_across_discarded_tokens() {
+  for (html, cap, expected) in [
+    ("<p>a&<?x?>amp;b</p>", 2, "a&"),
+    ("<p>a&<?x?>amp;b</p>", 6, "a\\&amp;"),
+    ("<p>a&<?x?>amp;b</p>", 7, "a\\&amp;b"),
+    ("<p>a&#65<?x?>66;b</p>", 4, "a\u{6}"),
+    ("<p>a&#65<?x?>66;b</p>", 5, "aA"),
+    ("<p>a&#65<?x?>66;b</p>", 7, "aA66"),
+    ("<p>a&#65<?x?>66;b</p>", 9, "aA66;b"),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_max_node_bytes(cap);
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{html} cap {cap}"
+    );
+    for width in 1..=html.len() {
+      assert_eq!(
+        convert_stream(html, &options, width).trim_end(),
+        expected,
+        "{html} cap {cap} chunk width {width}"
+      );
+    }
   }
 }
 
