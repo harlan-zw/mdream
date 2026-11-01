@@ -641,6 +641,8 @@ export interface ParseState {
   flattenedRawExcludesText?: boolean
   /** Currently processing element node */
   currentNode?: ElementNode | null
+  /** `<li>` children opened so far in each open `<ol>` or `<ul>`, innermost last */
+  listItemCounts?: number[]
   /** Whether current content contains HTML entities that need decoding */
   hasEncodedHtmlEntity?: boolean
   /** Whether the last processed character was whitespace - for collapsing whitespace */
@@ -961,6 +963,7 @@ function parseHtmlInternal(
   state.justClosedTag ??= false
   state.isFirstTextInElement ??= false
   state.scriptDataState ??= SCRIPT_DATA
+  state.listItemCounts ??= undefined
   state.rawtextEndTagPending = false
   // Process chunk character by character
   let i = 0
@@ -1681,6 +1684,8 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   if (tagId !== undefined && tagId >= 0 && tagId < MAX_TAG_ID) {
     state.depthMap[tagId] = Math.max(0, (state.depthMap[tagId] || 0) - 1)
   }
+  if (tagId === TAG_OL || tagId === TAG_UL)
+    state.listItemCounts!.pop()
 
   state.depth--
   state.endTagClosedNothing = false
@@ -2082,14 +2087,23 @@ function processOpeningTag(
     state.currentNode.currentWalkIndex = state.currentNode.currentWalkIndex || 0
   }
 
-  const currentWalkIndex = state.currentNode ? state.currentNode.currentWalkIndex!++ : 0
+  let index = state.currentNode ? state.currentNode.currentWalkIndex!++ : 0
+  if (tagId === TAG_OL || tagId === TAG_UL) {
+    (state.listItemCounts ||= []).push(0)
+  }
+  // An item's position counts only the items before it: a script, template or
+  // stray text ahead of it must not renumber it or make it a later item.
+  else if (tagId === TAG_LI && state.listItemCounts?.length
+    && (state.currentNode?.tagId === TAG_OL || state.currentNode?.tagId === TAG_UL)) {
+    index = state.listItemCounts[state.listItemCounts.length - 1]!++
+  }
 
   const tag = new ParsedElementNode(
     tagName,
     result.attributes,
     state.currentNode,
     state.depth,
-    currentWalkIndex,
+    index,
     tagId,
     tagHandler,
   )

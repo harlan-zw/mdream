@@ -418,8 +418,8 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       ['<p>a<code> <span>b</span></code></p>', 'a`b`'],
       ['<ul><li>a<span> <span>b</span></span></li></ul>', '- a b'],
       ['<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>', '| h |\n| --- |\n| a b |'],
-      ['<h2>w<span> <br>b</span></h2>', '## w<br>b'],
-      ['<h2>w<strong>a </strong><br>b</h2>', '## w**a**<br>b'],
+      ['<h2>w<span> <br>b</span></h2>', '## w <br>b'],
+      ['<h2>w<strong>a </strong><br>b</h2>', '## w**a** <br>b'],
     ]
     for (const [html, expected, options] of cases) {
       expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
@@ -437,10 +437,10 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
     const engine = await resolveEngine(engineConfig.engine)
     const tailwind = { plugins: { tailwind: true } }
     const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
-      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
-      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax 1.\nb', { wrapWidth: 6 }],
-      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa b', { wrapWidth: 6 }],
-      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa 1.\n  b', { wrapWidth: 8 }],
+      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa\nb', { wrapWidth: 6 }],
+      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa\n  1. b', { wrapWidth: 8 }],
       ['<p>Read<label> <span class="font-bold">new</span></label> now</p>', 'Read **new** now', tailwind],
       ['<p>Price<span>: </span><span class="font-bold">$5</span></p>', 'Price: **$5**', tailwind],
       ['<p>a<span> <span class="italic">b</span></span>c</p>', 'a *b*c', tailwind],
@@ -498,6 +498,72 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
   })
 })
 
+describe.each(engines)('setext equals escaping $name', (engineConfig) => {
+  it.each([
+    ['<ul><li>x<ul><li>a<br># b</li></ul></li></ul>', '- x\n  - a  \n    \\# b'],
+    ['<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>', '- x\n  - a  \n    \\- b'],
+    ['<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>', '- x\n  - a  \n    \\+ b'],
+    ['<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>', '- x\n  - a  \n    1\\. b'],
+    ['<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>', '- x\n  - a  \n    \\> b'],
+    ['<p>aaaaa<br>===</p>', 'aaaaa  \n\\==='],
+    ['<p>aaaaa<br><span>=</span><span>==</span></p>', 'aaaaa  \n\\==='],
+    ['<p>aaaaa<br> <span></span>===</p>', 'aaaaa  \n\\==='],
+    ['<p>aaaaa<br>=</p>', 'aaaaa  \n\\='],
+    ['<p>aaaaa<br>==</p>', 'aaaaa  \n\\=='],
+    ['<p>=SUM(A1:A3)</p>', '=SUM(A1:A3)'],
+    ['<p>aaaaa<br>= b</p>', 'aaaaa  \n= b'],
+    ['<p>aaaaa<br>=b</p>', 'aaaaa  \n=b'],
+    ['<p>aaaaa<br>== =</p>', 'aaaaa  \n== ='],
+    ['<p>aaaaa<br>=== x</p>', 'aaaaa  \n=== x'],
+    ['<p>aaaaa<br>=== </p>', 'aaaaa  \n\\==='],
+    ['<ul><li>x<ul><li>a<br>= b</li></ul></li></ul>', '- x\n  - a  \n    = b'],
+    ['<blockquote><p>x<br>= b</p></blockquote>', '> x  \n> = b'],
+    ['<blockquote><p>x<br>==</p></blockquote>', '> x  \n> \\=='],
+    ['<p>aaaaa<br><span></span></p>', 'aaaaa'],
+    ['<p>a = b and x===y</p>', 'a = b and x===y'],
+    ['<p>a<span>=</span><span>==</span>b</p>', 'a===b'],
+    ['<p><code>===</code></p>', '`===`'],
+    ['<p></p>', ''],
+    ['<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>', '- aaaaa  \n  \\==='],
+    ['<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>', '- x\n  - aaaaa  \n    \\==='],
+    ['<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>', '- x\n  - x\n    - aaaaa  \n      \\==='],
+    ['<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>', '- x\n  - x\n    - x\n      - aaaaa  \n        \\==='],
+    ['<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>', '- x\n  - x\n    - x\n      - x\n        - aaaaa  \n          \\==='],
+    ['<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>', '- x\n  - x\n    - x\n      - x\n        - x\n          - aaaaa  \n            \\==='],
+  ])('preserves paragraph text: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('setext dash escaping $name', (engineConfig) => {
+  it.each([
+    ['<p>aaaaa<br>--</p>', 'aaaaa  \n\\--'],
+    ['<p>aaaaa<br>-- </p>', 'aaaaa  \n\\--'],
+    ['<p>aaaaa<br>--\t</p>', 'aaaaa  \n\\--'],
+    ['<p>aaaaa<br>--<br>b</p>', 'aaaaa  \n\\--  \nb'],
+    ['<p>aaaaa<br>-<span>-</span></p>', 'aaaaa  \n\\--'],
+    ['<p>aaaaa<br>- -</p>', 'aaaaa  \n\\- -'],
+    ['<p>aaaaa<br>-- -</p>', 'aaaaa  \n\\-- -'],
+    ['<p>aaaaa<br>---</p>', 'aaaaa  \n\\---'],
+    ['<ul><li>x<br>--</li></ul>', '- x  \n  \\--'],
+    ['<ul><li>x<ul><li>y<br>--</li></ul></li></ul>', '- x\n  - y  \n    \\--'],
+    ['<blockquote><p>x<br>--</p></blockquote>', '> x  \n> \\--'],
+    ['<p>aaaaa<br>-- a</p>', 'aaaaa  \n-- a'],
+    ['<p>aaaaa<br>--a</p>', 'aaaaa  \n--a'],
+    ['<p>aaaaa --</p>', 'aaaaa --'],
+    ['<p>x<br><b>--</b></p>', 'x  \n**--**'],
+  ])('preserves paragraph text: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, wrapWidth: 20 })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine, wrapWidth: 20 }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+})
+
 it('counts visible plugin text generated from a retained blank', async () => {
   const plugin = createPlugin({
     processTextNode(node) {
@@ -512,4 +578,132 @@ it('counts visible plugin text generated from a retained blank', async () => {
     expect(await collect(jsStreamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { plugins: [plugin] })))
       .toBe(expected)
   }
+})
+
+describe.each(engines)('wrapped setext markers after an escaped line start $name', (engineConfig) => {
+  it.each([
+    ['<p>===<span> --</span></p>', 4, '\\=== --'],
+    ['<p><span>===</span> --</p>', 5, '\\=== --'],
+    ['<p><span>--</span> --</p>', 5, '\\-- --'],
+    ['<p>a<br><span>--</span> --</p>', 5, 'a  \n\\-- --'],
+  ] as const)('keeps the marker on the escaped line: %s', async (html, wrapWidth, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, wrapWidth })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine, wrapWidth }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+})
+
+describe.each(engines)('wrapped setext markers before a decoded line ending $name', (engineConfig) => {
+  it.each([
+    ['<p>aaaaaaaaaa ===&#10;foo</p>', 'aaaaaaaaaa ===\nfoo'],
+    ['<p>aaaaaaaaaa ===&#13;foo</p>', 'aaaaaaaaaa ===\rfoo'],
+    ['<p>aaaaaaaaaa ---&#10;foo</p>', 'aaaaaaaaaa ---\nfoo'],
+    ['<p>aaaaaaaaaa ---&#13;foo</p>', 'aaaaaaaaaa ---\rfoo'],
+    ['<p>aaaaaaaaaa ===&#9;&#10;foo</p>', 'aaaaaaaaaa ===\t\nfoo'],
+    ['<p>aaaaaaaaaa ---&#9;&#13;foo</p>', 'aaaaaaaaaa ---\t\rfoo'],
+    ['<p>aaaaaaaaaa -&#9;-&#9;-</p>', 'aaaaaaaaaa -\t-\t-'],
+    ['<p>aaaaaaaaaa ===&#9;foo</p>', 'aaaaaaaaaa\n===\tfoo'],
+    ['<p>aaaaaaaaaa ==x&#10;foo</p>', 'aaaaaaaaaa\n==x\nfoo'],
+  ])('breaks only before a word that is no marker line: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, wrapWidth: 10 })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine, wrapWidth: 10 }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+})
+
+describe.each(engines)('block markers after a decoded bare CR $name', (engineConfig) => {
+  it.each([
+    ['<p>abc&#13;===</p>', 'abc\r\\==='],
+    ['<p>abc&#13;---</p>', 'abc\r\\---'],
+    ['<p>abc&#13;# x</p>', 'abc\r\\# x'],
+    ['<p>abc&#13;- x</p>', 'abc\r\\- x'],
+    ['<p>abc&#13;1. x</p>', 'abc\r1\\. x'],
+    ['<p>abc&#13;<span>===</span></p>', 'abc\r\\==='],
+    ['<p><span>abc&#13;</span>===</p>', 'abc\r\\==='],
+    ['<p>abc&#13;=SUM(A1)</p>', 'abc\r=SUM(A1)'],
+    ['<p>abc&#13;x === y</p>', 'abc\rx === y'],
+    ['<b>a&#13;<ul><li># heading</li></ul></b>', '**a\r - \\# heading**'],
+    ['<b>a&#13;<ol><li># heading</li></ol></b>', '**a\r 1. \\# heading**'],
+    ['<a href="/x">a&#13;<ul><li># heading</li></ul></a>', '[a\r - \\# heading](/x)'],
+    ['<b>a&#13;<ul><li>- x</li></ul></b>', '**a\r - \\- x**'],
+    ['<b>a&#13;<ul><li>1. x</li></ul></b>', '**a\r - 1\\. x**'],
+    ['<b>a&#13;<ul><li>===</li></ul></b>', '**a\r - \\===**'],
+    ['<b>a&#13;<ul><li>&gt; x</li></ul></b>', '**a\r - \\> x**'],
+    ['<b>a&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></b>', '**a\r - | x |\n  | --- |\n  | 1 |**'],
+    ['<b>a&#13;<ul><li><pre>x</pre></li></ul></b>', '**a\r - ```\n  x\n  ```\n\n  **'],
+    ['<small>a&#13;<ul><li># heading</li></ul></small>', 'a\r - \\# heading'],
+    ['<small>a&#13;<ol><li># heading</li></ol></small>', 'a\r 1. \\# heading'],
+    ['<small>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></small>', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r - | x |\n  | --- |\n  | 1 |'],
+    ['<small>|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></small>', '|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r - | x |\n  | --- |\n  | 1 |'],
+    ['<b>a<ul><li># heading</li></ul></b>', '**a - # heading**'],
+  ])('escapes like after a newline: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+})
+
+describe.each(engines)('list markers alone on their line after a decoded bare CR $name', (engineConfig) => {
+  // A `\n` after the `\r` would only complete one `\r\n` line ending, which still
+  // reads the marker as a setext underline.
+  it.each([
+    ['<small>a&#13;<ul><li></li></ul></small>', 'a\r\n\n-'],
+    ['<small>a&#13;<ol><li></li></ol></small>', 'a\r\n\n1.'],
+    ['<b>a&#13;<ul><li><blockquote>x</blockquote></li></ul></b>', '**a\r\n\n- \n  > x**'],
+    ['<small>a&#13;<ol><li><blockquote>x</blockquote></li></ol></small>', 'a\r\n\n1. \n   > x'],
+    ['<small>a&#13;<ul><li><b></b></li></ul></small>', 'a\r\n\n-'],
+    ['<small>a&#13;<span> </span><ul><li></li></ul></small>', 'a\r\n\n-'],
+    ['<small><b>a</b>&#13;<ul><li></li></ul></small>', '**a**\r\n\n-'],
+    ['<small>a&#13;<ul><li>&#13;x</li></ul></small>', 'a\r\n\n- \rx'],
+    ['<small>a&#13;<ul><li>&#10;x</li></ul></small>', 'a\r\n\n- \nx'],
+    ['<small>a&#10;<ul><li>&#13;x</li></ul></small>', 'a\n\n- \rx'],
+    ['<ul><li>z<small>a&#13;<ul><li></li></ul></small></li></ul>', '- za\r\n\n  -'],
+    ['<ul><li>z<small>a&#13;<ul><li><blockquote>x</blockquote></li></ul></small></li></ul>', '- za\r\n\n  - \n    > x'],
+    ['<blockquote><small>a&#13;<ul><li></li></ul></small></blockquote>', '> a\r\n>\n> -'],
+    ['<blockquote><small>a&#13;<ul><li><blockquote>x</blockquote></li></ul></small></blockquote>', '> a\r\n>\n> - \n>   > x'],
+    ['<a>a&#13;<ul><li></li></ul></a>', 'a\r\n\n-'],
+    ['<a href="/x">a&#13;<ul><li><blockquote>x</blockquote></li></ul></a>', '[a\r\n\n- \n  > x](/x)'],
+  ])('opens the list with a blank line: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (const width of [1, 2, 3, 5]) {
+      const chunks = html.match(new RegExp(`[\\s\\S]{1,${width}}`, 'g'))!
+      expect(await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine })), `width ${width}`).toBe(expected)
+    }
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+
+  it.each([
+    ['<small>a&#13;&#10;<ul><li></li></ul></small>', 'a\r\n\n-'],
+    ['<small>a&#13;&#13;<ul><li></li></ul></small>', 'a\r\r -'],
+    ['<small>a&#10;&#13;<ul><li></li></ul></small>', 'a\n\r -'],
+    ['<small>a&#13;<ul><li>x</li></ul></small>', 'a\r - x'],
+    ['<a href="/x">a&#13;<ul><li></li></ul></a>', '[a\r -](/x)'],
+    ['<a href="/x">a&#13;<ol><li></li></ol></a>', '[a\r 1.](/x)'],
+  ])('leaves a line that needs no separator: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let i = 1; i < html.length; i++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, i), html.slice(i)]), { engine }))
+      expect(streamed, `split at ${i}`).toBe(expected)
+    }
+  })
+
+  it('keeps a literal item override out of the guard', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const plugins = { tagOverrides: { li: { enter: '<li>' } } }
+    expect(htmlToMarkdown('<small>a&#13;<ul><li></li></ul></small>', { engine, plugins })).toBe('a\r<li>')
+  })
 })

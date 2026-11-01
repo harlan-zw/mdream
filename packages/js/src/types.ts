@@ -367,8 +367,14 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   preFencePendingDepth?: number
   preFenceLang?: string
   preFenceOwnerDepth?: number
+  /** Element whose enter opened the deferred <pre> fence. */
+  preFenceOpener?: ElementNode
+  /** Open fenced block, whose opener is the fragment at this index. */
+  codeFence?: { fragment: number }
   /** Number of default blockquotes currently buffered for line prefixing. */
   bufferedBlockquoteDepth?: number
+  /** Fragments the buffered blockquotes' content starts at, innermost last. */
+  blockquotes?: ReadonlyArray<{ readonly fragment: number }>
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
   /** Whether output should omit Markdown/HTML markup */

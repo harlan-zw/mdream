@@ -180,8 +180,8 @@ describe('inline whitespace', () => {
       ['<p>a<code> <span>b</span></code></p>', 'a`b`'],
       ['<p><code>a<span> <span>b</span></span></code></p>', '`ab`'],
       // A raw line break ends the line the separator would trail.
-      ['<h2>w<span> <br>b</span></h2>', '## w<br>b'],
-      ['<h2>w<strong>a </strong><br>b</h2>', '## w**a**<br>b'],
+      ['<h2>w<span> <br>b</span></h2>', '## w <br>b'],
+      ['<h2>w<strong>a </strong><br>b</h2>', '## w**a** <br>b'],
     ]
     for (const [html, expected] of cases) {
       expect(htmlToMarkdown(html)).toBe(expected)
@@ -203,14 +203,14 @@ describe('inline whitespace', () => {
     const tailwind = () => ({ plugins: [tailwindPlugin()] })
     const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
       // A line break may not take its place and set the text at a line start.
-      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
-      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax 1.\nb', { wrapWidth: 6 }],
+      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],
       ['<p>aaaa<span> <span>- b</span></span></p>', 'aaaa -\nb', { wrapWidth: 6 }],
-      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa b', { wrapWidth: 6 }],
-      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa 1.\n  b', { wrapWidth: 8 }],
+      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa\nb', { wrapWidth: 6 }],
+      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa\n  1. b', { wrapWidth: 8 }],
       [
         '<p><a href="https://example.com/docs/getting-started/installation/index.html">Read the docs</a><span> <span>1. Install the CLI</span></span></p>',
-        '[Read the docs](https://example.com/docs/getting-started/installation/index.html) 1.\nInstall the CLI',
+        '[Read the docs](https://example.com/docs/getting-started/installation/index.html)\n1. Install the CLI',
         { wrapWidth: 80 },
       ],
       // Delimiters a plugin generates around the text stay tight around it.
