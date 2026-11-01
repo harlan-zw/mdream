@@ -801,6 +801,7 @@ pub struct ConvertState {
   /// The trailing whitespace, `<pre>` space and heading `#` runs `get_markdown_chunk`
   /// holds back.
   held_whitespace: TailRun,
+  held_emphasis_whitespace: TailRun,
   held_spaces: TailRun,
   held_heading_run: TailRun,
   /// Bytes at the buffer start known to be whitespace, for the leading trim.
@@ -1137,6 +1138,7 @@ impl ConvertState {
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
       held_whitespace: TailRun::default(),
+      held_emphasis_whitespace: TailRun::default(),
       held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
       leading_whitespace: 0,
@@ -2621,6 +2623,7 @@ impl ConvertState {
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
+    self.held_emphasis_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
     if offset < self.leading_whitespace {
@@ -2649,6 +2652,7 @@ impl ConvertState {
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
     self.held_whitespace.note_drain(removed);
+    self.held_emphasis_whitespace.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
     self.leading_whitespace = 0;
@@ -2757,6 +2761,26 @@ impl ConvertState {
     let mut stable_end = self
       .held_whitespace
       .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
+    // Separate predicates keep cached runs valid when emphasis closes.
+    if stable_end > 0
+      && self.buffer.as_bytes()[stable_end - 1] == 11
+      && !plain_text!(self)
+      && (self.depth_map[TAG_EM as usize] != 0
+        || self.depth_map[TAG_I as usize] != 0
+        || self.depth_map[TAG_STRONG as usize] != 0
+        || self.depth_map[TAG_B as usize] != 0
+        || self.depth_map[TAG_CITE as usize] != 0
+        || self.depth_map[TAG_DFN as usize] != 0
+        || self.depth_map[TAG_DEL as usize] != 0
+        || self.depth_map[TAG_S as usize] != 0
+        || self.depth_map[TAG_STRIKE as usize] != 0)
+    {
+      stable_end = self
+        .held_emphasis_whitespace
+        .start(self.buffer.as_bytes(), buf_len, |byte| {
+          byte.is_ascii_whitespace() || byte == 11
+        });
+    }
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
       // line-leading run is the exception: list continuation indentation is
