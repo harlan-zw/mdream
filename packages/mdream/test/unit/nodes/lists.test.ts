@@ -263,6 +263,35 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
   })
 
+  it.each([
+    ['ul', '\n\n* x', '- a\n\n* x\n\n- b\n\n* x'],
+    ['ul', '\n\n- x', '- a\n\n- x\n\n* b\n\n- x'],
+    ['ol', '\n\n1) x', '1. a\n\n1) x\n\n1. b\n\n1) x'],
+    ['ol', '\n\n1. x', '1. a\n\n1. x\n\n1) b\n\n1. x'],
+    ['ul', '\n\nparagraph', '- a\n\nparagraph\n\n- b\n\nparagraph'],
+    ['ul', '\n\n* x', '* x\n\n- b\n\n* x', ''],
+    ['ol', '\n\n1) x', '1) x\n\n1. b\n\n1) x', ''],
+    ['ul', 'END\n\n', '- aEND\n\n\n\n* bEND'],
+  ])('keeps siblings separate after exit-written list markers: %s %j', async (tag, exit, expected, first = '<li>a</li>') => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<${tag}>${first}</${tag}><${tag}><li>b</li></${tag}>`
+    const options = { plugins: { tagOverrides: { [tag]: { exit } } } }
+    expect(engine.htmlToMarkdown(html, options)).toBe(expected)
+    for (const chunks of [[html], [...html]]) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (const chunk of chunks)
+            controller.enqueue(chunk)
+          controller.close()
+        },
+      })
+      let streamed = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        streamed += chunk
+      expect(streamed).toBe(expected)
+    }
+  })
+
   it('handles nested unordered lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li>Level 1<ul><li>Level 2</li></ul></li><li>Another Level 1</li></ul>'

@@ -2005,14 +2005,24 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    * Close the marker entry its own `<ul>`/`<ol>` opened. An empty list writes
    * nothing, leaving the one before it in place.
    */
-  function closeListMarker(element: ElementNode): void {
+  function closeListMarker(element: ElementNode, exitOutput?: string): void {
     if (listMarkerOwners) {
       if (listMarkerOwners.at(-1) !== element)
         return
       listMarkerOwners.pop()
       listMarkerDepths!.pop()
     }
-    const marker = state.listMarkers.pop()
+    let marker = state.listMarkers.pop()
+    if (exitOutput && marker !== undefined) {
+      let last = exitOutput.length - 1
+      while (last >= 0 && isAsciiWhitespace(exitOutput.charCodeAt(last)))
+        last--
+      // A suffix on the item's own line still belongs to its existing marker.
+      if (last >= 0 && exitOutput.lastIndexOf('\n', last) >= 0) {
+        marker = (marker & LIST_SELECTED_MASK) | writtenListMarker(exitOutput) << LIST_WRITTEN_SHIFT
+        siblingListMarker = 0
+      }
+    }
     if (marker !== undefined && marker > LIST_SELECTED_MASK) {
       siblingListMarker = marker >> LIST_WRITTEN_SHIFT
       siblingListDepth = state.depthMap[TAG_LI]!
@@ -2654,7 +2664,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (gfmAction)
           commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element)
         if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
-          closeListMarker(element)
+          closeListMarker(element, hasPluginOutput || handler?.literalExit ? output?.join('') : undefined)
         if (tagId === TAG_LI)
           updateListIndent(state, element, eventType, output, hasPluginOutput)
         return
@@ -2832,7 +2842,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL))
-      closeListMarker(element)
+      closeListMarker(element, hasPluginOutput || handler?.literalExit ? output?.join('') : undefined)
     if (tagId === TAG_LI)
       updateListIndent(state, element, eventType, output, hasPluginOutput)
 

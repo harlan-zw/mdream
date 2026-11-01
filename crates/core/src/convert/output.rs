@@ -2612,6 +2612,18 @@ impl ConvertState {
 
     let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
+    if has_override
+      && matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && let Some(exit) = effective
+      && let Some(last) = exit.as_bytes().iter().rposition(|&b| !is_whitespace(b))
+      // A suffix on the item's own line still belongs to its existing marker.
+      && exit.as_bytes()[..last].contains(&b'\n')
+    {
+      if let Some(marker) = self.list_markers.last_mut() {
+        marker.written = written_list_marker(exit.as_bytes());
+      }
+      self.sibling_list_marker = 0;
+    }
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
     }
