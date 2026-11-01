@@ -6048,6 +6048,7 @@ mod tests {
     state.flushed_tail = *b"y\n";
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
+      list_rule_pending: false,
       list_indent: "  ".to_string(),
     });
     state.stack.push(entering_node(TAG_H2, false));
