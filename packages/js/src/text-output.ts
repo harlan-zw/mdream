@@ -52,13 +52,13 @@ function trimAsciiWhitespaceEnd(value: string): string {
  * A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
  * line feed, which ends block spacing or an earlier break and so stays.
  */
-function trimBeforeBreak(buffer: string[]): void {
+function trimBeforeBreak(buffer: string[], keepTabs: boolean): void {
   for (let index = buffer.length - 1; index >= 0; index--) {
     const fragment = buffer[index]!
     let end = fragment.length
     while (end > 0) {
       const code = fragment.charCodeAt(end - 1)
-      if (code !== 32 && code !== 9 && code !== 12 && code !== 13)
+      if (code !== 32 && (code !== 9 || keepTabs) && code !== 12 && code !== 13)
         break
       end--
     }
@@ -92,7 +92,8 @@ function currentColumn(buffer: string[], base: number, scan: [fragments: number,
     scan[1] = columnAt(value, value.length, scan[1])
   }
   const tail = buffer.at(-1)
-  return tail ? columnAt(tail, tail.length, scan[1]) : base
+  // A trim can leave an empty last fragment, which ends where the scan stopped.
+  return tail ? columnAt(tail, tail.length, scan[1]) : scan[1]
 }
 
 /**
@@ -355,7 +356,11 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
       || ((!isInline || eventType === NodeEventExit) && !(collapses && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
     if (trim && !keepsOwnSpaces) {
       const last = buffer.at(-1)!
-      const trimmed = closesPre || state.lastTextNode.parent?.tagId === TAG_PRE ? trimSpacesEnd(last) : trimAsciiWhitespaceEnd(last)
+      const trimmed = element.tagId === TAG_BR && state.depthMap[TAG_TABLE]! > 0
+        ? trimSpacesEnd(last, true)
+        : closesPre || state.lastTextNode.parent?.tagId === TAG_PRE
+          ? trimSpacesEnd(last)
+          : trimAsciiWhitespaceEnd(last)
       if (trimmed.length !== last.length) {
         buffer[buffer.length - 1] = trimmed
         if (eventType === NodeEventExit && isInline)
@@ -555,7 +560,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       // The break owns the line end, so the whitespace before it goes too,
       // before the line ends it would add are counted, as in Rust.
       if (!state.depthMap[TAG_PRE] && output.endsWith('\n'))
-        trimBeforeBreak(state.buffer)
+        trimBeforeBreak(state.buffer, state.depthMap[TAG_TABLE]! > 0)
       const currentNewlines = trailingNewlines(state.buffer)
       if (!state.depthMap[TAG_PRE] && currentNewlines >= 2)
         output = undefined

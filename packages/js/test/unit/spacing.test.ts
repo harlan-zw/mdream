@@ -16,6 +16,69 @@ async function streamConvert(chunks: string[]): Promise<string> {
 }
 
 describe('inline whitespace', () => {
+  it.each(['  \nafter', '  \n  after'])('trims source tabs after an earlier break before a plugin suffix: %j', async (replacement) => {
+    const html = '<p>a<br>&#9;<br>b</p>'
+    const options = () => {
+      let breaks = 0
+      return {
+        plugins: [createPlugin({
+          onNodeEnter(node) {
+            if (node.name === 'br' && ++breaks === 2)
+              return replacement
+          },
+        })],
+      }
+    }
+    const expected = `a  \n${replacement}b`
+    expect(htmlToMarkdown(html, options())).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options()))
+        output += chunk
+      expect(output, `split at ${split}`).toBe(expected)
+    }
+  })
+
+  it.each<[string[], string]>([
+    [['  \n', 'after'], 'a  \nafterb'],
+    [['  \nafter'], 'a  \nafterb'],
+    [['X\n', 'after'], 'a\tX\nafterb'],
+    [['X\nafter'], 'a\tX\nafterb'],
+    [['X', '\n', 'after'], 'a\tX\nafterb'],
+    [['', '  ', '\n', 'after'], 'a  \nafterb'],
+  ])('trims only before a leading plugin break: %j', async (fragments, expected) => {
+    const html = '<p>a&#9;<br>b</p>'
+    const options = {
+      plugins: fragments.map(fragment => createPlugin({
+        onNodeEnter(node) {
+          if (node.name === 'br')
+            return fragment
+        },
+      })),
+    }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `split at ${split}`).toBe(expected)
+    }
+  })
+
   it('preserves whitespace between root-level inline siblings', () => {
     expect(htmlToMarkdown('<span>One</span> <span>Two</span>')).toBe('One Two')
     expect(htmlToMarkdown('<strong>One</strong>\n<strong>Two</strong>')).toBe('**One** **Two**')
