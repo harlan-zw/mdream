@@ -4542,23 +4542,23 @@ fn block_on_a_nested_pending_marker_streams_like_one_shot() {
     ),
     (
       "<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>",
-      "- a\n\n  - \n\n  ## h",
+      "- a\n\n  -\n\n  ## h",
     ),
     (
       "<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>",
-      "- a\n  - b\n\n    - \n\n    ## h",
+      "- a\n  - b\n\n    -\n\n    ## h",
     ),
     (
       "<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>",
-      "- a\n\n  - \n\n  ```\n  x\n  ```",
+      "- a\n\n  -\n\n  ```\n  x\n  ```",
     ),
     (
       "<ul><li>a<ul><li></li></ul><hr></li></ul>",
-      "- a\n\n  - \n\n  ---",
+      "- a\n\n  -\n\n  ***",
     ),
     (
       "<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>",
-      "- a\n\n  - \n\n  | t |\n  | --- |\n  | c |",
+      "- a\n\n  -\n\n  | t |\n  | --- |\n  | c |",
     ),
   ] {
     for opts in [HtmlToMarkdownOptions::default(), fl2_style.clone()] {
