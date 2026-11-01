@@ -1404,6 +1404,7 @@ impl ConvertState {
     // True when `output` is a user-supplied override enter string — emit it
     // verbatim without synthesizing a separating space (issue #93).
     let enter_is_literal: bool;
+    let mut open_void_enter = false;
     {
       let (ancestors, last) = self.stack.split_at(stack_len - 1);
       let node = &last[0];
@@ -1496,11 +1497,8 @@ impl ConvertState {
         // A built-in void tag an override holds open has no exit before its
         // children, so the block spacing its exit would write follows its enter
         // here. Only the newlines the enter output does not already end with.
-        if ov.is_self_closing == Some(false)
-          && tag_id
-            .and_then(get_tag_handler)
-            .is_some_and(|handler| handler.is_self_closing)
-        {
+        if Self::is_open_void(tag_id, Some(ov)) {
+          open_void_enter = true;
           let after = self.calculate_new_line_config(tag_id, ov.spacing.or(node.spacing), false)[1];
           let after = if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
             after.min(1)
@@ -1766,6 +1764,9 @@ impl ConvertState {
       output.as_deref(),
       enter_is_literal,
     );
+    if open_void_enter {
+      self.last_node_is_inline = true;
+    }
 
     if tag_id == Some(TAG_IMG)
       && !enter_is_literal
@@ -2246,10 +2247,7 @@ impl ConvertState {
     let mut output: Option<Cow<'static, str>> = None;
     let mut table_separator: Option<String> = None;
 
-    let open_void = override_config.is_some_and(|ov| ov.is_self_closing == Some(false))
-      && tag_id
-        .and_then(get_tag_handler)
-        .is_some_and(|handler| handler.is_self_closing);
+    let open_void = Self::is_open_void(tag_id, override_config);
 
     // Check override exit string
     let has_override = if let Some(ov) = override_config {
@@ -2406,17 +2404,7 @@ impl ConvertState {
       && tag_id == Some(TAG_HR)
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
-      && !(self.has_tag_overrides
-        && Self::override_for_node(
-          self
-            .options
-            .plugins
-            .as_ref()
-            .and_then(|p| p.tag_overrides.as_ref()),
-          self.override_idx.as_deref(),
-          node,
-        )
-        .is_some_and(|ov| ov.is_self_closing == Some(false)))
+      && !open_void
     {
       self.list_rule_pending = true;
     }
@@ -5638,8 +5626,16 @@ impl ConvertState {
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
   }
 
+  /// A built-in void tag that an override holds open (`isSelfClosing: false`).
+  fn is_open_void(tag_id: Option<u8>, config: Option<&TagOverrideConfig>) -> bool {
+    config.is_some_and(|ov| ov.is_self_closing == Some(false))
+      && tag_id
+        .and_then(get_tag_handler)
+        .is_some_and(|handler| handler.is_self_closing)
+  }
+
   /// Whether a block child keeps its block spacing because every collapsing
-  /// ancestor is an open `br` or `img` override. An override holds content, so
+  /// ancestor is an open built-in void override. An override holds content, so
   /// it does not wrap inline text the way `<a>` or `<strong>` do. Any other
   /// collapsing ancestor keeps the suppression. A heading is a block child too,
   /// so the spec's block boundary after it applies. Runs only where the caller
@@ -5661,7 +5657,7 @@ impl ConvertState {
         return true;
       }
       match node.tag_id {
-        Some(TAG_BR | TAG_IMG) => true,
+        Some(void) if get_tag_handler(void).is_some_and(|handler| handler.is_self_closing) => true,
         Some(TAG_SPAN) => span_exempt,
         _ => false,
       }

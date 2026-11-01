@@ -58,7 +58,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
+import { breakHandler, isOpenVoidTag, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -365,7 +365,7 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   }
   // Unknown tags are inline, as in the Rust engine; an end tag that closed
   // nothing is no boundary.
-  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || (lastNode.tagHandler.isSelfClosing === false && tagHandlers[(lastNode as ElementNode).tagId ?? -1]?.isSelfClosing) : (lastNode as ElementNode).tagId === -1))) {
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || isOpenVoidTag(lastNode.tagHandler, (lastNode as ElementNode).tagId) : (lastNode as ElementNode).tagId === -1))) {
     return false
   }
   const firstChar = textNode.value[0]
@@ -944,7 +944,7 @@ function isBlockChildOfOpenVoid(node: ElementNode): boolean {
     if (!parent.tagHandler?.collapsesInnerWhiteSpace)
       continue
     const parentId = parent.tagId
-    if (parentId === TAG_BR || parentId === TAG_IMG)
+    if (parentId !== undefined && tagHandlers[parentId]?.isSelfClosing)
       continue
     if (parentId === TAG_SPAN && spanExempt)
       continue
@@ -2406,7 +2406,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     // An open void tag (override `isSelfClosing: false`) has no exit before its
     // children, so the block spacing its exit would write follows its start tag.
-    if (eventType === NodeEventEnter && handler?.isSelfClosing === false && tagHandlers[tagId]?.isSelfClosing) {
+    if (eventType === NodeEventEnter && isOpenVoidTag(handler, tagId)) {
       const exitLines = suppressedInPre ? 0 : calculateNewLineConfig(element, state, NodeEventExit)[1]
       // Same cap as the exit path: a thematic break in a blockquote takes one line.
       let enterNewlines = 0
@@ -2432,8 +2432,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : calculateNewLineConfig(node as ElementNode, state, eventType)
     const quoteAtStart = eventType === NodeEventEnter
       && state.blockquotes.at(-1)?.fragment === state.buffer.length
-    const openVoidExit = eventType === NodeEventExit && handler?.isSelfClosing === false
-      && !!tagHandlers[tagId]?.isSelfClosing
+    const openVoidExit = eventType === NodeEventExit && isOpenVoidTag(handler, tagId)
     const configuredNewLines = quoteAtStart || captionEvent || captionTransition || openVoidExit
       ? 0
       : eventType === NodeEventExit && tagId === TAG_HR && state.blockquotes.length > 0
