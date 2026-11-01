@@ -720,13 +720,12 @@ fn wraps_at_the_space_moved_past_a_closer() {
       );
     }
   }
-  // Plain text keeps a space-only text before the close as written, as JS does.
   assert_eq!(
     html_to_text(
       "<p>w <em>lo b Hel<span></span> </em>xx</p>",
       HtmlToMarkdownOptions::default().with_wrap_width(12)
     ),
-    "w lo b Hel xx"
+    "w lo b Hel\nxx"
   );
 }
 

@@ -265,9 +265,9 @@ describe.each(engines)('emphasis that cannot flank $name', (engineConfig) => {
     }
   })
 
-  it('keeps a space-only text before the close as written in plain text', async () => {
+  it('wraps at a space moved past an inline close in plain text', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(engine.htmlToMarkdown('<p>w <em>lo b Hel<span></span> </em>xx</p>', { format: 'text', wrapWidth: 12 })).toBe('w lo b Hel xx')
+    expect(engine.htmlToMarkdown('<p>w <em>lo b Hel<span></span> </em>xx</p>', { format: 'text', wrapWidth: 12 })).toBe('w lo b Hel\nxx')
   })
 
   it('keeps the separator after a literal tilde', async () => {
