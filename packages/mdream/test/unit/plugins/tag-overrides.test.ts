@@ -35,6 +35,29 @@ const SELF_CLOSING_CASES: [string, Record<string, any>, string][] = [
   ['<p>a</p><br><strong>x<p>b</p></strong>y', { br: { isSelfClosing: false } }, 'a\n\n  \n**x b**y'],
   ['<p>a</p><hr>x<p>b</p>', {}, 'a\n\n---\n\nx\n\nb'],
   ['<p>a</p><hr>x<p>b</p>', { em: { isSelfClosing: false } }, 'a\n\n---\n\nx\n\nb'],
+  // A custom exit keeps the spacing after its own output.
+  ['<hr>x</hr>y', { hr: { ...OPEN_MARKED, spacing: [0, 2] } }, '[x]\n\ny'],
+  ['<hr>x</hr>y', { hr: { isSelfClosing: false, exit: '' } }, '---\n\nxy'],
+  // A child's isInline override decides whether it keeps block spacing.
+  ['<img src="a.png"><em>x</em>y</img>', { img: { isSelfClosing: false }, em: { isInline: false, spacing: [2, 2] } }, '![](a.png)\n\n* x*\n\ny'],
+  ['<img src="a.png"><p>x</p>y</img>', { img: { isSelfClosing: false }, p: { isInline: true } }, '![](a.png)xy'],
+  // Explicit spacing on the reopened void itself.
+  ['a<br>x</br>y', { br: { isSelfClosing: false, spacing: [0, 2] } }, 'a  \n\nxy'],
+  ['<img src="a.png">x</img>y', { img: { isSelfClosing: false, spacing: [0, 2] } }, '![](a.png)\n\nxy'],
+  ['<p>a</p><meta>x</meta>y', { meta: { isSelfClosing: false, spacing: [2, 2] } }, 'a\n\nxy'],
+]
+
+// Plain text uses the same void boundary: the spacing follows the start tag.
+const SELF_CLOSING_TEXT_CASES: [string, Record<string, any>, string][] = [
+  ['<hr>x</hr>y', { hr: { isSelfClosing: false } }, 'xy'],
+  ['<p>a</p><hr>x</hr>y', { hr: { isSelfClosing: false } }, 'a\n\nxy'],
+  ['a<hr>x</hr>y', { hr: { ...OPEN_MARKED, spacing: [0, 2] } }, 'a[x]\n\ny'],
+  ['a<br>x</br>y', { br: { isSelfClosing: false } }, 'a\nxy'],
+  ['a<br>x</br>y', { br: { isSelfClosing: false, spacing: [0, 2] } }, 'a\n\nxy'],
+  ['a<img alt="i">x</img>y', { img: { isSelfClosing: false } }, 'a ixy'],
+  ['a<img alt="i">x</img>y', { img: { isSelfClosing: false, spacing: [0, 2] } }, 'a i\n\nxy'],
+  ['a<img alt="i"><p>x</p>y</img>', { img: { isSelfClosing: false } }, 'a i\n\nx\n\ny'],
+  ['a<br><h1>x</h1>y</br>', { br: { isSelfClosing: false } }, 'a\n\nx\n\ny'],
 ]
 
 function streamInChunksOf(html: string, width: number, engine: any, tagOverrides: Record<string, any>, format?: 'text' | 'html') {
@@ -293,6 +316,13 @@ describe.each(engines)('tagOverrides isSelfClosing $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
     for (let width = 1; width <= html.length; width++)
       expect(await collect(streamInChunksOf(html, width, engine, tagOverrides)), `width ${width}`).toBe(expected)
+  })
+
+  it.each(SELF_CLOSING_TEXT_CASES)('text %s %j', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, format: 'text', plugins: { tagOverrides } })).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamInChunksOf(html, width, engine, tagOverrides, 'text')), `width ${width}`).toBe(expected)
   })
 
   it.each([

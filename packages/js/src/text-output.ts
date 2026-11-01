@@ -27,7 +27,7 @@ import {
 } from './const'
 import { isOpenVoidTag } from './parser-tags'
 import { resolveUrl } from './url'
-import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
+import { figcaptionOwnsBlockSpacing, isBlockChildOfOpenVoid, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
 
 interface TextState extends MdreamRuntimeState {
   options: EngineOptions
@@ -207,7 +207,10 @@ function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [numb
         parent = parent.parent
         continue
       }
-      return NO_SPACING
+      // A block child of an open void override keeps its block spacing.
+      if (!isBlockChildOfOpenVoid(node))
+        return NO_SPACING
+      break
     }
     parent = parent.parent
   }
@@ -279,7 +282,23 @@ function trailingNewlines(buffer: string[]): number {
 function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined): void {
   const buffer = state.buffer
   const config = newlineConfig(element, state.depthMap)
-  const wantedNewlines = config[eventType] || 0
+  // An open void writes its block boundary after its enter, as the void it
+  // replaces would. A custom exit has output of its own, so the boundary stays
+  // after that exit.
+  const voidSpacingAtEnter = isOpenVoidTag(element.tagHandler, element.tagId) && !element.tagHandler?.literalExitHasOutput
+  let wantedNewlines = voidSpacingAtEnter && eventType === NodeEventExit ? 0 : config[eventType] || 0
+  if (voidSpacingAtEnter && eventType === NodeEventEnter) {
+    let end = output ? output.length : 0
+    while (end > 0 && output!.charCodeAt(end - 1) === 10)
+      end--
+    const owed = (config[1] || 0) - ((output?.length || 0) - end)
+    // Without visible enter text these newlines join the run before the enter,
+    // so they merge with what the buffer ends on.
+    if (end === 0)
+      wantedNewlines = Math.max(wantedNewlines, owed)
+    else if (owed > 0)
+      output += '\n'.repeat(owed)
+  }
   // An empty inline element between the text and a block boundary clears
   // `lastTextNode`, so the boundary itself drops the space it sits on.
   if (wantedNewlines > 0 && buffer.length > 0 && !(state.depthMap[TAG_PRE]! > 0 && element.tagId !== TAG_PRE)) {

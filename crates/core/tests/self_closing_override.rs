@@ -1,7 +1,7 @@
 //! `isSelfClosing` in `tagOverrides` decides whether a start tag opens an
 //! element, wherever a built-in void tag is recognized.
-use mdream::types::{HtmlToMarkdownOptions, PluginConfig, TagOverrideConfig};
-use mdream::{MarkdownStreamProcessor, get_tag_id, html_to_markdown};
+use mdream::types::{HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig};
+use mdream::{MarkdownStreamProcessor, get_tag_id, html_to_markdown, html_to_text};
 
 fn options(overrides: Vec<(&str, TagOverrideConfig)>) -> HtmlToMarkdownOptions {
   HtmlToMarkdownOptions {
@@ -52,6 +52,25 @@ fn assert_converts(html: &str, config: &[(&str, TagOverrideConfig)], expected: &
       expected,
       "split {split}: {html:?}"
     );
+  }
+}
+
+fn assert_text_converts(html: &str, config: &[(&str, TagOverrideConfig)], expected: &str) {
+  assert_eq!(html_to_text(html, options(config.to_vec())), expected);
+  for split in 0..=html.len() {
+    let mut processor =
+      MarkdownStreamProcessor::new_with_format(options(config.to_vec()), OutputFormat::Text);
+    let mut output = processor.process_chunk(&html[..split]);
+    output.push_str(&processor.process_chunk(&html[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "split {split}: {html:?}");
+  }
+}
+
+fn spaced(is_self_closing: bool, spacing: [u8; 2]) -> TagOverrideConfig {
+  TagOverrideConfig {
+    spacing: Some(spacing),
+    ..flag(is_self_closing)
   }
 }
 
@@ -217,6 +236,85 @@ fn open_void_inline_wrapper_still_keeps_block_child_inline() {
     "<p>a</p><br><strong>x<p>b</p></strong>y",
     &config,
     "a\n\n  \n**x b**y",
+  );
+}
+
+#[test]
+fn custom_exit_keeps_spacing_after_its_output() {
+  let marked = [(
+    "hr",
+    TagOverrideConfig {
+      spacing: Some([0, 2]),
+      ..marked(false)
+    },
+  )];
+  assert_converts("<hr>x</hr>y", &marked, "[x]\n\ny");
+  let empty_exit = [(
+    "hr",
+    TagOverrideConfig {
+      exit: Some(String::new()),
+      ..flag(false)
+    },
+  )];
+  assert_converts("<hr>x</hr>y", &empty_exit, "---\n\nxy");
+}
+
+#[test]
+fn reopened_void_keeps_its_explicit_spacing() {
+  assert_converts(
+    "a<br>x</br>y",
+    &[("br", spaced(false, [0, 2]))],
+    "a  \n\nxy",
+  );
+  assert_converts(
+    r#"<img src="a.png">x</img>y"#,
+    &[("img", spaced(false, [0, 2]))],
+    "![](a.png)\n\nxy",
+  );
+  assert_converts(
+    "<p>a</p><meta>x</meta>y",
+    &[("meta", spaced(false, [2, 2]))],
+    "a\n\nxy",
+  );
+}
+
+#[test]
+fn open_void_child_spacing_follows_its_inline_override() {
+  let block_em = TagOverrideConfig {
+    is_inline: Some(false),
+    spacing: Some([2, 2]),
+    ..Default::default()
+  };
+  assert_converts(
+    r#"<img src="a.png"><em>x</em>y</img>"#,
+    &[("img", flag(false)), ("em", block_em)],
+    "![](a.png)\n\n* x*\n\ny",
+  );
+  let inline_p = TagOverrideConfig {
+    is_inline: Some(true),
+    ..Default::default()
+  };
+  assert_converts(
+    r#"<img src="a.png"><p>x</p>y</img>"#,
+    &[("img", flag(false)), ("p", inline_p)],
+    "![](a.png)xy",
+  );
+}
+
+#[test]
+fn plain_text_open_void_boundary_follows_its_start_tag() {
+  let hr = [("hr", flag(false))];
+  assert_text_converts("<hr>x</hr>y", &hr, "xy");
+  assert_text_converts("<p>a</p><hr>x</hr>y", &hr, "a\n\nxy");
+  assert_text_converts("a<br>x</br>y", &[("br", flag(false))], "a\nxy");
+  assert_text_converts("a<br>x</br>y", &[("br", spaced(false, [0, 2]))], "a\n\nxy");
+  let img = [("img", flag(false))];
+  assert_text_converts(r#"a<img alt="i">x</img>y"#, &img, "a ixy");
+  assert_text_converts(r#"a<img alt="i"><p>x</p>y</img>"#, &img, "a i\n\nx\n\ny");
+  assert_text_converts(
+    r#"a<img alt="i">x</img>y"#,
+    &[("img", spaced(false, [0, 2]))],
+    "a i\n\nxy",
   );
 }
 

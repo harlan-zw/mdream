@@ -60,7 +60,7 @@ import {
 } from './const'
 import { isOpenVoidTag } from './parser-tags'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isBlockChildOfOpenVoid, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -928,30 +928,6 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
     return NO_SPACING
   }
   return DEFAULT_BLOCK_SPACING
-}
-
-/**
- * Whether a block child keeps its block spacing because every collapsing
- * ancestor is an open `br` or `img` override. Mirrors
- * `block_child_of_open_void` in the Rust engine.
- */
-function isBlockChildOfOpenVoid(node: ElementNode): boolean {
-  const tagId = node.tagId
-  if (tagId === undefined || !node.tagHandler || node.tagHandler.isInline)
-    return false
-  // A span keeps only the block children its own exemption keeps.
-  const spanExempt = tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI
-  for (let parent = node.parent; parent; parent = parent.parent) {
-    if (!parent.tagHandler?.collapsesInnerWhiteSpace)
-      continue
-    const parentId = parent.tagId
-    if (parentId !== undefined && tagHandlers[parentId]?.isSelfClosing)
-      continue
-    if (parentId === TAG_SPAN && spanExempt)
-      continue
-    return false
-  }
-  return true
 }
 
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
@@ -2407,24 +2383,31 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     // An open void tag (override `isSelfClosing: false`) has no exit before its
     // children, so the block spacing its exit would write follows its start tag.
-    if (eventType === NodeEventEnter && isOpenVoidTag(handler, tagId)) {
+    // A custom exit has output of its own, so the spacing stays after that exit.
+    const voidSpacingAtEnter = isOpenVoidTag(handler, tagId) && !handler?.literalExitHasOutput
+    let openVoidLines = 0
+    if (eventType === NodeEventEnter && voidSpacingAtEnter) {
       const exitLines = suppressedInPre ? 0 : calculateNewLineConfig(element, state, NodeEventExit)[1]
-      // Same cap as the exit path: a thematic break in a blockquote takes one line.
       let enterNewlines = 0
-      for (let i = (output?.length || 0) - 1; i >= 0; i--) {
+      let visible = false
+      for (let i = (output?.length || 0) - 1; i >= 0 && !visible; i--) {
         const fragment = output![i]!
         let end = fragment.length
         while (end > 0 && fragment.charCodeAt(end - 1) === 10) {
           end--
           enterNewlines++
         }
-        if (end > 0)
-          break
+        visible = end > 0
       }
+      // Same cap as the exit path: a thematic break in a blockquote takes one line.
       const cappedLines = tagId === TAG_HR && state.blockquotes.length > 0 ? Math.min(1, exitLines) : exitLines
       const owedLines = Math.max(0, cappedLines - enterNewlines)
-      if (owedLines > 0)
-        output = [...(output || []), '\n'.repeat(owedLines)]
+      // Without visible enter text these newlines join the run before the enter,
+      // so they merge with what the buffer ends on.
+      if (!visible)
+        openVoidLines = owedLines
+      else if (owedLines > 0)
+        output = [...output!, '\n'.repeat(owedLines)]
     }
 
     // Handle newlines
@@ -2433,12 +2416,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : calculateNewLineConfig(node as ElementNode, state, eventType)
     const quoteAtStart = eventType === NodeEventEnter
       && state.blockquotes.at(-1)?.fragment === state.buffer.length
-    const openVoidExit = eventType === NodeEventExit && isOpenVoidTag(handler, tagId)
-    const configuredNewLines = quoteAtStart || captionEvent || captionTransition || openVoidExit
+    const configuredNewLines = quoteAtStart || captionEvent || captionTransition || (eventType === NodeEventExit && voidSpacingAtEnter)
       ? 0
       : eventType === NodeEventExit && tagId === TAG_HR && state.blockquotes.length > 0
         ? Math.min(1, newLineConfig[eventType] || 0)
-        : newLineConfig[eventType] || 0
+        : openVoidLines ? Math.max(newLineConfig[eventType] || 0, openVoidLines) : newLineConfig[eventType] || 0
     // A closing code fence's block-spacing newlines are appended AFTER the
     // backtick or tilde delimiter, so
     // any trailing newlines already in the buffer (blank lines inside <pre>)
