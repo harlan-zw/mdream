@@ -63,10 +63,14 @@ function trimBeforeBreak(buffer: string[], floor: number): void {
         break
       end--
     }
-    if (end !== fragment.length)
-      buffer[index] = fragment.slice(0, end)
-    if (end > 0)
+    if (end === 0) {
+      buffer.pop()
+    }
+    else {
+      if (end !== fragment.length)
+        buffer[index] = fragment.slice(0, end)
       break
+    }
   }
 }
 
@@ -93,7 +97,8 @@ function currentColumn(buffer: string[], base: number, scan: [fragments: number,
     scan[1] = columnAt(value, value.length, scan[1])
   }
   const tail = buffer.at(-1)
-  return tail ? columnAt(tail, tail.length, scan[1]) : base
+  // A trim can leave an empty last fragment, which ends where the scan stopped.
+  return tail ? columnAt(tail, tail.length, scan[1]) : scan[1]
 }
 
 /**
@@ -358,7 +363,11 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
       || ((!isInline || eventType === NodeEventExit) && !(collapses && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
     if (trim && !keepsOwnSpaces) {
       const last = buffer.at(-1)!
-      const trimmed = closesPre || state.lastTextNode.parent?.tagId === TAG_PRE ? trimSpacesEnd(last) : trimAsciiWhitespaceEnd(last)
+      const trimmed = element.tagId === TAG_BR && state.depthMap[TAG_TABLE]! > 0
+        ? trimSpacesEnd(last, true)
+        : closesPre || state.lastTextNode.parent?.tagId === TAG_PRE
+          ? trimSpacesEnd(last)
+          : trimAsciiWhitespaceEnd(last)
       if (trimmed.length !== last.length) {
         buffer[buffer.length - 1] = trimmed
         if (eventType === NodeEventExit && isInline)
@@ -570,7 +579,21 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
             state.buffer[state.buffer.length - 1] = trimAsciiWhitespaceEnd(last)
           }
         }
+        const previousLength = state.buffer.length
         trimBeforeBreak(state.buffer, textCellStart)
+        if (state.buffer.length !== previousLength) {
+          // Only empty suffix fragments disappear; existing anchors keep their indexes.
+          if (state.lastTextOutputFragment !== undefined && state.lastTextOutputFragment >= state.buffer.length) {
+            state.lastTextOutputFragment = undefined
+            state.lastTextNode = undefined
+          }
+          if (columnScan[0] >= state.buffer.length) {
+            columnScan[0] = 0
+            columnScan[1] = bufferColumn
+          }
+          if (heldRunEnd > state.buffer.length)
+            heldRunEnd = 0
+        }
       }
       const currentNewlines = trailingNewlines(state.buffer)
       if (!state.depthMap[TAG_PRE] && currentNewlines >= 2)

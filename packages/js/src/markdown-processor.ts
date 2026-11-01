@@ -128,6 +128,8 @@ export interface MarkdownState {
   bufferedBlockquoteDepth: number
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
+  /** That line follows a decoded CR, which a single LF only turns into one CRLF. */
+  emptyItemAfterCr?: boolean
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
   /** Element whose enter opened the deferred <pre> fence. */
@@ -202,6 +204,25 @@ function newlineRunBefore(buffer: string[], index: number): number {
   return run
 }
 
+/**
+ * Whether a line ending sits before the CR that closes the output ahead of
+ * fragment `index`, which leaves a blank line.
+ */
+function crFollowsLineEnding(buffer: string[], index: number): boolean {
+  let skippedCr = false
+  for (let i = index - 1; i >= 0; i--) {
+    const fragment = buffer[i]!
+    for (let j = fragment.length - 1; j >= 0; j--) {
+      if (skippedCr) {
+        const code = fragment.charCodeAt(j)
+        return code === 10 || code === 13
+      }
+      skippedCr = true
+    }
+  }
+  return false
+}
+
 function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string): number {
   let fragment = index - 1
   let offset = fragment >= 0 ? buffer[fragment]!.length : 0
@@ -233,14 +254,21 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
  * underline: the text becomes a heading and the item disappears. A blank line, or
  * a sibling marker, opens its own block instead.
  */
-function recordItemMarker(state: MarkdownState, index: number): void {
+function recordItemMarker(state: MarkdownState, index: number, lastChar: string): void {
   // Only a list's first item can follow a paragraph, so every later sibling
   // skips the scan below.
-  if (index !== 0 || newlineRunBefore(state.buffer, state.buffer.length - 1) !== 1) {
+  const buffer = state.buffer
+  const marker = buffer.length - 1
+  const run = index === 0 ? newlineRunBefore(buffer, marker) : -1
+  // CRLF is a single line ending, so it opens no blank line by itself. `run`
+  // stops at the space `needsSpacing` puts between a CR and the marker.
+  const afterCr = run === 0 && lastChar === '\r'
+  if (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1) {
     state.emptyItemFragment = undefined
     return
   }
-  state.emptyItemFragment = state.buffer.length - 1
+  state.emptyItemFragment = marker
+  state.emptyItemAfterCr = afterCr
 }
 
 /**
@@ -249,7 +277,7 @@ function recordItemMarker(state: MarkdownState, index: number): void {
  * been written since the marker the answer is still open, so only the `<li>` exit
  * forces one.
  */
-function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCaptionFragment = -1): void {
+function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCaptionFragment = -1, linkOpen = false): void {
   const fragment = state.emptyItemFragment
   if (fragment === undefined)
     return
@@ -269,7 +297,8 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
     return
   // A later nested item can replace this guard before its owner closes.
   // A newline alone cannot commit the separator during a stream drain.
-  if (first === 10 && !atExit)
+  const lineEnds = first === 10 || first === 13
+  if (lineEnds && !atExit)
     return
   if (!atExit && unresolvedCaptionFragment !== -1) {
     let captionOpensItem = true
@@ -283,10 +312,24 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
       return
   }
   state.emptyItemFragment = undefined
-  if (first !== -1 && first !== 10)
+  if (first !== -1 && !lineEnds)
     return
-  const replacement = `\n${buffer[fragment]}`
-  state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + 1)
+  const afterCr = state.emptyItemAfterCr
+  // A link's `](url)` will share the marker's line, so nothing reads as an
+  // underline there, and a blank line would split the link across two blocks.
+  if (first === -1 && afterCr && linkOpen)
+    return
+  // An LF after a decoded CR only completes one CRLF line ending, so the blank
+  // line takes two. They replace the space `needsSpacing` put after the CR: it
+  // moves the item's content column past the indent of its next lines.
+  const spaced = afterCr && buffer[fragment - 1] === ' '
+  if (spaced) {
+    state.outputPositions?.replace(fragment - 1, fragment, ['\n'])
+    buffer[fragment - 1] = '\n'
+  }
+  const separator = afterCr && !spaced ? '\n\n' : '\n'
+  const replacement = separator + buffer[fragment]
+  state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + separator.length)
   buffer[fragment] = replacement
 }
 
@@ -522,23 +565,23 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
  * this position. A non-space byte, or more than three leading spaces, makes
  * the position ordinary inline text.
  */
-function markdownLineIndent(buffer: string[]): number {
+function markdownLineIndent(buffer: string[], structuralIndent: number): number {
   let spaces = 0
   for (let fragmentIndex = buffer.length - 1; fragmentIndex >= 0; fragmentIndex--) {
     const fragment = buffer[fragmentIndex]!
     for (let index = fragment.length - 1; index >= 0; index--) {
       const code = fragment.charCodeAt(index)
-      if (code === 10)
-        return spaces
+      if (code === 10 || code === 13)
+        return Math.max(0, spaces - structuralIndent)
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
-      if (code !== 32 || spaces === 3) {
+      if (code !== 32 || spaces === structuralIndent + 3) {
         return listMarkerLineStart(buffer, fragmentIndex, index) ? 0 : -1
       }
       spaces++
     }
   }
-  return spaces
+  return Math.max(0, spaces - structuralIndent)
 }
 
 function isMarkdownMarkerWhitespace(code: number): boolean {
@@ -553,21 +596,37 @@ function canStartGfmAngleConstruct(code: number): boolean {
     || code === 63 // ?
 }
 
-function isThematicBreak(value: string, start: number, marker: number): boolean {
-  let count = 0
+/**
+ * A line of only `-` and blanks is a list marker, a thematic break, or a
+ * setext underline, so its leading `-` always needs an escape.
+ */
+function isDashLine(value: string, start: number): boolean {
   for (let index = start; index < value.length; index++) {
     const code = value.charCodeAt(index)
-    if (code === marker) {
-      count++
-    }
-    else if (code === 10 || code === 13) {
+    if (code === 10 || code === 13)
       break
-    }
-    else if (code !== 32 && code !== 9) {
+    if (code !== 45 && code !== 32 && code !== 9)
       return false
-    }
   }
-  return count >= 3
+  return true
+}
+
+/**
+ * A `=` run followed only by blanks is a setext underline; blanks inside the
+ * run make it plain text.
+ */
+function isEqualsLine(value: string, start: number): boolean {
+  let index = start + 1
+  while (index < value.length && value.charCodeAt(index) === 61)
+    index++
+  for (; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code === 10 || code === 13)
+      break
+    if (code !== 32 && code !== 9)
+      return false
+  }
+  return true
 }
 
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
@@ -577,7 +636,7 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
  */
-function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array): boolean {
+function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true
   if ((depthMap[TAG_TABLE] && value.includes('|'))
@@ -589,11 +648,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
   // Text-side reject first: prose that cannot open a block skips the buffer
   // scan entirely, which is most text nodes.
   const first = value.charCodeAt(0)
-  if (!' #+->'.includes(value[0]!) && !(first >= 48 && first <= 57)) {
+  if (!' #+->='.includes(value[0]!) && !(first >= 48 && first <= 57)) {
     return false
   }
 
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, structuralIndent)
   if (lineIndent < 0)
     return false
 
@@ -606,7 +665,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
     return false
 
   const code = value.charCodeAt(index)
-  return '#+->'.includes(value[index]!)
+  return '#+->='.includes(value[index]!)
     || (code >= 48 && code <= 57)
 }
 
@@ -615,11 +674,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
-  let lineIndent = markdownLineIndent(buffer)
+  let lineIndent = markdownLineIndent(buffer, structuralIndent)
   let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
@@ -645,6 +704,14 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): 
       continue
     }
 
+    // A decoded `&#13;` is a bare CR, which also ends a CommonMark line. It
+    // never needs an escape itself.
+    if (code === 13) {
+      lineIndent = 0
+      orderedDigits = 0
+      continue
+    }
+
     let shouldEscape = '\\*_~`['.includes(character)
       || (code === 93 && inLink) // ]
       || (code === 124 && inTable) // |
@@ -662,10 +729,15 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array): 
       else if (code === 45 || code === 43) { // unordered list marker
         shouldEscape = index + 1 === value.length
           || isMarkdownMarkerWhitespace(value.charCodeAt(index + 1))
-          || (code === 45 && isThematicBreak(value, index, code))
+          || (code === 45 && isDashLine(value, index))
       }
       else if (code === 62) { // blockquote marker
         shouldEscape = true
+      }
+      // A node ending inside the run still escapes, since inline nodes can
+      // split one setext underline.
+      else if (code === 61) {
+        shouldEscape = isEqualsLine(value, index)
       }
     }
     else if (!shouldEscape && orderedDigits > 0 && (code === 46 || code === 41)) {
@@ -736,15 +808,13 @@ function columnWidth(value: string, start: number): number {
   return width
 }
 
+/**
+ * Only the word's own line counts: a decoded line ending or a trailing tab
+ * inside the word still leaves the marker alone on the wrapped line.
+ */
 function isSetextMarkerRun(word: string): boolean {
   const first = word.charCodeAt(0)
-  if (first !== 45 && first !== 61)
-    return false
-  for (let index = 1; index < word.length; index++) {
-    if (word.charCodeAt(index) !== first)
-      return false
-  }
-  return true
+  return first === 45 ? isDashLine(word, 0) : first === 61 && isEqualsLine(word, 0)
 }
 
 /**
@@ -809,6 +879,17 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
     return NO_SPACING
   }
 
+  // Only a list starting at 1 may interrupt its parent's paragraph. A bare
+  // parent marker has no paragraph to separate, so keep that list tight, and
+  // so does an open link or emphasis, which a blank line would never close.
+  if (eventType === NodeEventEnter && tagId === TAG_LI && depthMap[TAG_LI]! > 1
+    && node.index === 0 && node.parent?.tagId === TAG_OL
+    && orderedItemNumber(node.parent, 0) !== 1 && !isInsideTableCell(state)
+    && !insideOpenInlineDelimiter(node, state)
+    && (blockOpenPrefix(state, '') !== undefined || endsAtHardBreak(state.buffer))) {
+    return DEFAULT_BLOCK_SPACING
+  }
+
   // Adjust for inline elements
   // Block elements preserve spacing even inside span elements (presentational containers)
   // because spans shouldn't affect block-level semantics of their children
@@ -856,6 +937,25 @@ function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): bo
   return (INLINE_MARKER_TYPE[tagId] !== undefined && INLINE_MARKER_TYPE[tagId] !== 0)
     || (tagId === TAG_A && (node.attributes?.href !== undefined || isInsideRawHtmlBlock(state.depthMap)))
     || tagId === TAG_SUB || tagId === TAG_SUP || tagId === TAG_INS || tagId === TAG_U || tagId === TAG_MARK
+}
+
+/**
+ * Whether an ancestor left a Markdown delimiter open, which has to close in the
+ * same paragraph. Raw tags survive a blank line and a marker-less wrapper has
+ * nothing to close, so neither counts.
+ */
+function insideOpenInlineDelimiter(node: ElementNode, state: MarkdownState): boolean {
+  const rawHtml = isInsideRawHtmlBlock(state.depthMap)
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    const tagId = parent.tagId
+    if (parent.tagHandler?.collapsesInnerWhiteSpace
+      && tagId !== TAG_INS && tagId !== TAG_SUB && tagId !== TAG_SUP && tagId !== TAG_MARK && tagId !== TAG_U
+      && !(rawHtml && tagId === TAG_A)
+      && wrapperEmitsInlineMarkdown(parent, state)) {
+      return true
+    }
+  }
+  return false
 }
 
 /** What a hard break subsumes: HTML's ASCII whitespace but a line feed. */
@@ -1161,7 +1261,7 @@ function flushPreFence(state: MarkdownState): void {
   // A blank line between the marker and the fence ends the item, leaving the block
   // a sibling of the list, so a pending marker takes no separator.
   const fence = liDepth > 0
-    ? `${blockOpenPrefix(state.buffer, state.listIndent) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
+    ? `${blockOpenPrefix(state, state.listIndent) ?? ''}${MARKDOWN_CODE_BLOCK}${lang}\n${state.listIndent}`
     : `${MARKDOWN_CODE_BLOCK}${lang}\n`
   state.buffer.push(fence)
   startCodeFence(state, state.buffer.length - 1, lang, state.listIndent)
@@ -1346,6 +1446,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
+    emptyItemAfterCr: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -1436,7 +1537,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (spacing === CAPTION_DEFAULT_SPACING)
       spacing = DEFAULT_BLOCK_SPACING[0]
     const indent = includeListIndent ? state.listIndent : ''
-    const blockPrefix = blockOpenPrefix(state.buffer, indent, beforeFragment)
+    const blockPrefix = blockOpenPrefix(state, indent, beforeFragment)
     const trailingNewLines = newlineRunBeforePrefix(state.buffer, beforeFragment, indent)
     if (blockPrefix === undefined && trailingNewLines === 0)
       return ''
@@ -1762,9 +1863,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap)
+        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
       }
 
       if (textNode.generatedMarkdown && textNode.value)
@@ -1980,8 +2081,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
 
-      if (state.pendingInlineWhitespace)
+      if (state.pendingInlineWhitespace) {
         state.pendingInlineWhitespace = false
+        // A raw `<br>` (heading, table cell) ends no line, so it keeps the
+        // separator a closed inline element deferred, as in Rust.
+        if (breakOutput?.charCodeAt(0) === 60) {
+          const last = lastOutputChar(buff)
+          if (last !== -1 && last !== 32 && last !== 10 && last !== 9 && last !== 13) {
+            buff.push(' ')
+            state.lastContentCache = ' '
+          }
+        }
+      }
 
       const lastTextNode = state.lastTextNode
       if (state.lastContentCache && lastTextNode?.containsWhitespace && typeof lastTextNode.value === 'string') {
@@ -2303,7 +2414,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       rawHtmlNeedsBoundary = false
     if (rawBlockTag && !isInsideTableCell(state) && !state.depthMap[TAG_PRE]
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
-      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(buff, undefined) === undefined)) {
+      && handlerOutput && (pendingRawHtmlBoundary || blockOpenPrefix(state, undefined) === undefined)) {
       rawHtmlNeedsBoundary = true
       bufferScan[0] = false
       bufferScan[1] = buff.length
@@ -2356,7 +2467,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (state.pendingInlineWhitespace) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
-        if (!isInlineElement || tagId === TAG_BR || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+        // A raw `<br>` (heading, table cell) is no line end, so it keeps the
+        // separator like any inline output, as in Rust.
+        if (!isInlineElement || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
@@ -2446,7 +2559,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // Also don't trim before block elements that have their own spacing configuration
           // At a quote's content start the last fragment is the sibling separator,
           // not trailing whitespace; trimming it would glue adjacent quotes.
+          // A raw `</pre>` in a table cell closes preformatted text, so the
+          // whitespace before it is content, as in Rust.
           const shouldTrim = !quoteAtStart
+            && !(tagId === TAG_PRE && eventType === NodeEventExit && isInsideTableCell(state))
             && (breakConsumesSourceWhitespace
               || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)))
 
@@ -2518,9 +2634,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
-        recordItemMarker(state, element.index)
+        recordItemMarker(state, element.index, handler?.literalEnter ? '' : lastChar)
       else
-        resolveItemMarker(state, true)
+        resolveItemMarker(state, true, -1, openLinkFragment !== -1)
     }
 
     if (eventType === NodeEventEnter
