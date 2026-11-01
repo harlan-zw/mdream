@@ -2803,6 +2803,13 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     "- a\n-\n- b"
   );
   assert_eq!(convert("<ul><li></li><li>a</li></ul>"), "-\n- a");
+  // A parent's bare marker is no paragraph either, and a blank line under it
+  // would end that item and turn the nested one into its sibling.
+  assert_eq!(convert("<ul><li><ul><li></li></ul></li></ul>"), "-\n  -");
+  assert_eq!(
+    convert("<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>"),
+    "-\n  - \n    > q"
+  );
   // A child that is not an item does not make the first item a later one.
   assert_eq!(
     convert("<ul><li>a<ul><script>s</script><li></li></ul></li></ul>"),
@@ -2818,6 +2825,49 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     convert("<ul><li>a<ul><li><blockquote>q</blockquote><ul><li>b</li></ul></li></ul></li></ul>"),
     "- a\n\n  - \n    > q\n    - b"
   );
+}
+
+#[test]
+fn a_marker_nested_past_three_spaces_still_opens_its_item() {
+  // A third-level marker is indented by its ancestors' items. Its content
+  // starts a block like a top-level item's does, so it is escaped and blocks
+  // stay on the marker's line.
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>",
+      "-\n  -\n    - \\# h",
+    ),
+    (
+      "<ul><li><ul><li><ul><li>1. x</li></ul></li></ul></li></ul>",
+      "-\n  -\n    - 1\\. x",
+    ),
+    (
+      "<ol><li><ol><li><ol><li>&gt; q</li></ol></li></ol></li></ol>",
+      "1.\n   1.\n      1. \\> q",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - | a |\n      | --- |",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><pre>code</pre></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ```\n      code\n      ```",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ***",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - \n      > q",
+    ),
+    (
+      "<ol start=\"10\"><li><ol start=\"10\"><li><table><tr><td>a</td></tr></table></li></ol></li></ol>",
+      "10.\n    10. | a |\n        | --- |",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
 }
 
 #[test]
@@ -6705,214 +6755,316 @@ fn scout9_wrap_setext_plain_text_still_wraps() {
 }
 
 #[test]
-fn nested_ordered_start_separates_parent_paragraph() {
+fn empty_nested_list_tail_stays_in_parent_item() {
   for (html, expected) in [
     (
-      "<ul><li>x<br><ol start=\"10\"><script>s</script><li>y</li><template>t</template><li>z</li></ol></li></ul>",
-      "- x  \n\n  10. y\n  11. z",
+      "<ul><li><ol><li></li></ol>text</li></ul>",
+      "-\n  1.\n\n  text",
     ),
     (
-      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
-      "- x\n\n  10. y",
+      "<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>",
+      "-\n  -\n\n  text",
     ),
     (
-      "<ul><li><span>x</span><span>z</span><ol start=\"10\"><li>y</li></ol></li></ul>",
-      "- xz\n\n  10. y",
+      "<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>",
+      "-\n  -\n- next",
     ),
     (
-      "<ul><li><strong>x</strong><ol start=\"10\"><li>y</li></ol></li></ul>",
-      "- **x**\n\n  10. y",
+      "<ul><li><ul><li></li></ul>text</li></ul>",
+      "-\n  -\n\n  text",
     ),
     (
-      "<ol start=\"5\"><li>x<ol start=\"20\"><li>y</li><li>z</li></ol></li></ol>",
-      "5. x\n\n   20. y\n   21. z",
+      "<ul><li><ul><li></li></ul><span>te</span><span>xt</span></li></ul>",
+      "-\n  -\n\n  text",
     ),
     (
-      "<ul><li>x<ol start=\"0\"><li>y</li></ol></li></ul>",
-      "- x\n\n  0. y",
+      "<ul><li><ul><li></li></ul><em>text</em></li></ul>",
+      "-\n  -\n\n  *text*",
     ),
     (
-      "<ul><li>x<ol start=\"1\"><li>y</li></ol></li></ul>",
-      "- x\n  1. y",
+      "<ol start=\"10\"><li><ul><li></li></ul>text</li></ol>",
+      "10.\n    -\n\n    text",
     ),
     (
-      "<ul><li>x<ol start=\"-1\"><li>y</li></ol></li></ul>",
-      "- x\n  1. y",
+      "<blockquote><ul><li><ul><li></li></ul>text</li></ul></blockquote>",
+      "> -\n>   -\n>\n>   text",
     ),
     (
-      "<ul><li>x<ol start=\"\"><li>y</li></ol></li></ul>",
-      "- x\n  1. y",
+      "<ul><li><ul><li><ul><li></li></ul>text</li></ul></li></ul>",
+      "-\n  -\n    -\n\n    text",
+    ),
+    ("<ul><li><ul><li></li></ul></li></ul>", "-\n  -"),
+    ("<ul><li><ul></ul>text</li></ul>", "- text"),
+    (
+      "<ul><li><ul><li></li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  -\n- next",
     ),
     (
-      "<ul><li><ol start=\"10\"><li>y</li></ol></li></ul>",
-      "-\n  10. y",
-    ),
-    (
-      "<ul><li><span></span><ol start=\"10\"><li>y</li></ol></li></ul>",
-      "-\n  10. y",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\"></ol></li><li>z</li></ul>",
-      "- x\n- z",
-    ),
-    (
-      "<ul><li>x<ol reversed start=\"10\"><li value=\"20\">y</li><li>z</li></ol></li></ul>",
-      "- x\n\n  10. y\n  11. z",
-    ),
-    (
-      "<ul><li>x<ol reversed><li value=\"10\">y</li></ol></li></ul>",
-      "- x\n  1. y",
-    ),
-    (
-      "<blockquote><ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul></blockquote>",
-      "> - x\n>\n>   10. y",
-    ),
-    (
-      "<ul><li>x<ul><li>z<ol start=\"10\"><li>y</li></ol></li></ul></li></ul>",
-      "- x\n  - z\n\n    10. y",
-    ),
-    (
-      "<ul><li><p>x</p><ol start=\"10\"><li>y</li></ol></li></ul>",
-      "- x\n\n  10. y",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>",
-      "- x\n\n  10. y\n  - z\n- after",
-    ),
-    (
-      "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
-      "- x  \n\n  10. y",
-    ),
-    (
-      "<ul><li>x<ul><li>y</li></ul><ol start=\"10\"><li>z</li></ol></li></ul>",
-      "- x\n  - y\n\n  10. z",
-    ),
-    (
-      "<ol><li><ol start=\"10\"><li>y</li></ol></li></ol>",
-      "1.\n   10. y",
-    ),
-    (
-      "<ul><li>x<ol start=\"1000000000\"><li>y</li></ol></li></ul>",
-      "- x\n  1. y",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\"><li></li></ol></li></ul>",
-      "- x\n\n  10.",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\"><li>y</li></ol><p>tail</p></li></ul>",
-      "- x\n\n  10. y\n\n  tail",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\"><script>s</script><li>y</li></ol></li></ul>",
-      "- x\n\n  10. y",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\"><style>a{}</style><li>y</li><li>z</li></ol></li></ul>",
-      "- x\n\n  10. y\n  11. z",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\"><noscript>n</noscript><li>y</li></ol></li></ul>",
-      "- x\n\n  10. y",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\"><template>t</template><li>y</li></ol></li></ul>",
-      "- x\n\n  10. y",
-    ),
-    (
-      "<ul><li>x<ol start=\"10\">t<li>y</li></ol></li></ul>",
-      "- x t\n\n  10. y",
+      "<ul><li><ul><li>inner</li></ul></li><li>next</li></ul>",
+      "-\n  - inner\n- next",
     ),
   ] {
-    assert_eq!(convert(html), expected, "html={html:?}");
+    assert_eq!(convert(html), expected, "html={html}");
   }
 }
 
 #[test]
-fn nested_ordered_start_stays_tight_inside_an_open_delimiter() {
+fn filled_nested_list_tail_stays_in_parent_item() {
   for (html, expected) in [
     (
-      "<ul><li>x<a href=\"u\"><ol start=\"10\"><li>y</li></ol></a></li></ul>",
-      "- x [  10. y](u)",
+      "<ul><li><ul><li></li><li>a</li></ul>text</li></ul>",
+      "-\n  -\n  - a\n\n  text",
     ),
     (
-      "<ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
-      "- [x  10. y](u)",
+      "<ul><li><ul><li>a</li></ul>text</li></ul>",
+      "-\n  - a\n\n  text",
     ),
     (
-      "<ul><li><a href=\"u\">x<br><ol start=\"10\"><li>y</li></ol></a></li></ul>",
-      "- [x  \n    10. y](u)",
+      "<ul><li>lead<ul><li>a</li></ul>text</li></ul>",
+      "- lead\n  - a\n\n  text",
     ),
     (
-      "<a href=\"u\"><ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul></a>",
-      "[- x  10. y](u)",
+      "<ol><li><ol><li>a</li></ol>text</li></ol>",
+      "1.\n   1. a\n\n   text",
     ),
     (
-      "<ul><li><a href=\"u\"><small>x<ol start=\"10\"><li>y</li></ol></small></a></li></ul>",
-      "- [x  10. y](u)",
+      "<ul><li><ul><li>a</li></ul><em>text</em></li></ul>",
+      "-\n  - a\n\n  *text*",
     ),
     (
-      "<ul><li><span><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></span></li></ul>",
-      "- [x  10. y](u)",
+      "<ul><li><ul><li>a</li></ul><span>te</span><span>xt</span> more</li></ul>",
+      "-\n  - a\n\n  text more",
     ),
     (
-      "<ul><li><strong>x<ol start=\"10\"><li>y</li></ol></strong></li></ul>",
-      "- **x  10. y**",
+      "<ul><li><ul><li>a<ul><li>b</li></ul>c</li></ul>d</li></ul>",
+      "-\n  - a\n    - b\n\n    c\n\n  d",
     ),
     (
-      "<ul><li><em>x<ol start=\"10\"><li>y</li></ol></em></li></ul>",
-      "- *x  10. y*",
+      "<blockquote><ul><li><ul><li>a</li></ul>text</li></ul></blockquote>",
+      "> -\n>   - a\n>\n>   text",
     ),
     (
-      "<ul><li><del>x<ol start=\"10\"><li>y</li></ol></del></li></ul>",
-      "- ~~x  10. y~~",
+      "<ul><li><ul><li>a</li></ul>t<ul></ul>u</li></ul>",
+      "-\n  - a\n\n  t u",
     ),
     (
-      "<ul><li><code>x<ol start=\"10\"><li>y</li></ol></code></li></ul>",
-      "- `x  10. y`",
+      "<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  - a\n- next",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>1. x</li></ul>",
+      "-\n  - a\n\n  1\\. x",
+    ),
+    (
+      "<ul><li><div><ul><li>a</li></ul></div><ul></ul>t</li></ul>",
+      "-\n  - a\n\n  t",
+    ),
+    (
+      "<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>",
+      "-\n  -\n- z",
+    ),
+    (
+      "<ul><li>x<ul><li>z<br></li></ul>y</li></ul>",
+      "- x\n  - z  \n\n  y",
+    ),
+    (
+      "<ul><li><ul><li>a<br></li></ul>text</li></ul>",
+      "-\n  - a  \n\n  text",
+    ),
+    (
+      "<ul><li><a href=\"x\"><ul><li>a</li></ul></a>t<ul></ul>u</li></ul>",
+      "- [  - a](x)t u",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
     ),
   ] {
-    assert_eq!(convert(html), expected, "html={html:?}");
+    assert_eq!(convert(html), expected, "html={html}");
   }
 }
 
 #[test]
-fn nested_ordered_start_separates_inside_a_wrapper_a_blank_line_cannot_break() {
-  for (html, expected) in [
+fn empty_nested_list_review_regressions() {
+  for (id, html, expected, options) in [
     (
-      "<ul><li><a>x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
-      "- x\n\n  10. y",
+      "F8-1",
+      "<ul><li>lead<br><ul><li></li></ul>text</li></ul>",
+      "- lead  \n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
     ),
     (
-      "<ul><li><span>x<ol start=\"10\"><li>y</li></ol></span></li></ul>",
-      "- x\n\n  10. y",
+      "F8-2",
+      "<ul><li>lead<br><ol><li></li></ol>text</li></ul>",
+      "- lead  \n\n  1.\n\n  text",
+      HtmlToMarkdownOptions::default(),
     ),
     (
-      "<ul><li><small>x<ol start=\"10\"><li>y</li></ol></small></li></ul>",
-      "- x\n\n  10. y",
+      "F8-3",
+      "<ul><li>lead<br><ul><li></li></ul></li></ul>",
+      "- lead  \n\n  -",
+      HtmlToMarkdownOptions::default(),
     ),
     (
-      "<ul><li><mark>x<ol start=\"10\"><li>y</li></ol></mark></li></ul>",
-      "- <mark>x\n\n  10. y</mark>",
+      "F1-1",
+      "<ul><li>lead<ul><li></li></ul>text</li></ul>",
+      "- lead\n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
     ),
     (
-      "<details><ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul></details>",
-      "<details>\n\n- <a href=\"u\">x\n\n  10. y</a>\n\n</details>",
+      "F1-2",
+      "<ul><li><p>lead</p><ul><li></li></ul>text</li></ul>",
+      "- lead\n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-3",
+      "<ul><li><blockquote><ul><li></li></ul>text</blockquote></li></ul>",
+      "- \n  >\n  > -\n  >\n  > text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-4",
+      "<ul><li><ul><li></li></ul>a<ul><li></li></ul>b</li></ul>",
+      "-\n  -\n\n  a\n\n  -\n\n  b",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F2-1",
+      "<ul><li><ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>text</li></ul>",
+      "-\n  -\n    -\n      -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F2-2",
+      "<ol><li><ol><li><ol><li><ol><li></li></ol></li></ol></li></ol>t</li></ol>",
+      "1.\n   1.\n      1.\n         1.\n\n   t",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F3-1",
+      "<ul><li><ul><li></li></ul><span>t</span></li></ul>",
+      "-\n  -\n\n  XtY",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "span".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("X".to_string()),
+              exit: Some("Y".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F3-2",
+      "<ul><li><ul><li></li></ul><span></span></li><li>n</li></ul>",
+      "-\n  -\n\n  XY\n- n",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "span".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("X".to_string()),
+              exit: Some("Y".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F3-3",
+      "<ul><li><ul><li></li></ul><em></em></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "em".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("".to_string()),
+              exit: Some("".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F4-1",
+      "<ul><li><hr><br>text</li></ul>",
+      "- ***\n\n    \n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F4-2",
+      "<ul><li><ul><li></li></ul><br>text</li></ul>",
+      "-\n  -\n\n    \n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F4-3",
+      "<ul><li><ul><li></li></ul><br></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-1",
+      "<ul><li><ul><li></li></ul><div></div></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-2",
+      "<ul><li><ul><li></li></ul><p></p></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-3",
+      "<ul><li><ul><li></li></ul><em></em></li><li>next</li></ul>",
+      "-\n  -\n- next",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-4",
+      "<ul><li><ul><li></li></ul><code></code></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F6-1",
+      "<ul><li><ul><li>a<br>-</li></ul>text</li></ul>",
+      "-\n  - a  \n    \\-\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F6-2",
+      "<ul><li><ul><li>a<br>1.</li></ul>text</li></ul>",
+      "-\n  - a  \n    1\\.\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F7-1",
+      "<ul><li><ul><li></li></ul><blockquote>q</blockquote></li></ul>",
+      "-\n  - \n  > q",
+      HtmlToMarkdownOptions::default(),
     ),
   ] {
-    assert_eq!(convert(html), expected, "html={html:?}");
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{id}: {html}"
+    );
   }
-}
-
-#[test]
-fn nested_ordered_start_wraps_at_content_columns() {
-  assert_eq!(
-    html_to_markdown(
-      "<ul><li>alpha beta gamma delta<ol start=\"10\"><li>one two three four five</li></ol></li></ul>",
-      HtmlToMarkdownOptions::default().with_wrap_width(12)
-    ),
-    "- alpha beta\n  gamma\n  delta\n\n  10. one\n      two\n      three\n      four\n      five"
-  );
 }
 
 #[test]
@@ -7183,6 +7335,297 @@ fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
 }
 
 #[test]
+fn empty_quote_keeps_nested_list_tail() {
+  for (html, expected) in [
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote> </blockquote><p>parent</p></li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote><blockquote></blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote></blockquote>parent</li></ul>",
+      "- A\n  - inner\n\n  parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><h2>h</h2></li></ul>",
+      "- A\n  - inner\n\n  ## h",
+    ),
+    (
+      "<ul><li>A<ul><li></li></ul><blockquote></blockquote>parent</li></ul>",
+      "- A\n\n  - \n\n  parent",
+    ),
+    (
+      "<ol><li>A<ol><li>inner</li></ol><blockquote></blockquote>parent</li></ol>",
+      "1. A\n   1. inner\n\n   parent",
+    ),
+    (
+      "<blockquote><ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul></blockquote>",
+      "> - A\n>   - inner\n>\n>   parent",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote></li><li>n</li></ul>",
+      "- A\n  - inner\n- n",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote>q</blockquote></li></ul>",
+      "- A\n  - inner\n  > q",
+    ),
+    (
+      "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+      "- A\n  - inner\n\n  > q",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn empty_ancestor_list_markers_do_not_underline_parent_text() {
+  for (html, expected) in [
+    (
+      "<ol><li>lead<ul><li><ol><li></li></ol></li></ul></li></ol>",
+      "1. lead\n\n   -\n     1.",
+    ),
+    (
+      "<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>",
+      "- \n  > lead\n  >\n  > -\n  >   -",
+    ),
+    (
+      "<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>",
+      "- lead\n\n  -\n    - x",
+    ),
+    (
+      "<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>",
+      "-\n  -\n    -",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
+fn nested_ordered_start_separates_parent_paragraph() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<br><ol start=\"10\"><script>s</script><li>y</li><template>t</template><li>z</li></ol></li></ul>",
+      "- x  \n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><span>x</span><span>z</span><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- xz\n\n  10. y",
+    ),
+    (
+      "<ul><li><strong>x</strong><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- **x**\n\n  10. y",
+    ),
+    (
+      "<ol start=\"5\"><li>x<ol start=\"20\"><li>y</li><li>z</li></ol></li></ol>",
+      "5. x\n\n   20. y\n   21. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"0\"><li>y</li></ol></li></ul>",
+      "- x\n\n  0. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"1\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"-1\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "-\n  10. y",
+    ),
+    (
+      "<ul><li><span></span><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "-\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"></ol></li><li>z</li></ul>",
+      "- x\n- z",
+    ),
+    (
+      "<ul><li>x<ol reversed start=\"10\"><li value=\"20\">y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol reversed><li value=\"10\">y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<blockquote><ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul></blockquote>",
+      "> - x\n>\n>   10. y",
+    ),
+    (
+      "<ul><li>x<ul><li>z<ol start=\"10\"><li>y</li></ol></li></ul></li></ul>",
+      "- x\n  - z\n\n    10. y",
+    ),
+    (
+      "<ul><li><p>x</p><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>",
+      "- x\n\n  10. y\n\n  - z\n- after",
+    ),
+    (
+      "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x  \n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ul><li>y</li></ul><ol start=\"10\"><li>z</li></ol></li></ul>",
+      "- x\n  - y\n\n  10. z",
+    ),
+    (
+      "<ol><li><ol start=\"10\"><li>y</li></ol></li></ol>",
+      "1.\n   10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"1000000000\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li></li></ol></li></ul>",
+      "- x\n\n  10.",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol><p>tail</p></li></ul>",
+      "- x\n\n  10. y\n\n  tail",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><script>s</script><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><style>a{}</style><li>y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><noscript>n</noscript><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><template>t</template><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\">t<li>y</li></ol></li></ul>",
+      "- x t\n\n  10. y",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn nested_ordered_start_stays_tight_inside_an_open_delimiter() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<a href=\"u\"><ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- x [  10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\">x<br><ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- [x  \n    10. y](u)",
+    ),
+    (
+      "<a href=\"u\"><ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul></a>",
+      "[- x  10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\"><small>x<ol start=\"10\"><li>y</li></ol></small></a></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><span><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></span></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><strong>x<ol start=\"10\"><li>y</li></ol></strong></li></ul>",
+      "- **x  10. y**",
+    ),
+    (
+      "<ul><li><em>x<ol start=\"10\"><li>y</li></ol></em></li></ul>",
+      "- *x  10. y*",
+    ),
+    (
+      "<ul><li><del>x<ol start=\"10\"><li>y</li></ol></del></li></ul>",
+      "- ~~x  10. y~~",
+    ),
+    (
+      "<ul><li><code>x<ol start=\"10\"><li>y</li></ol></code></li></ul>",
+      "- `x  10. y`",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn nested_ordered_start_separates_inside_a_wrapper_a_blank_line_cannot_break() {
+  for (html, expected) in [
+    (
+      "<ul><li><a>x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><span>x<ol start=\"10\"><li>y</li></ol></span></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><small>x<ol start=\"10\"><li>y</li></ol></small></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><mark>x<ol start=\"10\"><li>y</li></ol></mark></li></ul>",
+      "- <mark>x\n\n  10. y</mark>",
+    ),
+    (
+      "<details><ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul></details>",
+      "<details>\n\n- <a href=\"u\">x\n\n  10. y</a>\n\n</details>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn nested_ordered_start_wraps_at_content_columns() {
+  assert_eq!(
+    html_to_markdown(
+      "<ul><li>alpha beta gamma delta<ol start=\"10\"><li>one two three four five</li></ol></li></ul>",
+      HtmlToMarkdownOptions::default().with_wrap_width(12)
+    ),
+    "- alpha beta\n  gamma\n  delta\n\n  10. one\n      two\n      three\n      four\n      five"
+  );
+}
+
+#[test]
 fn scout9_list_tail_quote_spacing() {
   for (html, expected) in [
     (
@@ -7362,23 +7805,23 @@ fn block_leaves_the_marker_of_a_closed_nested_item() {
   for (html, expected) in [
     (
       "<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>",
-      "- a\n\n  - \n\n  ## h",
+      "- a\n\n  -\n\n  ## h",
     ),
     (
       "<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>",
-      "- a\n  - b\n\n    - \n\n    ## h",
+      "- a\n  - b\n\n    -\n\n    ## h",
     ),
     (
       "<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>",
-      "- a\n\n  - \n\n  ```\n  x\n  ```",
+      "- a\n\n  -\n\n  ```\n  x\n  ```",
     ),
     (
       "<ul><li>a<ul><li></li></ul><hr></li></ul>",
-      "- a\n\n  - \n\n  ---",
+      "- a\n\n  -\n\n  ***",
     ),
     (
       "<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>",
-      "- a\n\n  - \n\n  | t |\n  | --- |\n  | c |",
+      "- a\n\n  -\n\n  | t |\n  | --- |\n  | c |",
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html}");
@@ -7389,6 +7832,37 @@ fn block_leaves_the_marker_of_a_closed_nested_item() {
 fn text_after_a_closed_nested_item_stays_escaped() {
   assert_eq!(
     convert("<ul><li>a<ul><li></li></ul># t</li></ul>"),
-    "- a\n\n  - \\# t"
+    "- a\n\n  -\n\n  \\# t"
   );
+}
+
+#[test]
+fn overridden_empty_quote_preserves_nested_list_tail() {
+  let html = "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>";
+  let options = transparent_override("blockquote", false);
+  let expected = "- A\n  - inner\n\n  parent";
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(options.clone());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual, expected, "split={split}");
+  }
+}
+
+#[test]
+fn nonempty_quote_enter_preserves_literal_spacing() {
+  let html = "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>";
+  let mut options = transparent_override("blockquote", false);
+  options.plugins.as_mut().unwrap().tag_overrides.as_mut().unwrap()[0].1.enter = Some("CUSTOM ".to_string());
+  let expected = "- A\n  - innerCUSTOM parent";
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(options.clone());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual, expected, "split={split}");
+  }
 }
