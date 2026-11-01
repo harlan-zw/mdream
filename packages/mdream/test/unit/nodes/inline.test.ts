@@ -1,3 +1,4 @@
+import { createPlugin, htmlToMarkdown as jsHtmlToMarkdown, streamHtmlToMarkdown as jsStreamHtmlToMarkdown } from '@mdream/js'
 import { describe, expect, it } from 'vitest'
 import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
@@ -259,6 +260,244 @@ describe.each(engines)('gfm inline code delimiters $name', (engineConfig) => {
   })
 })
 
+// Both engines write removed content as nothing, so the delimiters around it
+// must read as they would without it (CommonMark flanking rules).
+describe.each(engines)('inline delimiters around removed content $name', (engineConfig) => {
+  it('keeps the space after removed content outside the opening delimiter', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const expected = 'Install. **Warning:** read'
+    for (const html of [
+      '<p>Install. <strong><svg><path d="M0"/></svg> Warning:</strong> read</p>',
+      '<p>Install. <strong><script>x</script> Warning:</strong> read</p>',
+      '<p>Install.<strong><svg></svg> Warning:</strong> read</p>',
+    ]) {
+      expect(htmlToMarkdown(html, { engine })).toBe(expected)
+      for (let split = 1; split < html.length; split++) {
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { engine }))
+        expect(actual.trim(), `${html} split at ${split}`).toBe(expected)
+      }
+    }
+    const hidden = '<p>Install. <strong><span hidden>!</span> Warning:</strong> read</p>'
+    expect(htmlToMarkdown(hidden, { plugins: { filter: {} }, engine })).toBe(expected)
+    expect(htmlToMarkdown('<p>Install. <em><svg></svg> Warning:</em> read</p>', { engine })).toBe('Install. *Warning:* read')
+    expect(htmlToMarkdown('<p>Install. <del><svg></svg> Warning:</del> read</p>', { engine })).toBe('Install. ~~Warning:~~ read')
+  })
+
+  it('keeps the moved space out of the start of link text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const cases: [string, string][] = [
+      ['<p><a href="/x"><strong><svg></svg> now</strong></a></p>', '[**now**](/x)'],
+      ['<p>Go<a href="/x"><strong> now</strong></a></p>', 'Go [**now**](/x)'],
+      ['<p><em>x</em><a href="/x"><strong> now</strong></a></p>', '*x*[ **now**](/x)'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html, { engine })).toBe(expected)
+      for (let split = 1; split < html.length; split++) {
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { engine }))
+        expect(actual.trim(), `${html} split at ${split}`).toBe(expected)
+      }
+    }
+  })
+
+  it('leaves code-like content as written', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>', { engine })).toBe('`a** x**`')
+    expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>', { engine })).toBe('`a* x*`')
+    expect(htmlToMarkdown('<p><var>a<b><svg></svg> x</b></var></p>', { engine })).toBe('`a** x**`')
+  })
+
+  it('keeps the word separator for text that is only spaces', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>x<em><span hidden>h</span> </em>y</p>'
+    expect(htmlToMarkdown(html, { plugins: { filter: {} }, engine })).toBe('x y')
+    for (let split = 1; split < html.length; split++) {
+      const actual = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { plugins: { filter: {} }, engine }))
+      expect(actual.trim(), `split at ${split}`).toBe('x y')
+    }
+  })
+
+  it('keeps the word separator when emphasis starts with a blank', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const cases: [string, string][] = [
+      ['<p>a<strong> <span>b</span></strong></p>', 'a **b**'],
+      ['<p>a<strong> </strong>b</p>', 'a b'],
+      ['<p>a<em> <span>b</span></em></p>', 'a *b*'],
+      ['<p>a<b>\n<span>b</span></b></p>', 'a **b**'],
+      ['<p>a<strong> <svg></svg>b</strong></p>', 'a **b**'],
+      ['<p>a<strong> <em>b</em></strong></p>', 'a ***b***'],
+      ['<p>a <strong> <span>b</span></strong></p>', 'a **b**'],
+      ['<p><strong> <span>b</span></strong></p>', '**b**'],
+      ['<p>a<strong> </strong> b</p>', 'a b'],
+      ['<p>a<em> </em><strong> </strong>b</p>', 'a b'],
+      ['<p>a<strong> </strong><em></em> b</p>', 'a b'],
+      ['<p><a href="/x"><span>x</span><strong> </strong><em></em></a></p>', '[x](/x)'],
+      ['<ul><li>a<strong> <span>b</span></strong></li></ul>', '- a **b**'],
+      ['<h2>a<strong> </strong>b</h2>', '## a b'],
+      ['<table><tr><th>h</th></tr><tr><td>a<strong> <span>b</span></strong></td></tr></table>', '| h |\n| --- |\n| a **b** |'],
+    ]
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html, { engine })).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
+
+  it('places a blank kept inside emphasis without writing it as text', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const noStrongDelimiters = { plugins: { tagOverrides: { strong: { enter: '', exit: '' } } } }
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]?][] = [
+      // Elements that write nothing sit between the opener and the blank.
+      ['<p>Click<strong><span class="w"> <a href="/x">here</a></span></strong> now</p>', 'Click **[here](/x)** now'],
+      ['<p>a<strong><span> <span>b</span></span></strong></p>', 'a **b**'],
+      ['<p>a<strong><span> </span></strong>b</p>', 'a b'],
+      ['<p>a<strong><span> </span>b</strong></p>', 'a **b**'],
+      ['<p>a<em><span> <strong>b</strong></span></em></p>', 'a ***b***'],
+      ['<p>a<strong><font> <span>b</span></font></strong></p>', 'a **b**'],
+      ['<p>a<strong><span>\n</span><span>b</span></strong></p>', 'a **b**'],
+      // An emptied quote around the moved separator is dropped with it.
+      ['<p>a<q><em> </em></q>b</p>', 'a b'],
+      ['<p>a<strong><q><em> </em></q></strong>b</p>', 'a b'],
+      ['<p>a<strong><q><em> </em></q>c</strong>b</p>', 'a **c**b'],
+      ['<p>a<strong><q><em> </em></q><em>c</em></strong>b</p>', 'a ***c***b'],
+      ['<p>a<em><q><strong> <svg></svg></strong></q></em> b</p>', 'a b'],
+      ['<p><q><cite>&#32;</cite></q></p>', ''],
+      ['<p>a <q><span>y </span><q><a href="#"></a></q></q>z</p>', 'a "y "z', { format: 'text' }],
+      // With no opener to part, it is owed to later text: a line break or the
+      // end of the block drops it, later text that brings its own space needs
+      // no other, and code keeps its content as written.
+      ['<p><i>x<i> <svg></svg></i></i></p>', '*x*'],
+      ['<p>a<b>x<b> <svg></svg></b></b>z</p>', 'a**x**z'],
+      ['<p><i>a<i> <svg></svg> x</i></i></p>', '*a x*'],
+      ['<p>x<b>y<b> <strong></strong><br>z</b></b></p>', 'x**y  \nz**'],
+      ['<p><code>a<del> </del></code>z</p>', '`a `z'],
+      ['<p><code>a<strong> <svg></svg> b</strong></code></p>', '`a** b**`'],
+      ['<p>a<strong> <svg></svg> b</strong></p>', 'a b', noStrongDelimiters],
+      ['a<strong> <svg></svg> b</strong>', 'a b', noStrongDelimiters],
+      ['<p>a<b>x<b> <a href="#"></a></b></b></p>', 'a**x**', { clean: true }],
+      ['<p><i>x<i> <a href="#"></a></i></i>z</p>', '*x* z', { clean: true }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { ...options, engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
+
+  it('keeps the word separator when an inline wrapper starts with a blank', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const noStrongDelimiters = { plugins: { tagOverrides: { strong: { enter: '', exit: '' } } } }
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]?][] = [
+      ['<p>a<span> <span>b</span></span></p>', 'a b'],
+      ['<p>a<span> <strong>b</strong></span></p>', 'a **b**'],
+      ['<p>a<font> <b>x</b></font></p>', 'a **x**'],
+      ['<p>a<label> <span>b</span></label></p>', 'a b'],
+      ['<p>a<abbr> <span>b</span></abbr></p>', 'a b'],
+      ['<p>a<small> <span>b</span></small></p>', 'a b'],
+      ['<p>a<u> <span>b</span></u></p>', 'a<u> b</u>'],
+      ['<p>a<span><span> <span>b</span></span></span></p>', 'a b'],
+      ['<p>a<font><small> <label><b>x</b></label></small></font></p>', 'a **x**'],
+      ['<p>a<span> </span>b</p>', 'a b'],
+      ['<p>a<span> <strong></strong></span>b</p>', 'a b'],
+      ['<p>a<strong>x<span> <span>b</span></span></strong></p>', 'a**x b**'],
+      ['<p>a<strong> <span>b</span></strong></p>', 'a b', noStrongDelimiters],
+      ['<p>a <span> <span>b</span></span></p>', 'a b'],
+      ['<p><span> <strong>b</strong></span></p>', '**b**'],
+      ['<p>a<br><span> <span>b</span></span></p>', 'a  \nb'],
+      ['<p>a<a href="/x"> <span>b</span></a></p>', 'a [b](/x)'],
+      ['<p>a<q> <span>b</span></q></p>', 'a "b"'],
+      ['<p>a<code> <span>b</span></code></p>', 'a`b`'],
+      ['<ul><li>a<span> <span>b</span></span></li></ul>', '- a b'],
+      ['<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>', '| h |\n| --- |\n| a b |'],
+      ['<h2>w<span> <br>b</span></h2>', '## w <br>b'],
+      ['<h2>w<strong>a </strong><br>b</h2>', '## w**a** <br>b'],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { ...options, engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
+
+  it('writes an owed separator before the text it parts', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const tailwind = { plugins: { tailwind: true } }
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
+      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa\nb', { wrapWidth: 6 }],
+      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa\n  1. b', { wrapWidth: 8 }],
+      ['<p>Read<label> <span class="font-bold">new</span></label> now</p>', 'Read **new** now', tailwind],
+      ['<p>Price<span>: </span><span class="font-bold">$5</span></p>', 'Price: **$5**', tailwind],
+      ['<p>a<span> <span class="italic">b</span></span>c</p>', 'a *b*c', tailwind],
+      ['<p>aaaa<span> <span class="font-bold">bb cc</span></span></p>', 'aaaa **bb\ncc**', { ...tailwind, wrapWidth: 8 }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { ...options, engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
+
+  it('drops a blank after a literal tag override opener', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const span = { plugins: { tagOverrides: { span: { enter: '**', exit: '**' } } } }
+    const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
+      ['<p>a<sup><u></u><span> <span>2</span></span></sup>z</p>', 'a**X 2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' }, u: { enter: 'X', exit: '' } } } }],
+      ['<p>a<sup><span> <span>2</span></span></sup>z</p>', 'a**2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><span><span> <span>2</span></span></span></sup>z</p>', 'a**2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><span></span><span> <span>2</span></span></sup>z</p>', 'a**2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><svg></svg><span> <span>2</span></span></sup>z</p>', 'a**2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><b></b> <span>2</span></sup>z</p>', 'a**2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><a> <span>2</span></a></sup>z</p>', 'a**2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><em> <span>2</span></em></sup>z</p>', 'a***2***z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><span>x</span><span> <span>2</span></span></sup>z</p>', 'a**x 2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><img src="x.png"><span> <span>2</span></span></sup>z</p>', 'a**![](x.png) 2**z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><span></span><span> <span>2</span></span></sup>z</p>', 'a**2**z', { format: 'text', plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><b> 2</b></sup>z</p>', 'a****2****z', { plugins: { tagOverrides: { sup: { enter: '**', exit: '**' } } } }],
+      ['<p>a<x-y><span></span><span> <span>2</span></span></x-y>.</p>', 'a**2**.', { plugins: { tagOverrides: { 'x-y': { enter: '**', exit: '**' } } } }],
+      ['<p>a<x-y><span></span><span> <span>2</span></span></x-y>.</p>', 'a**2**.', { format: 'text', plugins: { tagOverrides: { 'x-y': { enter: '**', exit: '**' } } } }],
+      ['<p>a<sup><br>x<span> <span>2</span></span></sup>z</p>', 'a^\nx 2^z', { format: 'text', plugins: { tagOverrides: { sup: { enter: '^  ', exit: '^' } } } }],
+      ['<p>a<em>x </em><br>b</p>', 'a*x* b', { plugins: { tagOverrides: { br: { enter: '', exit: '' } } } }],
+      ['<p>a<span> <i>x</i></span>z</p>', 'a***x***z', span],
+      ['<p>a<span> <span>x</span></span>z</p>', 'a****x****z', span],
+      ['<p>a<span> </span>z</p>', 'a****z', span],
+      ['<p>a<u> <i>x</i></u>z</p>', 'a__*x*__z', { plugins: { tagOverrides: { u: { enter: '__', exit: '__' } } } }],
+      ['<p>a<sup> <span>2</span></sup>z</p>', 'a^2^z', { plugins: { tagOverrides: { sup: { enter: '^', exit: '^' } } } }],
+      ['<p>a<span> <i>x</i></span>z</p>', 'a *x*z', { plugins: { tagOverrides: { span: { enter: '', exit: '' } } } }],
+    ]
+    for (const [html, expected, options] of cases) {
+      expect(htmlToMarkdown(html, { ...options, engine }), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        const actual = await collect(streamHtmlToMarkdown(chunkedStream(chunks), { ...options, engine }))
+        expect(actual.trim(), `${html} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
+})
+
 describe.each(engines)('setext equals escaping $name', (engineConfig) => {
   it.each([
     ['<ul><li>x<ul><li>a<br># b</li></ul></li></ul>', '- x\n  - a  \n    \\# b'],
@@ -323,6 +562,22 @@ describe.each(engines)('setext dash escaping $name', (engineConfig) => {
       expect(streamed, `split at ${i}`).toBe(expected)
     }
   })
+})
+
+it('counts visible plugin text generated from a retained blank', async () => {
+  const plugin = createPlugin({
+    processTextNode(node) {
+      if (!node.value.trim())
+        return { content: 'visible', skip: false }
+    },
+  })
+  const html = '<p>a<a href="/x" title="fallback"> </a></p>'
+  const expected = 'a [visible](/x "fallback")'
+  expect(jsHtmlToMarkdown(html, { plugins: [plugin] })).toBe(expected)
+  for (let split = 0; split <= html.length; split++) {
+    expect(await collect(jsStreamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { plugins: [plugin] })))
+      .toBe(expected)
+  }
 })
 
 describe.each(engines)('wrapped setext markers after an escaped line start $name', (engineConfig) => {

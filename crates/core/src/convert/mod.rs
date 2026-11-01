@@ -111,7 +111,7 @@ fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
     if bytes[index] == SPACE_CHAR
       && !matches!(
         bytes[index + 1],
-        b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
+        b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9'
       )
     {
       return Some(index + 1);
@@ -169,6 +169,10 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// A word separator sits right before the opener, moved there or written for
+  /// a pending one. When the pair turns out empty it goes with the opener and
+  /// is owed to the content after it.
+  follows_separator: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -832,6 +836,9 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// End of the space the current element's enter wrote for a pending
+  /// separator, so an opener written right after it can take it along.
+  pending_space_end: usize,
   /// Deferred spacing after a committed figcaption.
   caption_boundary: CaptionBoundary,
 
@@ -888,6 +895,10 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
+  /// Depth and buffer offset right after each open inline element's literal
+  /// `tagOverrides` opener. The offset still ends the buffer while nothing
+  /// has been written since.
+  literal_opener_ends: Vec<(usize, usize)>,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1158,6 +1169,7 @@ impl ConvertState {
       has_last_text_node: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      pending_space_end: usize::MAX,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
@@ -1182,6 +1194,7 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      literal_opener_ends: Vec::new(),
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -3023,6 +3036,14 @@ impl ConvertState {
     for marker in &mut self.open_markers {
       marker.output_start -= drain_end;
       marker.content_start -= drain_end;
+    }
+    // An opener with drained output after it no longer ends anything.
+    for end in &mut self.literal_opener_ends {
+      end.1 = if end.1 == usize::MAX || end.1 < drain_end {
+        usize::MAX
+      } else {
+        end.1 - drain_end
+      };
     }
     for frame in &mut self.caption_frames {
       if let CaptionState::Tentative {

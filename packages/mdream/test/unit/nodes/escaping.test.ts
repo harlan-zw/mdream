@@ -18,4 +18,14 @@ describe.each(engines)('escaping $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
+
+  it.each([
+    ['<p>Line one<br>===</p>', 'Line one  \n\\==='],
+    ['<p>Line one<br>--</p>', 'Line one  \n\\--'],
+    ['<p>Line one<br>---</p>', 'Line one  \n\\---'],
+    ['<p>Line one<br>==x</p>', 'Line one  \n==x'],
+  ])('keeps the line after a hard break in %s from becoming a setext underline', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
 })

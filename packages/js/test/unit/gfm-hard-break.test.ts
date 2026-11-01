@@ -43,6 +43,18 @@ describe('gfm hard breaks', () => {
       .toBe('`first\nsecond`')
   })
 
+  it.each([
+    ['<p>Line one<br>===</p>', `Line one${HARD_BREAK}\\===`],
+    ['<p>Line one<br>=</p>', `Line one${HARD_BREAK}\\=`],
+    ['<p>Line one<br>--</p>', `Line one${HARD_BREAK}\\--`],
+    ['<ul><li>Line one<br>===</li></ul>', `- Line one${HARD_BREAK}  \\===`],
+    ['<blockquote><p>Line one<br>===</p></blockquote>', `> Line one${HARD_BREAK}> \\===`],
+    ['<p>Line one<br>==x</p>', `Line one${HARD_BREAK}==x`],
+    ['<p>Line one<br>= =</p>', `Line one${HARD_BREAK}= =`],
+  ])('does not let %s underline the line before the break', (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+  })
+
   it('preserves plugin output in place of the built-in break', () => {
     expect(htmlToMarkdown('<p>first<br>second</p>', {
       plugins: [{
@@ -71,6 +83,7 @@ describe('gfm hard breaks', () => {
   it('matches one-shot output at every stream split', async () => {
     const cases = [
       '<p>first<br>second</p>',
+      '<p>Line one<br>===</p>',
       '<p>before\\<br>after<br><br>last</p>',
       '<ul><li>first<br>second</li></ul>',
       '<blockquote><p>first<br>second</p></blockquote>',

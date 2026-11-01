@@ -91,6 +91,7 @@ export function processPluginsForEvent(
           const result = plugin.processTextNode(textNode, state)
           if (result) {
             if (result.skip) {
+              textNode.excludedFromMarkdown = true
               return true // Skip this text node
             }
             textNode.value = result.content
