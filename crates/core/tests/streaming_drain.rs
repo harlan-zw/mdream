@@ -257,6 +257,7 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
     "<ul><li>p<pre><p>x</p></pre></li></ul>",
     "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
     "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+    "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><p>x</p></pre></a></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());

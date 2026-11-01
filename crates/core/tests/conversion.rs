@@ -3261,7 +3261,11 @@ fn a_rule_around_a_deferred_fence_resumes_the_item() {
     ),
     (
       "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
-      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)",
+      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  ](/w \"W\")",
+    ),
+    (
+      "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><p>x</p></pre></a></li></ul>",
+      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  ](/w)",
     ),
   ] {
     assert_eq!(convert(html), expected, "{html}");

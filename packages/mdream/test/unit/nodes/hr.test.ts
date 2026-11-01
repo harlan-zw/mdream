@@ -73,7 +73,11 @@ const RULES_AROUND_DEFERRED_FENCE: [string, string][] = [
   ],
   [
     '<ul><li><a href="/w" title="W"><pre><p>x</p></pre></a></li></ul>',
-    '- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)',
+    '- [\n\n  ```\n  \n\n  x\n  ```\n\n  ](/w "W")',
+  ],
+  [
+    '<ul><li><a href="/w" aria-label="W"><pre><p>x</p></pre></a></li></ul>',
+    '- [\n\n  ```\n  \n\n  x\n  ```\n\n  ](/w)',
   ],
 ]
 
