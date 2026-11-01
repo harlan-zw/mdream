@@ -446,7 +446,6 @@ describe.each(engines)('scout9_list_tail_quote_spacing $name', (engineConfig) =>
   })
 })
 
-
 describe.each(engines)('parent heading after nested hard break $name', (engineConfig) => {
   it.each([
     ['<ul><li><p>a</p><h2>h</h2></li></ul>', '- a\n\n  ## h'],
@@ -458,7 +457,6 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 })
-
 
 describe.each(engines)('blocks opening a quote in an item $name', (engineConfig) => {
   it.each([
@@ -547,7 +545,6 @@ describe.each(engines)('blocks opening a quote in an item $name', (engineConfig)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 })
-
 
 describe.each(engines)('blocks around nested pending markers $name', (engineConfig) => {
   it.each([
