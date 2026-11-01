@@ -1776,8 +1776,13 @@ impl ConvertState {
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
-      self.empty_list_marker_end = self.buffer.trim_end_matches(' ').len();
-      self.empty_list_marker_scanned_to = self.empty_list_marker_end;
+      let bytes = self.buffer.as_bytes();
+      let mut end = bytes.len();
+      while end > 0 && bytes[end - 1] == b' ' {
+        end -= 1;
+      }
+      self.empty_list_marker_end = end;
+      self.empty_list_marker_scanned_to = bytes.len();
       self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
       self.item_settle_pending = true;
     }
@@ -3441,7 +3446,10 @@ impl ConvertState {
     };
     // Cache only a built-in marker actually written on its own line. Literal
     // overrides, raw HTML and a cap rejecting output cannot create a shortcut.
-    let marker_end = self.buffer.trim_end_matches(' ').len();
+    let mut marker_end = bytes.len();
+    while marker_end > 0 && bytes[marker_end - 1] == b' ' {
+      marker_end -= 1;
+    }
     if (starts_document || before(1) == b'\n')
       && self.buffer.len() > output_start
       && bytes
@@ -3509,7 +3517,11 @@ impl ConvertState {
   /// Kept out of line so the token loop stays small when nothing is pending.
   #[inline(never)]
   pub(crate) fn settle_item_marker(&mut self) {
-    if (self.empty_list_marker_end != usize::MAX || self.list_tail_start != usize::MAX)
+    let len = self.buffer.len();
+    let marker = self.empty_list_marker_end;
+    let tail = self.list_tail_start;
+    if ((marker != usize::MAX && (marker > len || self.empty_list_marker_scanned_to != len))
+      || (tail != usize::MAX && (tail > len || self.list_tail_scanned_to != len)))
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
       && self.open_link_hold_floor().is_none()
@@ -3531,7 +3543,8 @@ impl ConvertState {
         self.list_tail_scanned_to = self.buffer.len();
       }
     }
-    if self.buffer.len() > self.empty_item_len
+    if self.empty_item_hazard
+      && self.buffer.len() > self.empty_item_len
       && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
@@ -4637,11 +4650,15 @@ impl ConvertState {
   }
 
   fn flush_list_tail(&mut self) {
+    let prefix = self.continuation_prefix();
+    self.flush_list_tail_with_prefix(&prefix);
+  }
+
+  fn flush_list_tail_with_prefix(&mut self, prefix: &str) {
     self.trim_trailing_spaces();
     self.list_tail_start = self.buffer.len();
     self.list_tail_scanned_to = self.list_tail_start;
     self.item_settle_pending = true;
-    let prefix = self.continuation_prefix();
     // A hard break has already ended the line; write only the newlines the
     // blank line still lacks.
     let new_lines = &"\n\n"[usize::from(self.trailing_new_lines())..];
@@ -4659,8 +4676,6 @@ impl ConvertState {
   fn flush_list_pending(&mut self, tag_id: Option<u8>) {
     if self.list_pending & LIST_TAIL_PENDING != 0 {
       if matches!(tag_id, Some(TAG_BLOCKQUOTE)) {
-        self.list_pending &= !LIST_TAIL_PENDING;
-        self.empty_list_marker_end = usize::MAX;
         // A literal quote pushes no frame to hand the tail back.
         let overrides = self
           .options
@@ -4668,10 +4683,22 @@ impl ConvertState {
           .as_ref()
           .and_then(|p| p.tag_overrides.as_ref());
         let node = &self.stack[self.stack.len() - 1];
-        if Self::override_for_node(overrides, self.override_idx.as_deref(), node)
-          .is_none_or(|config| config.enter.is_none())
+        match Self::override_for_node(overrides, self.override_idx.as_deref(), node)
+          .and_then(|config| config.enter.as_deref())
         {
-          self.list_tail_quote_depth = self.blockquotes.len() + 1;
+          Some("") => {
+            // A literal enter has no quote frame and must not add a `>` prefix.
+            let prefix = self.list_indent.clone();
+            self.flush_list_tail_with_prefix(&prefix);
+          }
+          enter => {
+            let built_in = enter.is_none();
+            self.list_pending &= !LIST_TAIL_PENDING;
+            self.empty_list_marker_end = usize::MAX;
+            if built_in {
+              self.list_tail_quote_depth = self.blockquotes.len() + 1;
+            }
+          }
         }
       } else {
         self.flush_list_tail();

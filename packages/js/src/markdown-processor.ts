@@ -1502,8 +1502,8 @@ interface MarkdownProcessor {
  * Creates a markdown processor that consumes DOM events and generates markdown
  */
 export function createMarkdownProcessor(options?: EngineOptions): MarkdownProcessor
-export function createMarkdownProcessor<T>(options: EngineOptions, createStream: (context: MarkdownStreamContext) => T): MarkdownProcessor & T
-export function createMarkdownProcessor<T>(options: EngineOptions = {}, createStream?: (context: MarkdownStreamContext) => T) {
+export function createMarkdownProcessor<T>(options: EngineOptions, createStream: (context: MarkdownStreamContext) => T, hasPlugins?: boolean): MarkdownProcessor & T
+export function createMarkdownProcessor<T>(options: EngineOptions = {}, createStream?: (context: MarkdownStreamContext) => T, hasPlugins = false) {
   const state: MarkdownState = {
     options,
     outputFormat: 'markdown',
@@ -1550,6 +1550,21 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let captionBoundary = 0
   let captionBoundarySpacing = 0
   let captionBreakRun = 0
+  // A marker-only item cannot release its whitespace yet. Keep repeated
+  // ordinary breaks counted until another event can observe their contents.
+  let itemBreakRun: { fragment: number, unit: string, count: number } | undefined
+
+  function flushItemBreakRun(): void {
+    const run = itemBreakRun
+    if (!run)
+      return
+    itemBreakRun = undefined
+    if (run.count > 1) {
+      // Keep the final fragment separate: close handlers trim it by identity.
+      state.buffer[run.fragment] = run.unit.repeat(run.count - 1)
+      state.buffer.push(run.unit)
+    }
+  }
   const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
   let openLinkFragment = -1
   let openLinkCaptionBreakRun = 0
@@ -1979,6 +1994,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    */
   function processEvent(event: NodeEvent): void {
     const { type: eventType, node } = event
+    if (itemBreakRun && !(node.type === ELEMENT_NODE && node.tagHandler === breakHandler
+      && !(node as ElementNode).pluginOutput?.length)) {
+      flushItemBreakRun()
+    }
     if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
       && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
       pendingRawHtmlBoundary = false
@@ -2040,10 +2059,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       else if (node.type === ELEMENT_NODE && eventType === NodeEventEnter) {
         const tagId = (node as ElementNode).tagId
         if (tagId === TAG_BLOCKQUOTE) {
-          // The quote opens its own block. An empty one hands the tail back.
-          state.listTailQuote = node as ElementNode
-          state.listTailPending = false
-          state.emptyListMarkerFragment = undefined
+          if (node.tagHandler?.literalEnter && node.tagHandler.literalEnterHasOutput === false) {
+            flushListTail()
+          }
+          else {
+            // A built-in quote hands the tail back when empty. Nonempty literal
+            // overrides own their spacing and do not create a quote frame.
+            if (!node.tagHandler?.literalEnter)
+              state.listTailQuote = node as ElementNode
+            state.listTailPending = false
+            state.emptyListMarkerFragment = undefined
+          }
         }
         else if (!node.tagHandler?.excludesTextNodes) {
           flushListTail()
@@ -2254,6 +2280,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         captionBreakRun++
       }
       else if (breakOutput) {
+        if (createStream && !hasPlugins && state.emptyListMarkerFragment !== undefined
+          && !state.outputPositions && !state.blockquotes.length && !openMarkerCount
+          && !gfmLifecycle.openCodeSpans.length && !state.codeFence && openLinkFragment === -1
+          && !inPre && !state.depthMap[TAG_CODE] && !cleanPass?.holdsOutput
+          && !hasNonWhitespace(breakOutput)) {
+          if (itemBreakRun && itemBreakRun.unit === breakOutput
+            && itemBreakRun.fragment === buff.length - 1 && buff[itemBreakRun.fragment] === breakOutput) {
+            itemBreakRun.count++
+            return
+          }
+          flushItemBreakRun()
+          itemBreakRun = { fragment: buff.length, unit: breakOutput, count: 1 }
+        }
+        else {
+          flushItemBreakRun()
+        }
         // A raw `<br>` takes the separator other raw inline HTML gets, as in Rust.
         if (breakOutput.charCodeAt(0) === 60 && lastOutputChar(buff) === 124)
           buff.push(' ')
@@ -2877,6 +2919,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     return heldFragment > state.buffer.length ? Infinity : heldFragment
   }
 
+  let settledWhitespaceFragment = -1
+  let settledWhitespaceValue: string | undefined
+  function hasUnsettledListContent(from: number): boolean {
+    const buffer = state.buffer
+    // Strings are immutable. An unchanged last fragment needs no character
+    // scan; appends and replacements still go through the full content check.
+    if (from === settledWhitespaceFragment && buffer[from] === settledWhitespaceValue)
+      from++
+    const visible = hasNonWhitespaceFrom(buffer, from)
+    if (!visible && from < buffer.length) {
+      settledWhitespaceFragment = buffer.length - 1
+      settledWhitespaceValue = buffer[settledWhitespaceFragment]
+    }
+    return visible
+  }
+
   const processor = {
     processEvent,
     getMarkdown,
@@ -2931,18 +2989,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (unresolvedCaptionFragment === -1 && !state.codeFence) {
         const marker = state.emptyListMarkerFragment
         if (marker !== undefined) {
-          if (marker >= state.buffer.length || hasNonWhitespaceFrom(state.buffer, Math.max(marker + 1, state.emptyListMarkerScanFrom ?? marker + 1)))
+          if (marker >= state.buffer.length || hasUnsettledListContent(Math.max(marker + 1, state.emptyListMarkerScanFrom ?? marker + 1)))
             state.emptyListMarkerFragment = undefined
           state.emptyListMarkerScanFrom = Math.max(marker + 1, state.buffer.length - 1)
         }
         const start = state.listTailStart
         if (start !== undefined) {
-          if (start > state.buffer.length || hasNonWhitespaceFrom(state.buffer, Math.max(start, state.listTailScanFrom ?? start)))
+          if (start > state.buffer.length || hasUnsettledListContent(Math.max(start, state.listTailScanFrom ?? start)))
             state.listTailStart = undefined
           state.listTailScanFrom = Math.max(start, state.buffer.length - 1)
         }
       }
       resolveItemMarker(state, false, unresolvedCaptionFragment)
+      if (state.emptyListMarkerFragment === undefined && state.listTailStart === undefined) {
+        settledWhitespaceFragment = -1
+        settledWhitespaceValue = undefined
+      }
     },
     markYielded() { hasYieldedContent = true },
   }) }

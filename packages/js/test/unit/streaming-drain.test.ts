@@ -293,7 +293,7 @@ describe('streaming drain parity', () => {
     ['wrapWidth', { wrapWidth: 40 }, []],
   ])('bounds retained output with %s', (_, options, plugins) => {
     const html = '<p>A paragraph of words that runs well past forty columns before it ends.</p>'.repeat(2048)
-    const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, plugins.length > 0))
+    const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, plugins.length > 0), plugins.length > 0)
     const parseState: ParseState = {
       depthMap: processor.state.depthMap,
       depth: 0,
@@ -330,7 +330,7 @@ it.each(['<img src="/x">', '<br><img src="/x">', '<hr>', '<span></span>'])('rele
   const plugins = content === '<span></span>'
     ? [createPlugin({ onNodeEnter: node => node.name === 'span' ? 'X'.repeat(32) : undefined })]
     : []
-  const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, plugins.length > 0))
+  const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, plugins.length > 0), plugins.length > 0)
   const parseState: ParseState = { depthMap: processor.state.depthMap, depth: 0, resolvedPlugins: plugins, tagHandlers, plainText: false }
   const handleEvent = plugins.length
     ? (event: Parameters<typeof processor.processEvent>[0]) => processPluginsForEvent(event, plugins, processor.state, processor.processEvent)
@@ -578,4 +578,50 @@ describe('recorded parent markers', () => {
       }
     }
   })
+})
+
+it.each(['<br>', '<br> ', '<br>\n'])('bounds whitespace retained behind an open empty list marker with %j', (breaks) => {
+  const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
+  const parseState: ParseState = {
+    depthMap: processor.state.depthMap,
+    depth: 0,
+    resolvedPlugins: [],
+    tagHandlers,
+    plainText: false,
+  }
+  let remaining = parseHtmlStream('<ul><li>', parseState, processor.processEvent)
+  for (let index = 0; index < 1024; index++) {
+    remaining = parseHtmlStream(remaining + breaks, parseState, processor.processEvent)
+    processor.getMarkdownChunk()
+  }
+  expect(processor.state.buffer.join('').length).toBeLessThan(128)
+  remaining = parseHtmlStream(`${remaining}parent</li></ul>`, parseState, processor.processEvent)
+  finalizeParse(remaining, parseState, processor.processEvent)
+  expect(processor.getMarkdownChunk(true)).toBe(htmlToMarkdown(`<ul><li>${breaks.repeat(1024)}parent</li></ul>`))
+})
+
+it('does not rescan an unchanged whitespace fragment on every settlement', () => {
+  let settle = () => {}
+  const processor = createMarkdownProcessor({}, (context) => {
+    settle = context.settleItemMarker
+    return createMarkdownDrain(context, false)
+  })
+  const state = processor.state
+  state.buffer.push('- ', ' '.repeat(8192))
+  state.emptyListMarkerFragment = 0
+  state.listTailStart = 1
+  settle()
+  const reads = vi.spyOn(String.prototype, 'charCodeAt')
+  try {
+    for (let index = 0; index < 32; index++)
+      settle()
+    expect(reads.mock.calls.length).toBeLessThan(128)
+  }
+  finally {
+    reads.mockRestore()
+  }
+  state.buffer[1] += 'x'
+  settle()
+  expect(state.emptyListMarkerFragment).toBeUndefined()
+  expect(state.listTailStart).toBeUndefined()
 })

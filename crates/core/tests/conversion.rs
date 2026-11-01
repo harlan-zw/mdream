@@ -7835,3 +7835,34 @@ fn text_after_a_closed_nested_item_stays_escaped() {
     "- a\n\n  -\n\n  \\# t"
   );
 }
+
+#[test]
+fn overridden_empty_quote_preserves_nested_list_tail() {
+  let html = "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>";
+  let options = transparent_override("blockquote", false);
+  let expected = "- A\n  - inner\n\n  parent";
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(options.clone());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual, expected, "split={split}");
+  }
+}
+
+#[test]
+fn nonempty_quote_enter_preserves_literal_spacing() {
+  let html = "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>";
+  let mut options = transparent_override("blockquote", false);
+  options.plugins.as_mut().unwrap().tag_overrides.as_mut().unwrap()[0].1.enter = Some("CUSTOM ".to_string());
+  let expected = "- A\n  - innerCUSTOM parent";
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for split in 0..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(options.clone());
+    let mut actual = stream.process_chunk(&html[..split]);
+    actual.push_str(&stream.process_chunk(&html[split..]));
+    actual.push_str(&stream.finish());
+    assert_eq!(actual, expected, "split={split}");
+  }
+}
