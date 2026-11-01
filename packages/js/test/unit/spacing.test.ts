@@ -265,6 +265,35 @@ describe('inline whitespace', () => {
     }
   })
 
+  it('gives an empty link its label only when hooks leave its retained blank unwritten', async () => {
+    const html = '<p>a<a href="/x" title="fallback"> </a></p>'
+    const toNbsp = createPlugin({
+      processTextNode: node => node.value.trim() ? undefined : { content: ' ', skip: false },
+    })
+    const toVisible = createPlugin({
+      processTextNode: node => node.value.trim() ? undefined : { content: 'visible', skip: false },
+    })
+    const skipVisible = createPlugin({
+      processTextNode: node => node.value === 'visible' ? { content: '', skip: true } : undefined,
+    })
+    const cases: [Parameters<typeof htmlToMarkdown>[1], string][] = [
+      // A no-break space is written as text, so the link has content.
+      [{ plugins: [toNbsp] }, 'a [ ](/x "fallback")'],
+      // Text a later hook skips is never written, so the link stays empty.
+      [{ plugins: [toVisible, skipVisible] }, htmlToMarkdown(html)],
+    ]
+    expect(cases[1]![1]).toBe('a [fallback](/x)')
+    for (const [options, expected] of cases) {
+      expect(htmlToMarkdown(html, options)).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks: string[] = []
+        for (let offset = 0; offset < html.length; offset += width)
+          chunks.push(html.slice(offset, offset + width))
+        expect(await streamConvert(chunks, options), `${expected} in chunks of ${width}`).toBe(expected)
+      }
+    }
+  })
+
   it('leaves code-like content as written', () => {
     expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>')).toBe('`a** x**`')
     expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>')).toBe('`a* x*`')

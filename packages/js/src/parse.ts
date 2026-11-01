@@ -68,7 +68,7 @@ import {
 } from './const'
 import { parserTagHandlers } from './parser-tags'
 import { resolveUrl } from './url'
-import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+import { decodeHTMLEntities, hasNonWhitespace, traverseUpToFirstBlockNode } from './utils'
 
 // The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
 const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
@@ -1436,8 +1436,9 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
         leadingBlank: true,
       }
       handleEvent({ type: NodeEventEnter, node: blank })
-      // Plugins can turn the retained separator into actual link content.
-      if (!blank.excludedFromMarkdown && blank.value.trim()) {
+      // Plugins can turn the retained separator into actual link content. It
+      // counts when the output writes it: not skipped, and not ASCII blank.
+      if (!blank.excludedFromMarkdown && hasNonWhitespace(blank.value)) {
         state.currentNode.currentWalkIndex!++
         for (const parent of parentsToIncrement)
           parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
