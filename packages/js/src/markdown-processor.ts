@@ -58,7 +58,8 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { breakHandler, isOpenVoidTag, renderBreak, rowMarker, tagHandlers } from './tags'
+import { isOpenVoidTag } from './parser-tags'
+import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {

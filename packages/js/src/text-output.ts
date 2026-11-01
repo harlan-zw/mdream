@@ -25,7 +25,7 @@ import {
   TAG_TH,
   TEXT_NODE,
 } from './const'
-import { isOpenVoidTag } from './tags'
+import { isOpenVoidTag } from './parser-tags'
 import { resolveUrl } from './url'
 import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
 
