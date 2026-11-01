@@ -54,7 +54,7 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
     return false
   // Unknown tags are inline, as in the Rust engine; an end tag that closed
   // nothing is no boundary.
-  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline : (lastNode as ElementNode).tagId === -1)))
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || lastNode.tagHandler.isSelfClosing === false : (lastNode as ElementNode).tagId === -1)))
     return false
   const firstChar = textNode.value[0]
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))

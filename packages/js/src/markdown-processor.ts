@@ -365,7 +365,7 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   }
   // Unknown tags are inline, as in the Rust engine; an end tag that closed
   // nothing is no boundary.
-  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline : (lastNode as ElementNode).tagId === -1))) {
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || lastNode.tagHandler.isSelfClosing === false : (lastNode as ElementNode).tagId === -1))) {
     return false
   }
   const firstChar = textNode.value[0]
@@ -931,13 +931,12 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
 
 /**
  * Whether a block child keeps its block spacing because every collapsing
- * ancestor is an open `br` or `img` override. Headings keep the suppression,
- * so a reopened break still continues a heading's line. Mirrors
+ * ancestor is an open `br` or `img` override. Mirrors
  * `block_child_of_open_void` in the Rust engine.
  */
 function isBlockChildOfOpenVoid(node: ElementNode): boolean {
   const tagId = node.tagId
-  if (tagId === undefined || (tagId >= TAG_H1 && tagId <= TAG_H6) || !node.tagHandler || node.tagHandler.isInline)
+  if (tagId === undefined || !node.tagHandler || node.tagHandler.isInline)
     return false
   // A span keeps only the block children its own exemption keeps.
   const spanExempt = tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI
@@ -1890,10 +1889,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    */
   function processEvent(event: NodeEvent): void {
     const { type: eventType, node } = event
-    if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
-      && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
-      pendingRawHtmlBoundary = false
-    }
     // Update depth for plugin access
     state.depth = node.depth
 
@@ -1905,6 +1900,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : node.parent?.excludedFromMarkdown
     if (inTemplate)
       return
+    if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
+      && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
+      pendingRawHtmlBoundary = false
+    }
 
     // A plugin can skip the first cell's enter while accepting its contents
     // or exit. Those events still need the row-owned opener. Fully excluded
@@ -2421,7 +2420,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : calculateNewLineConfig(node as ElementNode, state, eventType)
     const quoteAtStart = eventType === NodeEventEnter
       && state.blockquotes.at(-1)?.fragment === state.buffer.length
-    const configuredNewLines = quoteAtStart || captionEvent || captionTransition
+    const openVoidExit = eventType === NodeEventExit && handler?.isSelfClosing === false
+      && !!tagHandlers[tagId]?.isSelfClosing
+    const configuredNewLines = quoteAtStart || captionEvent || captionTransition || openVoidExit
       ? 0
       : eventType === NodeEventExit && tagId === TAG_HR && state.blockquotes.length > 0
         ? Math.min(1, newLineConfig[eventType] || 0)

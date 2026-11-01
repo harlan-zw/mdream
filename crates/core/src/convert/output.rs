@@ -2246,6 +2246,11 @@ impl ConvertState {
     let mut output: Option<Cow<'static, str>> = None;
     let mut table_separator: Option<String> = None;
 
+    let open_void = override_config.is_some_and(|ov| ov.is_self_closing == Some(false))
+      && tag_id
+        .and_then(get_tag_handler)
+        .is_some_and(|handler| handler.is_self_closing);
+
     // Check override exit string
     let has_override = if let Some(ov) = override_config {
       if let Some(ref s) = ov.exit {
@@ -2430,7 +2435,7 @@ impl ConvertState {
     } else {
       self.calculate_new_line_config(tag_id, node_spacing, false)
     };
-    let configured_new_lines = if consumes_caption_boundary {
+    let configured_new_lines = if consumes_caption_boundary || open_void {
       0
     } else if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
       new_line_config[1].min(1)
@@ -2587,6 +2592,9 @@ impl ConvertState {
 
     let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
+    if open_void {
+      self.last_node_is_inline = true;
+    }
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
     }
@@ -5633,17 +5641,15 @@ impl ConvertState {
   /// Whether a block child keeps its block spacing because every collapsing
   /// ancestor is an open `br` or `img` override. An override holds content, so
   /// it does not wrap inline text the way `<a>` or `<strong>` do. Any other
-  /// collapsing ancestor keeps the suppression, and so does a heading, whose
-  /// line a reopened break must continue. Runs only where the caller already
-  /// found a collapsing ancestor.
+  /// collapsing ancestor keeps the suppression. A heading is a block child too,
+  /// so the spec's block boundary after it applies. Runs only where the caller
+  /// already found a collapsing ancestor.
   #[inline]
   fn block_child_of_open_void(&self, tag_id: Option<u8>, is_enter: bool) -> bool {
     let Some(id) = tag_id else {
       return false;
     };
-    if (TAG_H1..=TAG_H6).contains(&id)
-      || !get_tag_handler(id).is_some_and(|handler| !handler.is_inline)
-    {
+    if !get_tag_handler(id).is_some_and(|handler| !handler.is_inline) {
       return false;
     }
     // A span keeps only the block children its own exemption keeps.

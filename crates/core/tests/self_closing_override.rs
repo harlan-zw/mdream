@@ -153,14 +153,19 @@ fn reopened_rule_separates_its_children_in_a_list_item() {
   assert_converts(
     "<ul><li>a<hr>x</hr>b</li></ul>",
     &config,
-    "- a\n\n  ---\n\n  x b",
+    "- a\n\n  ---\n\n  xb",
   );
 }
 
 #[test]
-fn heading_in_reopened_break_continues_its_line() {
+fn heading_after_reopened_break_starts_its_own_block() {
   let config = [("br", flag(false))];
-  assert_converts("<br><h1></h1></br>b c", &config, "# b c");
+  assert_converts("<br><h1></h1></br>b c", &config, "#\n\nb c");
+  assert_converts(
+    "<p>a</p><br><h2>x</h2>| x |",
+    &config,
+    "a\n\n  \n\n## x\n\n| x |",
+  );
 }
 
 #[test]
