@@ -264,6 +264,18 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
+fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
+  // The item's tab ends a drained chunk, which settled the empty-item guard early.
+  // The `</li>` trim then removed the continuation indent one-shot keeps.
+  let html = "<b>1) x<small><br> <ul><li>&#9;<br></li></ul></small>===<hr></b>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "**1) x  \n- \t  \n  \\=== ---**"
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+}
+
+#[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HtmlToMarkdownOptions::default());
 }
@@ -2282,6 +2294,8 @@ fn streaming_empty_nested_item_marker_matches_one_shot() {
     "<ul><li>a<ol><li></li></ol></li></ul>",
     "<ul><li></li></ul>",
     "<ul><li>a<ul><li></li><li>b</li></ul></li></ul>",
+    "<ul><li>a<ul><script>s</script><li></li></ul></li></ul>",
+    "<ul><li>a<ol><template>t</template><li></li></ol></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
@@ -3776,6 +3790,363 @@ fn builtin_blockquote_alias_streams_as_div() {
 }
 
 #[test]
+fn streaming_setext_equals_text_preserves_paragraphs() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a<br># b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\# b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\- b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\+ b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>",
+      "- x\n  - a  \n    1\\. b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\> b",
+    ),
+    ("<p>aaaaa<br>===</p>", "aaaaa  \n\\==="),
+    (
+      "<p>aaaaa<br><span>=</span><span>==</span></p>",
+      "aaaaa  \n\\===",
+    ),
+    ("<p>aaaaa<br> <span></span>===</p>", "aaaaa  \n\\==="),
+    ("<p>aaaaa<br>=</p>", "aaaaa  \n\\="),
+    ("<p>aaaaa<br>==</p>", "aaaaa  \n\\=="),
+    ("<p>=SUM(A1:A3)</p>", "=SUM(A1:A3)"),
+    ("<p>aaaaa<br>= b</p>", "aaaaa  \n= b"),
+    ("<p>aaaaa<br>=b</p>", "aaaaa  \n=b"),
+    ("<p>aaaaa<br>== =</p>", "aaaaa  \n== ="),
+    ("<p>aaaaa<br>=== x</p>", "aaaaa  \n=== x"),
+    ("<p>aaaaa<br>=== </p>", "aaaaa  \n\\==="),
+    (
+      "<ul><li>x<ul><li>a<br>= b</li></ul></li></ul>",
+      "- x\n  - a  \n    = b",
+    ),
+    ("<blockquote><p>x<br>= b</p></blockquote>", "> x  \n> = b"),
+    ("<blockquote><p>x<br>==</p></blockquote>", "> x  \n> \\=="),
+    ("<p>aaaaa<br><span></span></p>", "aaaaa"),
+    ("<p>a = b and x===y</p>", "a = b and x===y"),
+    ("<p>a<span>=</span><span>==</span>b</p>", "a===b"),
+    ("<p><code>===</code></p>", "`===`"),
+    ("<p></p>", ""),
+    (
+      "<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>",
+      "- aaaaa  \n  \\===",
+    ),
+    (
+      "<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>",
+      "- x\n  - aaaaa  \n    \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - aaaaa  \n      \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - aaaaa  \n        \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - aaaaa  \n          \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - x\n          - aaaaa  \n            \\===",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn nested_ordered_start_separates_parent_paragraph() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><span>x</span><span>z</span><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- xz\n\n  10. y",
+    ),
+    (
+      "<ul><li><strong>x</strong><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- **x**\n\n  10. y",
+    ),
+    (
+      "<ol start=\"5\"><li>x<ol start=\"20\"><li>y</li><li>z</li></ol></li></ol>",
+      "5. x\n\n   20. y\n   21. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"0\"><li>y</li></ol></li></ul>",
+      "- x\n\n  0. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"1\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"-1\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "-\n  10. y",
+    ),
+    (
+      "<ul><li><span></span><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "-\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"></ol></li><li>z</li></ul>",
+      "- x\n- z",
+    ),
+    (
+      "<ul><li>x<ol reversed start=\"10\"><li value=\"20\">y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol reversed><li value=\"10\">y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<blockquote><ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul></blockquote>",
+      "> - x\n>\n>   10. y",
+    ),
+    (
+      "<ul><li>x<ul><li>z<ol start=\"10\"><li>y</li></ol></li></ul></li></ul>",
+      "- x\n  - z\n\n    10. y",
+    ),
+    (
+      "<ul><li><p>x</p><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>",
+      "- x\n\n  10. y\n  - z\n- after",
+    ),
+    (
+      "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
+      "- x  \n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ul><li>y</li></ul><ol start=\"10\"><li>z</li></ol></li></ul>",
+      "- x\n  - y\n\n  10. z",
+    ),
+    (
+      "<ol><li><ol start=\"10\"><li>y</li></ol></li></ol>",
+      "1.\n   10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"1000000000\"><li>y</li></ol></li></ul>",
+      "- x\n  1. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li></li></ol></li></ul>",
+      "- x\n\n  10.",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol><p>tail</p></li></ul>",
+      "- x\n\n  10. y\n\n  tail",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><script>s</script><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><style>a{}</style><li>y</li><li>z</li></ol></li></ul>",
+      "- x\n\n  10. y\n  11. z",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><noscript>n</noscript><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><template>t</template><li>y</li></ol></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\">t<li>y</li></ol></li></ul>",
+      "- x t\n\n  10. y",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_setext_dash_text_preserves_paragraphs() {
+  for (html, expected) in [
+    ("<p>aaaaa<br>--</p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>-- </p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>--\t</p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>--<br>b</p>", "aaaaa  \n\\--  \nb"),
+    ("<p>aaaaa<br>-<span>-</span></p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>- -</p>", "aaaaa  \n\\- -"),
+    ("<p>aaaaa<br>-- -</p>", "aaaaa  \n\\-- -"),
+    ("<p>aaaaa<br>---</p>", "aaaaa  \n\\---"),
+    ("<ul><li>x<br>--</li></ul>", "- x  \n  \\--"),
+    (
+      "<ul><li>x<ul><li>y<br>--</li></ul></li></ul>",
+      "- x\n  - y  \n    \\--",
+    ),
+    ("<blockquote><p>x<br>--</p></blockquote>", "> x  \n> \\--"),
+    ("<p>aaaaa<br>-- a</p>", "aaaaa  \n-- a"),
+    ("<p>aaaaa<br>--a</p>", "aaaaa  \n--a"),
+    ("<p>aaaaa --</p>", "aaaaa --"),
+    ("<p>x<br><b>--</b></p>", "x  \n**--**"),
+  ] {
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      HtmlToMarkdownOptions::default().with_wrap_width(20),
+    ] {
+      assert_eq!(
+        html_to_markdown(html, options.clone()),
+        expected,
+        "html={html:?}"
+      );
+      assert_stream_matches(html, options.clone());
+      assert_stream_matches_every_split(html, options);
+    }
+  }
+}
+
+#[test]
+fn nested_ordered_start_inside_inline_wrappers_matches_one_shot() {
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\">x<br><ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- [x  \n    10. y](u)",
+    ),
+    (
+      "<ul><li><a href=\"u\"><small>x<ol start=\"10\"><li>y</li></ol></small></a></li></ul>",
+      "- [x  10. y](u)",
+    ),
+    (
+      "<ul><li><strong>x<ol start=\"10\"><li>y</li></ol></strong></li></ul>",
+      "- **x  10. y**",
+    ),
+    (
+      "<ul><li><a>x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li><mark>x<ol start=\"10\"><li>y</li></ol></mark></li></ul>",
+      "- <mark>x\n\n  10. y</mark>",
+    ),
+    (
+      "<details><ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul></details>",
+      "<details>\n\n- <a href=\"u\">x\n\n  10. y</a>\n\n</details>",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn nested_ordered_start_outranks_an_li_spacing_override() {
+  for (html, spacing, expected) in [
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
+      [0, 0],
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li></ol></li></ul>",
+      [0, 1],
+      "- x\n\n  10. y",
+    ),
+    (
+      "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
+      [0, 0],
+      "- x  \n\n  10. y",
+    ),
+    (
+      "<ul><li>x<ol start=\"10\"><li>y</li><li>z</li></ol></li></ul>",
+      [0, 0],
+      "- x\n\n  10. y  11. z",
+    ),
+    (
+      "<ul><li>x<ol><li>y</li></ol></li></ul>",
+      [0, 0],
+      "- x  1. y",
+    ),
+    (
+      "<ul><li><a href=\"u\">x<ol start=\"10\"><li>y</li></ol></a></li></ul>",
+      [0, 0],
+      "- [x  10. y](u)",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "li".to_string(),
+          TagOverrideConfig {
+            spacing: Some(spacing),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn nested_ordered_start_wraps_at_content_columns() {
+  let html = "<ul><li>alpha beta gamma delta<ol start=\"10\"><li>one two three four five</li></ol></li></ul>";
+  let opts = HtmlToMarkdownOptions::default().with_wrap_width(12);
+  assert_eq!(
+    html_to_markdown(html, opts.clone()),
+    "- alpha beta\n  gamma\n  delta\n\n  10. one\n      two\n      three\n      four\n      five"
+  );
+  assert_stream_matches(html, opts.clone());
+  assert_stream_matches_every_split(html, opts);
+}
+
+#[test]
 fn raw_text_aliases_use_source_closing_names() {
   for (html, source, target, expected) in [
     (
@@ -3917,6 +4288,11 @@ fn scout9_wrap_setext_boundary_streaming() {
     ("<p>aaaaaaaaaa =</p>", "aaaaaaaaaa ="),
     ("<p>aaaaaaaaaa --word</p>", "aaaaaaaaaa\n--word"),
     ("<p>aaaaaaaaaa ==word</p>", "aaaaaaaaaa\n==word"),
+    ("<p>aaaaaaaaaa ===&#10;foo</p>", "aaaaaaaaaa ===\nfoo"),
+    ("<p>aaaaaaaaaa ===&#13;foo</p>", "aaaaaaaaaa ===\rfoo"),
+    ("<p>aaaaaaaaaa ---&#13;foo</p>", "aaaaaaaaaa ---\rfoo"),
+    ("<p>aaaaaaaaaa ===&#9;&#10;foo</p>", "aaaaaaaaaa ===\t\nfoo"),
+    ("<p>aaaaaaaaaa ==x&#10;foo</p>", "aaaaaaaaaa\n==x\nfoo"),
   ] {
     let opts = HtmlToMarkdownOptions::default().with_wrap_width(10);
     assert_eq!(
@@ -3926,6 +4302,143 @@ fn scout9_wrap_setext_boundary_streaming() {
     );
     assert_stream_matches(html, opts.clone());
     assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn wrap_keeps_setext_markers_after_an_escaped_line_start_streaming() {
+  for (html, width, expected) in [
+    ("<p>===<span> --</span></p>", 4, "\\=== --"),
+    ("<p><span>===</span> --</p>", 5, "\\=== --"),
+    ("<p><span>--</span> --</p>", 5, "\\-- --"),
+    ("<p>a<br><span>--</span> --</p>", 5, "a  \n\\-- --"),
+  ] {
+    let opts = HtmlToMarkdownOptions::default().with_wrap_width(width);
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn streaming_escapes_block_markers_after_a_decoded_bare_cr() {
+  for (html, expected) in [
+    ("<p>abc&#13;===</p>", "abc\r\\==="),
+    ("<p>abc&#13;---</p>", "abc\r\\---"),
+    ("<p>abc&#13;# x</p>", "abc\r\\# x"),
+    ("<p>abc&#13;- x</p>", "abc\r\\- x"),
+    ("<p>abc&#13;1. x</p>", "abc\r1\\. x"),
+    ("<p>abc&#13;<span>===</span></p>", "abc\r\\==="),
+    ("<p><span>abc&#13;</span>===</p>", "abc\r\\==="),
+    ("<p>abc&#13;=SUM(A1)</p>", "abc\r=SUM(A1)"),
+    ("<p>abc&#13;x === y</p>", "abc\rx === y"),
+    (
+      "<b>a&#13;<ul><li># heading</li></ul></b>",
+      "**a\r - \\# heading**",
+    ),
+    (
+      "<b>a&#13;<ol><li># heading</li></ol></b>",
+      "**a\r 1. \\# heading**",
+    ),
+    (
+      "<a href=\"/x\">a&#13;<ul><li># heading</li></ul></a>",
+      "[a\r - \\# heading](/x)",
+    ),
+    ("<b>a&#13;<ul><li>- x</li></ul></b>", "**a\r - \\- x**"),
+    ("<b>a&#13;<ul><li>1. x</li></ul></b>", "**a\r - 1\\. x**"),
+    ("<b>a&#13;<ul><li>===</li></ul></b>", "**a\r - \\===**"),
+    ("<b>a&#13;<ul><li>&gt; x</li></ul></b>", "**a\r - \\> x**"),
+    (
+      "<b>a&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></b>",
+      "**a\r - | x |\n  | --- |\n  | 1 |**",
+    ),
+    (
+      "<b>a&#13;<ul><li><pre>x</pre></li></ul></b>",
+      "**a\r - ```\n  x\n  ```\n\n  **",
+    ),
+    (
+      "<small>a&#13;<ul><li># heading</li></ul></small>",
+      "a\r - \\# heading",
+    ),
+    (
+      "<small>a&#13;<ol><li># heading</li></ol></small>",
+      "a\r 1. \\# heading",
+    ),
+    (
+      "<small>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></small>",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r - | x |\n  | --- |\n  | 1 |",
+    ),
+    (
+      "<small>|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></small>",
+      "|aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r - | x |\n  | --- |\n  | 1 |",
+    ),
+    ("<b>a<ul><li># heading</li></ul></b>", "**a - # heading**"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_settles_a_lone_list_marker_after_a_decoded_bare_cr() {
+  for (html, expected) in [
+    ("<small>a&#13;<ul><li></li></ul></small>", "a\r\n\n-"),
+    ("<small>a&#13;<ol><li></li></ol></small>", "a\r\n\n1."),
+    (
+      "<b>a&#13;<ul><li><blockquote>x</blockquote></li></ul></b>",
+      "**a\r\n\n- \n  > x**",
+    ),
+    ("<small>a&#13;<ul><li><b></b></li></ul></small>", "a\r\n\n-"),
+    (
+      "<small>a&#13;<ul><li>&#13;x</li></ul></small>",
+      "a\r\n\n- \rx",
+    ),
+    (
+      "<small>a&#10;<ul><li>&#13;x</li></ul></small>",
+      "a\n\n- \rx",
+    ),
+    (
+      "<ul><li>z<small>a&#13;<ul><li></li></ul></small></li></ul>",
+      "- za\r\n\n  -",
+    ),
+    (
+      "<ul><li>z<small>a&#13;<ul><li><blockquote>x</blockquote></li></ul></small></li></ul>",
+      "- za\r\n\n  - \n    > x",
+    ),
+    (
+      "<blockquote><small>a&#13;<ul><li></li></ul></small></blockquote>",
+      "> a\r\n>\n> -",
+    ),
+    (
+      "<a href=\"/x\">a&#13;<ul><li><blockquote>x</blockquote></li></ul></a>",
+      "[a\r\n\n- \n  > x](/x)",
+    ),
+    ("<small>a&#13;&#10;<ul><li></li></ul></small>", "a\r\n\n-"),
+    ("<small>a&#13;&#13;<ul><li></li></ul></small>", "a\r\r -"),
+    ("<small>a&#10;&#13;<ul><li></li></ul></small>", "a\n\r -"),
+    ("<small>a&#13;<ul><li>x</li></ul></small>", "a\r - x"),
+    ("<a href=\"/x\">a&#13;<ul><li></li></ul></a>", "[a\r -](/x)"),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+    let wrapped = HtmlToMarkdownOptions::default().with_wrap_width(10);
+    assert_stream_matches(html, wrapped.clone());
+    assert_stream_matches_every_split(html, wrapped);
   }
 }
 
@@ -4045,6 +4558,30 @@ fn link_trailing_spaces_match_every_partition() {
 }
 
 #[test]
+fn wrap_at_a_moved_link_separator_matches_every_partition() {
+  let options = HtmlToMarkdownOptions::default().with_wrap_width(12);
+  for (html, expected) in [
+    (
+      r#"<a href="x">text <span></span></a>tail"#,
+      "[text](x)\ntail",
+    ),
+    (
+      r#"<a href="x"><img src="i" alt="A"> <span></span></a>tail"#,
+      "[![A](i)](x)\ntail",
+    ),
+    ("<p><b>text </b>tailtail</p>", "**text**\ntailtail"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html:?}"
+    );
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options.clone());
+  }
+}
+
+#[test]
 fn paragraph_after_empty_nested_quote() {
   let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
   assert_eq!(
@@ -4097,5 +4634,275 @@ fn builtin_aliases_preserve_raw_source_boundaries_streaming() {
     );
     assert_stream_matches(html, options.clone());
     assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn scout9_list_tail_quote_spacing_streaming() {
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>",
+      "-\n  - a  \n\n  > q",
+    ),
+    (
+      "<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>",
+      "1.\n   - a  \n\n   > q",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts);
+  }
+}
+
+#[test]
+fn hard_break_trim_preserves_an_empty_item_guard_at_every_split() {
+  let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
+
+#[test]
+fn heading_after_nested_hard_break_keeps_indent_across_drains() {
+  let html = "<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>";
+  let expected = "- a\n  - b  \n\n  ## h";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    expected
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  let prefix = format!("<p>{}</p>", "lead ".repeat(1000));
+  let long = format!("{prefix}{html}");
+  let long_expected = format!("{}\n\n{expected}", "lead ".repeat(1000).trim());
+  for width in [1, 7, 4096] {
+    assert_eq!(
+      stream_chunks(&long, width, HtmlToMarkdownOptions::default()),
+      long_expected
+    );
+  }
+}
+
+#[test]
+fn heading_after_paragraph_in_item_matches_every_split() {
+  for html in [
+    "<ul><li><p>a</p><h2>h</h2></li></ul>",
+    "<ol start=\"10\"><li><p>a</p><h2>h</h2></li></ol>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn block_opening_a_quote_in_an_item_streams_like_one_shot() {
+  // FL2-style: every cleaner that streams, and a 1 MiB cap.
+  let fl2_style = HtmlToMarkdownOptions {
+    clean: Some(safe_clean()),
+    max_node_bytes: 1 << 20,
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote><h1>h</h1></blockquote></li></ul>",
+      "- \n  > # h",
+    ),
+    (
+      "<ol><li><blockquote><h2>h</h2></blockquote></li></ol>",
+      "1. \n   > ## h",
+    ),
+    (
+      "<ol start=\"10\"><li><blockquote><h3>h</h3></blockquote></li></ol>",
+      "10. \n    > ### h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<blockquote><h2>h</h2></blockquote></li></ul></li></ul>",
+      "- a\n  - b\n    > ## h",
+    ),
+    (
+      "<ul><li>a<ul><li><blockquote><h2>h</h2></blockquote></li></ul></li></ul>",
+      "- a\n\n  - \n    > ## h",
+    ),
+    (
+      "<ul><li>a<blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  > ## h",
+    ),
+    (
+      "<ul><li><p>a</p><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  > ## h",
+    ),
+    (
+      "<ul><li>a<br><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a  \n  \n  > ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<br></li></ul><blockquote><h2>h</h2></blockquote></li></ul>",
+      "- a\n  - b  \n\n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><div><h2>h</h2></div></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><blockquote><h2>h</h2></blockquote></blockquote></li></ul>",
+      "- \n  > > ## h",
+    ),
+    (
+      "<ul><li><blockquote> <h2>h</h2></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><b></b><h2>h</h2></blockquote></li></ul>",
+      "- \n  > ## h",
+    ),
+    (
+      "<ul><li><blockquote><h2>h</h2><p>x</p></blockquote></li></ul>",
+      "- \n  > ## h\n  >\n  > x",
+    ),
+    (
+      "<ul><li><blockquote><p>x</p></blockquote></li></ul>",
+      "- \n  > x",
+    ),
+    (
+      "<ul><li><blockquote><pre>x</pre></blockquote></li></ul>",
+      "- \n  > ```\n  > x\n  > ```",
+    ),
+    (
+      "<ul><li><blockquote><hr></blockquote></li></ul>",
+      "- \n  > ---",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>y</li></ul></blockquote></li></ul>",
+      "- \n  > - y",
+    ),
+    (
+      "<ul><li><blockquote><table><tr><th>t</th></tr><tr><td>c</td></tr></table></blockquote></li></ul>",
+      "- \n  > | t |\n  > | --- |\n  > | c |",
+    ),
+    (
+      "<ul><li><blockquote><ul><li>y<br></li></ul><h2>h</h2></blockquote></li></ul>",
+      "- \n  > - y  \n  >\n  > ## h",
+    ),
+  ] {
+    for opts in [HtmlToMarkdownOptions::default(), fl2_style.clone()] {
+      assert_eq!(
+        html_to_markdown(html, opts.clone()),
+        expected,
+        "html={html}"
+      );
+      assert_stream_matches(html, opts.clone());
+      assert_stream_matches_every_split(html, opts.clone());
+      let lead = "lead ".repeat(1000);
+      let long = format!("<p>{lead}</p>{html}");
+      let long_expected = format!("{}\n\n{expected}", lead.trim());
+      for width in [1, 7, 4096] {
+        assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+      }
+    }
+  }
+}
+
+#[test]
+fn heading_after_a_flushed_hard_break_keeps_its_blank_quote_line() {
+  // The empty `<code>` flushes the quote up to the hard break and leaves its
+  // anchor at the buffer end, as if the quote had written nothing.
+  let lead = "<p>line</p>".repeat(2000);
+  let html = format!(
+    "<ul><li><blockquote>{lead}<ul><li>y<br></li></ul><code></code><h2>h</h2></blockquote></li></ul>"
+  );
+  let opts = HtmlToMarkdownOptions::default();
+  let expected = html_to_markdown(&html, opts.clone());
+  assert!(
+    expected.ends_with("\n  > - y  \n  >\n  > ## h"),
+    "{}",
+    &expected[expected.len() - 40..]
+  );
+  for width in [1, 7, 64, 4096, html.len()] {
+    assert_eq!(stream_chunks(&html, width, opts.clone()), expected);
+  }
+}
+
+#[test]
+fn block_on_a_nested_pending_marker_streams_like_one_shot() {
+  // FL2-style: every cleaner that streams, and a 1 MiB cap.
+  let fl2_style = HtmlToMarkdownOptions {
+    clean: Some(safe_clean()),
+    max_node_bytes: 1 << 20,
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ## h",
+    ),
+    (
+      "<ol><li>a<ol><li>a<ol><li><h2>h</h2></li></ol></li></ol></li></ol>",
+      "1. a\n   1. a\n      1. ## h",
+    ),
+    (
+      "<ol start=\"100\"><li>a<ul><li><h2>h</h2></li></ul></li></ol>",
+      "100. a\n     - ## h",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><h2>h</h2></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ## h",
+    ),
+    (
+      "<blockquote><ul><li>a<ul><li>a<ul><li><h2>h</h2></li></ul></li></ul></li></ul></blockquote>",
+      "> - a\n>   - a\n>     - ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><pre>x</pre></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ```\n      x\n      ```",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><hr></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - ***",
+    ),
+    (
+      "<ul><li>a<ul><li>a<ul><li><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul></li></ul></li></ul>",
+      "- a\n  - a\n    - | t |\n      | --- |\n      | c |",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>",
+      "- a\n\n  - \n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>",
+      "- a\n  - b\n\n    - \n\n    ## h",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>",
+      "- a\n\n  - \n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><hr></li></ul>",
+      "- a\n\n  - \n\n  ---",
+    ),
+    (
+      "<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>",
+      "- a\n\n  - \n\n  | t |\n  | --- |\n  | c |",
+    ),
+  ] {
+    for opts in [HtmlToMarkdownOptions::default(), fl2_style.clone()] {
+      assert_eq!(
+        html_to_markdown(html, opts.clone()),
+        expected,
+        "html={html}"
+      );
+      assert_stream_matches(html, opts.clone());
+      assert_stream_matches_every_split(html, opts.clone());
+      let lead = "lead ".repeat(1000);
+      let long = format!("<p>{lead}</p>{html}");
+      let long_expected = format!("{}\n\n{expected}", lead.trim());
+      for width in [1, 7, 4096] {
+        assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+      }
+    }
   }
 }

@@ -328,6 +328,7 @@ describe.each(engines)('headings $name', (engineConfig) => {
     // Delimiters that pair across the wrapper keep it inline.
     ['<ul><li><q><h3>T</h3>more</q></li></ul>', '- " ### T more"'],
     ['<ul><li><small><strong><h3>T</h3></strong>more</small></li></ul>', '- **### T**more'],
+    ['<strong><ul><li>Intro <h3>T</h3>more</li></ul></strong>', '**- Intro ### T more**'],
   ])('breaks a heading in a list item out of a wrapper without delimiters: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
@@ -409,5 +410,46 @@ describe.each(engines)('headings $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
     const plugins = { tagOverrides: { span: 'strong' } }
     expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
+  })
+
+  it.each([
+    ['<h2>a<em>x </em><br>x</h2>', '## a*x* <br>x', undefined],
+    ['<h2><em>x </em><br><br>x</h2>', '## *x* <br><br>x', undefined],
+    ['<h2>a<a href="/l">x </a><br>x</h2>', '## a [x](/l) <br>x', undefined],
+    ['<table><tr><td>a<em>x </em><br>x</td></tr></table>', '| a*x* <br>x |\n| --- |', undefined],
+    ['<h2>a<em>x </em><br>x</h2>', '## a*x* <br>x', { br: 'br' }],
+    ['<h2>a<em>x </em><br>x</h2>', '## a*x* <br>x', { br: { spacing: [0, 0] as [number, number] } }],
+    // A Markdown hard break still subsumes the space.
+    ['<p>a<em>x </em><br>x</p>', 'a*x*  \nx', undefined],
+  ])('keeps an inline element\'s trailing space before a raw <br>: %s', async (html, expected, tagOverrides) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, plugins: tagOverrides && { tagOverrides } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output).toBe(expected)
+    }
   })
 })
