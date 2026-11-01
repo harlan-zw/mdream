@@ -6,9 +6,97 @@ import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
 import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
-import { htmlToText } from '../../src/text'
+import { htmlToText, streamHtmlToText } from '../../src/text'
 
 describe('root conversion', () => {
+  it.each([
+    ['x-y', 'br', 'a\nbc', 'a  \nbc'],
+    ['em', 'br', 'a\nbc', 'a  \nbc'],
+    ['br', 'span', 'abc', 'abc'],
+  ])('keeps the %s alias to %s independent of target overrides', (tag, alias, text, markdown) => {
+    const html = `<div>a<${tag}>b</${tag}>c</div>`
+    const options = { tagOverrides: { [tag]: alias, [alias]: { isSelfClosing: false } } }
+    expect(htmlToText(html, options)).toBe(text)
+    expect(htmlToMarkdown(html, options)).toBe(markdown)
+  })
+
+  it.each([
+    'meta',
+    'br',
+    'hr',
+    'img',
+    'link',
+    'area',
+    'base',
+    'col',
+    'embed',
+    'input',
+    'keygen',
+    'param',
+    'source',
+    'track',
+    'wbr',
+  ])('keeps reopened %s content joined in text and Markdown', async (tag) => {
+    const html = `<div>a<${tag}>b</${tag}>c</div>`
+    const options = { tagOverrides: { [tag]: { enter: '[', exit: ']', isSelfClosing: false, isInline: false, spacing: [0, 0] as [number, number] } } }
+    expect(htmlToText(html, options)).toBe('a[b]c')
+    expect(htmlToMarkdown(html, options)).toBe('a[b]c')
+    const input = () => new ReadableStream<string>({
+      start(controller) {
+        for (const char of html)
+          controller.enqueue(char)
+        controller.close()
+      },
+    })
+    for (const convert of [streamHtmlToText, streamHtmlToMarkdown]) {
+      let output = ''
+      for await (const chunk of convert(input(), options))
+        output += chunk
+      expect(output).toBe('a[b]c')
+    }
+  })
+
+  it('keeps exit spacing after plugin exit output on a reopened void', async () => {
+    const html = 'x<hr>y</hr>z'
+    const tagOverrides = { hr: { isSelfClosing: false, spacing: [0, 2] as [number, number] } }
+    const options = {
+      tagOverrides,
+      plugins: [createPlugin({
+        onNodeExit(node) {
+          if (node.name === 'hr')
+            return ']'
+        },
+      })],
+    }
+    const markdown = 'x ---\n\ny]\n\nz'
+    const text = 'x\n\ny]\n\nz'
+    expect(htmlToMarkdown(html, options)).toBe(markdown)
+    expect(htmlToText(html, options)).toBe(text)
+
+    const noopOptions = {
+      tagOverrides,
+      plugins: [createPlugin({ onNodeExit() {} })],
+    }
+    expect(htmlToMarkdown(html, noopOptions)).toBe('x ---\n\nyz')
+    expect(htmlToText(html, noopOptions)).toBe('x\n\nyz')
+
+    const input = () => new ReadableStream<string>({
+      start(controller) {
+        for (const char of html)
+          controller.enqueue(char)
+        controller.close()
+      },
+    })
+    let streamed = ''
+    for await (const chunk of streamHtmlToMarkdown(input(), options))
+      streamed += chunk
+    expect(streamed).toBe(markdown)
+    streamed = ''
+    for await (const chunk of streamHtmlToText(input(), options))
+      streamed += chunk
+    expect(streamed).toBe(text)
+  })
+
   it.each([0, 1, 7])('supports mutable processAttributes with chunk size %i', async (chunkSize) => {
     const html = '<a>first</a><a href="/old" title="keep">second</a><a>third</a>'
     const attributes: ElementNode['attributes'][] = []

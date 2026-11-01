@@ -1397,13 +1397,14 @@ impl ConvertState {
     // Phase 1: read from node + compute output (borrows self.stack immutably)
     let tag_id: Option<u8>;
     let is_inline: bool;
-    let node_spacing: Option<[u8; 2]>;
+    let mut node_spacing: Option<[u8; 2]>;
     let caption_spacing: [u8; 2];
     let mut output: Option<Cow<'static, str>>;
     let exit_is_overridden: bool;
     // True when `output` is a user-supplied override enter string — emit it
     // verbatim without synthesizing a separating space (issue #93).
     let enter_is_literal: bool;
+    let mut open_void_enter = false;
     {
       let (ancestors, last) = self.stack.split_at(stack_len - 1);
       let node = &last[0];
@@ -1476,13 +1477,53 @@ impl ConvertState {
 
       // Check override enter string
       output = if let Some(ov) = override_config {
-        if let Some(ref s) = ov.enter {
+        let mut enter = if let Some(ref s) = ov.enter {
           enter_is_literal = true;
           Some(Cow::Owned(s.clone()))
         } else {
           enter_is_literal = false;
           self.get_enter_output(node, ancestors)
+        };
+        // A built-in void tag an override holds open has no exit before its
+        // children, so the block spacing its exit would write follows its enter
+        // here. Only the newlines the enter output does not already end with.
+        // The enter-side call keeps the node out of its own ancestors.
+        open_void_enter = Self::is_open_void(tag_id, Some(ov));
+        if open_void_enter {
+          // A rule an override keeps open owes the separator before its children.
+          if tag_id == Some(TAG_HR)
+            && ov.enter.is_none()
+            && !plain_text!(self)
+            && !self.in_table_cell()
+            && self.depth_map[TAG_LI as usize] > 0
+          {
+            self.list_rule_pending = true;
+          }
+          if Self::void_spacing_follows_enter(ov) {
+            let after = self.calculate_new_line_config(tag_id, node_spacing, true)[1];
+            let after = if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
+              after.min(1)
+            } else {
+              after
+            };
+            let text = enter.as_deref().unwrap_or("");
+            let have = text.bytes().rev().take_while(|&b| b == b'\n').count();
+            let owed = after.saturating_sub(u8::try_from(have).unwrap_or(u8::MAX));
+            if have == text.len() {
+              // Nothing visible separates these newlines from the ones before the
+              // enter, so they join that run and merge with what the buffer ends on.
+              // The spacing call above returned this spacing, so the enter's own
+              // call returns the raised value too.
+              let [before, after] = node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING);
+              node_spacing = Some([before.max(owed), after]);
+            } else if owed > 0 {
+              let mut text = enter.map_or_else(String::new, Cow::into_owned);
+              text.push_str(&"\n".repeat(owed.into()));
+              enter = Some(Cow::Owned(text));
+            }
+          }
         }
+        enter
       } else {
         enter_is_literal = false;
         self.get_enter_output(node, ancestors)
@@ -1731,6 +1772,9 @@ impl ConvertState {
       output.as_deref(),
       enter_is_literal,
     );
+    if open_void_enter {
+      self.last_node_is_inline = true;
+    }
 
     if tag_id == Some(TAG_IMG)
       && !enter_is_literal
@@ -2174,15 +2218,20 @@ impl ConvertState {
 
     // A skipped node must never emit its own override exit. The only output
     // allowed below is the matching close for a fence opened by its child.
-    let override_config = if node.enter_skipped {
-      None
-    } else if self.has_tag_overrides {
-      let ovs = self
-        .options
-        .plugins
-        .as_ref()
-        .and_then(|p| p.tag_overrides.as_ref());
-      Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+    let override_config = if self.has_tag_overrides {
+      // The caller moved the node out of its slot. The open-void spacing check
+      // reads the flag back there, and only overrides reach that check.
+      self.stack.retired_mut().is_inline = node.is_inline;
+      if node.enter_skipped {
+        None
+      } else {
+        let ovs = self
+          .options
+          .plugins
+          .as_ref()
+          .and_then(|p| p.tag_overrides.as_ref());
+        Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+      }
     } else {
       None
     };
@@ -2210,6 +2259,10 @@ impl ConvertState {
 
     let mut output: Option<Cow<'static, str>> = None;
     let mut table_separator: Option<String> = None;
+
+    let open_void = Self::is_open_void(tag_id, override_config);
+    let void_spacing_at_enter =
+      open_void && override_config.is_some_and(Self::void_spacing_follows_enter);
 
     // Check override exit string
     let has_override = if let Some(ov) = override_config {
@@ -2366,6 +2419,7 @@ impl ConvertState {
       && tag_id == Some(TAG_HR)
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
+      && !open_void
     {
       self.list_rule_pending = true;
     }
@@ -2384,7 +2438,7 @@ impl ConvertState {
     } else {
       self.calculate_new_line_config(tag_id, node_spacing, false)
     };
-    let configured_new_lines = if consumes_caption_boundary {
+    let configured_new_lines = if consumes_caption_boundary || void_spacing_at_enter {
       0
     } else if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
       new_line_config[1].min(1)
@@ -2541,6 +2595,9 @@ impl ConvertState {
 
     let output_start = self.buffer.len();
     self.write_output(false, is_inline, configured_new_lines, effective, false);
+    if open_void {
+      self.last_node_is_inline = true;
+    }
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
     }
@@ -5566,7 +5623,11 @@ impl ConvertState {
     let span_depth = self
       .collapse_span_depth
       .saturating_sub(u8::from(counted_self && is_span));
-    if non_span_depth > 0 && !heading_owns_collapse && !heading_exit_in_markerless_collapse {
+    if non_span_depth > 0
+      && !heading_owns_collapse
+      && !heading_exit_in_markerless_collapse
+      && (!self.has_tag_overrides || !self.block_child_of_open_void(tag_id, is_enter))
+    {
       return NO_SPACING;
     }
     if span_depth > 0 {
@@ -5578,6 +5639,60 @@ impl ConvertState {
       }
     }
     node_spacing.unwrap_or(DEFAULT_BLOCK_SPACING)
+  }
+
+  /// A built-in void tag that an override holds open (`isSelfClosing: false`).
+  fn is_open_void(tag_id: Option<u8>, config: Option<&TagOverrideConfig>) -> bool {
+    config.is_some_and(|ov| ov.is_self_closing == Some(false))
+      && tag_id
+        .and_then(get_tag_handler)
+        .is_some_and(|handler| handler.is_self_closing)
+  }
+
+  /// An open void writes its block spacing after its enter, as the void it
+  /// replaces would. A custom exit has output of its own, so the spacing
+  /// stays after that exit.
+  fn void_spacing_follows_enter(config: &TagOverrideConfig) -> bool {
+    config.exit.as_deref().is_none_or(str::is_empty)
+  }
+
+  /// Whether a block child keeps its block spacing because every collapsing
+  /// ancestor is an open built-in void override. An override holds content, so
+  /// it does not wrap inline text the way `<a>` or `<strong>` do. Any other
+  /// collapsing ancestor keeps the suppression. A heading is a block child too,
+  /// so the spec's block boundary after it applies. Runs only where the caller
+  /// already found a collapsing ancestor.
+  ///
+  /// The node's own `is_inline` includes an `isInline` override. On enter the
+  /// node is the stack top; on exit it is the retired slot, where
+  /// `emit_exit_element` keeps the flag (the only exit path with overrides).
+  #[inline]
+  fn block_child_of_open_void(&self, tag_id: Option<u8>, is_enter: bool) -> bool {
+    let Some(id) = tag_id else {
+      return false;
+    };
+    let node = if is_enter {
+      self.stack.last()
+    } else {
+      Some(self.stack.retired())
+    };
+    if node.is_none_or(|node| node.is_inline) {
+      return false;
+    }
+    // A span keeps only the block children its own exemption keeps.
+    let span_exempt = matches!(id, TAG_P | TAG_DIV | TAG_LI);
+    // On enter the node is the stack top, and it is not one of its own ancestors.
+    let ancestors = self.stack.len().saturating_sub(usize::from(is_enter));
+    self.stack[..ancestors].iter().all(|node| {
+      if !node.collapses_inner_white_space || node.excluded_from_markdown {
+        return true;
+      }
+      match node.tag_id {
+        Some(void) if get_tag_handler(void).is_some_and(|handler| handler.is_self_closing) => true,
+        Some(TAG_SPAN) => span_exempt,
+        _ => false,
+      }
+    })
   }
 
   /// Whether the tag writes visible inline Markdown around its content:

@@ -25,8 +25,9 @@ import {
   TAG_TH,
   TEXT_NODE,
 } from './const'
+import { isOpenVoidTag } from './parser-tags'
 import { resolveUrl } from './url'
-import { figcaptionOwnsBlockSpacing, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
+import { figcaptionOwnsBlockSpacing, isBlockChildOfOpenVoid, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
 
 interface TextState extends MdreamRuntimeState {
   options: EngineOptions
@@ -54,7 +55,7 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
     return false
   // Unknown tags are inline, as in the Rust engine; an end tag that closed
   // nothing is no boundary.
-  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline : (lastNode as ElementNode).tagId === -1)))
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || isOpenVoidTag(lastNode.tagHandler, (lastNode as ElementNode).tagId) : (lastNode as ElementNode).tagId === -1)))
     return false
   const firstChar = textNode.value[0]
   return Boolean(firstChar && !'.,!?:;_*`)]'.includes(firstChar))
@@ -206,7 +207,10 @@ function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [numb
         parent = parent.parent
         continue
       }
-      return NO_SPACING
+      // A block child of an open void override keeps its block spacing.
+      if (!isBlockChildOfOpenVoid(node))
+        return NO_SPACING
+      break
     }
     parent = parent.parent
   }
@@ -275,10 +279,28 @@ function trailingNewlines(buffer: string[]): number {
   return count
 }
 
-function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined): void {
+function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined, hasVisiblePluginOutput = false): void {
   const buffer = state.buffer
   const config = newlineConfig(element, state.depthMap)
-  const wantedNewlines = config[eventType] || 0
+  // An open void writes its block boundary after its enter, as the void it
+  // replaces would. A custom exit or a visible plugin exit has output of its
+  // own, so the boundary stays after that exit.
+  const voidSpacingAtEnter = isOpenVoidTag(element.tagHandler, element.tagId)
+    && !element.tagHandler?.literalExitHasOutput
+    && !(eventType === NodeEventExit && hasVisiblePluginOutput)
+  let wantedNewlines = voidSpacingAtEnter && eventType === NodeEventExit ? 0 : config[eventType] || 0
+  if (voidSpacingAtEnter && eventType === NodeEventEnter) {
+    let end = output ? output.length : 0
+    while (end > 0 && output!.charCodeAt(end - 1) === 10)
+      end--
+    const owed = (config[1] || 0) - ((output?.length || 0) - end)
+    // Without visible enter text these newlines join the run before the enter,
+    // so they merge with what the buffer ends on.
+    if (end === 0)
+      wantedNewlines = Math.max(wantedNewlines, owed)
+    else if (owed > 0)
+      output += '\n'.repeat(owed)
+  }
   // An empty inline element between the text and a block boundary clears
   // `lastTextNode`, so the boundary itself drops the space it sits on.
   if (wantedNewlines > 0 && buffer.length > 0 && !(state.depthMap[TAG_PRE]! > 0 && element.tagId !== TAG_PRE)) {
@@ -486,6 +508,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
 
     const element = event.node as ElementNode
     let output: string | undefined
+    let hasVisiblePluginOutput = false
     // A quotation with only whitespace since its opener emits nothing, but
     // keeps the space its opener added. Openers above this one belong to
     // quotations inside it whose exit never came.
@@ -523,6 +546,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     if (element.pluginOutput?.length) {
       output = element.pluginOutput.join('')
       element.pluginOutput = undefined
+      hasVisiblePluginOutput = hasNonWhitespace(output)
     }
     else {
       output = elementOutput(element, event.type, state)
@@ -565,7 +589,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       state.pendingInlineWhitespace = false
     }
 
-    appendOutput(state, element, event.type, output)
+    appendOutput(state, element, event.type, output, hasVisiblePluginOutput)
     if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {
       openQuotes.push(state.buffer.length - 1)
       openQuoteNodes.push(element)

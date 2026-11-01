@@ -1,5 +1,82 @@
+import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it } from 'vitest'
-import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
+
+const MARKED = { enter: '[', exit: ']' }
+const VOID_MARKED = { ...MARKED, isSelfClosing: true }
+const OPEN_MARKED = { ...MARKED, isSelfClosing: false }
+
+const SELF_CLOSING_CASES: [string, Record<string, any>, string][] = [
+  ['<p>a <x-y> 2</p>', { 'x-y': { isSelfClosing: true } }, 'a  2'],
+  ['<p>a <x-y>text</x-y> b</p>', { 'x-y': VOID_MARKED }, 'a []text b'],
+  ['<p>a <x-y><x-y>in</x-y></x-y> b</p>', { 'x-y': VOID_MARKED }, 'a [][]in b'],
+  ['<p>a <x-y title="1>2">text</x-y> b</p>', { 'x-y': VOID_MARKED }, 'a []text b'],
+  ['<p>a <X-Y>text</X-Y> b</p>', { 'x-y': VOID_MARKED }, 'a []text b'],
+  ['<p>a<em>b</em>c</p>', { em: VOID_MARKED }, 'a[]bc'],
+  ['<p>a<EM>b</EM>c</p>', { em: VOID_MARKED }, 'a[]bc'],
+  ['<p>a<br>b</br>c</p>', { br: OPEN_MARKED }, 'a[b]c'],
+  ['<p>a<BR>b</BR>c</p>', { br: OPEN_MARKED }, 'a[b]c'],
+  ['<p>a<br/>b</p>', { br: OPEN_MARKED }, 'a[]b'],
+  ['<p>a<br>b</p>', { br: MARKED }, 'a[]b'],
+  ['<p>a<x-y>b</x-y>c</p>', { 'x-y': 'br' }, 'a  \nbc'],
+  ['<p>a<x-y>b</x-y>c</p>', { 'x-y': 'br', 'br': { isSelfClosing: false } }, 'a  \nbc'],
+  ['<p>a <![CDATA[x]]> c</p><p>d</p>', { '#cdata-section': VOID_MARKED }, 'a [] c\n\nd'],
+  ['<p>a <![CDATA[x]]> c</p><p>d</p>', { '#cdata-section': 'br' }, 'a  \n c\n\nd'],
+  ['<ul><li><hr>x</hr></li></ul>', { hr: { isSelfClosing: false } }, '- ***\n\n  x'],
+  ['<ul><li>a<hr>x</hr>b</li></ul>', { hr: { isSelfClosing: false } }, '- a\n\n  ---\n\n  xb'],
+  ['<hr>a</hr>1) x', { hr: { isSelfClosing: false } }, '---\n\na1) x'],
+  ['<br><h1></h1></br>b c', { br: { isSelfClosing: false } }, '#\n\nb c'],
+  ['<p>a</p><br><h2>x</h2>| x |', { br: { isSelfClosing: false } }, 'a\n\n  \n\n## x\n\n| x |'],
+  ['<p>a</p><hr>x<p>b</p>', { hr: { isSelfClosing: false } }, 'a\n\n---\n\nx\n\nb'],
+  ['<p>a<hr></p><p>b</p>', { hr: { isSelfClosing: false } }, 'a\n\n---\n\nb'],
+  ['<p>a<img src="a.png">x</p>', { img: { isSelfClosing: false } }, 'a![](a.png)x'],
+  ['<p>a</p><img src="a.png">x<p>b</p>', { img: { isSelfClosing: false } }, 'a\n\n![](a.png)x\n\nb'],
+  ['<p>a</p><br>x<p>b</p>', { br: { isSelfClosing: false } }, 'a\n\n  \nx\n\nb'],
+  ['<p>a</p><br><strong>x<p>b</p></strong>y', { br: { isSelfClosing: false } }, 'a\n\n  \n**x b**y'],
+  ['<p>a</p><hr>x<p>b</p>', {}, 'a\n\n---\n\nx\n\nb'],
+  ['<p>a</p><hr>x<p>b</p>', { em: { isSelfClosing: false } }, 'a\n\n---\n\nx\n\nb'],
+  // A custom exit keeps the spacing after its own output.
+  ['<hr>x</hr>y', { hr: { ...OPEN_MARKED, spacing: [0, 2] } }, '[x]\n\ny'],
+  ['<hr>x</hr>y', { hr: { isSelfClosing: false, exit: '' } }, '---\n\nxy'],
+  // A child's isInline override decides whether it keeps block spacing.
+  ['<img src="a.png"><em>x</em>y</img>', { img: { isSelfClosing: false }, em: { isInline: false, spacing: [2, 2] } }, '![](a.png)\n\n* x*\n\ny'],
+  ['<img src="a.png"><p>x</p>y</img>', { img: { isSelfClosing: false }, p: { isInline: true } }, '![](a.png)xy'],
+  // Explicit spacing on the reopened void itself.
+  ['a<br>x</br>y', { br: { isSelfClosing: false, spacing: [0, 2] } }, 'a  \n\nxy'],
+  ['<img src="a.png">x</img>y', { img: { isSelfClosing: false, spacing: [0, 2] } }, '![](a.png)\n\nxy'],
+  ['<p>a</p><meta>x</meta>y', { meta: { isSelfClosing: false, spacing: [2, 2] } }, 'a\n\nxy'],
+]
+
+// Plain text uses the same void boundary: the spacing follows the start tag.
+const SELF_CLOSING_TEXT_CASES: [string, Record<string, any>, string][] = [
+  ['<hr>x</hr>y', { hr: { isSelfClosing: false } }, 'xy'],
+  ['<p>a</p><hr>x</hr>y', { hr: { isSelfClosing: false } }, 'a\n\nxy'],
+  ['a<hr>x</hr>y', { hr: { ...OPEN_MARKED, spacing: [0, 2] } }, 'a[x]\n\ny'],
+  ['a<br>x</br>y', { br: { isSelfClosing: false } }, 'a\nxy'],
+  ['a<br>x</br>y', { br: { isSelfClosing: false, spacing: [0, 2] } }, 'a\n\nxy'],
+  ['a<img alt="i">x</img>y', { img: { isSelfClosing: false } }, 'a ixy'],
+  ['a<img alt="i">x</img>y', { img: { isSelfClosing: false, spacing: [0, 2] } }, 'a i\n\nxy'],
+  ['a<img alt="i"><p>x</p>y</img>', { img: { isSelfClosing: false } }, 'a i\n\nx\n\ny'],
+  ['a<br><h1>x</h1>y</br>', { br: { isSelfClosing: false } }, 'a\n\nx\n\ny'],
+]
+
+function streamInChunksOf(html: string, width: number, engine: any, tagOverrides: Record<string, any>, format?: 'text' | 'html') {
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < html.length; i += width)
+        controller.enqueue(html.slice(i, i + width))
+      controller.close()
+    },
+  })
+  return streamHtmlToMarkdown(stream as any, { engine, format, plugins: { tagOverrides } })
+}
+
+async function collect(chunks: AsyncIterable<string>): Promise<string> {
+  let output = ''
+  for await (const chunk of chunks)
+    output += chunk
+  return output
+}
 
 describe.each(engines)('tagOverrides $name', (engineConfig) => {
   it('overrides enter/exit strings for existing tag', async () => {
@@ -230,5 +307,40 @@ describe.each(engines)('tagOverrides $name', (engineConfig) => {
         streamed += chunk
       expect(streamed, `split=${split}`).toBe(expected)
     }
+  })
+})
+
+describe.each(engines)('tagOverrides isSelfClosing $name', (engineConfig) => {
+  it.each(SELF_CLOSING_CASES)('%s %j', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides } })).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamInChunksOf(html, width, engine, tagOverrides)), `width ${width}`).toBe(expected)
+  })
+
+  it.each(SELF_CLOSING_TEXT_CASES)('text %s %j', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, format: 'text', plugins: { tagOverrides } })).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamInChunksOf(html, width, engine, tagOverrides, 'text')), `width ${width}`).toBe(expected)
+  })
+
+  it.each([
+    ['text', 'a  2'],
+    ['html', '<p>a  2</p>'],
+  ] as const)('applies to %s output', async (format, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = '<p>a <x-y> 2</p>'
+    const tagOverrides = { 'x-y': { isSelfClosing: true } }
+    expect(htmlToMarkdown(html, { engine, format, plugins: { tagOverrides } })).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await collect(streamInChunksOf(html, width, engine, tagOverrides, format)), `width ${width}`).toBe(expected)
+  })
+
+  it('closes a reopened void tag past the depth limit', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `${'<div>'.repeat(512)}<br>a</br><div>b</div><p>c</p>${'</div>'.repeat(512)}<p>d</p>`
+    const markdown = htmlToMarkdown(html, { engine, plugins: { tagOverrides: { br: { isSelfClosing: false } } } })
+    expect(markdown).toBe('a b c\n\nd')
   })
 })
