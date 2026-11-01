@@ -34,6 +34,7 @@ interface TextState extends MdreamRuntimeState {
   depthMap: Uint16Array
   lastNode?: ElementNode | TextNode
   lastTextNode?: TextNode
+  lastTextOutputFragment?: number
   pendingInlineWhitespace?: boolean
 }
 
@@ -41,11 +42,36 @@ function trimAsciiWhitespaceEnd(value: string): string {
   let end = value.length
   while (end > 0) {
     const code = value.charCodeAt(end - 1)
-    if (code !== 32 && (code < 9 || code > 13))
+    if (code !== 32 && (code < 9 || code > 13 || code === 11))
       break
     end--
   }
   return end === value.length ? value : value.slice(0, end)
+}
+
+/**
+ * A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+ * line feed, which ends block spacing or an earlier break and so stays.
+ */
+function trimBeforeBreak(buffer: string[], floor: number): void {
+  for (let index = buffer.length - 1; index >= floor; index--) {
+    const fragment = buffer[index]!
+    let end = fragment.length
+    while (end > 0) {
+      const code = fragment.charCodeAt(end - 1)
+      if (code !== 32 && code !== 9 && code !== 12 && code !== 13)
+        break
+      end--
+    }
+    if (end === 0) {
+      buffer.pop()
+    }
+    else {
+      if (end !== fragment.length)
+        buffer[index] = fragment.slice(0, end)
+      break
+    }
+  }
 }
 
 function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | TextNode | undefined, textNode: TextNode): boolean {
@@ -101,6 +127,8 @@ function columnAt(value: string, end: number, column: number): number {
 
 /** Yielded characters a stream keeps before its unstable tail, for `trailingNewlines` and `lastOutputChar`. */
 const YIELDED_CONTEXT = 2
+/** Held whitespace this long is no longer rejoined by every `takeOutput`. */
+const LONG_HELD_RUN = 1024
 
 function wrapText(value: string, column: number, width: number): string {
   const leading = value.charCodeAt(0) === 32
@@ -289,6 +317,8 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
       buffer[buffer.length - 1] = trimmed
   }
   const missingNewlines = Math.max(0, wantedNewlines - trailingNewlines(buffer))
+  if (missingNewlines > 0 || output)
+    state.lastTextOutputFragment = undefined
   // An unknown tag with no handler is inline, as in the Rust engine.
   const isInline = element.tagHandler ? element.tagHandler.isInline === true : element.tagId === -1
 
@@ -329,8 +359,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
     const collapses = element.tagHandler?.collapsesInnerWhiteSpace
     const hasSpacing = Array.isArray(element.tagHandler?.spacing)
     // A block boundary owns the line, so the space before it goes too.
-    const trim = (element.tagId === TAG_BR && output?.endsWith('\n'))
-      || isBlock
+    const trim = isBlock
       || ((!isInline || eventType === NodeEventExit) && !(collapses && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter))
     if (trim && !keepsOwnSpaces) {
       const last = buffer.at(-1)!
@@ -374,6 +403,8 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
   let started = false
   // Column the first buffer fragment starts at, once yielded output is dropped.
   let bufferColumn = 0
+  // Generated column separators belong to the table, outside source whitespace.
+  let textCellStart = 0
   const columnScan: [fragments: number, column: number] = [0, 0]
   // A caption only earns its blank-line boundary once it emits visible
   // content, so an empty `<figcaption>` leaves the text unchanged.
@@ -392,6 +423,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
   // matches its own element, and the final output drops the hold.
   const openQuotes: number[] = []
   const openQuoteNodes: ElementNode[] = []
+  // Fragment end of a long held whitespace run, 0 when there is none, and the
+  // fragment before it, which a rewrite of the run replaces.
+  let heldRunEnd = 0
+  let heldRunLast: string | undefined
 
   function pushCaptionBoundary(newlines: number): boolean {
     if (state.buffer.length === 0 || newlines === 0)
@@ -432,7 +467,9 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
     const last = charOf(lastOutputChar(state.buffer))
     if (state.pendingInlineWhitespace) {
-      if (!node.value.trim())
+      // Only HTML's ASCII whitespace collapses into the pending space, as in
+      // Rust: U+000B, U+00A0 and other Unicode spaces are content.
+      if (!hasNonWhitespace(node.value))
         return
       if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(node.value[0] || ''))
         node.value = ` ${node.value}`
@@ -459,6 +496,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       ? wrapText(node.value, currentColumn(state.buffer, bufferColumn, columnScan), width)
       : node.value
     state.buffer.push(value)
+    state.lastTextOutputFragment = state.buffer.length - 1
     state.lastContentCache = value
     state.lastTextNode = node
     if (openQuotes.length !== 0 && hasNonWhitespace(value)) {
@@ -529,18 +567,38 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
 
     if (element.tagId === TAG_BR && event.type === NodeEventEnter && output) {
+      // The break owns the line end, so the whitespace before it goes too,
+      // before the line ends it would add are counted, as in Rust.
+      if (!state.depthMap[TAG_PRE] && !element.tagHandler?.literalEnter && output.endsWith('\n')) {
+        if (state.lastTextNode?.containsWhitespace && state.lastTextOutputFragment === state.buffer.length - 1) {
+          let parent = state.lastTextNode.parent
+          while (parent && parent.tagId !== TAG_PRE)
+            parent = parent.parent
+          if (!parent) {
+            const last = state.buffer.at(-1)!
+            state.buffer[state.buffer.length - 1] = trimAsciiWhitespaceEnd(last)
+          }
+        }
+        const previousLength = state.buffer.length
+        trimBeforeBreak(state.buffer, textCellStart)
+        if (state.buffer.length !== previousLength) {
+          // Only empty suffix fragments disappear; existing anchors keep their indexes.
+          if (state.lastTextOutputFragment !== undefined && state.lastTextOutputFragment >= state.buffer.length) {
+            state.lastTextOutputFragment = undefined
+            state.lastTextNode = undefined
+          }
+          if (columnScan[0] >= state.buffer.length) {
+            columnScan[0] = 0
+            columnScan[1] = bufferColumn
+          }
+          if (heldRunEnd > state.buffer.length)
+            heldRunEnd = 0
+        }
+      }
       const currentNewlines = trailingNewlines(state.buffer)
       if (!state.depthMap[TAG_PRE] && currentNewlines >= 2)
         output = undefined
       state.pendingInlineWhitespace = false
-      // The break owns the line end, so the space before it goes too. A table
-      // cell keeps its tabs: one may be the column separator, as in Rust.
-      if (output && !state.depthMap[TAG_PRE] && state.buffer.length > 0) {
-        const tail = state.buffer[state.buffer.length - 1]!
-        const trimmed = trimSpacesEnd(tail, state.depthMap[TAG_TABLE]! > 0)
-        if (trimmed.length !== tail.length)
-          state.buffer[state.buffer.length - 1] = trimmed
-      }
       // A break inside an unopened caption serves as its boundary.
       if (output && captionOpen > 0 && !captionContent)
         captionBreakRun++
@@ -566,6 +624,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
 
     appendOutput(state, element, event.type, output)
+    if (event.type === NodeEventEnter && (element.tagId === TAG_TD || element.tagId === TAG_TH)
+      && !element.tagHandler?.literalEnter && output === '\t') {
+      textCellStart = state.buffer.length
+    }
     if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {
       openQuotes.push(state.buffer.length - 1)
       openQuoteNodes.push(element)
@@ -625,6 +687,12 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       buffer.push(kept[index]!)
     // The context fragment replaces fragments `0..keepFrom`.
     const shift = keepFrom - 1
+    textCellStart = Math.max(0, textCellStart - shift)
+    if (state.lastTextOutputFragment !== undefined) {
+      state.lastTextOutputFragment = state.lastTextOutputFragment >= keepFrom
+        ? state.lastTextOutputFragment - shift
+        : undefined
+    }
     for (let index = 0; index < openQuotes.length; index++)
       openQuotes[index]! -= shift
     columnScan[0] = 0
@@ -632,10 +700,33 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     yieldedLength = stableEnd - contextStart
   }
 
+  // Only fragments past a held run can settle it, so reading those keeps a run
+  // that grows from being rejoined and rescanned on every chunk. The bytes stay
+  // buffered: a later trim can still take them. Skipping a take is the same as
+  // merging two input chunks, so a missed rewrite only delays output.
+  function extendHeldRun(): boolean {
+    const buffer = state.buffer
+    const end = buffer.length
+    if (end < heldRunEnd || buffer[heldRunEnd - 1] !== heldRunLast || openQuotes.length !== 0)
+      return false
+    for (let index = heldRunEnd; index < end; index++) {
+      if (hasNonWhitespace(buffer[index]!))
+        return false
+    }
+    heldRunEnd = end
+    heldRunLast = buffer[end - 1]
+    return true
+  }
+
   return {
     state,
     processEvent,
     takeOutput(final) {
+      if (heldRunEnd !== 0) {
+        if (!final && extendHeldRun())
+          return ''
+        heldRunEnd = 0
+      }
       const content = state.buffer.join('')
       const leading = started || preserveLeadingWhitespace ? 0 : content.length - trimOutputStart(content).length
       // Hold back the tail a later event may still trim: trailing whitespace,
@@ -651,10 +742,12 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       }
       while (stableEnd > leading) {
         const code = content.charCodeAt(stableEnd - 1)
-        if (code !== 32 && (code < 9 || code > 13))
+        if (code !== 32 && (code < 9 || code > 13 || code === 11))
           break
         stableEnd--
       }
+      // Leading whitespace not yet yielded is held as well.
+      const heldRunStart = stableEnd === leading ? 0 : stableEnd
       const yieldedEnd = started ? yieldedLength : leading
       if (stableEnd < yieldedEnd)
         stableEnd = yieldedEnd
@@ -663,6 +756,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
         started = true
         yieldedLength = stableEnd
         dropYielded(content, stableEnd)
+      }
+      if (!final && openQuotes.length === 0 && content.length - heldRunStart >= LONG_HELD_RUN) {
+        heldRunEnd = state.buffer.length
+        heldRunLast = state.buffer[heldRunEnd - 1]
       }
       return output
     },

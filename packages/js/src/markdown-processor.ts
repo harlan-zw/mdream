@@ -958,15 +958,48 @@ function insideOpenInlineDelimiter(node: ElementNode, state: MarkdownState): boo
   return false
 }
 
-export function isAsciiWhitespace(code: number): boolean {
-  return code === 32 || (code >= 9 && code <= 13)
+/** What a hard break subsumes: HTML's ASCII whitespace but a line feed. */
+function isBreakWhitespace(code: number): boolean {
+  return code === 32 || code === 9 || code === 12 || code === 13
 }
 
-export function trimAsciiWhitespaceEnd(value: string): string {
+/** A plugin break takes preceding whitespace only before its first content. */
+function startsWithBreak(fragments: string[] | undefined): boolean {
+  if (!fragments)
+    return false
+  for (const fragment of fragments) {
+    for (let index = 0; index < fragment.length; index++) {
+      const code = fragment.charCodeAt(index)
+      if (code === 10)
+        return true
+      if (!isBreakWhitespace(code))
+        return false
+    }
+  }
+  return false
+}
+
+/** HTML's ASCII whitespace, as in Rust: U+000B is content. */
+export function isAsciiWhitespace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13 && code !== 11)
+}
+
+export function trimAsciiWhitespaceEnd(value: string, inlineClose = false): string {
   let end = value.length
-  while (end > 0 && isAsciiWhitespace(value.charCodeAt(end - 1)))
+  while (end > 0) {
+    const code = value.charCodeAt(end - 1)
+    if (!isAsciiWhitespace(code) && (!inlineClose || code !== 11))
+      break
     end--
+  }
   return end === value.length ? value : value.slice(0, end)
+}
+
+function textInPre(node: TextNode): boolean {
+  let parent = node.parent
+  while (parent && parent.tagId !== TAG_PRE)
+    parent = parent.parent
+  return !!parent
 }
 
 /** Drop the top marker when every following fragment is whitespace. */
@@ -1624,6 +1657,30 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
+  // A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+  // line feed, which ends block spacing or an earlier break and so stays.
+  function trimBeforeBreak(buff: string[]): void {
+    let floor = state.codeFence ? state.codeFence.fragment + 1 : 0
+    const span = gfmLifecycle.openCodeSpans.at(-1)
+    if (span && span.fragment >= floor)
+      floor = span.fragment + 1
+    const quote = state.blockquotes.at(-1)
+    if (quote && quote.fragment > floor)
+      floor = quote.fragment
+    for (let index = buff.length - 1; index >= floor; index--) {
+      const fragment = buff[index]!
+      let end = fragment.length
+      while (end > 0 && isBreakWhitespace(fragment.charCodeAt(end - 1)))
+        end--
+      if (end !== fragment.length) {
+        state.outputPositions?.replace(index, index + 1, [fragment.slice(0, end)])
+        buff[index] = fragment.slice(0, end)
+      }
+      if (end > 0)
+        break
+    }
+  }
+
   function consumeCaptionTransition(isInlineElement: boolean, tagId: number): void {
     captionBoundary = isInlineElement && tagId !== TAG_IMG && tagId !== TAG_BR ? 2 : 0
   }
@@ -1777,7 +1834,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
 
       if (state.pendingInlineWhitespace) {
-        if (!textNode.value.trim())
+        // Only HTML's ASCII whitespace collapses into the pending space, as in
+        // Rust: U+000B, U+00A0 and other Unicode spaces are content.
+        if (!hasNonWhitespace(textNode.value))
           return
         if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
           textNode.value = ` ${textNode.value}`
@@ -1829,7 +1888,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
 
       const wrapWidth = state.options?.wrapWidth
-      if (wrapWidth && canWrapHere(state.depthMap)) {
+      if (lastChar === '\u000B' && state.lastTextNode?.containsWhitespace && !state.depthMap[TAG_PRE]
+        && state.lastContentCache && state.lastContentCache === state.buffer.at(-1)
+        && trimAsciiWhitespaceEnd(textNode.value).length === 0 && !textInPre(state.lastTextNode)) {
+        // Transparent wrappers can separate a mutable tail from its final source space.
+        const joined = state.lastContentCache + textNode.value
+        state.outputPositions?.replace(state.buffer.length - 1, state.buffer.length, [joined])
+        state.buffer[state.buffer.length - 1] = joined
+        state.lastContentCache = joined
+      }
+      else if (wrapWidth && canWrapHere(state.depthMap)) {
         const wrapped = wrapText(
           textNode.value,
           currentColumn(state.buffer),
@@ -2042,9 +2110,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
 
-      const lastFragment = state.lastContentCache
       const lastTextNode = state.lastTextNode
-      if (lastFragment && lastTextNode?.containsWhitespace && typeof lastTextNode.value === 'string') {
+      if (state.lastContentCache && lastTextNode?.containsWhitespace && typeof lastTextNode.value === 'string') {
         let parent = element.parent
         let parentInPre = false
         while (parent) {
@@ -2055,20 +2122,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           parent = parent.parent
         }
         if (!parentInPre || element.parent?.tagId === TAG_PRE) {
-          if (breakOutput?.endsWith('\n') && !parentInPre) {
-            const trimmed = trimAsciiWhitespaceEnd(lastFragment)
-            if (trimmed.length !== lastFragment.length && buff.at(-1) === lastFragment) {
+          const fragment = state.lastContentCache
+          if (!parentInPre && breakOutput?.endsWith('\n') && buff.at(-1) === fragment) {
+            const trimmed = trimAsciiWhitespaceEnd(fragment)
+            if (trimmed.length !== fragment.length) {
               state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
               buff[buff.length - 1] = trimmed
+              state.lastContentCache = trimmed
             }
           }
           state.lastTextNode = undefined
         }
       }
-      // Spaces before a line break have no visual effect, even when an emptied
-      // inline element left them, so the break subsumes them as in Rust.
-      if (!inPre && breakOutput?.endsWith('\n') && lastOutputChar(buff) === 32)
-        trimTrailingSpaces(buff)
+      // Whitespace before a line break has no visual effect, even when an
+      // emptied inline element left it, so the break subsumes it as in Rust.
+      if (!inPre && breakOutput?.endsWith('\n') && isBreakWhitespace(lastOutputChar(buff)))
+        trimBeforeBreak(buff)
 
       const pendingCaption = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
@@ -2484,7 +2553,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // Don't trim if we're about to add inline content that needs spacing
       // Don't trim before block elements that need their own spacing
       if (lastFragment && state.lastTextNode?.containsWhitespace && (!!node.parent || isInlineElement) && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
-        let parent = node.parent
+        const breakConsumesSourceWhitespace = eventType === NodeEventEnter && tagId === TAG_BR
+          && !state.depthMap[TAG_PRE] && !handler?.literalEnter && startsWithBreak(output)
+        // A plugin break consumes source whitespace, while closed pre content keeps its newlines.
+        let parent = breakConsumesSourceWhitespace ? state.lastTextNode.parent : node.parent
         let parentInPre = false
         while (parent) {
           if (parent.tagId === TAG_PRE) {
@@ -2507,12 +2579,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // whitespace before it is content, as in Rust.
           const shouldTrim = !quoteAtStart
             && !(tagId === TAG_PRE && eventType === NodeEventExit && isInsideTableCell(state))
-            && ((tagId === TAG_BR && output?.[0]?.endsWith('\n') && !parentInPre)
+            && (breakConsumesSourceWhitespace
               || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)))
 
           if (shouldTrim) {
             const originalLength = lastFragment.length
-            const trimmed = trimAsciiWhitespaceEnd(lastFragment)
+            const trimmed = trimAsciiWhitespaceEnd(lastFragment, eventType === NodeEventExit && isInlineElement
+              && !handler?.literalExit && (handlerOutput === '*' || handlerOutput === '**' || handlerOutput === '~~'))
             const trimmedChars = originalLength - trimmed.length
 
             // Update the last content in buffer regions with trimmed content
@@ -2520,13 +2593,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
               if (buff?.length && buff.at(-1) === lastFragment) {
                 state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
                 buff[buff.length - 1] = trimmed
+                state.lastContentCache = trimmed
               }
               if (eventType === NodeEventExit && isInlineElement)
                 state.pendingInlineWhitespace = true
             }
           }
 
-          state.lastTextNode = undefined
+          // Transparent exits leave the source tail available to an enclosing delimiter.
+          if (eventType !== NodeEventExit || !isInlineElement || handler?.literalExit || output)
+            state.lastTextNode = undefined
         }
       }
     }
@@ -2538,10 +2614,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // An overridden <br> skips the break fast path, but its line break still
-    // subsumes the spaces before it.
+    // subsumes the whitespace before it.
     if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
-      && !handler?.literalEnter && output?.at(-1)?.endsWith('\n') && lastOutputChar(buff) === 32) {
-      trimTrailingSpaces(buff)
+      && !handler?.literalEnter && isBreakWhitespace(lastOutputChar(buff)) && startsWithBreak(output)) {
+      trimBeforeBreak(buff)
     }
 
     const rawHtmlQuoteBoundary = pendingRawHtmlBoundary && gfmAction?._tag === 'BlockquoteEnter'

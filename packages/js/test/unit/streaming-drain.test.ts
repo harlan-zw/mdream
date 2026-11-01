@@ -9,6 +9,10 @@ import { processPluginsForEvent } from '../../src/plugin-processor'
 import { createPlugin, filterPlugin } from '../../src/plugins'
 import { tagHandlers } from '../../src/tags'
 
+// Flush text into the drain without closing the emphasis. Otherwise, each
+// chunk reparses one growing text node and never exercises the held run.
+const EMPHASIS_WHITESPACE_UNIT = ' &#11;<span></span>'
+
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
   return new ReadableStream({
     start(controller) {
@@ -282,6 +286,118 @@ describe('streaming drain parity', () => {
     expect(emittedLength).toBe(expectedLength)
     expect(emittedHash).toBe(expectedHash)
     expect(peakRetainedLength).toBeLessThan(chunkSize)
+  })
+
+  // A trailing whitespace run stays buffered until content settles it, since a
+  // later trim can still take it. Copying the run on every chunk would make a
+  // long one quadratic, so count what the drain joins.
+  it.each([
+    ['tabs before empty pairs', '<p>a', '&#9;<i></i>', 13, '</p>'],
+    ['vertical tabs before empty pairs', '<p>a', '&#11;<i></i>', 13, '</p>'],
+    ['vertical tabs in emphasis', '<p><em>a', EMPHASIS_WHITESPACE_UNIT, 7, '</em>x</p>'],
+    ['vertical tabs and newlines in quoted emphasis', '<blockquote><em>a', ' &#10;&#11;<span></span>', 7, '</em>x</blockquote>'],
+    ['an open pair at every chunk end', '<p>a', '&#9;<i></i>', 11, '</p>'],
+    ['tabs in spans', '<p>a', '<span>&#9;</span>', 17, '</p>'],
+    ['tabs before breaks', '<p>a', '&#9;<br>', 8, '</p>'],
+    ['newlines', '<p>a', '&#10;<i></i>', 12, '</p>'],
+    ['breaks', '<p>a', '<br>', 4, '</p>'],
+    ['a heading', '<h2>a', '&#9;<i></i>', 11, '</h2>'],
+    ['a list item', '<ul><li>a', '&#9;<i></i>', 11, '</li></ul>'],
+    ['a fence held open', '<p>a', '&#9;<i></i>', 11, '</p><pre><code>x'],
+  ])('does not rejoin a long held run on every chunk: %s', (_, open, unit, chunkSize, close) => {
+    const html = `${open}${unit.repeat(16 * 1024)}${close}`
+    let joinedLength = 0
+    class CountingBuffer extends Array<string> {
+      override join(separator?: string): string {
+        const joined = super.join(separator)
+        joinedLength += joined.length
+        return joined
+      }
+    }
+    const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
+    processor.state.buffer = new CountingBuffer()
+    const parseState: ParseState = {
+      depthMap: processor.state.depthMap,
+      depth: 0,
+      resolvedPlugins: [],
+      tagHandlers,
+      plainText: false,
+    }
+    let remainingHtml = ''
+    let markdown = ''
+    for (let offset = 0; offset < html.length; offset += chunkSize) {
+      remainingHtml = parseHtmlStream(remainingHtml + html.slice(offset, offset + chunkSize), parseState, processor.processEvent)
+      markdown += processor.getMarkdownChunk()
+    }
+    finalizeParse(remainingHtml, parseState, processor.processEvent)
+    markdown += processor.getMarkdownChunk(true)
+
+    expect(markdown).toBe(htmlToMarkdown(html))
+    expect(joinedLength).toBeLessThan(1024 * 1024)
+  })
+
+  it('emits emphasis content before its long whitespace tail closes', async () => {
+    const prefix = `<p><em>a${EMPHASIS_WHITESPACE_UNIT.repeat(16 * 1024)}`
+    const close = '</em>x</p>'
+    let deliveredPrefix = false
+    let emittedPrefix = false
+    const source = new ReadableStream<string>({
+      pull(controller) {
+        if (!deliveredPrefix) {
+          deliveredPrefix = true
+          controller.enqueue(prefix)
+        }
+        else {
+          if (!emittedPrefix)
+            throw new Error('Closing markup arrived before settled emphasis content')
+          controller.enqueue(close)
+          controller.close()
+        }
+      },
+    }, { highWaterMark: 0 })
+    const iterator = streamHtmlToMarkdown(source)[Symbol.asyncIterator]()
+    try {
+      const first = await iterator.next()
+      expect(first.value).toBe('*a')
+      emittedPrefix = true
+      let markdown = first.value
+      while (true) {
+        const next = await iterator.next()
+        if (next.done)
+          break
+        markdown += next.value
+      }
+      expect(markdown).toBe(htmlToMarkdown(prefix + close))
+    }
+    finally {
+      await iterator.return?.()
+    }
+  })
+
+  it('releases a long held run with the first content after it', () => {
+    const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
+    const parseState: ParseState = {
+      depthMap: processor.state.depthMap,
+      depth: 0,
+      resolvedPlugins: [],
+      tagHandlers,
+      plainText: false,
+    }
+    const feed = (html: string): string => {
+      parseHtmlStream(html, parseState, processor.processEvent)
+      return processor.getMarkdownChunk()
+    }
+
+    expect(feed('<p>a<i></i>')).toBe('a')
+    for (let index = 0; index < 2048; index++)
+      expect(feed('&#9;<i></i>')).toBe('')
+    expect(feed('b<i></i>')).toBe(`${'\t'.repeat(2048)}b`)
+  })
+
+  it('keeps a heading closing run held past a long whitespace run', async () => {
+    const html = `<h2>a #${'&#9;<i></i>'.repeat(2048)}</h2><p>b</p>`
+    for (const chunkSize of [1, 11, 13, 1024, html.length])
+      expect(await streamConvert(html, chunkSize) === htmlToMarkdown(html), `chunkSize=${chunkSize}`).toBe(true)
   })
 
   // A yielded chunk is a slice of the joined buffer, and a slice keeps its

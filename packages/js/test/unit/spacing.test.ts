@@ -16,6 +16,77 @@ async function streamConvert(chunks: string[]): Promise<string> {
 }
 
 describe('inline whitespace', () => {
+  it.each([
+    ['<p><em>T&#11; </em>x</p>', '*T* x'],
+    ['<p><em>a &#11;</em>b</p>', '*a* b'],
+  ])('preserves emphasis when vertical tab is mixed with trailing space: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split at ${split}`)
+        .toBe(expected)
+    }
+  })
+
+  it('keeps literal source whitespace before visible plugin content ending in a break', async () => {
+    const html = '<p>a <br>b</p>'
+    const options = {
+      plugins: [createPlugin({
+        onNodeEnter(node) {
+          if (node.name === 'br')
+            return 'X\n'
+        },
+      })],
+    }
+    const expected = 'a X\nb'
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `split at ${split}`).toBe(expected)
+    }
+  })
+
+  it.each<[string[], string]>([
+    [['  \n', 'after'], 'a  \nafterb'],
+    [['  \nafter'], 'a  \nafterb'],
+    [['X\n', 'after'], 'a\tX\nafterb'],
+    [['X\nafter'], 'a\tX\nafterb'],
+    [['X', '\n', 'after'], 'a\tX\nafterb'],
+    [['', '  ', '\n', 'after'], 'a  \nafterb'],
+  ])('trims only before a leading plugin break: %j', async (fragments, expected) => {
+    const html = '<p>a&#9;<br>b</p>'
+    const options = {
+      plugins: fragments.map(fragment => createPlugin({
+        onNodeEnter(node) {
+          if (node.name === 'br')
+            return fragment
+        },
+      })),
+    }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `split at ${split}`).toBe(expected)
+    }
+  })
+
   it('preserves whitespace between root-level inline siblings', () => {
     expect(htmlToMarkdown('<span>One</span> <span>Two</span>')).toBe('One Two')
     expect(htmlToMarkdown('<strong>One</strong>\n<strong>Two</strong>')).toBe('**One** **Two**')
