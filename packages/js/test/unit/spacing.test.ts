@@ -212,6 +212,11 @@ describe('inline whitespace', () => {
         '[Read the docs](https://example.com/docs/getting-started/installation/index.html) 1.\nInstall the CLI',
         { wrapWidth: 80 },
       ],
+      // Nor at one an empty pair took along and gave back.
+      ['<p>aaaa<span> <strong></strong><span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
+      ['<p>aaaa<span> <strong><svg></svg></strong><span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
+      ['<p>aaaa<strong> </strong>1. b</p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
+      ['<p>aaaa<b>x </b><strong></strong>1. b</p>', 'aaaa**x** 1.\nb', { wrapWidth: 6 }],
       // A separator trimmed from a closed element joins the text, where it
       // stays a wrap boundary.
       ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],

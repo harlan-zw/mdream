@@ -78,7 +78,7 @@ export interface MarkdownState {
   lastTextNode?: TextNode
   /** Deferred separator trimmed from the end of an inline element */
   pendingInlineWhitespace?: boolean
-  /** That separator is a blank that opened an inline element. */
+  /** That separator is a blank that opened an inline element, or one an empty pair took along and gave back. */
   pendingLeadingBlank?: boolean
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
@@ -1894,9 +1894,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // A blank that opened an inline element owes a separator written on
       // its own, as the Rust engine writes it: inside the text it could take
       // a line break that sets the text at a line start, or land inside a
-      // generated delimiter. A separator trimmed from a closed element joins
-      // the text, where it stays a wrap boundary. U+00A0 is content that
-      // needs it, not a blank that takes its place.
+      // generated delimiter. So does one an empty pair gave back. A separator
+      // trimmed from a closed element joins the text, where it stays a wrap
+      // boundary. U+00A0 is content that needs it, not a blank that takes its
+      // place.
       if (state.pendingInlineWhitespace) {
         if (!hasNonWhitespace(textNode.value))
           return
@@ -2505,11 +2506,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.outputPositions?.replace(idx, buff.length, [])
             buff.length = idx
             state.pendingInlineWhitespace = true
-            state.pendingLeadingBlank = false
+            state.pendingLeadingBlank = true
           }
           if (hoisted) {
             state.pendingInlineWhitespace = true
-            state.pendingLeadingBlank = false
+            state.pendingLeadingBlank = true
           }
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined

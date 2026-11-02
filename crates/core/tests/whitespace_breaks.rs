@@ -830,6 +830,23 @@ fn blank_opening_an_inline_wrapper_is_no_wrap_boundary() {
       80,
       "[Read the docs](https://example.com/docs/getting-started/installation/index.html) 1.\nInstall the CLI",
     ),
+    // Nor at one an empty pair took along and gave back.
+    (
+      "<p>aaaa<span> <strong></strong><span>1. b</span></span></p>",
+      6,
+      "aaaa 1.\nb",
+    ),
+    (
+      "<p>aaaa<span> <strong><svg></svg></strong><span>1. b</span></span></p>",
+      6,
+      "aaaa 1.\nb",
+    ),
+    ("<p>aaaa<strong> </strong>1. b</p>", 6, "aaaa 1.\nb"),
+    (
+      "<p>aaaa<b>x </b><strong></strong>1. b</p>",
+      6,
+      "aaaa**x** 1.\nb",
+    ),
   ] {
     let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
     assert_every_chunking(html, &options, expected);

@@ -836,7 +836,8 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
-  /// That separator is a blank that opened an inline element.
+  /// That separator is a blank that opened an inline element, or one an empty
+  /// pair took along and gave back, so it is written on its own.
   pending_leading_blank: bool,
   /// End of the space the current element's enter wrote for a pending
   /// separator, so an opener written right after it can take it along.
