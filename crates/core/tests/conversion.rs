@@ -6995,6 +6995,91 @@ fn emphasis_holding_only_vertical_tabs_drops_its_delimiters() {
 }
 
 #[test]
+fn emphasis_vertical_tabs_keep_repeated_breaks() {
+  // Streaming holds repeated breaks as one counted run, which moving the
+  // emphasis whitespace must carry along rather than drop.
+  for (html, expected) in [
+    ("<p><em>T&#11;<br><br></em>X</p>", "*T*\u{000b}  \n  \nX"),
+    (
+      "<p><em>T&#11;<br><br><br></em>X</p>",
+      "*T*\u{000b}  \n  \n  \nX",
+    ),
+    ("<p><em>T<br><br>&#11;</em>X</p>", "*T*  \n  \n\u{000b}X"),
+    (
+      "<p><strong>T&#11;<br><br></strong>X</p>",
+      "**T**\u{000b}  \n  \nX",
+    ),
+    (
+      "<p><em>T&#11;<br><br></em></p><p>X</p>",
+      "*T*\u{000b}  \n  \n\nX",
+    ),
+    ("<p>z<em>&#11;<br><br></em>X</p>", "z\u{000b}  \n  \nX"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_vertical_tabs_keep_list_item_block_boundaries() {
+  // The hard break still ends the output once the closer moves before it, so a
+  // block that follows inside the item keeps its blank line.
+  for (html, expected) in [
+    (
+      "<ul><li><em>T&#11;<br></em><p>X</p></li></ul>",
+      "- *T*\u{000b}  \n\n  X",
+    ),
+    (
+      "<ul><li><em>T&#11;<br></em><div>X</div></li></ul>",
+      "- *T*\u{000b}  \n\n  X",
+    ),
+    (
+      "<ul><li><em>T&#11;<br></em><pre>X</pre></li></ul>",
+      "- *T*\u{000b}  \n\n  ```\n  X\n  ```",
+    ),
+    (
+      "<ul><li><em>T&#11;<br></em><table><tr><td>X</td></tr></table></li></ul>",
+      "- *T*\u{000b}  \n\n  | X |\n  | --- |",
+    ),
+    (
+      "<ol><li><em>T&#11;<br></em><ol start=\"3\"><li>X</li></ol></li></ol>",
+      "1. *T*\u{000b}  \n\n   3. X",
+    ),
+    (
+      "<ul><li><strong>T&#11;<br></strong><p>X</p></li></ul>",
+      "- **T**\u{000b}  \n\n  X",
+    ),
+    (
+      "<ul><li><em>T&#11;<br><br></em><p>X</p></li></ul>",
+      "- *T*\u{000b}  \n    \n\n  X",
+    ),
+    (
+      "<ul><li><em>&#11;<br></em><p>X</p></li></ul>",
+      "- \u{000b}  \n\n  X",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
 fn nested_ordered_start_separates_parent_paragraph() {
   for (html, expected) in [
     (

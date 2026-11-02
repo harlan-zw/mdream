@@ -1316,12 +1316,20 @@ impl ConvertState {
   #[inline(never)]
   fn drop_vertical_tab_marker_pair(&mut self, open_marker: OpenMarker, is_inline: bool) {
     let run = self.buffer[open_marker.content_start..].to_owned();
+    // As in `push_output_before_emphasis_whitespace`, the kept run still ends
+    // with any hard break the output ended with.
+    let break_at_end = self.hard_break_end == self.buffer.len();
+    let moved = self.take_break_runs_from(open_marker.content_start);
     self.truncate_buffer(open_marker.output_start);
     if open_marker.starts_at_hard_break {
       self.hard_break_end = open_marker.output_start;
     }
     self.buffer.push_str(&run);
     self.last_content_cache_len = run.len();
+    self.restore_break_runs(moved, open_marker.content_start, open_marker.output_start);
+    if break_at_end {
+      self.hard_break_end = self.buffer.len();
+    }
     self.last_node_is_inline = is_inline;
   }
 
@@ -5198,12 +5206,45 @@ impl ConvertState {
   fn push_output_before_emphasis_whitespace(&mut self, output: &str, start: usize) {
     // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
     let trailing = self.buffer[start..].to_owned();
+    // The run is written back unchanged, so a hard break the output ends with
+    // still ends it and a following block in a list item keeps its blank line.
+    let break_at_end = self.hard_break_end == self.buffer.len();
+    let moved = self.take_break_runs_from(start);
     self.truncate_buffer(start);
     if !output.is_empty() {
       self.last_content_cache_len = self.push_code_span_content(output, true);
     }
+    let target = self.buffer.len();
     self.buffer.push_str(&trailing);
     self.last_content_cache_len = trailing.len();
+    self.restore_break_runs(moved, start, target);
+    if break_at_end {
+      self.hard_break_end = self.buffer.len();
+    }
+  }
+
+  /// Detach the deferred break runs at or after `start` before the bytes there
+  /// are cut and written back. `truncate_buffer` would drop them, and a run
+  /// keeps its repeats as a count, so the moved bytes hold only one break.
+  fn take_break_runs_from(&mut self, start: usize) -> Vec<StreamingBreakRun> {
+    match self
+      .streaming_break_runs
+      .iter()
+      .position(|run| run.output_start >= start)
+    {
+      Some(first) => self.streaming_break_runs.split_off(first),
+      None => Vec::new(),
+    }
+  }
+
+  /// Reattach runs detached by `take_break_runs_from` once their bytes moved
+  /// from `from` to `to`, keeping the runs ordered by offset.
+  fn restore_break_runs(&mut self, moved: Vec<StreamingBreakRun>, from: usize, to: usize) {
+    for mut run in moved {
+      run.output_start = run.output_start - from + to;
+      run.output_end = run.output_end - from + to;
+      self.streaming_break_runs.push(run);
+    }
   }
 
   /// An emphasis delimiter closing after whitespace, which may hold a vertical
