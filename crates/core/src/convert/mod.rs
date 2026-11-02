@@ -836,6 +836,8 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// That separator is a blank that opened an inline element.
+  pending_leading_blank: bool,
   /// End of the space the current element's enter wrote for a pending
   /// separator, so an opener written right after it can take it along.
   pending_space_end: usize,
@@ -1169,6 +1171,7 @@ impl ConvertState {
       has_last_text_node: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      pending_leading_blank: false,
       pending_space_end: usize::MAX,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,

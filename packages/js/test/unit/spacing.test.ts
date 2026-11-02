@@ -203,16 +203,18 @@ describe('inline whitespace', () => {
     const tailwind = () => ({ plugins: [tailwindPlugin()] })
     const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
       // A line break may not take its place and set the text at a line start.
-      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa\n1. b', { wrapWidth: 6 }],
-      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
       ['<p>aaaa<span> <span>- b</span></span></p>', 'aaaa -\nb', { wrapWidth: 6 }],
-      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa\nb', { wrapWidth: 6 }],
-      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa\n  1. b', { wrapWidth: 8 }],
+      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa b', { wrapWidth: 6 }],
+      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa 1.\n  b', { wrapWidth: 8 }],
       [
         '<p><a href="https://example.com/docs/getting-started/installation/index.html">Read the docs</a><span> <span>1. Install the CLI</span></span></p>',
-        '[Read the docs](https://example.com/docs/getting-started/installation/index.html)\n1. Install the CLI',
+        '[Read the docs](https://example.com/docs/getting-started/installation/index.html) 1.\nInstall the CLI',
         { wrapWidth: 80 },
       ],
+      // A separator trimmed from a closed element joins the text, where it
+      // stays a wrap boundary.
+      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],
       // Delimiters a plugin generates around the text stay tight around it.
       ['<p>Read<label> <span class="font-bold">new</span></label> now</p>', 'Read **new** now', tailwind()],
       ['<p>Price<span>: </span><span class="font-bold">$5</span></p>', 'Price: **$5**', tailwind()],

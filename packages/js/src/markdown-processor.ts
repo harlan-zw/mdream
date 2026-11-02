@@ -78,6 +78,8 @@ export interface MarkdownState {
   lastTextNode?: TextNode
   /** Deferred separator trimmed from the end of an inline element */
   pendingInlineWhitespace?: boolean
+  /** That separator is a blank that opened an inline element. */
+  pendingLeadingBlank?: boolean
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
@@ -1425,6 +1427,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
     emptyItemAfterCr: false,
+    pendingLeadingBlank: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -1774,6 +1777,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (!(openMarkerCount && openMarkers[openMarkerCount - 1]! >> 3 === end) && !(link >= 0 && link === end)
       && !(literalOpeners.length && followsLiteralOpener(end + 1))) {
       state.pendingInlineWhitespace = true
+      state.pendingLeadingBlank = true
     }
   }
 
@@ -1887,17 +1891,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         captionBoundary = 0
       }
 
-      // The owed separator is written on its own, as the Rust engine writes
-      // it: inside the text it could take a line break that sets the text at
-      // a line start, or land inside a generated delimiter. U+00A0 is content
-      // that needs it, not a blank that takes its place.
+      // A blank that opened an inline element owes a separator written on
+      // its own, as the Rust engine writes it: inside the text it could take
+      // a line break that sets the text at a line start, or land inside a
+      // generated delimiter. A separator trimmed from a closed element joins
+      // the text, where it stays a wrap boundary. U+00A0 is content that
+      // needs it, not a blank that takes its place.
       if (state.pendingInlineWhitespace) {
         if (!hasNonWhitespace(textNode.value))
           return
         if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || '')
           && !(literalOpeners.length && followsLiteralOpener(state.buffer.length))
           && !(openMarkerCount && hoistOpenerSpace())) {
-          if (textNode.generatedMarkdown?.prefix) {
+          if (textNode.generatedMarkdown?.prefix || state.pendingLeadingBlank) {
             state.buffer.push(' ')
             state.lastContentCache = ' '
             lastChar = ' '
@@ -2311,6 +2317,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             if (cache)
               state.lastContentCache = cache.slice(0, Math.max(0, cache.length - removed))
             state.pendingInlineWhitespace = true
+            state.pendingLeadingBlank = false
             lastBuffEntry = buff.at(-1)!
             lastChar = String.fromCharCode(lastOutputChar(buff))
           }
@@ -2498,9 +2505,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.outputPositions?.replace(idx, buff.length, [])
             buff.length = idx
             state.pendingInlineWhitespace = true
+            state.pendingLeadingBlank = false
           }
-          if (hoisted)
+          if (hoisted) {
             state.pendingInlineWhitespace = true
+            state.pendingLeadingBlank = false
+          }
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
@@ -2688,8 +2698,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
                 state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
                 buff[buff.length - 1] = trimmed
               }
-              if (eventType === NodeEventExit && isInlineElement)
+              if (eventType === NodeEventExit && isInlineElement) {
                 state.pendingInlineWhitespace = true
+                state.pendingLeadingBlank = false
+              }
             }
           }
 

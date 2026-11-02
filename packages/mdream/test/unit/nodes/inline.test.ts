@@ -437,10 +437,10 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
     const engine = await resolveEngine(engineConfig.engine)
     const tailwind = { plugins: { tailwind: true } }
     const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
-      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
       ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],
-      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa\nb', { wrapWidth: 6 }],
-      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa\n  1. b', { wrapWidth: 8 }],
+      ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa b', { wrapWidth: 6 }],
+      ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa 1.\n  b', { wrapWidth: 8 }],
       ['<p>Read<label> <span class="font-bold">new</span></label> now</p>', 'Read **new** now', tailwind],
       ['<p>Price<span>: </span><span class="font-bold">$5</span></p>', 'Price: **$5**', tailwind],
       ['<p>a<span> <span class="italic">b</span></span>c</p>', 'a *b*c', tailwind],

@@ -499,6 +499,7 @@ impl ConvertState {
       || self.follows_literal_opener(end);
     if !follows_opener {
       self.pending_inline_whitespace = true;
+      self.pending_leading_blank = true;
     }
   }
 
@@ -1400,6 +1401,7 @@ impl ConvertState {
       if open_marker.follows_separator && end > 0 && self.buffer.as_bytes()[end - 1] == b' ' {
         end -= 1;
         self.pending_inline_whitespace = true;
+        self.pending_leading_blank = false;
       }
       self.truncate_buffer(end);
       if open_marker.starts_at_hard_break {
@@ -2228,6 +2230,7 @@ impl ConvertState {
       self.last_content_cache_len = self.last_content_cache_len.saturating_sub(removed);
       self.truncate_buffer(text_end);
       self.pending_inline_whitespace = true;
+      self.pending_leading_blank = false;
     }
 
     let link_text_end = self.buffer.len();
@@ -3072,12 +3075,19 @@ impl ConvertState {
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
       // An empty opener run ending the output takes the separator in front.
+      // A separator trimmed from a closed element is a wrap boundary. One a
+      // blank that opened an inline element owes stays outside the text, where
+      // a line break cannot set the text at a line start.
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None)
         && !is_whitespace(first)
         && !self.follows_literal_opener(self.buffer.len())
         && (self.open_markers.is_empty() || !self.hoist_opener_space())
       {
-        if generated_prefix.is_none() && self.wrap_width != 0 && self.can_wrap_here() {
+        if generated_prefix.is_none()
+          && (!self.pending_leading_blank || plain_text!(self))
+          && self.wrap_width != 0
+          && self.can_wrap_here()
+        {
           relocated_space = true;
         } else {
           self.push_code_span_content(" ", true);
@@ -5610,6 +5620,7 @@ impl ConvertState {
               self.last_content_cache_len = trimmed_len;
               if !is_enter && is_inline {
                 self.pending_inline_whitespace = true;
+                self.pending_leading_blank = false;
               }
             }
           }

@@ -811,6 +811,32 @@ fn blank_opening_an_inline_wrapper_keeps_the_word_separator() {
 }
 
 #[test]
+fn blank_opening_an_inline_wrapper_is_no_wrap_boundary() {
+  // A line break may not take its place and set the text at a line start.
+  for (html, width, expected) in [
+    (
+      "<p>aaaa<span> <span>1. b</span></span></p>",
+      6,
+      "aaaa 1.\nb",
+    ),
+    ("<p>aaaaaa<span> <span>b</span></span></p>", 6, "aaaaaa b"),
+    (
+      "<ul><li>aaaa<span> <span>1. b</span></span></li></ul>",
+      8,
+      "- aaaa 1.\n  b",
+    ),
+    (
+      r#"<p><a href="https://example.com/docs/getting-started/installation/index.html">Read the docs</a><span> <span>1. Install the CLI</span></span></p>"#,
+      80,
+      "[Read the docs](https://example.com/docs/getting-started/installation/index.html) 1.\nInstall the CLI",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
 fn separator_before_a_raw_line_break_is_preserved() {
   let options = HtmlToMarkdownOptions::default();
   for (html, expected) in [
