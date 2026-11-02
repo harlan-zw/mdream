@@ -1062,3 +1062,29 @@ describe('emphasis holding only vertical tabs streaming', () => {
     }
   })
 })
+
+describe('vertical tabs moved before hard breaks streaming', () => {
+  it.each([
+    ['<p><em>T&#11;<br><br></em>X</p>', '*T*\u000B  \n  \nX'],
+    ['<p><em>T<br><br>&#11;</em>X</p>', '*T*  \n  \n\u000BX'],
+    ['<p>z<em>&#11;<br><br></em>X</p>', 'z\u000B  \n  \nX'],
+    ['<ul><li><em>T&#11;<br></em><p>X</p></li></ul>', '- *T*\u000B  \n\n  X'],
+    ['<ol><li><em>T&#11;<br></em><ol start="3"><li>X</li></ol></li></ol>', '1. *T*\u000B  \n\n   3. X'],
+    ['<ul><li><em>&#11;<br></em><p>X</p></li></ul>', '- \u000B  \n\n  X'],
+  ] as const)('keeps the breaks and blocks of %s at every chunk width', async (html, expected) => {
+    for (const { engine, name } of engines) {
+      expect(engine.htmlToMarkdown(html), name).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const stream = new ReadableStream<string>({ start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        } })
+        let actual = ''
+        for await (const part of engine.streamHtmlToMarkdown(stream))
+          actual += part
+        expect(actual, `${name}, width ${width}`).toBe(expected)
+      }
+    }
+  })
+})
