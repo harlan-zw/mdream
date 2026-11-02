@@ -1328,10 +1328,13 @@ impl ConvertState {
     let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
     let configured_new_lines = new_line_config[1];
 
+    // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+    // item line is left open for the parent's text to continue.
     if matches!(tag_id, Some(TAG_UL | TAG_OL))
       && node.has_list_item_output
       && self.depth_map[TAG_LI as usize] > 0
       && self.depth_map[TAG_PRE as usize] == 0
+      && self.collapse_non_span_depth == 0
       && !self.in_table_cell()
     {
       self.list_rule_pending = ListBoundary::NestedList;
@@ -2189,6 +2192,19 @@ impl ConvertState {
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = ListBoundary::None;
+      // Nothing visible followed the nested list, so its separator would only
+      // leave a blank line that turns the list loose.
+      if self.list_tail_start != usize::MAX {
+        let start = self.list_tail_start.min(self.buffer.len());
+        if self.buffer[start..]
+          .bytes()
+          .all(|byte| byte.is_ascii_whitespace())
+        {
+          self.truncate_buffer(start);
+          self.last_content_cache_len = 0;
+        }
+        self.list_tail_start = usize::MAX;
+      }
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
     // Only the <pre> owning the open fence may close it; a nested one closing
@@ -2391,7 +2407,8 @@ impl ConvertState {
       && (tag_id == Some(TAG_HR)
         || (matches!(tag_id, Some(TAG_UL | TAG_OL))
           && node.has_list_item_output
-          && self.depth_map[TAG_PRE as usize] == 0))
+          && self.depth_map[TAG_PRE as usize] == 0
+          && self.collapse_non_span_depth == 0))
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
     {
@@ -2784,6 +2801,9 @@ impl ConvertState {
           self.held_break_bytes = 0;
         }
       }
+    }
+    if self.list_tail_start != usize::MAX && has_visible(text.as_bytes()) {
+      self.list_tail_start = usize::MAX;
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.has_last_text_node = true;
@@ -3585,6 +3605,9 @@ impl ConvertState {
   fn shift_offsets_at_or_after(&mut self, at: usize) {
     if self.last_item_marker_end != usize::MAX && self.last_item_marker_end >= at {
       self.last_item_marker_end += 1;
+    }
+    if self.list_tail_start != usize::MAX && self.list_tail_start >= at {
+      self.list_tail_start += 1;
     }
     for marker in &mut self.open_markers {
       if marker.output_start >= at {
@@ -4544,6 +4567,7 @@ impl ConvertState {
     let prefix = self.continuation_prefix();
     let new_lines = if self.list_rule_pending == ListBoundary::NestedList {
       self.trim_trailing_spaces();
+      self.list_tail_start = self.buffer.len();
       usize::from(2_u8.saturating_sub(self.trailing_new_lines()))
     } else {
       2

@@ -970,6 +970,8 @@ pub struct ConvertState {
   empty_item_after_cr: bool,
   /// A rule or nested list waiting to see whether visible parent content follows.
   list_rule_pending: ListBoundary,
+  /// A tentative separator retractable while following wrappers are empty.
+  list_tail_start: usize,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1224,6 +1226,7 @@ impl ConvertState {
       parent_marker_scans: 0,
       empty_item_after_cr: false,
       list_rule_pending: ListBoundary::None,
+      list_tail_start: usize::MAX,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -2634,6 +2637,9 @@ impl ConvertState {
     if self.last_item_marker_end != usize::MAX && offset < self.last_item_marker_end {
       self.last_item_marker_end = usize::MAX;
     }
+    if offset < self.list_tail_start {
+      self.list_tail_start = usize::MAX;
+    }
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -2831,6 +2837,9 @@ impl ConvertState {
     if self.empty_item_hazard {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.list_tail_start != usize::MAX {
+      stable_end = stable_end.min(self.list_tail_start);
+    }
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
     // closes) until the heading is complete.
@@ -3001,6 +3010,9 @@ impl ConvertState {
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.list_tail_start != usize::MAX {
+      drain_end = drain_end.min(self.list_tail_start);
+    }
     if drain_end == 0 {
       return;
     }
@@ -3073,6 +3085,9 @@ impl ConvertState {
     }
     self.empty_item_line_start = self.empty_item_line_start.saturating_sub(drain_end);
     self.empty_item_len = self.empty_item_len.saturating_sub(drain_end);
+    if self.list_tail_start != usize::MAX {
+      self.list_tail_start -= drain_end;
+    }
     // Buffer-indexed like every other stored offset: left alone, streaming reads
     // a different line start than one-shot.
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);

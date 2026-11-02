@@ -48,6 +48,25 @@ describe('inline whitespace', () => {
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
   })
 
+  // Only visible parent text needs its own paragraph after a nested list. An
+  // element that stays empty, or a list its inline wrapper wrote inline, must
+  // not leave a blank line that turns the list loose.
+  it.each([
+    ['<ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul>', '- x\n  - a\n- next'],
+    ['<ul><li>x<ul><li>a</li></ul><a id="anchor"></a></li><li>next</li></ul>', '- x\n  - a\n- next'],
+    ['<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>', '-\n  - a\n- next'],
+    ['<ol><li>x<ol><li>a</li></ol><span></span><em></em></li><li>next</li></ol>', '1. x\n   1. a\n2. next'],
+    ['<blockquote><ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul></blockquote>', '> - x\n>   - a\n> - next'],
+    ['<ul><li><em><ul><li>a</li></ul></em>t</li></ul>', '- *  - a*t'],
+    ['<ul><li><a href="/x"><ul><li>a</li></ul></a>t</li></ul>', '- [  - a](/x)t'],
+    ['<ul><li>x<ul><li>a</li></ul><span></span>tail</li><li>next</li></ul>', '- x\n  - a\n\n  tail\n- next'],
+  ])('keeps a list tight when nothing visible follows its nested list: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+    expect(await streamConvert([...html]), 'one char per chunk').toBe(expected)
+  })
+
   it('preserves whitespace between root-level inline siblings', () => {
     expect(htmlToMarkdown('<span>One</span> <span>Two</span>')).toBe('One Two')
     expect(htmlToMarkdown('<strong>One</strong>\n<strong>Two</strong>')).toBe('**One** **Two**')

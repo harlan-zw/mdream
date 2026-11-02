@@ -135,6 +135,8 @@ export interface MarkdownState {
   emptyItemAfterCr?: boolean
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string | true
+  /** A tentative separator retractable while following wrappers are empty. */
+  listTailStart?: number
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -365,6 +367,12 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   const replacement = separator + buffer[fragment]
   state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + separator.length)
   buffer[fragment] = replacement
+}
+
+/** Invalidate tail records when their source fragments are replaced or removed. */
+function noteListTailRewrite(state: MarkdownState, fragment: number): void {
+  if (state.listTailStart !== undefined && fragment < state.listTailStart)
+    state.listTailStart = undefined
 }
 
 /**
@@ -959,6 +967,15 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
   return DEFAULT_BLOCK_SPACING
 }
 
+/** Whether an ancestor collapses block spacing, as `calculateNewLineConfig` does for `<li>`. */
+function insideInlineWrapper(node: ElementNode): boolean {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.tagHandler?.collapsesInnerWhiteSpace && parent.tagId !== TAG_SPAN)
+      return true
+  }
+  return false
+}
+
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
   const handler = node.tagHandler
   // Custom exits have not run yet. Treat them as wrappers unless a
@@ -987,6 +1004,14 @@ function insideOpenInlineDelimiter(node: ElementNode, state: MarkdownState): boo
       && wrapperEmitsInlineMarkdown(parent, state)) {
       return true
     }
+  }
+  return false
+}
+
+function hasNonWhitespaceFrom(buffer: readonly string[], from: number): boolean {
+  for (let index = from; index < buffer.length; index++) {
+    if (hasNonWhitespace(buffer[index]!))
+      return true
   }
   return false
 }
@@ -1099,6 +1124,7 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
       }
       return offset + added
     })
+    noteListTailRewrite(state, span.fragment + 1)
     state.buffer.length = span.fragment + 1
     state.buffer.push(content)
   }
@@ -1235,6 +1261,7 @@ function finalizeBlockquote(state: MarkdownState): void {
         replacement.push(quoted.slice(end))
       state.outputPositions.replace(frame.fragment, buffer.length, replacement, mapPosition)
     }
+    noteListTailRewrite(state, frame.fragment)
     buffer.length = frame.fragment
     if (start > 0)
       buffer.push(quoted.slice(0, start))
@@ -1247,6 +1274,7 @@ function finalizeBlockquote(state: MarkdownState): void {
   }
 
   state.outputPositions?.replace(frame.fragment, buffer.length, [quoted], mapPosition)
+  noteListTailRewrite(state, frame.fragment)
   buffer.splice(frame.fragment, buffer.length - frame.fragment, quoted)
   state.lastContentCache = quoted
 }
@@ -1464,6 +1492,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     emptyItemFragment: undefined,
     lastItemMarkerFragment: undefined,
     lastItemMarkerOwner: undefined,
+    listTailStart: undefined,
     emptyItemAfterCr: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
@@ -1699,10 +1728,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (end !== 0) {
         state.outputPositions?.replace(index, state.buffer.length, [value.slice(0, end)])
         state.buffer[index] = value.slice(0, end)
+        noteListTailRewrite(state, index + 1)
         state.buffer.length = index + 1
         break
       }
       state.outputPositions?.replace(index, state.buffer.length, [])
+      noteListTailRewrite(state, index)
       state.buffer.length = index
     }
     const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
@@ -1728,6 +1759,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     else if (anchor !== CAPTION_NO_ANCHOR) {
       state.outputPositions?.replace(anchor, state.buffer.length, [])
+      noteListTailRewrite(state, anchor)
       state.buffer.length = anchor
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
@@ -1889,6 +1921,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
+    if (state.listTailStart !== undefined && hasNonWhitespace(textNode.value))
+      state.listTailStart = undefined
     state.lastTextNode = textNode
   }
 
@@ -1947,6 +1981,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         let separator: string
         if (nestedList) {
           trimTrailingSpaces(state.buffer)
+          state.listTailStart = state.buffer.length
           const newLines = Math.max(0, 2 - newlineRunBefore(state.buffer, state.buffer.length))
           separator = `${'\n'.repeat(newLines)}${state.listIndent}`
           state.lastTextNode = undefined
@@ -1964,6 +1999,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       else if (node.type === TEXT_NODE) {
         return
       }
+    }
+    // Nothing visible followed the nested list, so its separator would only
+    // leave a blank line that turns the list loose.
+    if (state.listTailStart !== undefined && node.type === ELEMENT_NODE && eventType === NodeEventExit
+      && (node as ElementNode).tagId === TAG_LI) {
+      const start = state.listTailStart
+      if (start <= state.buffer.length && !hasNonWhitespaceFrom(state.buffer, start)) {
+        state.outputPositions?.replace(start, state.buffer.length, [])
+        state.buffer.length = start
+        state.lastContentCache = state.buffer.at(-1)
+        state.lastTextNode = undefined
+      }
+      state.listTailStart = undefined
     }
 
     const lastNode = state.lastNode
@@ -2175,6 +2223,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventExit
         && tagId === TAG_A) {
         if (dropEmptyLinkText(buff, openLinkFragment, state.outputPositions)) {
+          noteListTailRewrite(state, openLinkFragment)
           if (captionFrameCount !== 0) {
             captionBreakRun = openLinkCaptionBreakRun
             restoreCaptionBreakFlags(captionFrames, openLinkCaptionFlags, captionFrameCount)
@@ -2389,6 +2438,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && !handler?.literalExit) {
         const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
         if (idx >= 0) {
+          noteListTailRewrite(state, idx)
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
@@ -2641,7 +2691,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     else if (eventType === NodeEventExit && (tagId === TAG_UL || tagId === TAG_OL)
       && (element as MarkdownListNode).hasListItemOutput
       && state.depthMap[TAG_LI] && !state.depthMap[TAG_PRE]
-      && !isInsideTableCell(state) && !handler?.literalExit && !hasPluginOutput) {
+      && !isInsideTableCell(state) && !handler?.literalExit && !hasPluginOutput
+      // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+      // item line is left open for the parent's text to continue.
+      && !insideInlineWrapper(element)) {
       state.listRulePending = true
     }
 
@@ -2702,6 +2755,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
     // and a stream cannot take back a nbsp it already yielded.
     const result = trimAsciiWhitespaceEnd(trimOutputStart(state.buffer.join('')))
+    noteListTailRewrite(state, 0)
     state.buffer.length = 0
     return cleanPass ? cleanPass.finish(result).markdown : result
   }
@@ -2717,6 +2771,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
           state.emptyItemFragment ?? Infinity,
+          state.listTailStart ?? Infinity,
           state.codeFence?.fragment ?? Infinity,
           openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
         )

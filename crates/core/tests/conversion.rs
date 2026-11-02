@@ -2960,6 +2960,67 @@ fn parent_text_after_empty_nested_list_stays_in_parent() {
 }
 
 #[test]
+fn empty_inline_after_nested_list_keeps_the_list_tight() {
+  // Only visible parent text needs its own paragraph after a nested list. An
+  // element that stays empty, or a list its inline wrapper wrote inline, must
+  // not leave a blank line that turns the list loose.
+  for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul>",
+      "- x\n  - a\n- next",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><a id=\"anchor\"></a></li><li>next</li></ul>",
+      "- x\n  - a\n- next",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  - a\n- next",
+    ),
+    (
+      "<ol><li>x<ol><li>a</li></ol><span></span><em></em></li><li>next</li></ol>",
+      "1. x\n   1. a\n2. next",
+    ),
+    (
+      "<blockquote><ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul></blockquote>",
+      "> - x\n>   - a\n> - next",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><ul><li>a</li></ul></a>t</li></ul>",
+      "- [  - a](/x)t",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><span></span>tail</li><li>next</li></ul>",
+      "- x\n  - a\n\n  tail\n- next",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = processor.process_chunk(&html[..split]);
+      output.push_str(&processor.process_chunk(&html[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "html={html}, split={split}");
+    }
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut output = String::new();
+    for index in 0..html.len() {
+      output.push_str(&processor.process_chunk(&html[index..=index]));
+    }
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "html={html}, one byte per chunk");
+  }
+}
+
+#[test]
 fn block_marker_after_nested_list_stays_literal() {
   for (text, expected) in [
     ("# h", "\\# h"),
