@@ -1159,6 +1159,8 @@ function parseHtmlInternal(
           const boundary = comment
             ? (result.remainingText.length <= 7 ? result.remainingText : `<!--x${result.remainingText.slice(-3)}`)
             : '<!x'
+          if (textBuffer.length > 0 && isWhitespace(htmlChunk.charCodeAt(runStart)))
+            state.lastCharWasWhitespace = false
           state.trailingText = textBuffer
           return htmlChunk.substring(runStart, i) + boundary
         }
@@ -1174,6 +1176,8 @@ function parseHtmlInternal(
       sealTextRun(textBuffer, state)
       const end = htmlChunk.indexOf('>', i + 2)
       if (end === -1) {
+        if (textBuffer.length > 0 && isWhitespace(htmlChunk.charCodeAt(runStart)))
+          state.lastCharWasWhitespace = false
         state.trailingText = textBuffer
         return `${htmlChunk.substring(runStart, i)}<!x`
       }

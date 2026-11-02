@@ -94,6 +94,22 @@ const cases = [
     '<textarea>a<?x?>b</textarea>',
     'a\\<?x?>b',
   ],
+  [
+    '<b>a</b> <?x?><i>b</i>',
+    '**a** *b*',
+  ],
+  [
+    '<b>a</b> </ x><i>b</i>',
+    '**a** *b*',
+  ],
+  [
+    '<b>a</b> <!xy><i>b</i>',
+    '**a** *b*',
+  ],
+  [
+    '<b>a</b> <!doctype x><i>b</i>',
+    '**a** *b*',
+  ],
 ]
 
 describe.each(engines)('$name bogus comments', ({ engine }) => {
