@@ -45,7 +45,7 @@ function flushBlockquoteLines(state: MarkdownState): boolean {
     return false
 
   const content = buffer.slice(start).join('')
-  const stableEnd = trimAsciiWhitespaceEnd(content).length
+  const stableEnd = trimAsciiWhitespaceEnd(content, true).length
   let end = content.lastIndexOf('\n', stableEnd - 1) + 1
   while (end >= 2 && content.charCodeAt(end - 2) === 10)
     end--
@@ -123,7 +123,7 @@ function prepareQuoteOutput(state: MarkdownState, bufferScan: BufferScanState, q
   for (; quoteScan.fragment < state.buffer.length; quoteScan.fragment++) {
     const fragment = state.buffer[quoteScan.fragment]!
     const lastNewline = fragment.lastIndexOf('\n')
-    const contentEnd = trimAsciiWhitespaceEnd(fragment).length
+    const contentEnd = trimAsciiWhitespaceEnd(fragment, true).length
     if (contentEnd > 0) {
       const settled = lastNewline < contentEnd
         ? lastNewline
@@ -185,7 +185,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     if (end < heldRunEnd || buffer[heldRunEnd - 1] !== heldRunLast)
       return false
     for (let index = heldRunEnd; index < end; index++) {
-      if (trimAsciiWhitespaceEnd(buffer[index]!).length !== 0)
+      if (trimAsciiWhitespaceEnd(buffer[index]!, true).length !== 0)
         return false
     }
     heldRunEnd = end
@@ -263,12 +263,13 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       }
     }
     else {
-      // The prefix ends before a mutable owner. Its trailing block spacing
-      // stays buffered even when that owner sits inside a preformatted block.
-      // The whole ASCII set stays with it: the trims that reach back here, and
-      // the final one, take a tab, form feed or carriage return as well.
-      while (stableLength > 0 && isAsciiWhitespace(currentContent.charCodeAt(stableLength - 1)))
+      // U+000B stays mutable until an inline closer settles it.
+      while (stableLength > 0) {
+        const code = currentContent.charCodeAt(stableLength - 1)
+        if (!isAsciiWhitespace(code) && (final || code !== 11))
+          break
         stableLength--
+      }
       retainMutableFragments = stableLength < currentContent.length
       heldRunStart = stableLength
     }
