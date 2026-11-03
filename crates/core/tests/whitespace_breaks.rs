@@ -298,6 +298,53 @@ fn a_list_item_break_escapes_a_marker_before_a_trimmed_form_feed() {
 }
 
 #[test]
+fn a_list_item_break_keeps_the_form_feed_after_a_marker_the_escape_left_bare() {
+  // A tab opening the line keeps the escape off a marker, though the item's
+  // indent still lets it open a block. Only the form feed keeps it text, so
+  // the run stays, as before the item's break took a run.
+  let options = HtmlToMarkdownOptions::default();
+  let sp = "&#32;".repeat(20);
+  let pad = " ".repeat(20);
+  for (html, expected) in [
+    (
+      "<ul><li>a&#10;&#9;-&#12;<br>b</li></ul>".to_string(),
+      "- a\n\t-\u{c}  \n  b".to_string(),
+    ),
+    (
+      "<ul><li>a&#10;&#9;=&#12;<br>b</li></ul>".to_string(),
+      "- a\n\t=\u{c}  \n  b".to_string(),
+    ),
+    (
+      "<ul><li>1.&#13;&#9;-<span>&#12;</span><br>b</li></ul>".to_string(),
+      "- 1\\.\r\t-\u{c}  \n  b".to_string(),
+    ),
+    (
+      "<ul><li>a&#13;&#10;&#9;&#32;&#32;---&#12;<br>b</li></ul>".to_string(),
+      "- a\r\n\t  ---\u{c}  \n  b".to_string(),
+    ),
+    (
+      "<ol><li>a&#10;&#9;===<span>&#12;</span><br>b</li></ol>".to_string(),
+      "1. a\n\t===\u{c}  \n   b".to_string(),
+    ),
+    (
+      "<ul><li>x<ul><li>a&#10;&#9;#&#12;<br>b</li></ul></li></ul>".to_string(),
+      "- x\n  - a\n\t#\u{c}  \n    b".to_string(),
+    ),
+    (
+      format!("<ul><li>a&#10;&#9;{sp}=<span>&#12;</span><br>b</li></ul>"),
+      format!("- a\n\t{pad}=\u{c}  \n  b"),
+    ),
+    // Item text after the form feed still loses its run.
+    (
+      "<ul><li>a&#10;&#9;-&#12;x&#9;<br>b</li></ul>".to_string(),
+      "- a\n\t-\u{c}x  \n  b".to_string(),
+    ),
+  ] {
+    assert_every_chunking(&html, &options, &expected);
+  }
+}
+
+#[test]
 fn a_list_item_break_reads_the_marker_run_past_a_drained_line_start() {
   // A long item line drains its start while it streams. The marker check goes
   // on through what the drain cut, as one-shot reads the whole line: the run

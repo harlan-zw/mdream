@@ -988,14 +988,21 @@ function startsWithBreak(fragments: string[] | undefined): boolean {
   return false
 }
 
-// How a line reads as the list markers a list item's break checks for, as
-// `MarkerRun` in Rust: open where a marker may begin (a line start, or after a
-// marker and a space), the count of an ordered marker's digits from 1 to 9,
-// right after a whole marker, or broken by anything else. Compaction records
-// it for the line it cuts, so the check can go on past the buffer's start.
+// How a line reads as the block markers a list item's break checks for, as
+// `MarkerRun` in Rust: open where a marker may begin (a line start, after a
+// marker and a space or a tab, or after `>`), the count of an ordered marker's
+// digits from 1 to 9, right after a whole `*`, `+` or ordered marker, right
+// after a `-`, a run of `-` and blanks with two `-` in a row, a `=` run, a run
+// of one to six `#`, or broken by anything else. Compaction records it for the
+// line it cuts, so the check can go on past the buffer's start.
 const MARKER_RUN_OPEN = 0
 const MARKER_RUN_MARKER = 10
-const MARKER_RUN_BROKEN = 11
+const MARKER_RUN_DASH = 11
+const MARKER_RUN_DASHES = 12
+const MARKER_RUN_EQUALS = 13
+// One `#`, up to six at `MARKER_RUN_HASH + 5`.
+const MARKER_RUN_HASH = 14
+const MARKER_RUN_BROKEN = 20
 
 /**
  * The marker run after `text` from `start` to `end`, which continue a line
@@ -1013,18 +1020,42 @@ function markerRunAfter(run: number, text: string, start: number, end: number): 
   }
   for (; index < end; index++) {
     const code = text.charCodeAt(index)
-    if (code === 32 && (run === MARKER_RUN_OPEN || run === MARKER_RUN_MARKER))
+    if (((code === 32 || code === 9) && (run === MARKER_RUN_OPEN || run === MARKER_RUN_MARKER || run === MARKER_RUN_DASH)) || (code === 62 && run === MARKER_RUN_OPEN))
       run = MARKER_RUN_OPEN
-    else if ((code === 45 || code === 42 || code === 43) && run === MARKER_RUN_OPEN)
+    else if (code === 45 && run === MARKER_RUN_OPEN)
+      run = MARKER_RUN_DASH
+    else if ((code === 45 && (run === MARKER_RUN_DASH || run === MARKER_RUN_DASHES)) || ((code === 32 || code === 9) && run === MARKER_RUN_DASHES))
+      run = MARKER_RUN_DASHES
+    else if ((code === 42 || code === 43) && run === MARKER_RUN_OPEN)
       run = MARKER_RUN_MARKER
     else if ((code === 46 || code === 41) && run > MARKER_RUN_OPEN && run < MARKER_RUN_MARKER)
       run = MARKER_RUN_MARKER
     else if (code >= 48 && code <= 57 && run < 9)
       run++
+    else if (code === 61 && (run === MARKER_RUN_OPEN || run === MARKER_RUN_EQUALS))
+      run = MARKER_RUN_EQUALS
+    else if (code === 35 && run === MARKER_RUN_OPEN)
+      run = MARKER_RUN_HASH
+    else if (code === 35 && run >= MARKER_RUN_HASH && run < MARKER_RUN_HASH + 5)
+      run++
     else
       return MARKER_RUN_BROKEN
   }
   return run
+}
+
+/**
+ * Whether a line ends right after a marker that the escape takes at a line
+ * start: a list marker, an ATX opening, or a setext or thematic run.
+ */
+function endsInMarker(run: number): boolean {
+  return run >= MARKER_RUN_MARKER && run < MARKER_RUN_BROKEN
+}
+
+/** Whether `code` can be part of a line `markerRunAfter` reads as markers. */
+function readsAsMarker(code: number): boolean {
+  return code === 32 || code === 9 || code === 45 || code === 42 || code === 43 || code === 46 || code === 41
+    || code === 61 || code === 35 || code === 62 || (code >= 48 && code <= 57)
 }
 
 /**
@@ -1047,59 +1078,41 @@ export function noteCompactedMarkerRun(scan: BufferScanState, content: string, e
 
 /**
  * Whether the text ending at `end` in `buffer[fragment]` is a list marker, `-`,
- * `*`, `+`, or digits then `.` or `)`, that only spaces and other such markers
- * precede on its line: the item's own, or item text that a wrap left where the
- * trim would make it one. Item text that just ends like a marker, as in
- * `see item 1.`, is not. `cutRun` is the run of what compaction dropped.
+ * `*`, `+`, or digits then `.` or `)`, that only spaces or tabs and other such
+ * markers precede on its line: the item's own, or item text that a wrap left
+ * where the trim would make it one. Item text that just ends like a marker, as
+ * in `see item 1.`, is not. A line that ends in a `#`, `=` or dash run the
+ * escape left bare, as after a tab, counts too, since a form feed in the run
+ * is what keeps it from reading as a heading, a setext underline or a thematic
+ * break. `cutRun` is the run of what compaction dropped.
  */
 function followsItemMarker(buffer: readonly string[], fragment: number, end: number, cutRun: number): boolean {
   let index = fragment
   let offset = end
-  const previous = (): number => {
-    while (offset === 0) {
-      if (--index < 0)
-        return -1
-      offset = buffer[index]!.length
-    }
-    return buffer[index]!.charCodeAt(--offset)
-  }
-  // At the buffer's start, even inside a marker, the cut line's run goes on
-  // into the buffer.
-  const continuesCutRun = (): boolean => {
-    let run = cutRun
-    for (let at = 0; at < fragment; at++)
-      run = markerRunAfter(run, buffer[at]!, 0, buffer[at]!.length)
-    return markerRunAfter(run, buffer[fragment]!, 0, end) === MARKER_RUN_MARKER
-  }
-  let code = previous()
   for (;;) {
-    if (code === 46 || code === 41) {
-      let digits = 0
-      code = previous()
-      while (code >= 48 && code <= 57) {
-        digits++
-        code = previous()
+    if (offset === 0) {
+      if (index === 0) {
+        // At the buffer's start, even inside a marker, the cut line's run goes
+        // on into the buffer.
+        let run = cutRun
+        for (let at = 0; at < fragment; at++)
+          run = markerRunAfter(run, buffer[at]!, 0, buffer[at]!.length)
+        return endsInMarker(markerRunAfter(run, buffer[fragment]!, 0, end))
       }
-      if (digits > 9)
-        return false
-      if (digits === 0)
-        return code === -1 && continuesCutRun()
+      offset = buffer[--index]!.length
+      continue
     }
-    else if (code === 45 || code === 42 || code === 43) {
-      code = previous()
-    }
-    else {
-      return false
-    }
-    if (code !== 32)
-      return code === -1 ? continuesCutRun() : code === 10 || code === 13
-    while (code === 32)
-      code = previous()
-    if (code === -1)
-      return continuesCutRun()
-    if (code === 10 || code === 13)
-      return true
+    if (!readsAsMarker(buffer[index]!.charCodeAt(offset - 1)))
+      break
+    offset--
   }
+  const code = buffer[index]!.charCodeAt(offset - 1)
+  if (code !== 10 && code !== 13)
+    return false
+  let run = MARKER_RUN_OPEN
+  for (let at = index; at < fragment; at++)
+    run = markerRunAfter(run, buffer[at]!, at === index ? offset : 0, buffer[at]!.length)
+  return endsInMarker(markerRunAfter(run, buffer[fragment]!, index === fragment ? offset : 0, end))
 }
 
 /** HTML's ASCII whitespace, as in Rust: U+000B is content. */
@@ -1812,7 +1825,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     // A run that reaches back past compaction ends where the cut line's own
     // trailing blanks begin.
-    if (index < 0 && state.depthMap[TAG_LI] && bufferScan[8] === MARKER_RUN_MARKER)
+    if (index < 0 && state.depthMap[TAG_LI] && endsInMarker(bufferScan[8]))
       return
     let remove = opensLine ? run - Math.min(indent, run) : run
     for (let index = buff.length - 1; remove > 0; index--) {

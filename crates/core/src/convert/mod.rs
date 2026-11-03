@@ -440,18 +440,29 @@ enum CutLineLead {
   Content,
 }
 
-/// How a line reads as the list markers a list item's break checks for:
-/// spaces, then `-`, `*`, `+`, or one to nine digits and `.` or `)`, each
-/// further marker after at least one space. A drain records it for the line
-/// it cuts, so the check can go on past the start of the buffer.
+/// How a line reads as the block markers a list item's break checks for:
+/// spaces or tabs, then `-`, `*`, `+`, or one to nine digits and `.` or `)`,
+/// each further marker after at least one space or tab, with `>` before any
+/// of them. The line can also end in one to six `#`, a `=` run, or a run of
+/// `-` and blanks. A drain records it for the line it cuts, so the check can
+/// go on past the start of the buffer.
 #[derive(Clone, Copy, PartialEq)]
 enum MarkerRun {
-  /// At a line start, or after a marker and a space: a marker may begin.
+  /// At a line start, after a marker and a space or a tab, or after `>`: a
+  /// marker may begin.
   Open,
   /// Inside an ordered marker, after this many digits.
   Digits(u8),
-  /// Right after a whole marker.
+  /// Right after a whole `*`, `+` or ordered marker.
   Marker,
+  /// Right after a `-` that a marker or a dash run can start with.
+  Dash,
+  /// A run of `-` and blanks with two `-` in a row.
+  Dashes,
+  /// A `=` run.
+  Equals,
+  /// A run of this many `#`.
+  Hashes(u8),
   /// Anything else on the line.
   Broken,
 }
@@ -466,14 +477,36 @@ impl MarkerRun {
     };
     for &byte in rest {
       run = match (run, byte) {
-        (Self::Open | Self::Marker, b' ') => Self::Open,
-        (Self::Open, b'-' | b'*' | b'+') | (Self::Digits(_), b'.' | b')') => Self::Marker,
+        (Self::Open | Self::Marker | Self::Dash, b' ' | b'\t') | (Self::Open, b'>') => Self::Open,
+        (Self::Open, b'-') => Self::Dash,
+        (Self::Dash | Self::Dashes, b'-') | (Self::Dashes, b' ' | b'\t') => Self::Dashes,
+        (Self::Open, b'*' | b'+') | (Self::Digits(_), b'.' | b')') => Self::Marker,
         (Self::Open, b'0'..=b'9') => Self::Digits(1),
         (Self::Digits(digits), b'0'..=b'9') if digits < 9 => Self::Digits(digits + 1),
+        (Self::Open | Self::Equals, b'=') => Self::Equals,
+        (Self::Open, b'#') => Self::Hashes(1),
+        (Self::Hashes(hashes), b'#') if hashes < 6 => Self::Hashes(hashes + 1),
         _ => return Self::Broken,
       };
     }
     run
+  }
+
+  /// Whether the line ends right after a marker that the escape takes at a
+  /// line start: a list marker, an ATX opening, or a setext or thematic run.
+  fn ends_in_marker(self) -> bool {
+    matches!(
+      self,
+      Self::Marker | Self::Dash | Self::Dashes | Self::Equals | Self::Hashes(_)
+    )
+  }
+
+  /// Whether `byte` can be part of a line `after` reads as markers.
+  fn reads(byte: u8) -> bool {
+    matches!(
+      byte,
+      b' ' | b'\t' | b'-' | b'*' | b'+' | b'.' | b')' | b'=' | b'#' | b'>' | b'0'..=b'9'
+    )
   }
 }
 

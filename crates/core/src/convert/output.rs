@@ -3972,7 +3972,7 @@ impl ConvertState {
         } else {
           // A run that reaches back past a drain's cut ends where the cut
           // line's own trailing blanks begin.
-          trimmed_len == 0 && self.cut_marker_run_before_blanks == MarkerRun::Marker
+          trimmed_len == 0 && self.cut_marker_run_before_blanks.ends_in_marker()
         }
       {
         return;
@@ -3989,48 +3989,24 @@ impl ConvertState {
   }
 
   /// Whether `text` ends in a list marker, `-`, `*`, `+`, or digits then `.`
-  /// or `)`, that only spaces and other such markers precede on its line: the
-  /// item's own, or item text that a wrap left where the trim would make it
-  /// one. Item text that just ends like a marker, as in `see item 1.`, is not.
+  /// or `)`, that only spaces or tabs and other such markers precede on its
+  /// line: the item's own, or item text that a wrap left where the trim would
+  /// make it one. Item text that just ends like a marker, as in `see item 1.`,
+  /// is not. A line that ends in a `#`, `=` or dash run the escape left bare,
+  /// as after a tab, counts too, since a form feed in the run is what keeps it
+  /// from reading as a heading, a setext underline or a thematic break.
   fn follows_item_marker(&self, text: &[u8]) -> bool {
-    let mut end = text.len();
-    loop {
-      match text[..end].last() {
-        Some(b'.' | b')') => {
-          end -= 1;
-          let digits = text[..end]
-            .iter()
-            .rev()
-            .take_while(|byte| byte.is_ascii_digit())
-            .count();
-          if digits > 9 {
-            return false;
-          }
-          if digits == 0 {
-            // The digits can sit before a drain's cut.
-            return end == 0 && self.cut_marker_run.after(text) == MarkerRun::Marker;
-          }
-          end -= digits;
-        }
-        Some(b'-' | b'*' | b'+') => end -= 1,
-        _ => return false,
-      }
-      let marker_start = end;
-      while end > 0 && text[end - 1] == b' ' {
-        end -= 1;
-      }
-      if end == 0 {
-        // A streamed buffer can start mid-line once earlier output drains,
-        // even inside a marker: the cut line's run goes on into this one.
-        return self.cut_marker_run.after(text) == MarkerRun::Marker;
-      }
-      if matches!(text[end - 1], b'\n' | b'\r') {
-        return true;
-      }
-      if end == marker_start {
-        return false;
-      }
+    let start = text
+      .iter()
+      .rposition(|&byte| !MarkerRun::reads(byte))
+      .map_or(0, |at| at + 1);
+    if start == 0 {
+      // A streamed buffer can start mid-line once earlier output drains,
+      // even inside a marker: the cut line's run goes on into this one.
+      return self.cut_marker_run.after(text).ends_in_marker();
     }
+    matches!(text[start - 1], b'\n' | b'\r')
+      && MarkerRun::Open.after(&text[start..]).ends_in_marker()
   }
 
   /// Plain text ends a line on a space and tab run, as in JS. Kept out of

@@ -345,6 +345,16 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<li>a<br>-&#12;<br>b</li>', '- a  \n  \\-  \n  b', 'a\n-\nb'],
   ['<ol><li>a<br>2)&#12;<br>b</li></ol>', '1. a  \n   2\\)  \n   b', 'a\n2)\nb'],
   ['<li>--&#12;</li>', '- \\--', '--'],
+  // A tab opening the line keeps the escape off a marker, though the item's
+  // indent still lets it open a block, so the form feed and its run stay.
+  ['<ul><li>a&#10;&#9;-&#12;<br>b</li></ul>', '- a\n\t-\f  \n  b', 'a\n\t-\nb'],
+  ['<ul><li>a&#10;&#9;=&#12;<br>b</li></ul>', '- a\n\t=\f  \n  b', 'a\n\t=\nb'],
+  ['<ul><li>1.&#13;&#9;-<span>&#12;</span><br>b</li></ul>', '- 1\\.\r\t-\f  \n  b', '1.\r\t-\nb'],
+  ['<ul><li>a&#13;&#10;&#9;&#32;&#32;---&#12;<br>b</li></ul>', '- a\r\n\t  ---\f  \n  b', 'a\r\n\t  ---\nb'],
+  ['<ol><li>a&#10;&#9;===<span>&#12;</span><br>b</li></ol>', '1. a\n\t===\f  \n   b', 'a\n\t===\nb'],
+  ['<ul><li>x<ul><li>a&#10;&#9;#&#12;<br>b</li></ul></li></ul>', '- x\n  - a\n\t#\f  \n    b', 'x\na\n\t#\nb'],
+  [`<ul><li>a&#10;&#9;${'&#32;'.repeat(20)}=<span>&#12;</span><br>b</li></ul>`, `- a\n\t${' '.repeat(20)}=\f  \n  b`, `a\n\t${' '.repeat(20)}=\nb`],
+  ['<ul><li>a&#10;&#9;-&#12;x&#9;<br>b</li></ul>', '- a\n\t-\fx  \n  b', 'a\n\t-\fx\nb'],
   ['<blockquote>a&#9;<br>b</blockquote>', '> a  \n> b', 'a\nb'],
   // HTML's ASCII whitespace leaves out U+000B, so it is content and stops a trim.
   ['<p>a&#11;<br></p>', 'a\u000B', 'a\u000B'],
