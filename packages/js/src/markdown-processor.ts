@@ -584,8 +584,13 @@ function markdownLineIndent(buffer: string[], structuralIndent: number): number 
   return Math.max(0, spaces - structuralIndent)
 }
 
+/**
+ * Only a space or a tab ends a marker in CommonMark, but the escape takes a
+ * form feed too: a break or the block's end trims it with the rest of the
+ * trailing whitespace, which leaves the marker ending its line.
+ */
 function isMarkdownMarkerWhitespace(code: number): boolean {
-  return code === 0 || code === 9 || code === 10 || code === 13 || code === 32
+  return code === 9 || code === 10 || code === 12 || code === 13 || code === 32
 }
 
 function canStartGfmAngleConstruct(code: number): boolean {
@@ -598,14 +603,16 @@ function canStartGfmAngleConstruct(code: number): boolean {
 
 /**
  * A line of only `-` and blanks is a list marker, a thematic break, or a
- * setext underline, so its leading `-` always needs an escape.
+ * setext underline, so its leading `-` always needs an escape. The escape
+ * passes `formFeed`, since a break or the block's end can trim a form feed;
+ * the wrap guard counts only spaces and tabs.
  */
-function isDashLine(value: string, start: number): boolean {
+function isDashLine(value: string, start: number, formFeed: boolean): boolean {
   for (let index = start; index < value.length; index++) {
     const code = value.charCodeAt(index)
     if (code === 10 || code === 13)
       break
-    if (code !== 45 && code !== 32 && code !== 9)
+    if (code !== 45 && code !== 32 && code !== 9 && (!formFeed || code !== 12))
       return false
   }
   return true
@@ -613,9 +620,9 @@ function isDashLine(value: string, start: number): boolean {
 
 /**
  * A `=` run followed only by blanks is a setext underline; blanks inside the
- * run make it plain text.
+ * run make it plain text. `formFeed` is as for `isDashLine`.
  */
-function isEqualsLine(value: string, start: number): boolean {
+function isEqualsLine(value: string, start: number, formFeed: boolean): boolean {
   let index = start + 1
   while (index < value.length && value.charCodeAt(index) === 61)
     index++
@@ -623,7 +630,7 @@ function isEqualsLine(value: string, start: number): boolean {
     const code = value.charCodeAt(index)
     if (code === 10 || code === 13)
       break
-    if (code !== 32 && code !== 9)
+    if (code !== 32 && code !== 9 && (!formFeed || code !== 12))
       return false
   }
   return true
@@ -729,7 +736,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
       else if (code === 45 || code === 43) { // unordered list marker
         shouldEscape = index + 1 === value.length
           || isMarkdownMarkerWhitespace(value.charCodeAt(index + 1))
-          || (code === 45 && isDashLine(value, index))
+          || (code === 45 && isDashLine(value, index, true))
       }
       else if (code === 62) { // blockquote marker
         shouldEscape = true
@@ -737,7 +744,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
       // A node ending inside the run still escapes, since inline nodes can
       // split one setext underline.
       else if (code === 61) {
-        shouldEscape = isEqualsLine(value, index)
+        shouldEscape = isEqualsLine(value, index, true)
       }
     }
     else if (!shouldEscape && orderedDigits > 0 && (code === 46 || code === 41)) {
@@ -814,7 +821,7 @@ function columnWidth(value: string, start: number): number {
  */
 function isSetextMarkerRun(word: string): boolean {
   const first = word.charCodeAt(0)
-  return first === 45 ? isDashLine(word, 0) : first === 61 && isEqualsLine(word, 0)
+  return first === 45 ? isDashLine(word, 0, false) : first === 61 && isEqualsLine(word, 0, false)
 }
 
 /**

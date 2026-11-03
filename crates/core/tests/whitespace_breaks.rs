@@ -334,6 +334,35 @@ fn a_break_after_a_whitespace_only_wrapper_keeps_its_line_end() {
 }
 
 #[test]
+fn a_marker_before_a_trimmed_form_feed_stays_text() {
+  // Only a space or a tab ends a marker, but the trim before a break or at the
+  // block's end takes the form feed, so the marker is escaped as if it ended
+  // its line.
+  let markdown = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>#&#12;<br>b</p>", "\\#  \nb"),
+    ("<p>a<br>=&#12;<br>b</p>", "a  \n\\=  \nb"),
+    ("<p>a<br>=&#12;</p>", "a  \n\\="),
+    ("<p>a<br>--&#12;<br>b</p>", "a  \n\\--  \nb"),
+    ("<p>1.&#12;<br>b</p>", "1\\.  \nb"),
+    ("<blockquote>#&#12;<br>b</blockquote>", "> \\#  \n> b"),
+    ("<p>#&#12;x</p>", "\\#\u{c}x"),
+    // A NUL is content, as in the JS engine.
+    ("<p>#\u{0}x</p>", "#\u{0}x"),
+  ] {
+    assert_every_chunking(html, &markdown, expected);
+  }
+  // Wrapping still moves a marker run that ends in a form feed to the next line.
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa ===&#12; # x</p>", "aaaaaaaaaa\n===\u{c} # x"),
+    ("<p>aaaaaaaaaa ---&#12; + x</p>", "aaaaaaaaaa\n---\u{c} + x"),
+  ] {
+    let wrapped = HtmlToMarkdownOptions::default().with_wrap_width(10);
+    assert_every_chunking(html, &wrapped, expected);
+  }
+}
+
+#[test]
 fn quote_flushing_keeps_the_inline_source_tail_mutable() {
   let text = "a".repeat(8200);
   for (tag, marker) in [("em", "*"), ("strong", "**"), ("del", "~~")] {
