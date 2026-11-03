@@ -490,6 +490,8 @@ export type BufferScanState = [
   lineStartOffset: number,
   compactedLineOpensRawHtml: boolean | undefined,
   pendingLineSpaces: number,
+  compactedMarkerRun: number,
+  compactedMarkerRunBeforeBlanks: number,
 ]
 
 function trackRawHtmlMarkdownContext(buffer: string[], scan: BufferScanState): boolean {
@@ -986,14 +988,73 @@ function startsWithBreak(fragments: string[] | undefined): boolean {
   return false
 }
 
+// How a line reads as the list markers a list item's break checks for, as
+// `MarkerRun` in Rust: open where a marker may begin (a line start, or after a
+// marker and a space), the count of an ordered marker's digits from 1 to 9,
+// right after a whole marker, or broken by anything else. Compaction records
+// it for the line it cuts, so the check can go on past the buffer's start.
+const MARKER_RUN_OPEN = 0
+const MARKER_RUN_MARKER = 10
+const MARKER_RUN_BROKEN = 11
+
+/**
+ * The marker run after `text` from `start` to `end`, which continue a line
+ * read up to `run`. A line end, `\n` or `\r`, starts the run over.
+ */
+function markerRunAfter(run: number, text: string, start: number, end: number): number {
+  let index = end
+  while (index > start) {
+    const code = text.charCodeAt(index - 1)
+    if (code === 10 || code === 13) {
+      run = MARKER_RUN_OPEN
+      break
+    }
+    index--
+  }
+  for (; index < end; index++) {
+    const code = text.charCodeAt(index)
+    if (code === 32 && (run === MARKER_RUN_OPEN || run === MARKER_RUN_MARKER))
+      run = MARKER_RUN_OPEN
+    else if ((code === 45 || code === 42 || code === 43) && run === MARKER_RUN_OPEN)
+      run = MARKER_RUN_MARKER
+    else if ((code === 46 || code === 41) && run > MARKER_RUN_OPEN && run < MARKER_RUN_MARKER)
+      run = MARKER_RUN_MARKER
+    else if (code >= 48 && code <= 57 && run < 9)
+      run++
+    else
+      return MARKER_RUN_BROKEN
+  }
+  return run
+}
+
+/**
+ * Note that compaction dropped `content` up to `end`. A list item's break
+ * reads its line's markers back from the trailing run, so what it would have
+ * read there stays known, both up to the cut and up to the last byte before
+ * the trailing blanks the break's trim also takes.
+ */
+export function noteCompactedMarkerRun(scan: BufferScanState, content: string, end: number): void {
+  if (end <= 0)
+    return
+  let blanksStart = end
+  while (blanksStart > 0 && isBreakWhitespace(content.charCodeAt(blanksStart - 1)))
+    blanksStart--
+  const run = markerRunAfter(scan[7], content, 0, end)
+  if (blanksStart === end)
+    scan[8] = run
+  else if (blanksStart > 0)
+    scan[8] = markerRunAfter(scan[7], content, 0, blanksStart)
+  scan[7] = run
+}
+
 /**
  * Whether the text ending at `end` in `buffer[fragment]` is a list marker, `-`,
  * `*`, `+`, or digits then `.` or `)`, that only spaces and other such markers
  * precede on its line: the item's own, or item text that a wrap left where the
  * trim would make it one. Item text that just ends like a marker, as in
- * `see item 1.`, is not.
+ * `see item 1.`, is not. `cutRun` is the run of what compaction dropped.
  */
-function followsItemMarker(buffer: readonly string[], fragment: number, end: number): boolean {
+function followsItemMarker(buffer: readonly string[], fragment: number, end: number, cutRun: number): boolean {
   let index = fragment
   let offset = end
   const previous = (): number => {
@@ -1004,6 +1065,14 @@ function followsItemMarker(buffer: readonly string[], fragment: number, end: num
     }
     return buffer[index]!.charCodeAt(--offset)
   }
+  // At the buffer's start, even inside a marker, the cut line's run goes on
+  // into the buffer.
+  const continuesCutRun = (): boolean => {
+    let run = cutRun
+    for (let at = 0; at < fragment; at++)
+      run = markerRunAfter(run, buffer[at]!, 0, buffer[at]!.length)
+    return markerRunAfter(run, buffer[fragment]!, 0, end) === MARKER_RUN_MARKER
+  }
   let code = previous()
   for (;;) {
     if (code === 46 || code === 41) {
@@ -1013,8 +1082,10 @@ function followsItemMarker(buffer: readonly string[], fragment: number, end: num
         digits++
         code = previous()
       }
-      if (digits === 0 || digits > 9)
+      if (digits > 9)
         return false
+      if (digits === 0)
+        return code === -1 && continuesCutRun()
     }
     else if (code === 45 || code === 42 || code === 43) {
       code = previous()
@@ -1023,10 +1094,12 @@ function followsItemMarker(buffer: readonly string[], fragment: number, end: num
       return false
     }
     if (code !== 32)
-      return code === -1 || code === 10 || code === 13
+      return code === -1 ? continuesCutRun() : code === 10 || code === 13
     while (code === 32)
       code = previous()
-    if (code === -1 || code === 10 || code === 13)
+    if (code === -1)
+      return continuesCutRun()
+    if (code === 10 || code === 13)
       return true
   }
 }
@@ -1525,7 +1598,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFenceOwnerDepth: 0,
     preFenceOpener: undefined,
   }
-  const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
+  const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0, MARKER_RUN_OPEN, MARKER_RUN_OPEN]
   let inRawHtmlRegion = false
   let rawHtmlNeedsBoundary = false
   let pendingRawHtmlBoundary = false
@@ -1725,7 +1798,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       floor = quote.fragment
     let run = 0
     let opensLine = false
-    for (let index = buff.length - 1; index >= floor; index--) {
+    let index = buff.length - 1
+    for (; index >= floor; index--) {
       const fragment = buff[index]!
       let end = fragment.length
       while (end > 0 && isBreakWhitespace(fragment.charCodeAt(end - 1)))
@@ -1733,11 +1807,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       run += fragment.length - end
       if (end > 0) {
         opensLine = fragment.charCodeAt(end - 1) === 10
-        if (!opensLine && state.depthMap[TAG_LI] && followsItemMarker(buff, index, end))
+        if (!opensLine && state.depthMap[TAG_LI] && followsItemMarker(buff, index, end, bufferScan[7]))
           return
         break
       }
     }
+    // A run that reaches back past compaction ends where the cut line's own
+    // trailing blanks begin.
+    if (index < 0 && state.depthMap[TAG_LI] && bufferScan[8] === MARKER_RUN_MARKER)
+      return
     let remove = opensLine ? run - Math.min(indent, run) : run
     for (let index = buff.length - 1; remove > 0; index--) {
       const fragment = buff[index]!

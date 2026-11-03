@@ -3966,9 +3966,14 @@ impl ConvertState {
       if trimmed_len > floor && bytes[trimmed_len - 1] == b'\n' {
         trimmed_len = (trimmed_len + indent).min(bytes.len());
       } else if !plain_text!(self)
-        && trimmed_len > floor
         && self.depth_map[TAG_LI as usize] > 0
-        && self.follows_item_marker(&bytes[..trimmed_len])
+        && if trimmed_len > floor {
+          self.follows_item_marker(&bytes[..trimmed_len])
+        } else {
+          // A run that reaches back past a drain's cut ends where the cut
+          // line's own trailing blanks begin.
+          trimmed_len == 0 && self.cut_marker_run_before_blanks == MarkerRun::Marker
+        }
       {
         return;
       }
@@ -3998,8 +4003,12 @@ impl ConvertState {
             .rev()
             .take_while(|byte| byte.is_ascii_digit())
             .count();
-          if digits == 0 || digits > 9 {
+          if digits > 9 {
             return false;
+          }
+          if digits == 0 {
+            // The digits can sit before a drain's cut.
+            return end == 0 && self.cut_marker_run.after(text) == MarkerRun::Marker;
           }
           end -= digits;
         }
@@ -4011,8 +4020,9 @@ impl ConvertState {
         end -= 1;
       }
       if end == 0 {
-        // A streamed buffer can start mid-line once earlier output drains.
-        return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
+        // A streamed buffer can start mid-line once earlier output drains,
+        // even inside a marker: the cut line's run goes on into this one.
+        return self.cut_marker_run.after(text) == MarkerRun::Marker;
       }
       if matches!(text[end - 1], b'\n' | b'\r') {
         return true;

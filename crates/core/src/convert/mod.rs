@@ -440,6 +440,43 @@ enum CutLineLead {
   Content,
 }
 
+/// How a line reads as the list markers a list item's break checks for:
+/// spaces, then `-`, `*`, `+`, or one to nine digits and `.` or `)`, each
+/// further marker after at least one space. A drain records it for the line
+/// it cuts, so the check can go on past the start of the buffer.
+#[derive(Clone, Copy, PartialEq)]
+enum MarkerRun {
+  /// At a line start, or after a marker and a space: a marker may begin.
+  Open,
+  /// Inside an ordered marker, after this many digits.
+  Digits(u8),
+  /// Right after a whole marker.
+  Marker,
+  /// Anything else on the line.
+  Broken,
+}
+
+impl MarkerRun {
+  /// The run after `bytes`, which continue a line read up to `self`. A line
+  /// end, `\n` or `\r`, starts the run over.
+  fn after(self, bytes: &[u8]) -> Self {
+    let (mut run, rest) = match bytes.iter().rposition(|&b| b == b'\n' || b == b'\r') {
+      Some(at) => (Self::Open, &bytes[at + 1..]),
+      None => (self, bytes),
+    };
+    for &byte in rest {
+      run = match (run, byte) {
+        (Self::Open | Self::Marker, b' ') => Self::Open,
+        (Self::Open, b'-' | b'*' | b'+') | (Self::Digits(_), b'.' | b')') => Self::Marker,
+        (Self::Open, b'0'..=b'9') => Self::Digits(1),
+        (Self::Digits(digits), b'0'..=b'9') if digits < 9 => Self::Digits(digits + 1),
+        _ => return Self::Broken,
+      };
+    }
+    run
+  }
+}
+
 /// Deepest space indent a `<` may sit at and still suspend Markdown.
 const RAW_HTML_MAX_INDENT: u8 = 3;
 
@@ -978,6 +1015,11 @@ pub struct ConvertState {
   /// Rescanning `buffer` for a line start is wrong once a drain has happened;
   /// this is the same trick as `flushed_tail`, one step further back.
   cut_line_lead: CutLineLead,
+  /// The marker run of the line the latest drain cut, read up to the cut.
+  cut_marker_run: MarkerRun,
+  /// The same run read only up to the last drained byte a break's trim stops
+  /// at: it takes a trailing space, tab, form feed or carriage return.
+  cut_marker_run_before_blanks: MarkerRun,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
   /// Test/fuzz switch: `false` routes everything through the general path.
@@ -1170,6 +1212,8 @@ impl ConvertState {
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
       cut_line_lead: CutLineLead::Uncut,
+      cut_marker_run: MarkerRun::Open,
+      cut_marker_run_before_blanks: MarkerRun::Open,
       buffer_start_column: 0,
       #[cfg(any(test, fuzzing))]
       disable_drain: false,
@@ -3046,6 +3090,24 @@ impl ConvertState {
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
+    if !plain_text!(self) {
+      // A list item's break reads its line's markers back from the trailing
+      // run, so what it would have read in the drained bytes stays known.
+      let drained = &bytes[..drain_end];
+      let blanks = drained
+        .iter()
+        .rev()
+        .take_while(|&&b| matches!(b, b' ' | b'\t' | b'\x0C' | b'\r'))
+        .count();
+      let run = self.cut_marker_run.after(drained);
+      if blanks == 0 {
+        self.cut_marker_run_before_blanks = run;
+      } else if blanks < drain_end {
+        self.cut_marker_run_before_blanks =
+          self.cut_marker_run.after(&drained[..drain_end - blanks]);
+      }
+      self.cut_marker_run = run;
+    }
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);

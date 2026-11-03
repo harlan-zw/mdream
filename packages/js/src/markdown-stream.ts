@@ -1,6 +1,6 @@
 import type { BlockquoteFrame, BufferScanState, MarkdownState, MarkdownStreamContext } from './markdown-processor'
 import { TAG_PRE } from './const'
-import { isAsciiWhitespace, lineOpensRawHtmlBlock, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
+import { isAsciiWhitespace, lineOpensRawHtmlBlock, noteCompactedMarkerRun, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { isInsideHeading, trimOutputStart } from './utils'
 
 /** Held whitespace this long is no longer rejoined by every input chunk. */
@@ -215,6 +215,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       || context.getNonQuoteHeldOutputFragment() !== Infinity) {
       return 0
     }
+    noteCompactedMarkerRun(bufferScan, content, start)
     const retained = content.slice(start)
     state.buffer.splice(0, fragment, retained)
     for (const frame of state.blockquotes)
@@ -340,6 +341,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         const stableTailLength = Math.max(0, Math.min(stableLength, fragmentStart) - tailStart)
         const stableTail = emittedTail.slice(0, stableTailLength)
         const mutableTail = emittedTail.slice(stableTailLength)
+        noteCompactedMarkerRun(bufferScan, content, leadingTrimmed + tailStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (stableTail)
@@ -353,6 +355,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       else if (!retainMutableFragments) {
         const tailStart = Math.max(0, contextStart)
         const emittedTail = currentContent.slice(tailStart, stableLength)
+        noteCompactedMarkerRun(bufferScan, content, leadingTrimmed + tailStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (emittedTail)

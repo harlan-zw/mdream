@@ -298,6 +298,62 @@ fn a_list_item_break_escapes_a_marker_before_a_trimmed_form_feed() {
 }
 
 #[test]
+fn a_list_item_break_reads_the_marker_run_past_a_drained_line_start() {
+  // A long item line drains its start while it streams. The marker check goes
+  // on through what the drain cut, as one-shot reads the whole line: the run
+  // stays after a marker run, even one cut inside a marker, and goes after
+  // item text.
+  let options = HtmlToMarkdownOptions::default();
+  let sp = |count: usize| "&#32;".repeat(count);
+  let pad = |count: usize| " ".repeat(count);
+  for (html, expected) in [
+    (
+      format!("<ul><li>{}1.<span>&#9;</span><br>b</li></ul>", sp(13)),
+      format!("-{}1.\t  \n  b", pad(14)),
+    ),
+    (
+      format!("<ul><li>{}-<span>&#12;</span><br>b</li></ul>", sp(13)),
+      format!("-{}-\u{c}  \n  b", pad(14)),
+    ),
+    (
+      format!("<ul><li>{}1. -<span>&#9;</span><br>b</li></ul>", sp(10)),
+      format!("-{}1. -\t  \n  b", pad(11)),
+    ),
+    (
+      format!("<ul><li>{}<span>&#9;</span><br>b</li></ul>", sp(20)),
+      format!("-{}\t  \n  b", pad(21)),
+    ),
+    (
+      format!(
+        "<ul><li>{}123456789)<span>&#9;</span><br>b</li></ul>",
+        sp(20)
+      ),
+      format!("-{}123456789)\t  \n  b", pad(21)),
+    ),
+    (
+      format!(
+        "<ul><li>a<ul><li>{}1.<span>&#9;</span><br>c</li></ul></li></ul>",
+        sp(13)
+      ),
+      format!("- a\n  -{}1.\t  \n    c", pad(14)),
+    ),
+    (
+      format!("<ul><li>see{}1.<span>&#9;</span><br>b</li></ul>", sp(16)),
+      format!("- see{}1.  \n  b", pad(16)),
+    ),
+    (
+      format!(
+        "<ul><li>-{}12<i></i>3.<span>&#9;</span><br>b</li></ul>",
+        sp(13)
+      ),
+      format!("- \\-{}123.  \n  b", pad(13)),
+    ),
+  ] {
+    assert_every_chunking(&html, &options, &expected);
+  }
+}
+
+#[test]
 fn a_wrapped_item_line_keeps_the_run_after_a_marker_like_word() {
   // Wrapping can open an item's line with a word that only the form feed after
   // it keeps from reading as a marker, so a break there leaves the run. A word

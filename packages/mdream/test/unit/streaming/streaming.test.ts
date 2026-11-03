@@ -327,6 +327,16 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<li>a -<span>&#9;</span><br>b</li>', '- a -  \n  b', 'a -\nb'],
   ['<li>a<br>b 3.&#12;<br>c</li>', '- a  \n  b 3.  \n  c', 'a\nb 3.\nc'],
   ['<ul><li>a<ul><li>see 2)&#9;<br>c</li></ul></li></ul>', '- a\n  - see 2)  \n    c', 'a\nsee 2)\nc'],
+  // A long item line drains its start while it streams, and the marker check
+  // goes on through what the drain cut, even inside a marker.
+  [`<ul><li>${'&#32;'.repeat(13)}1.<span>&#9;</span><br>b</li></ul>`, `-${' '.repeat(14)}1.\t  \n  b`, '1.\nb'],
+  [`<ul><li>${'&#32;'.repeat(13)}-<span>&#12;</span><br>b</li></ul>`, `-${' '.repeat(14)}-\f  \n  b`, '-\nb'],
+  [`<ul><li>${'&#32;'.repeat(10)}1. -<span>&#9;</span><br>b</li></ul>`, `-${' '.repeat(11)}1. -\t  \n  b`, '1. -\nb'],
+  [`<ul><li>${'&#32;'.repeat(20)}<span>&#9;</span><br>b</li></ul>`, `-${' '.repeat(21)}\t  \n  b`, 'b'],
+  [`<ul><li>${'&#32;'.repeat(20)}123456789)<span>&#9;</span><br>b</li></ul>`, `-${' '.repeat(21)}123456789)\t  \n  b`, '123456789)\nb'],
+  [`<ul><li>a<ul><li>${'&#32;'.repeat(13)}1.<span>&#9;</span><br>c</li></ul></li></ul>`, `- a\n  -${' '.repeat(14)}1.\t  \n    c`, `a\n${' '.repeat(13)}1.\nc`],
+  [`<ul><li>see${'&#32;'.repeat(16)}1.<span>&#9;</span><br>b</li></ul>`, `- see${' '.repeat(16)}1.  \n  b`, `see${' '.repeat(16)}1.\nb`],
+  [`<ul><li>-${'&#32;'.repeat(13)}12<i></i>3.<span>&#9;</span><br>b</li></ul>`, `- \\-${' '.repeat(13)}123.  \n  b`, `-${' '.repeat(13)}123.\nb`],
   // The break takes the form feed after a marker, which so ends its line and
   // is escaped as at a paragraph's break.
   ['<li>#&#12;<br>b</li>', '- \\#  \n  b', '#\nb'],
