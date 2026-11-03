@@ -8179,7 +8179,15 @@ fn overridden_empty_quote_preserves_nested_list_tail() {
 fn nonempty_quote_enter_preserves_literal_spacing() {
   let html = "<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>";
   let mut options = transparent_override("blockquote", false);
-  options.plugins.as_mut().unwrap().tag_overrides.as_mut().unwrap()[0].1.enter = Some("CUSTOM ".to_string());
+  options
+    .plugins
+    .as_mut()
+    .unwrap()
+    .tag_overrides
+    .as_mut()
+    .unwrap()[0]
+    .1
+    .enter = Some("CUSTOM ".to_string());
   let expected = "- A\n  - innerCUSTOM parent";
   assert_eq!(html_to_markdown(html, options.clone()), expected);
   for split in 0..=html.len() {
