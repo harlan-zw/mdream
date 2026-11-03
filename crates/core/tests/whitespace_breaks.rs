@@ -258,6 +258,24 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
 }
 
 #[test]
+fn a_plain_text_break_takes_the_run_after_text_like_a_list_marker() {
+  // Plain text writes no list marker, so item text that looks like one keeps
+  // no run before a break, as in JS.
+  for (html, expected) in [
+    ("<li>1.<span>&#9;</span><br>b</li>", "1.\nb"),
+    ("<li>-<span>&#9;</span><br>b</li>", "-\nb"),
+    ("<li>x<br>12)<i></i>&#12;<br>b</li>", "x\n12)\nb"),
+    ("<li>x<br>+<span>&#9;</span><br>b</li>", "x\n+\nb"),
+    (
+      "<ol><li>Step 1. <em>&#9;</em><br>Done</li></ol>",
+      "Step 1.\nDone",
+    ),
+  ] {
+    assert_every_text_chunking(html, expected);
+  }
+}
+
+#[test]
 fn a_break_after_preformatted_text_preserves_source_newlines() {
   for html in [
     "<table><tr><td><pre>a\n</pre><br>x</td></tr></table>",

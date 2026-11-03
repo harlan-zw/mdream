@@ -3922,8 +3922,9 @@ impl ConvertState {
   /// line feed, which ends block spacing or an earlier break and so stays. The
   /// run is the same whatever the text's source whitespace; U+000B is content.
   /// A run that opens a line keeps the `indent` the break writes after its own
-  /// line feed, an earlier break's or a block's, and a run right after a list
-  /// item's marker stays whole, the marker's own space included.
+  /// line feed, an earlier break's or a block's, and in Markdown a run right
+  /// after a list item's marker stays whole, the marker's own space included.
+  /// Plain text writes no marker, so its run always goes, as in JS.
   fn trim_before_break(&mut self, indent: usize) {
     let floor = self.trim_floor().max(self.text_cell_start);
     if self.buffer.len() > floor {
@@ -3935,7 +3936,8 @@ impl ConvertState {
       }
       if trimmed_len > floor && bytes[trimmed_len - 1] == b'\n' {
         trimmed_len = (trimmed_len + indent).min(bytes.len());
-      } else if trimmed_len > floor
+      } else if !plain_text!(self)
+        && trimmed_len > floor
         && self.depth_map[TAG_LI as usize] > 0
         && Self::follows_item_marker(&bytes[..trimmed_len])
       {

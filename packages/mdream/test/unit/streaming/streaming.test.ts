@@ -285,6 +285,10 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<li>&#9;<br>b</li>', '- \t  \n  b'],
   ['<ol><li>&#9;<br>b</li></ol>', '1. \t  \n   b'],
   ['<ul><li>a<ul><li><br><br>x</li></ul></li></ul>', '- a\n\n  -   \n      \n    x'],
+  // Plain text writes no list marker, so text that looks like one keeps no run.
+  ['<li>1.<span>&#9;</span><br>b</li>', '- 1\\.  \n  b', '1.\nb'],
+  ['<li>-<span>&#9;</span><br>b</li>', '- \\-  \n  b', '-\nb'],
+  ['<li>x<br>12)<i></i>&#12;<br>b</li>', '- x  \n  12\\)  \n  b', 'x\n12)\nb'],
   ['<blockquote>a&#9;<br>b</blockquote>', '> a  \n> b', 'a\nb'],
   // HTML's ASCII whitespace leaves out U+000B, so it is content and stops a trim.
   ['<p>a&#11;<br></p>', 'a\u000B', 'a\u000B'],
