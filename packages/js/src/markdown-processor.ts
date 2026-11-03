@@ -2150,7 +2150,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
       else if ((tagId === TAG_UL || tagId === TAG_OL)
         && state.emptyListMarkerDepth > state.depthMap[TAG_LI]!
-        && state.listIndent && !insideRawHtmlRegion && !isInsideTableCell(state)
+        && state.listIndent && !isInsideTableCell(state)
         && !handler?.literalExit && !element.pluginOutput?.length) {
         // Any item of this list, filled or empty, ends before the parent's text.
         // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no

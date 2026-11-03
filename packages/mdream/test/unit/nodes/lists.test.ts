@@ -491,6 +491,18 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
   })
 })
 
+describe.each(engines)('nested list tail in a raw HTML block $name', (engineConfig) => {
+  it.each([
+    ['<details><summary>s</summary><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></details>', '<details>\n\n<summary>s</summary>\n\n\n\n- x\n  - a\n- next\n\n</details>'],
+    ['<dl><dd><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></dd></dl>', '<dl><dd>\n\n- x\n  - a\n- next\n\n</dd></dl>'],
+    ['<details><ul><li>x<ul><li>a</li></ul>tail</li></ul></details>', '<details>\n\n- x\n  - a\n\n  tail\n\n</details>'],
+    ['<dl><dd><ul><li>x<ul><li></li></ul>t</li></ul></dd></dl>', '<dl><dd>\n\n- x\n\n  -\n\n  t\n\n</dd></dl>'],
+  ])('matches the plain context: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
 describe.each(engines)('blocks opening a quote in an item $name', (engineConfig) => {
   it.each([
     [

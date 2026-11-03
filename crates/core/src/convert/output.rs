@@ -4629,7 +4629,6 @@ impl ConvertState {
     if !plain_text!(self)
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
-      && !self.in_raw_html_block()
       && self.empty_list_marker_depth > self.depth_map[TAG_LI as usize] as usize
     {
       // Any item of this list, filled or empty, ends before the parent's text.

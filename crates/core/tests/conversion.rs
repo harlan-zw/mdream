@@ -7496,6 +7496,30 @@ fn hard_break_in_an_empty_nested_item_leaves_no_indent_line() {
 }
 
 #[test]
+fn nested_list_tail_in_a_raw_html_block_matches_the_plain_context() {
+  for (html, expected) in [
+    (
+      "<details><summary>s</summary><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></details>",
+      "<details>\n\n<summary>s</summary>\n\n\n\n- x\n  - a\n- next\n\n</details>",
+    ),
+    (
+      "<dl><dd><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></dd></dl>",
+      "<dl><dd>\n\n- x\n  - a\n- next\n\n</dd></dl>",
+    ),
+    (
+      "<details><ul><li>x<ul><li>a</li></ul>tail</li></ul></details>",
+      "<details>\n\n- x\n  - a\n\n  tail\n\n</details>",
+    ),
+    (
+      "<dl><dd><ul><li>x<ul><li></li></ul>t</li></ul></dd></dl>",
+      "<dl><dd>\n\n- x\n\n  -\n\n  t\n\n</dd></dl>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
 fn block_opens_on_the_first_line_of_a_quote_in_an_item() {
   for (html, expected) in [
     (

@@ -4332,6 +4332,19 @@ fn hard_break_in_an_empty_nested_item_matches_every_split() {
 }
 
 #[test]
+fn nested_list_tail_in_a_raw_html_block_matches_every_split() {
+  for html in [
+    "<details><summary>s</summary><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></details>",
+    "<dl><dd><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></dd></dl>",
+    "<details><ul><li>x<ul><li>a</li></ul>tail</li></ul></details>",
+    "<dl><dd><ul><li>x<ul><li></li></ul>t</li></ul></dd></dl>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn heading_after_paragraph_in_item_matches_every_split() {
   for html in [
     "<ul><li><p>a</p><h2>h</h2></li></ul>",
