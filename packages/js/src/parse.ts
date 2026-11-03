@@ -2096,7 +2096,9 @@ function processOpeningTag(
   handleEvent({ type: NodeEventEnter, node: tag })
 
   // Count after the enter event, whose processAttributes hooks may replace the
-  // handler, and record the node so its close undoes exactly this count.
+  // handler, and record the node so its close undoes exactly this count. A hook
+  // on a later descendant that swaps this element's handler while it is open is
+  // not followed: the count keeps what this enter saw.
   const collapseTarget = state.collapseDepthTarget
   if (collapseTarget && tag.tagHandler?.collapsesInnerWhiteSpace && tag.tagId !== TAG_SPAN && !tag.excludedFromMarkdown) {
     collapseTarget.collapseNonSpanDepth++
