@@ -145,6 +145,11 @@ export interface MarkdownState {
   /** First fragment to recheck, including the last fragment a writer may append to. */
   listTailScanFrom?: number
   emptyListMarkerScanFrom?: number
+  /**
+   * Open elements, other than `<span>`, that collapse block spacing as
+   * `calculateNewLineConfig` does for `<li>`. The parser keeps the count.
+   */
+  collapseNonSpanDepth: number
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -980,15 +985,6 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
   return DEFAULT_BLOCK_SPACING
 }
 
-/** Whether an ancestor collapses block spacing, as `calculateNewLineConfig` does for `<li>`. */
-function insideInlineWrapper(node: ElementNode): boolean {
-  for (let parent = node.parent; parent; parent = parent.parent) {
-    if (parent.tagHandler?.collapsesInnerWhiteSpace && parent.tagId !== TAG_SPAN)
-      return true
-  }
-  return false
-}
-
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
   const handler = node.tagHandler
   // Custom exits have not run yet. Treat them as wrappers unless a
@@ -1511,6 +1507,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     emptyListMarkerScanFrom: undefined,
     lastItemMarkerFragment: undefined,
     lastItemMarkerOwner: undefined,
+    collapseNonSpanDepth: 0,
     emptyItemAfterCr: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
@@ -2132,7 +2129,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // Any item of this list, filled or empty, ends before the parent's text.
         // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
         // item line is left open for that text to continue.
-        if (!insideInlineWrapper(element))
+        if (!state.collapseNonSpanDepth)
           state.listTailPending = true
         state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
         const marker = state.emptyListMarkerFragment

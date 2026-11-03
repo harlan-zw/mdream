@@ -1,7 +1,8 @@
+import type { MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 
-async function streamConvert(chunks: string[]): Promise<string> {
+async function streamConvert(chunks: string[], options?: Partial<MdreamOptions>): Promise<string> {
   const stream = new ReadableStream<string>({
     start(controller) {
       for (const chunk of chunks)
@@ -10,7 +11,7 @@ async function streamConvert(chunks: string[]): Promise<string> {
     },
   })
   let output = ''
-  for await (const chunk of streamHtmlToMarkdown(stream))
+  for await (const chunk of streamHtmlToMarkdown(stream, options))
     output += chunk
   return output
 }
@@ -65,6 +66,51 @@ describe('inline whitespace', () => {
     for (let split = 0; split <= html.length; split++)
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
     expect(await streamConvert([...html]), 'one char per chunk').toBe(expected)
+  })
+
+  // The parser counts open inline wrappers, so a wrapper only stops the
+  // separator while it is open: once closed, explicitly or implicitly, a later
+  // nested list gets its blank line back. Template content never counts.
+  it.each([
+    ['<ul><li><em>e</em><ul><li>a</li></ul>t</li></ul>', '- *e*\n  - a\n\n  t'],
+    ['<p><em>x</p><ul><li>y<ul><li>a</li></ul>t</li></ul>', '*x*\n\n- y\n  - a\n\n  t'],
+    ['<ul><li><em>x<ul><li>a</li></ul></em>t</li></ul><ul><li>y<ul><li>b</li></ul>u</li></ul>', '- *x  - a*t\n\n- y\n  - b\n\n  u'],
+    ['<template><em></template><ul><li>y<ul><li>a</li></ul>t</li></ul>', '- y\n  - a\n\n  t'],
+    ['<ul><li><em><ul><li>a</li></ul>t', '- *  - a t*'],
+  ])('only lets an open inline wrapper hold back the separator: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+    expect(await streamConvert([...html]), 'one char per chunk').toBe(expected)
+  })
+
+  // A processAttributes hook may replace the handler, so the count follows the
+  // handler the element kept after its enter event, and closing the element
+  // undoes exactly that count, whether the flag was dropped or added.
+  const dropFlag = createPlugin({
+    processAttributes(node) {
+      if (node.name === 'em')
+        node.tagHandler = { enter: () => '_', exit: () => '_', isInline: true }
+    },
+  })
+  const addFlag = createPlugin({
+    processAttributes(node) {
+      if (node.name === 'x-em')
+        node.tagHandler = { enter: () => '*', exit: () => '*', isInline: true, collapsesInnerWhiteSpace: true }
+    },
+  })
+  const nested = '<ul><li>y<ul><li>a</li></ul>t</li></ul>'
+  it.each([
+    [`<p><em>x</em></p>${nested}`, dropFlag, '_x_\n\n- y\n  - a\n\n  t'],
+    [`<ul><li><em>x<ul><li>a</li></ul></em>t</li></ul>${nested}`, dropFlag, '- _x\n  - a_\n\n  t\n\n- y\n  - a\n\n  t'],
+    [`<p><x-em>x</x-em></p>${nested}`, addFlag, '*x*\n\n- y\n  - a\n\n  t'],
+    [`<ul><li><x-em>x<ul><li>a</li></ul></x-em>t</li></ul>${nested}`, addFlag, '- *x  - a*t\n\n- y\n  - a\n\n  t'],
+  ])('counts the wrapper handler a plugin kept: %s', async (html, plugin, expected) => {
+    const options = { plugins: [plugin] }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)], options), `split=${split}`).toBe(expected)
+    expect(await streamConvert([...html], options), 'one char per chunk').toBe(expected)
   })
 
   it('preserves whitespace between root-level inline siblings', () => {
