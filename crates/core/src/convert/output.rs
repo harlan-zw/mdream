@@ -3641,10 +3641,7 @@ impl ConvertState {
   #[cold]
   fn break_follows_item_marker(&self) -> bool {
     let bytes = self.buffer.as_bytes();
-    let mut start = bytes.len();
-    while start > 0 && bytes[start - 1] == b' ' {
-      start -= 1;
-    }
+    let start = bytes.len() - trailing_spaces(bytes);
     start > self.empty_item_len && bytes[start - 1] == b'\n'
   }
 
@@ -4745,10 +4742,7 @@ impl ConvertState {
   /// drain via `flushed_tail` like `trailing_new_lines`.
   fn ends_in_indent_line(&self) -> bool {
     let bytes = self.buffer.as_bytes();
-    let mut start = bytes.len();
-    while start > 0 && bytes[start - 1] == b' ' {
-      start -= 1;
-    }
+    let start = bytes.len() - trailing_spaces(bytes);
     if start == bytes.len() {
       return false;
     }
