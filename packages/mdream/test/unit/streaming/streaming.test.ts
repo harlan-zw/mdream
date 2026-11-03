@@ -1071,6 +1071,11 @@ describe('vertical tabs moved before hard breaks streaming', () => {
     ['<ul><li><em>T&#11;<br></em><p>X</p></li></ul>', '- *T*\u000B  \n\n  X'],
     ['<ol><li><em>T&#11;<br></em><ol start="3"><li>X</li></ol></li></ol>', '1. *T*\u000B  \n\n   3. X'],
     ['<ul><li><em>&#11;<br></em><p>X</p></li></ul>', '- \u000B  \n\n  X'],
+    ['<ul><li>z<em>&#11;<br><br> &#9;</em><p>X</p></li></ul>', '- z\u000B  \n    \n  \n\n  X'],
+    ['<ul><li>z<em>&#11;<br><br><br> &#9;</em><p>X</p></li></ul>', '- z\u000B  \n    \n    \n  \n\n  X'],
+    ['<ul><li>z<strong>&#11;<br><br> &#9;</strong><pre>X</pre></li></ul>', '- z\u000B  \n    \n  ```\n  X\n  ```'],
+    ['<ul><li>z<em>&#11;<br><br> &#9;</em></li><li>X</li></ul>', '- z\u000B  \n    \n- X'],
+    ['<ol><li>z<em>&#11;<br><br> &#9;</em><ol start="3"><li>X</li></ol></li></ol>', '1. z\u000B  \n     \n\n   3. X'],
   ] as const)('keeps the breaks and blocks of %s at every chunk width', async (html, expected) => {
     for (const { engine, name } of engines) {
       expect(engine.htmlToMarkdown(html), name).toBe(expected)
