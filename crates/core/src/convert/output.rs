@@ -3306,9 +3306,11 @@ impl ConvertState {
   /// preceded by whitespace (or forming the whole heading) closes a heading.
   fn escape_trailing_heading_hashes(&mut self) {
     let bytes = self.buffer.as_bytes();
-    // Cheap reject: almost no heading ends in `#`.
+    // Cheap reject: almost no heading ends in `#`. The run ends where the trims
+    // leave the line, so skip what they take: a form feed or a line end there
+    // still makes the run the closing sequence.
     let mut end = bytes.len();
-    while end > 0 && matches!(bytes[end - 1], b' ' | b'\t') {
+    while end > 0 && matches!(bytes[end - 1], b' ' | b'\t' | b'\n' | b'\x0C' | b'\r') {
       end -= 1;
     }
     if end == 0 || bytes[end - 1] != b'#' {
@@ -3331,9 +3333,24 @@ impl ConvertState {
     while run > start && bytes[run - 1] == b'#' {
       run -= 1;
     }
-    if run < end && (run == start || matches!(bytes[run - 1], b' ' | b'\t')) {
-      self.replace_code_span_content(run..run, "\\");
+    if run == end || (run != start && !matches!(bytes[run - 1], b' ' | b'\t')) {
+      return;
     }
+    // An empty heading's run is its own opening sequence, after the line's
+    // indent or a list marker alone on the line.
+    let mut lead = run;
+    while lead > line && bytes[lead - 1] == b' ' {
+      lead -= 1;
+    }
+    if lead == line {
+      // A streamed buffer can start mid-line once earlier output drains.
+      if line != 0 || !self.has_flushed_tail() || self.flushed_tail[1] == b'\n' {
+        return;
+      }
+    } else if self.list_marker_line_start(bytes, lead, self.pending_marker_indent()) {
+      return;
+    }
+    self.replace_code_span_content(run..run, "\\");
   }
 
   /// Deepest indent of a marker a block can share a line with. A list writes the

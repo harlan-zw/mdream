@@ -478,6 +478,51 @@ fn heading_closing_run_is_read_at_the_real_end() {
 }
 
 #[test]
+fn heading_closing_run_is_read_past_a_trimmed_form_feed_or_line_end() {
+  // The trims take a form feed or a line end after the run too, and a line end
+  // there closes the heading's line anyway, so the run is escaped. Only a space
+  // or a tab opens the sequence, and an empty heading's own opening sequence
+  // after a list marker or an item's indent stays as it is.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<h2>a #&#12;</h2>", "## a \\#"),
+    ("<h2>a #&#13;</h2>", "## a \\#"),
+    ("<h2>a #&#10;</h2>", "## a \\#"),
+    ("<h2>a ##&#12;&#12;</h2>", "## a \\##"),
+    ("<h2>#&#12;</h2>", "## \\#"),
+    ("<h2>a&#9;#&#12;</h2>", "## a\t\\#"),
+    ("<h2>a #<span>&#12;</span></h2>", "## a \\#"),
+    ("<h2>a #&#12;<i></i>&#12;<i></i></h2>", "## a \\#"),
+    ("<h2>a #&#13;</h2><p>x</p>", "## a \\#\r\n\nx"),
+    ("<ul><li><h2>a #&#12;</h2></li></ul>", "- ## a \\#"),
+    ("<h2>a&#12;#</h2>", "## a\u{c}#"),
+    ("<h2>a #&#12;b</h2>", "## a #\u{c}b"),
+    ("<ul><li><h2></h2></li></ul>", "- ##"),
+    ("<ul><li><h2>&#9;</h2></li></ul>", "- ##"),
+    ("<ul><li><h2>&#12;</h2></li></ul>", "- ##"),
+    ("<ol start=\"9\"><li><h2> </h2></li></ol>", "9. ##"),
+    ("<ul><li>x<h2></h2></li></ul>", "- x\n\n  ##"),
+    (
+      "<blockquote><ul><li><h2>&#9;</h2></li></ul></blockquote>",
+      "> - ##",
+    ),
+    ("<ul><li><h2>#</h2></li></ul>", "- ## \\#"),
+    // Drained output can leave the buffer starting mid-line inside the spaces.
+    (
+      "<h2>x<i></i>&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;#&#12;</h2>",
+      "## x                    \\#",
+    ),
+    (
+      "<ul><li><h2>a #&#12;</h2></li><li>b</li></ul>",
+      "- ## a \\#\n- b",
+    ),
+    ("<ul><li><h2>a #&#9;</h2>y</li></ul>", "- ## a \\# y"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
 fn vertical_tab_is_content_to_the_trailing_trims() {
   // HTML's ASCII whitespace leaves out U+000B, so it stops a trim and stays in
   // the output, as it does in the JS engine.
