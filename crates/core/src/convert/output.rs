@@ -3433,18 +3433,19 @@ impl ConvertState {
   }
 
   /// The indent of the bare marker line that `end` closes once the spaces and
-  /// line feeds before it are skipped, read before a drain takes those bytes.
-  pub(super) fn bare_marker_line_before(&self, end: usize) -> Option<usize> {
+  /// line feeds before it are skipped, read before a drain takes those bytes,
+  /// and whether a line feed was among them.
+  pub(super) fn bare_marker_line_before(&self, end: usize) -> Option<(usize, bool)> {
     let bytes = self.buffer.as_bytes();
-    let mut end = end;
-    while end > 0 && matches!(bytes[end - 1], b' ' | b'\n') {
-      end -= 1;
+    let mut start = end;
+    while start > 0 && matches!(bytes[start - 1], b' ' | b'\n') {
+      start -= 1;
     }
-    if end == 0 {
+    if start == 0 {
       return None;
     }
-    match self.marker_line(bytes, end, usize::MAX) {
-      MarkerLine::Bare(indent) => Some(indent),
+    match self.marker_line(bytes, start, usize::MAX) {
+      MarkerLine::Bare(indent) => Some((indent, bytes[start..end].contains(&b'\n'))),
       MarkerLine::Other | MarkerLine::Cut => None,
     }
   }
@@ -3459,6 +3460,7 @@ impl ConvertState {
       end -= 1;
     }
     self.bare_marker_end = usize::MAX;
+    self.bare_marker_gap_newline = false;
     if end > output_start
       && let MarkerLine::Bare(indent) = self.marker_line(bytes, end, usize::MAX)
     {
@@ -3541,9 +3543,13 @@ impl ConvertState {
         self.parent_marker_scans += 1;
       }
       // A line of spaces only is blank, as in JS: a hard break's continuation
-      // indent left one between the parent's marker and this one.
+      // indent left one between the parent's marker and this one. A marker
+      // right after a `\r` reads only its own line, which JS stops at too.
+      let across_lines = line_ending == b'\n';
       let mut above_end = above_end;
-      while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n') {
+      while above_end > 0
+        && (bytes[above_end - 1] == b' ' || across_lines && bytes[above_end - 1] == b'\n')
+      {
         above_end -= 1;
       }
       let max_spaces = self.list_indent.len() + 3;
@@ -3555,6 +3561,7 @@ impl ConvertState {
         self.has_flushed_tail()
           && self.bare_marker_end == 0
           && self.bare_marker_indent <= max_spaces
+          && (across_lines || !self.bare_marker_gap_newline)
       };
       bare
         && self

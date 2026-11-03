@@ -972,6 +972,8 @@ pub struct ConvertState {
   /// the drain took the marker and only whitespace after it.
   bare_marker_end: usize,
   bare_marker_indent: usize,
+  /// The whitespace a drain took after that marker held a line feed.
+  bare_marker_gap_newline: bool,
   /// Spaces the line holding `buffer[0]` lost to drains while spaces were all
   /// it lost, so the marker line readers still count its whole indent.
   /// `usize::MAX` once anything else left with them.
@@ -1248,6 +1250,7 @@ impl ConvertState {
       last_item_marker_end: usize::MAX,
       bare_marker_end: usize::MAX,
       bare_marker_indent: 0,
+      bare_marker_gap_newline: false,
       drained_line_spaces: 0,
       #[cfg(test)]
       parent_marker_scans: 0,
@@ -3114,22 +3117,24 @@ impl ConvertState {
     if self.bare_marker_end != usize::MAX {
       self.bare_marker_end = match self.bare_marker_end.checked_sub(drain_end) {
         Some(end) => end,
-        None
-          if bytes[self.bare_marker_end..drain_end]
-            .iter()
-            .all(|&byte| matches!(byte, b' ' | b'\n')) =>
-        {
-          0
+        None => {
+          let gap = &bytes[self.bare_marker_end..drain_end];
+          if gap.iter().all(|&byte| matches!(byte, b' ' | b'\n')) {
+            self.bare_marker_gap_newline |= gap.contains(&b'\n');
+            0
+          } else {
+            usize::MAX
+          }
         }
-        None => usize::MAX,
       };
     }
     // Any other line the readers take for a bare marker leaves the same way.
     if self.bare_marker_end == usize::MAX
-      && let Some(indent) = drained_bare_marker
+      && let Some((indent, gap_newline)) = drained_bare_marker
     {
       self.bare_marker_end = 0;
       self.bare_marker_indent = indent;
+      self.bare_marker_gap_newline = gap_newline;
     }
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);

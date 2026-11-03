@@ -7403,6 +7403,13 @@ fn ordered_list_after_a_dropped_block_keeps_its_blank_line() {
 }
 
 #[test]
+fn marker_after_a_cr_reads_only_its_own_line_above() {
+  // JS stops at the `\r` rather than reading past it for the parent's marker.
+  let html = "<ul><li><em><br><ul><li><br>&#13;<ol start=\"123456789\"><li></li></ol></li></ul></em></li></ul>";
+  assert_eq!(convert(html), "- *  \n    -   \n    \r\n\n    123456789. *");
+}
+
+#[test]
 fn open_fence_leaves_a_quoted_empty_item_guard_open() {
   // Settled while the fence was open, the guard took the fence's line break for
   // an empty item and wrote a quoted blank line that JS does not.

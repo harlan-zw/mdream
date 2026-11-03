@@ -496,6 +496,13 @@ describe.each(engines)('ordered list after a dropped block $name', (engineConfig
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
+
+  it.each([
+    ['<ul><li><em><br><ul><li><br>&#13;<ol start="123456789"><li></li></ol></li></ul></em></li></ul>', '- *  \n    -   \n    \r\n\n    123456789. *'],
+  ])('reads only the line above a marker after a CR: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
 })
 
 describe.each(engines)('parent block after a closed nested fence $name', (engineConfig) => {
