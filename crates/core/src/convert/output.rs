@@ -3236,13 +3236,13 @@ impl ConvertState {
             end - index <= 6 && Self::is_markdown_marker_whitespace(bytes.get(end).copied());
         } else if byte == b'-' || byte == b'+' {
           should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied())
-            || (byte == b'-' && Self::is_dash_line(&bytes[index..]));
+            || (byte == b'-' && Self::is_dash_line::<true>(&bytes[index..]));
         } else if byte == b'>' {
           should_escape = true;
         } else if byte == b'=' {
           // A node ending inside the run still escapes, since inline nodes can
           // split one setext underline.
-          should_escape = Self::is_equals_line(&bytes[index..]);
+          should_escape = Self::is_equals_line::<true>(&bytes[index..]);
         }
       } else if !should_escape && ordered_digits > 0 && (byte == b'.' || byte == b')') {
         should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied());
@@ -3311,9 +3311,11 @@ impl ConvertState {
   /// preceded by whitespace (or forming the whole heading) closes a heading.
   fn escape_trailing_heading_hashes(&mut self) {
     let bytes = self.buffer.as_bytes();
-    // Cheap reject: almost no heading ends in `#`.
+    // Cheap reject: almost no heading ends in `#`. The run ends where the trims
+    // leave the line, so skip what they take: a form feed or a line end there
+    // still makes the run the closing sequence.
     let mut end = bytes.len();
-    while end > 0 && matches!(bytes[end - 1], b' ' | b'\t') {
+    while end > 0 && matches!(bytes[end - 1], b' ' | b'\t' | b'\n' | b'\x0C' | b'\r') {
       end -= 1;
     }
     if end == 0 || bytes[end - 1] != b'#' {
@@ -3336,9 +3338,24 @@ impl ConvertState {
     while run > start && bytes[run - 1] == b'#' {
       run -= 1;
     }
-    if run < end && (run == start || matches!(bytes[run - 1], b' ' | b'\t')) {
-      self.replace_code_span_content(run..run, "\\");
+    if run == end || (run != start && !matches!(bytes[run - 1], b' ' | b'\t')) {
+      return;
     }
+    // An empty heading's run is its own opening sequence, after the line's
+    // indent or a list marker alone on the line.
+    let mut lead = run;
+    while lead > line && bytes[lead - 1] == b' ' {
+      lead -= 1;
+    }
+    if lead == line {
+      // A streamed buffer can start mid-line once earlier output drains.
+      if line != 0 || !self.has_flushed_tail() || self.flushed_tail[1] == b'\n' {
+        return;
+      }
+    } else if self.list_marker_line_start(bytes, lead, self.pending_marker_indent()) {
+      return;
+    }
+    self.replace_code_span_content(run..run, "\\");
   }
 
   /// Deepest indent of a marker a block can share a line with. A list writes the
@@ -3602,20 +3619,31 @@ impl ConvertState {
     }
   }
 
+  /// Only a space or a tab ends a marker in CommonMark, but the escape takes a
+  /// form feed too: a break or the block's end trims it with the rest of the
+  /// trailing whitespace, which leaves the marker ending its line.
   #[inline]
   fn is_markdown_marker_whitespace(byte: Option<u8>) -> bool {
-    matches!(byte, None | Some(b' ' | b'\t' | b'\n' | b'\r'))
+    matches!(byte, None | Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0C'))
+  }
+
+  /// Whether `byte` is a blank on a marker line. The escape passes
+  /// `FORM_FEED`, since a break or the block's end can trim a form feed; the
+  /// wrap guard counts only spaces and tabs.
+  #[inline]
+  fn is_marker_line_blank<const FORM_FEED: bool>(byte: u8) -> bool {
+    byte == b' ' || byte == b'\t' || (FORM_FEED && byte == b'\x0C')
   }
 
   /// A line of only `-` and blanks is a list marker, a thematic break, or a
   /// setext underline, so its leading `-` always needs an escape.
   #[inline]
-  fn is_dash_line(value: &[u8]) -> bool {
+  fn is_dash_line<const FORM_FEED: bool>(value: &[u8]) -> bool {
     for &byte in value {
       if byte == b'\n' || byte == b'\r' {
         break;
       }
-      if byte != b'-' && byte != b' ' && byte != b'\t' {
+      if byte != b'-' && !Self::is_marker_line_blank::<FORM_FEED>(byte) {
         return false;
       }
     }
@@ -3625,13 +3653,13 @@ impl ConvertState {
   /// A `=` run followed only by blanks is a setext underline; blanks inside
   /// the run make it plain text.
   #[inline]
-  fn is_equals_line(value: &[u8]) -> bool {
+  fn is_equals_line<const FORM_FEED: bool>(value: &[u8]) -> bool {
     let run = value.iter().take_while(|&&byte| byte == b'=').count();
     for &byte in &value[run..] {
       if byte == b'\n' || byte == b'\r' {
         break;
       }
-      if byte != b' ' && byte != b'\t' {
+      if !Self::is_marker_line_blank::<FORM_FEED>(byte) {
         return false;
       }
     }
@@ -4570,8 +4598,8 @@ impl ConvertState {
   fn is_setext_marker_run(word: &str) -> bool {
     let bytes = word.as_bytes();
     match bytes[0] {
-      b'-' => Self::is_dash_line(bytes),
-      b'=' => Self::is_equals_line(bytes),
+      b'-' => Self::is_dash_line::<false>(bytes),
+      b'=' => Self::is_equals_line::<false>(bytes),
       _ => false,
     }
   }

@@ -9,6 +9,8 @@ const engines = [
     name: 'JavaScript',
     markdown: jsMarkdown,
     markdownStream: jsMarkdownStream,
+    markdownWrapped: (html: string) => jsMarkdown(html, { wrapWidth: 10 }),
+    markdownWrappedStream: (stream: ReadableStream<string>) => jsMarkdownStream(stream, { wrapWidth: 10 }),
     text: jsText,
     textStream: jsTextStream,
     html: jsHtml,
@@ -22,6 +24,8 @@ const engines = [
     name: 'Rust',
     markdown: (html: string) => rustMarkdown(html),
     markdownStream: (stream: ReadableStream<string>) => rustStream(stream),
+    markdownWrapped: (html: string) => rustMarkdown(html, { wrapWidth: 10 }),
+    markdownWrappedStream: (stream: ReadableStream<string>) => rustStream(stream, { wrapWidth: 10 }),
     text: (html: string) => rustMarkdown(html, { format: 'text' }),
     textStream: (stream: ReadableStream<string>) => rustStream(stream, { format: 'text' }),
     html: (html: string) => rustMarkdown(html, { format: 'html' }),
@@ -80,6 +84,8 @@ describe('javascript plugin hard breaks', () => {
     ['<p>x y</p>&#10;<br>b', 'x y\n\n\n  \nb'],
     ['<ul><li>x y&#10;<br>b</li></ul>', '- x y  \nb'],
     ['<pre>a\n</pre><br>x', '```\na\n\n```\n\n  \nx'],
+    ['<p>a<span> &#9;</span><br>b</p>', 'a  \nb'],
+    ['<p>a<span> &#9;</span><br><br>b</p>', 'a  \n  \nb'],
   ])('preserves source and structural spacing: %s', (html, expected) => {
     it('converts through the package export', () => {
       expect(jsMarkdown(html, options)).toBe(expected)
@@ -94,6 +100,16 @@ describe('javascript plugin hard breaks', () => {
     const html = '<p>x y&#10;<br>b</p>'
     const literalOptions = { tagOverrides: { br: { enter } } }
     const expected = `x y\n${enter}b`
+    expect(jsMarkdown(html, literalOptions)).toBe(expected)
+    await assertChunkings(html, stream => jsMarkdownStream(stream, literalOptions), expected)
+  })
+
+  it.each([
+    ['L\n', 'a L\nb'],
+    ['  \n', 'a  \nb'],
+  ])('keeps a literal break after a whitespace-only wrapper: %j', async (enter, expected) => {
+    const html = '<p>a<span> &#9;</span><br>b</p>'
+    const literalOptions = { tagOverrides: { br: { enter } } }
     expect(jsMarkdown(html, literalOptions)).toBe(expected)
     await assertChunkings(html, stream => jsMarkdownStream(stream, literalOptions), expected)
   })
@@ -308,6 +324,41 @@ describe.each(engines)('$name formatting whitespace', (engine) => {
   ])('preserves existing structural spacing: %s', async (html, expected) => {
     expect(engine.markdown(html)).toBe(expected)
     await assertChunkings(html, engine.markdownStream, expected)
+  })
+
+  it.each([
+    ['<p>a<span> &#9;</span><br>b</p>', 'a  \nb', 'a\nb'],
+    ['<p>a<span>&#9; </span><br>b</p>', 'a  \nb', 'a\nb'],
+    ['<p>a<span> &#9;</span><br><br>b</p>', 'a  \n  \nb', 'a\n\nb'],
+    ['<ul><li>a<span> &#9;</span><br>b</li></ul>', '- a  \n  b', 'a\nb'],
+    ['<blockquote>a<span> &#9;</span><br>b</blockquote>', '> a  \n> b', 'a\nb'],
+  ])('keeps the break after a whitespace-only wrapper: %s', async (html, markdown, text) => {
+    expect(engine.markdown(html)).toBe(markdown)
+    await assertChunkings(html, engine.markdownStream, markdown)
+    expect(engine.text(html)).toBe(text)
+    await assertChunkings(html, engine.textStream, text)
+  })
+
+  it.each([
+    ['<p>#&#12;<br>b</p>', '\\#  \nb'],
+    ['<p>a<br>=&#12;<br>b</p>', 'a  \n\\=  \nb'],
+    ['<p>a<br>=&#12;</p>', 'a  \n\\='],
+    ['<p>a<br>--&#12;<br>b</p>', 'a  \n\\--  \nb'],
+    ['<p>1.&#12;<br>b</p>', '1\\.  \nb'],
+    ['<blockquote>#&#12;<br>b</blockquote>', '> \\#  \n> b'],
+    ['<p>#&#12;x</p>', '\\#\fx'],
+    ['<p>#\u0000x</p>', '#\u0000x'],
+  ])('escapes a marker before a trimmed form feed: %j', async (html, expected) => {
+    expect(engine.markdown(html)).toBe(expected)
+    await assertChunkings(html, engine.markdownStream, expected)
+  })
+
+  it.each([
+    ['<p>aaaaaaaaaa ===&#12; # x</p>', 'aaaaaaaaaa\n===\f # x'],
+    ['<p>aaaaaaaaaa ---&#12; + x</p>', 'aaaaaaaaaa\n---\f + x'],
+  ])('wraps a marker run before a form feed onto the next line: %j', async (html, expected) => {
+    expect(engine.markdownWrapped(html)).toBe(expected)
+    await assertChunkings(html, engine.markdownWrappedStream, expected)
   })
 
   it('keeps long vertical-tab tails consistent across chunks', async () => {

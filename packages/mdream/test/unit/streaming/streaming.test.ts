@@ -263,6 +263,36 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<h2>a #<q></q></h2>', '## a \\#', 'a #'],
   ['<li><h2>a #&#9;<i></i></h2></li>', '- ## a \\#', 'a #'],
   ['<h2>a#<i></i>#</h2>', '## a##', 'a##'],
+  // The trims take a form feed or a line end after the run as well, and a line
+  // end there closes the heading's line anyway.
+  ['<h2>a #&#12;</h2>', '## a \\#', 'a #'],
+  ['<h2>a #&#13;</h2>', '## a \\#', 'a #'],
+  ['<h2>a #&#10;</h2>', '## a \\#', 'a #'],
+  ['<h2>a ##&#12;&#12;</h2>', '## a \\##', 'a ##'],
+  ['<h2>#&#12;</h2>', '## \\#', '#'],
+  ['<h2>a&#9;#&#12;</h2>', '## a\t\\#', 'a\t#'],
+  ['<h2>a #<span>&#12;</span></h2>', '## a \\#', 'a #'],
+  ['<h2>a #&#12;<i></i>&#12;<i></i></h2>', '## a \\#', 'a #'],
+  ['<h2>a #&#13;</h2><p>x</p>', '## a \\#\r\n\nx'],
+  ['<ul><li><h2>a #&#12;</h2></li></ul>', '- ## a \\#', 'a #'],
+  // Only a space or a tab opens the closing sequence, and a form feed before
+  // other content leaves the run inside the line.
+  ['<h2>a&#12;#</h2>', '## a\f#', 'a\f#'],
+  ['<h2>a #&#12;b</h2>', '## a #\fb', 'a #\fb'],
+  // An empty heading's own opening sequence is never escaped, after a list
+  // marker or the item's indent.
+  ['<ul><li><h2></h2></li></ul>', '- ##', ''],
+  ['<ul><li><h2>&#9;</h2></li></ul>', '- ##', ''],
+  ['<ul><li><h2>&#12;</h2></li></ul>', '- ##', ''],
+  ['<ol start="9"><li><h2> </h2></li></ol>', '9. ##', ''],
+  ['<ul><li>x<h2></h2></li></ul>', '- x\n\n  ##', 'x'],
+  ['<blockquote><ul><li><h2>&#9;</h2></li></ul></blockquote>', '> - ##', ''],
+  ['<ul><li><h2>#</h2></li></ul>', '- ## \\#', '#'],
+  // Drained output can leave the buffer starting mid-line inside the spaces.
+  [`<h2>x<i></i>${'&#32;'.repeat(20)}#&#12;</h2>`, `## x${' '.repeat(20)}\\#`, `x${' '.repeat(20)}#`],
+  // The trims after an escaped run still find the text's fragment.
+  ['<ul><li><h2>a #&#12;</h2></li><li>b</li></ul>', '- ## a \\#\n- b', 'a #\nb'],
+  ['<ul><li><h2>a #&#9;</h2>y</li></ul>', '- ## a \\# y', 'a # y'],
   ['<p><b>x y&#9;</b><br>b</p>', '**x y**  \nb', 'x y\nb'],
   ['<p><span>x y&#9;</span>z</p>', 'x y z', 'x y z'],
   // Source text trims separately; structural line feeds and earlier breaks stay.

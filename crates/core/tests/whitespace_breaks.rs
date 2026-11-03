@@ -338,6 +338,62 @@ fn transparent_wrappers_preserve_the_formatting_whitespace_tail() {
 }
 
 #[test]
+fn a_break_after_a_whitespace_only_wrapper_keeps_its_line_end() {
+  let markdown = HtmlToMarkdownOptions::default();
+  for (html, expected_markdown, expected_text) in [
+    ("<p>a<span> &#9;</span><br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a<span>&#9; </span><br>b</p>", "a  \nb", "a\nb"),
+    (
+      "<p>a<span> &#9;</span><br><br>b</p>",
+      "a  \n  \nb",
+      "a\n\nb",
+    ),
+    (
+      "<ul><li>a<span> &#9;</span><br>b</li></ul>",
+      "- a  \n  b",
+      "a\nb",
+    ),
+    (
+      "<blockquote>a<span> &#9;</span><br>b</blockquote>",
+      "> a  \n> b",
+      "a\nb",
+    ),
+  ] {
+    assert_every_chunking(html, &markdown, expected_markdown);
+    assert_every_text_chunking(html, expected_text);
+  }
+}
+
+#[test]
+fn a_marker_before_a_trimmed_form_feed_stays_text() {
+  // Only a space or a tab ends a marker, but the trim before a break or at the
+  // block's end takes the form feed, so the marker is escaped as if it ended
+  // its line.
+  let markdown = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>#&#12;<br>b</p>", "\\#  \nb"),
+    ("<p>a<br>=&#12;<br>b</p>", "a  \n\\=  \nb"),
+    ("<p>a<br>=&#12;</p>", "a  \n\\="),
+    ("<p>a<br>--&#12;<br>b</p>", "a  \n\\--  \nb"),
+    ("<p>1.&#12;<br>b</p>", "1\\.  \nb"),
+    ("<blockquote>#&#12;<br>b</blockquote>", "> \\#  \n> b"),
+    ("<p>#&#12;x</p>", "\\#\u{c}x"),
+    // A NUL is content, as in the JS engine.
+    ("<p>#\u{0}x</p>", "#\u{0}x"),
+  ] {
+    assert_every_chunking(html, &markdown, expected);
+  }
+  // Wrapping still moves a marker run that ends in a form feed to the next line.
+  for (html, expected) in [
+    ("<p>aaaaaaaaaa ===&#12; # x</p>", "aaaaaaaaaa\n===\u{c} # x"),
+    ("<p>aaaaaaaaaa ---&#12; + x</p>", "aaaaaaaaaa\n---\u{c} + x"),
+  ] {
+    let wrapped = HtmlToMarkdownOptions::default().with_wrap_width(10);
+    assert_every_chunking(html, &wrapped, expected);
+  }
+}
+
+#[test]
 fn quote_flushing_keeps_the_inline_source_tail_mutable() {
   let text = "a".repeat(8200);
   for (tag, marker) in [("em", "*"), ("strong", "**"), ("del", "~~")] {
@@ -447,6 +503,51 @@ fn heading_closing_run_is_read_at_the_real_end() {
     ("<h2>a #<q></q></h2>", "## a \\#"),
     ("<li><h2>a #&#9;<i></i></h2></li>", "- ## a \\#"),
     ("<h2>a#<i></i>#</h2>", "## a##"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn heading_closing_run_is_read_past_a_trimmed_form_feed_or_line_end() {
+  // The trims take a form feed or a line end after the run too, and a line end
+  // there closes the heading's line anyway, so the run is escaped. Only a space
+  // or a tab opens the sequence, and an empty heading's own opening sequence
+  // after a list marker or an item's indent stays as it is.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<h2>a #&#12;</h2>", "## a \\#"),
+    ("<h2>a #&#13;</h2>", "## a \\#"),
+    ("<h2>a #&#10;</h2>", "## a \\#"),
+    ("<h2>a ##&#12;&#12;</h2>", "## a \\##"),
+    ("<h2>#&#12;</h2>", "## \\#"),
+    ("<h2>a&#9;#&#12;</h2>", "## a\t\\#"),
+    ("<h2>a #<span>&#12;</span></h2>", "## a \\#"),
+    ("<h2>a #&#12;<i></i>&#12;<i></i></h2>", "## a \\#"),
+    ("<h2>a #&#13;</h2><p>x</p>", "## a \\#\r\n\nx"),
+    ("<ul><li><h2>a #&#12;</h2></li></ul>", "- ## a \\#"),
+    ("<h2>a&#12;#</h2>", "## a\u{c}#"),
+    ("<h2>a #&#12;b</h2>", "## a #\u{c}b"),
+    ("<ul><li><h2></h2></li></ul>", "- ##"),
+    ("<ul><li><h2>&#9;</h2></li></ul>", "- ##"),
+    ("<ul><li><h2>&#12;</h2></li></ul>", "- ##"),
+    ("<ol start=\"9\"><li><h2> </h2></li></ol>", "9. ##"),
+    ("<ul><li>x<h2></h2></li></ul>", "- x\n\n  ##"),
+    (
+      "<blockquote><ul><li><h2>&#9;</h2></li></ul></blockquote>",
+      "> - ##",
+    ),
+    ("<ul><li><h2>#</h2></li></ul>", "- ## \\#"),
+    // Drained output can leave the buffer starting mid-line inside the spaces.
+    (
+      "<h2>x<i></i>&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;#&#12;</h2>",
+      "## x                    \\#",
+    ),
+    (
+      "<ul><li><h2>a #&#12;</h2></li><li>b</li></ul>",
+      "- ## a \\#\n- b",
+    ),
+    ("<ul><li><h2>a #&#9;</h2>y</li></ul>", "- ## a \\# y"),
   ] {
     assert_every_chunking(html, &options, expected);
   }
