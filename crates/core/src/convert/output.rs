@@ -4746,6 +4746,22 @@ impl ConvertState {
     }
   }
 
+  /// Whether only indentation follows a prose hard break, read from the bytes
+  /// as JS reads its buffer: an empty block dropped after the break moves no
+  /// line, though its rewrite forgets `hard_break_end`.
+  fn ends_at_hard_break(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let end = bytes.len() - trailing_spaces(bytes);
+    let byte = |back: usize| match end.checked_sub(back) {
+      Some(at) => Some(bytes[at]),
+      None if self.has_flushed_tail() && back - end <= 2 => {
+        Some(self.flushed_tail[2 - (back - end)])
+      }
+      None => None,
+    };
+    byte(1) == Some(b'\n') && byte(2) == Some(b' ') && byte(3) == Some(b' ')
+  }
+
   /// Whether the output ends in a line holding spaces only, read through a
   /// drain via `flushed_tail` like `trailing_new_lines`.
   fn ends_in_indent_line(&self) -> bool {
@@ -5899,7 +5915,7 @@ impl ConvertState {
       && self.ordered_item_number(0) != 1
       && !self.in_table_cell()
       && !self.inside_open_inline_delimiter()
-      && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
+      && (self.block_open_prefix("").is_some() || self.ends_at_hard_break())
     {
       return DEFAULT_BLOCK_SPACING;
     }

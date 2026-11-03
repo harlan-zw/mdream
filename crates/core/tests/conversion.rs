@@ -7395,6 +7395,14 @@ fn scout9_list_tail_quote_spacing() {
 }
 
 #[test]
+fn ordered_list_after_a_dropped_block_keeps_its_blank_line() {
+  // The empty quote's rewrite forgot the break's end; the bytes still end there.
+  let html =
+    "<ul><li><br><blockquote></blockquote><ol start=\"123456789\"><li></li></ol></li></ul>";
+  assert_eq!(convert(html), "-   \n  \n\n  123456789.");
+}
+
+#[test]
 fn hard_break_trim_preserves_an_empty_item_guard() {
   let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
   assert_eq!(convert(html), "- x\n\n  - \n  \n\n  y");

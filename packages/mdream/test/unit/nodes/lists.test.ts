@@ -482,6 +482,15 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
   })
 })
 
+describe.each(engines)('ordered list after a dropped block $name', (engineConfig) => {
+  it.each([
+    ['<ul><li><br><blockquote></blockquote><ol start="123456789"><li></li></ol></li></ul>', '-   \n  \n\n  123456789.'],
+  ])('keeps the blank line a hard break owes it: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
 describe.each(engines)('parent block after a closed nested fence $name', (engineConfig) => {
   it.each([
     ['<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>', '- a\n  - ```\n    c\n    ```\n\n  ***'],
