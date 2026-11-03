@@ -67,6 +67,22 @@ describe('inline whitespace', () => {
     expect(await streamConvert([...html]), 'one char per chunk').toBe(expected)
   })
 
+  // The parser counts open inline wrappers, so a wrapper only stops the
+  // separator while it is open: once closed, explicitly or implicitly, a later
+  // nested list gets its blank line back. Template content never counts.
+  it.each([
+    ['<ul><li><em>e</em><ul><li>a</li></ul>t</li></ul>', '- *e*\n  - a\n\n  t'],
+    ['<p><em>x</p><ul><li>y<ul><li>a</li></ul>t</li></ul>', '*x*\n\n- y\n  - a\n\n  t'],
+    ['<ul><li><em>x<ul><li>a</li></ul></em>t</li></ul><ul><li>y<ul><li>b</li></ul>u</li></ul>', '- *x  - a*t\n\n- y\n  - b\n\n  u'],
+    ['<template><em></template><ul><li>y<ul><li>a</li></ul>t</li></ul>', '- y\n  - a\n\n  t'],
+    ['<ul><li><em><ul><li>a</li></ul>t', '- *  - a t*'],
+  ])('only lets an open inline wrapper hold back the separator: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+    expect(await streamConvert([...html]), 'one char per chunk').toBe(expected)
+  })
+
   it('preserves whitespace between root-level inline siblings', () => {
     expect(htmlToMarkdown('<span>One</span> <span>Two</span>')).toBe('One Two')
     expect(htmlToMarkdown('<strong>One</strong>\n<strong>Two</strong>')).toBe('**One** **Two**')

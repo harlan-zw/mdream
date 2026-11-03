@@ -137,6 +137,11 @@ export interface MarkdownState {
   listRulePending?: string | true
   /** A tentative separator retractable while following wrappers are empty. */
   listTailStart?: number
+  /**
+   * Open elements, other than `<span>`, that collapse block spacing as
+   * `calculateNewLineConfig` does for `<li>`. The parser keeps the count.
+   */
+  collapseNonSpanDepth: number
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -967,15 +972,6 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
   return DEFAULT_BLOCK_SPACING
 }
 
-/** Whether an ancestor collapses block spacing, as `calculateNewLineConfig` does for `<li>`. */
-function insideInlineWrapper(node: ElementNode): boolean {
-  for (let parent = node.parent; parent; parent = parent.parent) {
-    if (parent.tagHandler?.collapsesInnerWhiteSpace && parent.tagId !== TAG_SPAN)
-      return true
-  }
-  return false
-}
-
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
   const handler = node.tagHandler
   // Custom exits have not run yet. Treat them as wrappers unless a
@@ -1493,6 +1489,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     lastItemMarkerFragment: undefined,
     lastItemMarkerOwner: undefined,
     listTailStart: undefined,
+    collapseNonSpanDepth: 0,
     emptyItemAfterCr: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
@@ -2694,7 +2691,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && !isInsideTableCell(state) && !handler?.literalExit && !hasPluginOutput
       // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
       // item line is left open for the parent's text to continue.
-      && !insideInlineWrapper(element)) {
+      && !state.collapseNonSpanDepth) {
       state.listRulePending = true
     }
 

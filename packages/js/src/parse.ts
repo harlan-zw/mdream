@@ -51,6 +51,7 @@ import {
   TAG_SCRIPT,
   TAG_SECTION,
   TAG_SELECT,
+  TAG_SPAN,
   TAG_STYLE,
   TAG_SUMMARY,
   TAG_TABLE,
@@ -666,6 +667,8 @@ export interface ParseState {
   plainText?: boolean
   /** Output state whose `options.origin` the first usable `<base href>` replaces. */
   urlBaseTarget?: { options: EngineOptions }
+  /** Output state counting open elements, other than `<span>`, that collapse block spacing. */
+  collapseDepthTarget?: { collapseNonSpanDepth: number }
   /** Only the first `<base href>` counts, even when it is not usable. */
   baseHrefSeen?: boolean
   /**
@@ -1650,6 +1653,9 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   }
   if (tagId === TAG_OL || tagId === TAG_UL)
     state.listItemCounts!.pop()
+  const collapseTarget = state.collapseDepthTarget
+  if (collapseTarget && node.tagHandler?.collapsesInnerWhiteSpace && tagId !== TAG_SPAN && !node.excludedFromMarkdown)
+    collapseTarget.collapseNonSpanDepth--
 
   state.depth--
   state.endTagClosedNothing = false
@@ -2076,6 +2082,10 @@ function processOpeningTag(
   // their descendants receive this optional field.
   if (tagId === TAG_TEMPLATE || state.currentNode?.excludedFromMarkdown)
     tag.excludedFromMarkdown = true
+
+  const collapseTarget = state.collapseDepthTarget
+  if (collapseTarget && tagHandler?.collapsesInnerWhiteSpace && tagId !== TAG_SPAN && !tag.excludedFromMarkdown)
+    collapseTarget.collapseNonSpanDepth++
 
   state.lastTextNode = tag
   state.endTagClosedNothing = false
