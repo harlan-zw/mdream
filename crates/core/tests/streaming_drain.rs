@@ -264,7 +264,7 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
-fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
+fn hard_break_item_indent_drops_across_a_drain_before_its_setext_line() {
   // The item's tab ends a drained chunk, which settled the empty-item guard early.
   // The `</li>` trim must not depend on that guard: one-shot drops the
   // continuation indent after the break too, as JS does.
