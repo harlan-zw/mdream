@@ -3099,14 +3099,12 @@ impl ConvertState {
         .rev()
         .take_while(|&&b| matches!(b, b' ' | b'\t' | b'\x0C' | b'\r'))
         .count();
-      let run = self.cut_marker_run.after(drained);
-      if blanks == 0 {
-        self.cut_marker_run_before_blanks = run;
-      } else if blanks < drain_end {
-        self.cut_marker_run_before_blanks =
-          self.cut_marker_run.after(&drained[..drain_end - blanks]);
+      let (up_to_blanks, blank_tail) = drained.split_at(drain_end - blanks);
+      let before_blanks = self.cut_marker_run.after(up_to_blanks);
+      if !up_to_blanks.is_empty() {
+        self.cut_marker_run_before_blanks = before_blanks;
       }
-      self.cut_marker_run = run;
+      self.cut_marker_run = before_blanks.after(blank_tail);
     }
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);

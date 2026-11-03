@@ -1039,12 +1039,10 @@ export function noteCompactedMarkerRun(scan: BufferScanState, content: string, e
   let blanksStart = end
   while (blanksStart > 0 && isBreakWhitespace(content.charCodeAt(blanksStart - 1)))
     blanksStart--
-  const run = markerRunAfter(scan[7], content, 0, end)
-  if (blanksStart === end)
-    scan[8] = run
-  else if (blanksStart > 0)
-    scan[8] = markerRunAfter(scan[7], content, 0, blanksStart)
-  scan[7] = run
+  const beforeBlanks = markerRunAfter(scan[7], content, 0, blanksStart)
+  if (blanksStart > 0)
+    scan[8] = beforeBlanks
+  scan[7] = markerRunAfter(beforeBlanks, content, blanksStart, end)
 }
 
 /**
