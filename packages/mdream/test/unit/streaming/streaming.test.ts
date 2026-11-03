@@ -195,6 +195,11 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<blockquote><ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul></blockquote>',
   '<ul><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ul>',
   '<ol><li><ul><li>a<br></li></ul><blockquote>q</blockquote></li></ol>',
+  '<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>',
+  '<ul><li>a<ul><li><pre>c</pre></li></ul><h2>h</h2></li></ul>',
+  '<ul><li>a<ul><li><br></li></ul><blockquote>q</blockquote></li></ul>',
+  '<ol start="4"><li>a<ol start="2"><li><br><br></li></ol><ul><li></li></ul></li></ol>',
+  '<ul><li>a<ul><li><pre>c</pre><br></li></ul><ul><li></li></ul></li></ul>',
   { html: '<script><b>x</b></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'div' } } } },
   { html: '<script>a</div>b</script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'div' } } } },
   { html: '<style><b>x</b></style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'div' } } } },
@@ -901,23 +906,23 @@ describe('blocks around nested pending markers streaming', () => {
     ],
     [
       '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
-      '- a\n\n  -\n\n  ## h',
+      '- a\n\n  - \n\n  ## h',
     ],
     [
       '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
-      '- a\n  - b\n\n    -\n\n    ## h',
+      '- a\n  - b\n\n    - \n\n    ## h',
     ],
     [
       '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
-      '- a\n\n  -\n\n  ```\n  x\n  ```',
+      '- a\n\n  - \n\n  ```\n  x\n  ```',
     ],
     [
       '<ul><li>a<ul><li></li></ul><hr></li></ul>',
-      '- a\n\n  -\n\n  ***',
+      '- a\n\n  - \n\n  ---',
     ],
     [
       '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
-      '- a\n\n  -\n\n  | t |\n  | --- |\n  | c |',
+      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
     ],
   ])('matches every split and chunk width: %s', async (html, expected) => {
     for (const { engine, name } of engines) {

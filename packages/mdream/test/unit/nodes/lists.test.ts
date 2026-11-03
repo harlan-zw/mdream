@@ -142,7 +142,7 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<blockquote><ul><li>x<ol start="10"><li>y</li></ol></li></ul></blockquote>', '> - x\n>\n>   10. y'],
     ['<ul><li>x<ul><li>z<ol start="10"><li>y</li></ol></li></ul></li></ul>', '- x\n  - z\n\n    10. y'],
     ['<ul><li><p>x</p><ol start="10"><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
-    ['<ul><li>x<ol start="10"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>', '- x\n\n  10. y\n\n  - z\n- after'],
+    ['<ul><li>x<ol start="10"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>', '- x\n\n  10. y\n  - z\n- after'],
     ['<ul><li>x<br><ol start="10"><li>y</li></ol></li></ul>', '- x  \n\n  10. y'],
     ['<ul><li>x<ul><li>y</li></ul><ol start="10"><li>z</li></ol></li></ul>', '- x\n  - y\n\n  10. z'],
     ['<ol><li><ol start="10"><li>y</li></ol></li></ol>', '1.\n   10. y'],
@@ -377,6 +377,17 @@ line2</code></pre></li></ol>`
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 
+  it.each([
+    ['<ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul>', '- x\n  - a\n- next'],
+    ['<ul><li>x<ul><li>a</li></ul><a id="anchor"></a></li><li>next</li></ul>', '- x\n  - a\n- next'],
+    ['<ol><li>x<ol><li>a</li></ol><span></span><em></em></li><li>next</li></ol>', '1. x\n   1. a\n2. next'],
+    ['<ul><li><em><ul><li>a</li></ul></em>t</li></ul>', '- *  - a*t'],
+    ['<ul><li>x<ul><li>a</li></ul><span></span>tail</li><li>next</li></ul>', '- x\n  - a\n\n  tail\n- next'],
+  ])('keeps a list tight when nothing visible follows its nested list: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>
@@ -425,6 +436,43 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
     ['<ul><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ul>', '- a\n  - b  \n\n  ## h'],
     ['<ol start="10"><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ol>', '10. a\n    - b  \n\n    ## h'],
   ])('keeps the heading in its parent item: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li>a<ul><li><br></li></ul><pre>d</pre></li></ul>', '- a\n\n  -   \n\n  ```\n  d\n  ```'],
+    ['<ul><li>a<ul><li><br></li></ul><blockquote>q</blockquote></li></ul>', '- a\n\n  -   \n\n  > q'],
+    ['<ul><li>a<ul><li><br></li></ul><hr></li></ul>', '- a\n\n  -   \n  ---'],
+    ['<ul><li>a<ul><li><br></li></ul><h2>h</h2></li></ul>', '- a\n\n  -   \n\n  ## h'],
+    ['<ol start="4"><li>a<ol start="2"><li><br><br></li></ol><ul><li></li></ul></li></ol>', '4. a\n\n   2.   \n        \n   -'],
+    ['<ul><li>a<ul><li><pre>c</pre><br></li></ul><ul><li></li></ul></li></ul>', '- a\n  - ```\n    c\n    ```\n\n      \n\n  -'],
+    ['<ul><li>a<ul><li><br></li></ul><ol start="5"><li>z</li></ol></li></ul>', '- a\n\n  -   \n\n  5. z'],
+  ])('leaves no indent line after a hard break in an empty item: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('parent block after a closed nested fence $name', (engineConfig) => {
+  it.each([
+    ['<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>', '- a\n  - ```\n    c\n    ```\n\n  ***'],
+    ['<ul><li>a<ul><li><pre>c</pre></li></ul><h2>h</h2></li></ul>', '- a\n  - ```\n    c\n    ```\n\n  ## h'],
+    ['<ul><li>a<ul><li>x</li><li><pre>c</pre></li></ul><hr></li></ul>', '- a\n  - x\n  - ```\n    c\n    ```\n\n  ***'],
+    ['<blockquote><ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul></blockquote>', '> - a\n>   - ```\n>     c\n>     ```\n>\n>   ***'],
+  ])('drops the indent the closed item left: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('nested list tail in a raw HTML block $name', (engineConfig) => {
+  it.each([
+    ['<details><summary>s</summary><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></details>', '<details>\n\n<summary>s</summary>\n\n\n\n- x\n  - a\n- next\n\n</details>'],
+    ['<dl><dd><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></dd></dl>', '<dl><dd>\n\n- x\n  - a\n- next\n\n</dd></dl>'],
+    ['<details><ul><li>x<ul><li>a</li></ul>tail</li></ul></details>', '<details>\n\n- x\n  - a\n\n  tail\n\n</details>'],
+    ['<dl><dd><ul><li>x<ul><li></li></ul>t</li></ul></dd></dl>', '<dl><dd>\n\n- x\n\n  -\n\n  t\n\n</dd></dl>'],
+  ])('matches the plain context: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
@@ -560,23 +608,23 @@ describe.each(engines)('blocks around nested pending markers $name', (engineConf
   it.each([
     [
       '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
-      '- a\n\n  -\n\n  ## h',
+      '- a\n\n  - \n\n  ## h',
     ],
     [
       '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
-      '- a\n  - b\n\n    -\n\n    ## h',
+      '- a\n  - b\n\n    - \n\n    ## h',
     ],
     [
       '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
-      '- a\n\n  -\n\n  ```\n  x\n  ```',
+      '- a\n\n  - \n\n  ```\n  x\n  ```',
     ],
     [
       '<ul><li>a<ul><li></li></ul><hr></li></ul>',
-      '- a\n\n  -\n\n  ***',
+      '- a\n\n  - \n\n  ---',
     ],
     [
       '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
-      '- a\n\n  -\n\n  | t |\n  | --- |\n  | c |',
+      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
     ],
   ])('leaves the marker of a closed item: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)

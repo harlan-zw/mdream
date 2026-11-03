@@ -2559,7 +2559,7 @@ impl ConvertState {
         // A hard break already ended the item. Its continuation indentation
         // must not become a whitespace-only line before the following block.
         if self.hard_break_end == self.buffer.len()
-          && !self.empty_item_hazard
+          && (!self.empty_item_hazard || self.break_follows_item_marker())
           && !has_override
           && self.depth_map[TAG_PRE as usize] == 0
           && !self.in_table_cell()
@@ -3377,6 +3377,13 @@ impl ConvertState {
       _ => return false,
     }
     let mut spaces = 0;
+    while index >= 8
+      && max_spaces.saturating_sub(spaces) >= 8
+      && bytes[index - 8..index] == [b' '; 8]
+    {
+      index -= 8;
+      spaces += 8;
+    }
     while index > 0 && bytes[index - 1] == b' ' {
       // The space after a decoded `\r` separates the marker from the line end
       // before it; it is not indentation, so it never counts against the cap.
@@ -3475,8 +3482,10 @@ impl ConvertState {
       {
         self.parent_marker_scans += 1;
       }
+      // A line of spaces only is blank, as in JS: a hard break's continuation
+      // indent left one between the parent's marker and this one.
       let mut above_end = above_end;
-      while above_end > 0 && bytes[above_end - 1] == b' ' {
+      while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n') {
         above_end -= 1;
       }
       above_end > 0
@@ -3514,6 +3523,8 @@ impl ConvertState {
   /// the same, and waiting for it pins the marker's line and everything the
   /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
   /// blank line also survives a nested list whose first `<li>` dropped it.
+  /// An open fence takes nothing back: its opener stays on the marker's line,
+  /// and the stream drain already answers there, so one-shot does too.
   /// Kept out of line so the token loop stays small when nothing is pending.
   #[inline(never)]
   pub(crate) fn settle_item_marker(&mut self) {
@@ -3548,7 +3559,6 @@ impl ConvertState {
       && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
-      && self.code_fence.is_none()
       && self.depth_map[TAG_A as usize] == 0
       && self.first_tentative_caption_start().is_none()
       // The blank line leaves quote frames where they are, right only for those
@@ -3563,6 +3573,19 @@ impl ConvertState {
     self.item_settle_pending = self.empty_item_hazard
       || self.empty_list_marker_end != usize::MAX
       || self.list_tail_start != usize::MAX;
+  }
+
+  /// Whether the output ends in a line break written after the open item's
+  /// marker and then spaces only. Those spaces are the break's continuation
+  /// indent, never the marker's own space that the empty-item guard keeps.
+  #[cold]
+  fn break_follows_item_marker(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let mut start = bytes.len();
+    while start > 0 && bytes[start - 1] == b' ' {
+      start -= 1;
+    }
+    start > self.empty_item_len && bytes[start - 1] == b'\n'
   }
 
   /// Give a marker that ended up alone on its line the blank line it needs: the
@@ -4627,7 +4650,6 @@ impl ConvertState {
     if !plain_text!(self)
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
-      && !self.in_raw_html_block()
       && self.empty_list_marker_depth > self.depth_map[TAG_LI as usize] as usize
     {
       // Any item of this list, filled or empty, ends before the parent's text.
@@ -4649,13 +4671,33 @@ impl ConvertState {
     }
   }
 
-  fn flush_list_tail(&mut self) {
-    let prefix = self.continuation_prefix();
-    self.flush_list_tail_with_prefix(&prefix);
+  /// Whether the output ends in a line holding spaces only, read through a
+  /// drain via `flushed_tail` like `trailing_new_lines`.
+  fn ends_in_indent_line(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let mut start = bytes.len();
+    while start > 0 && bytes[start - 1] == b' ' {
+      start -= 1;
+    }
+    if start == bytes.len() {
+      return false;
+    }
+    if start > 0 {
+      bytes[start - 1] == b'\n'
+    } else {
+      self.has_flushed_tail() && self.flushed_tail[1] == b'\n'
+    }
   }
 
-  fn flush_list_tail_with_prefix(&mut self, prefix: &str) {
-    self.trim_trailing_spaces();
+  fn flush_list_tail(&mut self, preserve_marker_space: bool) {
+    let prefix = self.continuation_prefix();
+    self.flush_list_tail_with_prefix(&prefix, preserve_marker_space);
+  }
+
+  fn flush_list_tail_with_prefix(&mut self, prefix: &str, preserve_marker_space: bool) {
+    if !preserve_marker_space {
+      self.trim_trailing_spaces();
+    }
     self.list_tail_start = self.buffer.len();
     self.list_tail_scanned_to = self.list_tail_start;
     self.item_settle_pending = true;
@@ -4675,7 +4717,9 @@ impl ConvertState {
   #[inline(never)]
   fn flush_list_pending(&mut self, tag_id: Option<u8>) {
     if self.list_pending & LIST_TAIL_PENDING != 0 {
-      if matches!(tag_id, Some(TAG_BLOCKQUOTE)) {
+      if matches!(tag_id, Some(TAG_UL | TAG_OL)) {
+        // Empty lists cannot settle the parent paragraph boundary.
+      } else if matches!(tag_id, Some(TAG_BLOCKQUOTE)) {
         // A literal quote pushes no frame to hand the tail back.
         let overrides = self
           .options
@@ -4689,7 +4733,7 @@ impl ConvertState {
           Some("") => {
             // A literal enter has no quote frame and must not add a `>` prefix.
             let prefix = self.list_indent.clone();
-            self.flush_list_tail_with_prefix(&prefix);
+            self.flush_list_tail_with_prefix(&prefix, false);
           }
           enter => {
             let built_in = enter.is_none();
@@ -4700,8 +4744,23 @@ impl ConvertState {
             }
           }
         }
+      } else if matches!(tag_id, Some(TAG_LI | TAG_H1..=TAG_H6 | TAG_HR)) {
+        // A closed nested item can leave its indent alone on the last line, as
+        // after a fence. A heading or rule reads it as its own prefix and lands
+        // in that item, so the parent's prefix replaces it after a blank line.
+        if matches!(tag_id, Some(TAG_H1..=TAG_H6 | TAG_HR)) && self.ends_in_indent_line() {
+          self.trim_trailing_spaces();
+          if self.trailing_new_lines() == 2 {
+            let prefix = self.continuation_prefix();
+            self.last_content_cache_len = self.push_code_span_content(&prefix, true);
+          }
+        }
+        self.list_pending &= !LIST_TAIL_PENDING;
+        self.empty_list_marker_end = usize::MAX;
       } else {
-        self.flush_list_tail();
+        self.flush_list_tail(
+          matches!(tag_id, Some(TAG_PRE | TAG_TABLE)) && self.empty_list_marker_end != usize::MAX,
+        );
       }
     }
     if self.list_pending & LIST_RULE_PENDING != 0 {
@@ -6113,6 +6172,28 @@ mod tests {
   }
 
   #[test]
+  fn list_marker_indent_cap_survives_word_skips() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    for indent in 0..=24 {
+      state.list_indent = " ".repeat(indent);
+      let max_spaces = indent + 3;
+      for spaces in 0..=60 {
+        for lead in ["", "\n", "x"] {
+          for marker in ["-", "3."] {
+            let line = format!("{lead}{}{marker}", " ".repeat(spaces));
+            let expected = (lead.is_empty() || lead == "\n") && spaces <= max_spaces;
+            assert_eq!(
+              state.list_marker_line_start(line.as_bytes(), line.len(), max_spaces),
+              expected,
+              "indent={indent} spaces={spaces} lead={lead:?} marker={marker}"
+            );
+          }
+        }
+      }
+    }
+  }
+
+  #[test]
   fn push_decimal_matches_display() {
     for value in [0, 1, 9, 10, 99, 100, 4_294_967_295] {
       let mut out = String::from("x");
@@ -6273,7 +6354,7 @@ mod tests {
       state.list_pending |= LIST_TAIL_PENDING;
       let before = state.buffer.len();
 
-      state.flush_list_tail();
+      state.flush_list_tail(false);
 
       let written = state.buffer.len() - before;
       assert_eq!(written, expected_written, "cap={cap}, content={content:?}");

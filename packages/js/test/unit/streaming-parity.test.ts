@@ -933,3 +933,9 @@ it.each(['parent</li></ul>', '</li></ul><p>after</p>', '<ul><li>nested</li></ul>
   const html = `<p>before</p><ul><li>${'<br>'.repeat(8)}${suffix}`
   await expectEverySplitParity(html)
 })
+
+it.each(['<table></table>', '<pre></pre>'])('keeps the nested list tail across %s', async (block) => {
+  const html = `<ul><li>A<ul><li>inner</li></ul>${block}parent</li></ul>`
+  expect(convertOnce(html)).toBe('- A\n  - inner\n\n  parent')
+  await expectEverySplitParity(html)
+})

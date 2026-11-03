@@ -264,13 +264,14 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
-fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
+fn hard_break_item_indent_drops_across_a_drain_before_its_setext_line() {
   // The item's tab ends a drained chunk, which settled the empty-item guard early.
-  // The `</li>` trim then removed the continuation indent one-shot keeps.
+  // The `</li>` trim must not depend on that guard: one-shot drops the
+  // continuation indent after the break too, as JS does.
   let html = "<b>1) x<small><br> <ul><li>&#9;<br></li></ul></small>===<hr></b>";
   assert_eq!(
     html_to_markdown(html, HtmlToMarkdownOptions::default()),
-    "**1) x  \n- \t  \n  \\=== ---**"
+    "**1) x  \n- \t  \n\\=== ---**"
   );
   assert_stream_matches(html, HtmlToMarkdownOptions::default());
 }
@@ -3388,6 +3389,38 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
   }
 }
 
+// Quoting the completed lines of a long blockquote rewrites the bytes before a
+// pending nested-list separator. Its offset must survive until the item decides
+// whether to drop it, or streaming leaves a blank line one-shot removes.
+#[test]
+fn long_quote_flush_keeps_a_retractable_list_tail() {
+  let lead = "x".repeat(9000);
+  for tail in ["<span></span>", "<a id=\"anchor\"></a>", "<span></span> "] {
+    let html = format!(
+      "<blockquote><p>{lead}</p><ul><li>x<ul><li>a</li></ul>{tail}</li><li>next</li></ul></blockquote>"
+    );
+    let expected = format!("> {lead}\n>\n> - x\n>   - a\n> - next");
+    assert_eq!(
+      html_to_markdown(&html, HtmlToMarkdownOptions::default()),
+      expected
+    );
+    for chunk in [1, 7, 64, 4096, 9050] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "tail={tail}, chunk={chunk}"
+      );
+    }
+    for split in html.len() - 80..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = processor.process_chunk(&html[..split]);
+      output.push_str(&processor.process_chunk(&html[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "tail={tail}, split={split}");
+    }
+  }
+}
+
 #[test]
 fn builtin_blockquote_alias_streams_as_div() {
   let opts = HtmlToMarkdownOptions {
@@ -3563,7 +3596,7 @@ fn nested_ordered_start_separates_parent_paragraph() {
     ),
     (
       "<ul><li>x<ol start=\"10\"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>",
-      "- x\n\n  10. y\n\n  - z\n- after",
+      "- x\n\n  10. y\n  - z\n- after",
     ),
     (
       "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
@@ -4941,6 +4974,59 @@ fn heading_after_nested_hard_break_keeps_indent_across_drains() {
 }
 
 #[test]
+fn parent_block_drops_the_indent_a_closed_item_left_at_every_split() {
+  for html in [
+    "<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>",
+    "<ul><li>a<ul><li><pre>c</pre></li></ul><h2>h</h2></li></ul>",
+    "<blockquote><ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul></blockquote>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+  // A long lead lets the stream drain before the nested list closes.
+  let html = "<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>";
+  let long = format!("<p>{}</p>{html}", "lead ".repeat(1000));
+  let expected = html_to_markdown(&long, HtmlToMarkdownOptions::default());
+  assert!(expected.ends_with("\n\n  ***"), "{expected:?}");
+  for width in [1, 7, 4096] {
+    assert_eq!(
+      stream_chunks(&long, width, HtmlToMarkdownOptions::default()),
+      expected
+    );
+  }
+}
+
+#[test]
+fn hard_break_in_an_empty_nested_item_matches_every_split() {
+  for html in [
+    "<ul><li>a<ul><li><br></li></ul><pre>d</pre></li></ul>",
+    "<ul><li>a<ul><li><br></li></ul><blockquote>q</blockquote></li></ul>",
+    "<ul><li>a<ul><li><br></li></ul><hr></li></ul>",
+    "<ol start=\"4\"><li>a<ol start=\"2\"><li><br><br></li></ol><ul><li></li></ul></li></ol>",
+    "<ul><li>a<ul><li><pre>c</pre><br></li></ul><ul><li></li></ul></li></ul>",
+    "<ul><li>a<ul><li><pre>c</pre><br></li></ul><hr></li></ul>",
+    "<ul><li>a<ul><li><br><br></li></ul><ol start=\"5\"><li></li></ol></li></ul>",
+    "<ul><li>a<ul><li><pre>c</pre><br></li></ul><ol start=\"3\"><li>z</li><li></li></ol></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn nested_list_tail_in_a_raw_html_block_matches_every_split() {
+  for html in [
+    "<details><summary>s</summary><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></details>",
+    "<dl><dd><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></dd></dl>",
+    "<details><ul><li>x<ul><li>a</li></ul>tail</li></ul></details>",
+    "<dl><dd><ul><li>x<ul><li></li></ul>t</li></ul></dd></dl>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn heading_after_paragraph_in_item_matches_every_split() {
   for html in [
     "<ul><li><p>a</p><h2>h</h2></li></ul>",
@@ -5122,23 +5208,23 @@ fn block_on_a_nested_pending_marker_streams_like_one_shot() {
     ),
     (
       "<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>",
-      "- a\n\n  -\n\n  ## h",
+      "- a\n\n  - \n\n  ## h",
     ),
     (
       "<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>",
-      "- a\n  - b\n\n    -\n\n    ## h",
+      "- a\n  - b\n\n    - \n\n    ## h",
     ),
     (
       "<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>",
-      "- a\n\n  -\n\n  ```\n  x\n  ```",
+      "- a\n\n  - \n\n  ```\n  x\n  ```",
     ),
     (
       "<ul><li>a<ul><li></li></ul><hr></li></ul>",
-      "- a\n\n  -\n\n  ***",
+      "- a\n\n  - \n\n  ---",
     ),
     (
       "<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>",
-      "- a\n\n  -\n\n  | t |\n  | --- |\n  | c |",
+      "- a\n\n  - \n\n  | t |\n  | --- |\n  | c |",
     ),
   ] {
     for opts in [HtmlToMarkdownOptions::default(), fl2_style.clone()] {

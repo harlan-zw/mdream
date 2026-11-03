@@ -2828,6 +2828,191 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
 }
 
 #[test]
+fn parent_text_after_empty_nested_list_stays_in_parent() {
+  for (html, expected) in [
+    ("<ul><li><ul></ul>text</li></ul>", "- text"),
+    ("<ul><li><ol></ol>text</li></ul>", "- text"),
+    ("<ul><li>before<ul></ul>text</li></ul>", "- before text"),
+    (
+      "<ul><li><ul><template><li></li></template></ul>text</li></ul>",
+      "- text",
+    ),
+    ("<ul><li><ul><span></span></ul>text</li></ul>", "- text"),
+    ("<ul><li><ul> \n </ul>text</li></ul>", "- text"),
+    (
+      "<ul><li><ul></ul><strong>text</strong></li></ul>",
+      "- **text**",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><ul></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<blockquote><ul><li><ol><li></li></ol>text</li></ul></blockquote>",
+      "> -\n>   1.\n>\n>   text",
+    ),
+    (
+      "<ul><li><blockquote><ol><li></li></ol>text</blockquote></li></ul>",
+      "- \n  >\n  > 1.\n  >\n  > text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol>text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ol start=\"10\"><li><ul><li></li></ul>text</li></ol>",
+      "10.\n    -\n\n    text",
+    ),
+    (
+      "<ul><li><ol><li>child</li></ol>text</li></ul>",
+      "-\n  1. child\n\n  text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol><strong>text</strong></li></ul>",
+      "-\n  1.\n\n  **text**",
+    ),
+    (
+      "<ul><li><ol><li></li></ol><script>hidden</script> text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol></li><li>next</li></ul>",
+      "-\n  1.\n- next",
+    ),
+    (
+      "<ul><li><pre><ul></ul>x</pre></li></ul>",
+      "- ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>",
+      "- x\n\n  - \n  \n\n  y",
+    ),
+    (
+      "<table><tr><td><ul><li><ol><li></li></ol>text</li></ul></td></tr></table>",
+      "| <ul><li><ol><li></li></ol>text</li></ul> |\n| --- |",
+    ),
+  ] {
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      transparent_override("span", true),
+    ] {
+      assert_eq!(
+        html_to_markdown(html, options.clone()),
+        expected,
+        "html={html}"
+      );
+      for split in 0..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = processor.process_chunk(&html[..split]);
+        output.push_str(&processor.process_chunk(&html[split..]));
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "html={html}, split={split}");
+      }
+    }
+  }
+}
+
+#[test]
+fn empty_inline_after_nested_list_keeps_the_list_tight() {
+  // Only visible parent text needs its own paragraph after a nested list. An
+  // element that stays empty, or a list its inline wrapper wrote inline, must
+  // not leave a blank line that turns the list loose.
+  for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul>",
+      "- x\n  - a\n- next",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><a id=\"anchor\"></a></li><li>next</li></ul>",
+      "- x\n  - a\n- next",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  - a\n- next",
+    ),
+    (
+      "<ol><li>x<ol><li>a</li></ol><span></span><em></em></li><li>next</li></ol>",
+      "1. x\n   1. a\n2. next",
+    ),
+    (
+      "<blockquote><ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul></blockquote>",
+      "> - x\n>   - a\n> - next",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><ul><li>a</li></ul></a>t</li></ul>",
+      "- [  - a](/x)t",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><span></span>tail</li><li>next</li></ul>",
+      "- x\n  - a\n\n  tail\n- next",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = processor.process_chunk(&html[..split]);
+      output.push_str(&processor.process_chunk(&html[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "html={html}, split={split}");
+    }
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut output = String::new();
+    for index in 0..html.len() {
+      output.push_str(&processor.process_chunk(&html[index..=index]));
+    }
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "html={html}, one byte per chunk");
+  }
+}
+
+#[test]
+fn block_marker_after_nested_list_stays_literal() {
+  for (text, expected) in [
+    ("# h", "\\# h"),
+    ("## h", "\\## h"),
+    ("1. x", "1\\. x"),
+    ("1) x", "1\\) x"),
+    ("999999999. x", "999999999\\. x"),
+    ("- x", "\\- x"),
+    ("+ x", "\\+ x"),
+    ("&gt; q", "\\> q"),
+    ("---", "\\---"),
+  ] {
+    let html = format!("<ol start=\"10\"><li><ul><li>child</li></ul>{text}</li></ol>");
+    let expected = format!("10.\n    - child\n\n    {expected}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      transparent_override("span", true),
+    ] {
+      assert_eq!(
+        html_to_markdown(&html, options.clone()),
+        expected,
+        "html={html}"
+      );
+      for split in 0..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = processor.process_chunk(&html[..split]);
+        output.push_str(&processor.process_chunk(&html[split..]));
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "html={html}, split={split}");
+      }
+    }
+  }
+}
+
+#[test]
 fn a_marker_nested_past_three_spaces_still_opens_its_item() {
   // A third-level marker is indented by its ancestors' items. Its content
   // starts a block like a top-level item's does, so it is escaped and blocks
@@ -7068,6 +7253,22 @@ fn empty_nested_list_review_regressions() {
 }
 
 #[test]
+fn empty_blocks_preserve_nested_list_tail() {
+  for block in ["<table></table>", "<pre></pre>"] {
+    let html = format!("<ul><li>A<ul><li>inner</li></ul>{block}parent</li></ul>");
+    let expected = "- A\n  - inner\n\n  parent";
+    assert_eq!(convert(&html), expected, "{block}");
+    for split in 0..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut actual = stream.process_chunk(&html[..split]);
+      actual.push_str(&stream.process_chunk(&html[split..]));
+      actual.push_str(&stream.finish());
+      assert_eq!(actual, expected, "{block} split={split}");
+    }
+  }
+}
+
+#[test]
 fn scout9_excluded_list_spacing() {
   for (html, expected) in [
     (
@@ -7487,7 +7688,7 @@ fn nested_ordered_start_separates_parent_paragraph() {
     ),
     (
       "<ul><li>x<ol start=\"10\"><li>y</li></ol><ul><li>z</li></ul></li><li>after</li></ul>",
-      "- x\n\n  10. y\n\n  - z\n- after",
+      "- x\n\n  10. y\n  - z\n- after",
     ),
     (
       "<ul><li>x<br><ol start=\"10\"><li>y</li></ol></li></ul>",
@@ -7673,6 +7874,104 @@ fn heading_after_nested_hard_break_stays_in_parent_item() {
 }
 
 #[test]
+fn parent_block_drops_the_indent_a_closed_item_left() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n  ***",
+    ),
+    (
+      "<ul><li>a<ul><li><pre>c</pre></li></ul><h2>h</h2></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>x</li><li><pre>c</pre></li></ul><hr></li></ul>",
+      "- a\n  - x\n  - ```\n    c\n    ```\n\n  ***",
+    ),
+    (
+      "<blockquote><ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul></blockquote>",
+      "> - a\n>   - ```\n>     c\n>     ```\n>\n>   ***",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn hard_break_in_an_empty_nested_item_leaves_no_indent_line() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li><br></li></ul><pre>d</pre></li></ul>",
+      "- a\n\n  -   \n\n  ```\n  d\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li><br></li></ul><blockquote>q</blockquote></li></ul>",
+      "- a\n\n  -   \n\n  > q",
+    ),
+    (
+      "<ul><li><p>a</p><ul><li><br></li></ul><blockquote>q</blockquote></li></ul>",
+      "- a\n\n  -   \n\n  > q",
+    ),
+    (
+      "<ul><li>a<ul><li><br></li></ul><hr></li></ul>",
+      "- a\n\n  -   \n  ---",
+    ),
+    (
+      "<ul><li>a<ul><li><br></li></ul><h2>h</h2></li></ul>",
+      "- a\n\n  -   \n\n  ## h",
+    ),
+    // A line of spaces between two markers is blank, so the second needs no
+    // separator of its own.
+    (
+      "<ol start=\"4\"><li>a<ol start=\"2\"><li><br><br></li></ol><ul><li></li></ul></li></ol>",
+      "4. a\n\n   2.   \n        \n   -",
+    ),
+    (
+      "<ul><li>a<ul><li><pre>c</pre><br></li></ul><ul><li></li></ul></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n      \n\n  -",
+    ),
+    (
+      "<ul><li>a<ul><li><pre>c</pre><br></li></ul><h2>h</h2></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n      \n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li><br></li></ul><ol start=\"5\"><li>z</li></ol></li></ul>",
+      "- a\n\n  -   \n\n  5. z",
+    ),
+    (
+      "<ul><li>a<ul><li><br><br></li></ul><ul><li></li></ul></li></ul>",
+      "- a\n\n  -   \n      \n  -",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn nested_list_tail_in_a_raw_html_block_matches_the_plain_context() {
+  for (html, expected) in [
+    (
+      "<details><summary>s</summary><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></details>",
+      "<details>\n\n<summary>s</summary>\n\n\n\n- x\n  - a\n- next\n\n</details>",
+    ),
+    (
+      "<dl><dd><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></dd></dl>",
+      "<dl><dd>\n\n- x\n  - a\n- next\n\n</dd></dl>",
+    ),
+    (
+      "<details><ul><li>x<ul><li>a</li></ul>tail</li></ul></details>",
+      "<details>\n\n- x\n  - a\n\n  tail\n\n</details>",
+    ),
+    (
+      "<dl><dd><ul><li>x<ul><li></li></ul>t</li></ul></dd></dl>",
+      "<dl><dd>\n\n- x\n\n  -\n\n  t\n\n</dd></dl>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
 fn block_opens_on_the_first_line_of_a_quote_in_an_item() {
   for (html, expected) in [
     (
@@ -7805,23 +8104,23 @@ fn block_leaves_the_marker_of_a_closed_nested_item() {
   for (html, expected) in [
     (
       "<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>",
-      "- a\n\n  -\n\n  ## h",
+      "- a\n\n  - \n\n  ## h",
     ),
     (
       "<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>",
-      "- a\n  - b\n\n    -\n\n    ## h",
+      "- a\n  - b\n\n    - \n\n    ## h",
     ),
     (
       "<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>",
-      "- a\n\n  -\n\n  ```\n  x\n  ```",
+      "- a\n\n  - \n\n  ```\n  x\n  ```",
     ),
     (
       "<ul><li>a<ul><li></li></ul><hr></li></ul>",
-      "- a\n\n  -\n\n  ***",
+      "- a\n\n  - \n\n  ---",
     ),
     (
       "<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>",
-      "- a\n\n  -\n\n  | t |\n  | --- |\n  | c |",
+      "- a\n\n  - \n\n  | t |\n  | --- |\n  | c |",
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html}");
@@ -7834,6 +8133,13 @@ fn text_after_a_closed_nested_item_stays_escaped() {
     convert("<ul><li>a<ul><li></li></ul># t</li></ul>"),
     "- a\n\n  -\n\n  \\# t"
   );
+}
+
+#[test]
+fn long_text_before_an_ordered_list_does_not_count_as_an_item() {
+  let text = "word ".repeat(16_384);
+  let html = format!("<ol>{text}<li>item</li></ol>");
+  assert_eq!(convert(&html).rsplit('\n').next(), Some("1. item"));
 }
 
 #[test]

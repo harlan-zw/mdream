@@ -147,6 +147,11 @@ export interface MarkdownState {
   /** First fragment to recheck, including the last fragment a writer may append to. */
   listTailScanFrom?: number
   emptyListMarkerScanFrom?: number
+  /**
+   * Open elements, other than `<span>`, that collapse block spacing as
+   * `calculateNewLineConfig` does for `<li>`. The parser keeps the count.
+   */
+  collapseNonSpanDepth: number
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -235,6 +240,21 @@ function crFollowsLineEnding(buffer: string[], index: number): boolean {
         return code === 10 || code === 13
       }
       skippedCr = true
+    }
+  }
+  return false
+}
+
+/** Whether the output ends in a line holding spaces only. */
+function endsInIndentLine(buffer: readonly string[]): boolean {
+  let spaces = 0
+  for (let fragment = buffer.length - 1; fragment >= 0; fragment--) {
+    const value = buffer[fragment]!
+    for (let index = value.length - 1; index >= 0; index--) {
+      const code = value.charCodeAt(index)
+      if (code !== 32)
+        return code === 10 && spaces > 0
+      spaces++
     }
   }
   return false
@@ -622,9 +642,8 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
 }
 
 /**
- * Return the current GFM line indent when a block marker may still start at
- * this position. A non-space byte, or more than three leading spaces, makes
- * the position ordinary inline text.
+ * Return block indentation after the active list continuation prefix.
+ * Four additional spaces make the position ordinary inline text.
  */
 function markdownLineIndent(buffer: string[], structuralIndent: number): number {
   let spaces = 0
@@ -985,15 +1004,6 @@ function calculateNewLineConfig(node: ElementNode, state: MarkdownState, eventTy
     return NO_SPACING
   }
   return DEFAULT_BLOCK_SPACING
-}
-
-/** Whether an ancestor collapses block spacing, as `calculateNewLineConfig` does for `<li>`. */
-function insideInlineWrapper(node: ElementNode): boolean {
-  for (let parent = node.parent; parent; parent = parent.parent) {
-    if (parent.tagHandler?.collapsesInnerWhiteSpace && parent.tagId !== TAG_SPAN)
-      return true
-  }
-  return false
 }
 
 function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): boolean {
@@ -1526,6 +1536,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     emptyListMarkerScanFrom: undefined,
     lastItemMarkerFragment: undefined,
     lastItemMarkerOwner: undefined,
+    collapseNonSpanDepth: 0,
     emptyItemAfterCr: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
@@ -1977,8 +1988,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     state.lastTextNode = textNode
   }
 
-  function flushListTail(): void {
-    trimTrailingSpaces(state.buffer)
+  function flushListTail(preserveMarkerSpace = false): void {
+    if (!preserveMarkerSpace)
+      trimTrailingSpaces(state.buffer)
     state.listTailStart = state.buffer.length
     state.listTailScanFrom = state.listTailStart
     // A hard break has already ended the line; write only the newlines the
@@ -2058,7 +2070,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
       else if (node.type === ELEMENT_NODE && eventType === NodeEventEnter) {
         const tagId = (node as ElementNode).tagId
-        if (tagId === TAG_BLOCKQUOTE) {
+        if (tagId === TAG_UL || tagId === TAG_OL) {
+          // Empty lists cannot settle the parent paragraph boundary.
+        }
+        else if (tagId === TAG_BLOCKQUOTE) {
           if (node.tagHandler?.literalEnter && node.tagHandler.literalEnterHasOutput === false) {
             flushListTail()
           }
@@ -2071,8 +2086,23 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.emptyListMarkerFragment = undefined
           }
         }
+        else if (tagId === TAG_LI || (tagId! >= TAG_H1 && tagId! <= TAG_H6) || tagId === TAG_HR) {
+          // A closed nested item can leave its indent alone on the last line, as
+          // after a fence. A heading or rule reads it as its own prefix and lands
+          // in that item, so the parent's prefix replaces it after a blank line.
+          if (tagId !== TAG_LI && endsInIndentLine(state.buffer)) {
+            trimTrailingSpaces(state.buffer)
+            if (newlineRunBefore(state.buffer, state.buffer.length) === 2) {
+              state.buffer.push(state.listIndent)
+              state.lastContentCache = state.listIndent
+              state.lastTextNode = undefined
+            }
+          }
+          state.listTailPending = false
+          state.emptyListMarkerFragment = undefined
+        }
         else if (!node.tagHandler?.excludesTextNodes) {
-          flushListTail()
+          flushListTail((tagId === TAG_PRE || tagId === TAG_TABLE) && state.emptyListMarkerFragment !== undefined)
         }
       }
       else if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
@@ -2165,12 +2195,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
       else if ((tagId === TAG_UL || tagId === TAG_OL)
         && state.emptyListMarkerDepth > state.depthMap[TAG_LI]!
-        && state.listIndent && !insideRawHtmlRegion && !isInsideTableCell(state)
+        && state.listIndent && !isInsideTableCell(state)
         && !handler?.literalExitHasOutput && !element.pluginOutput?.length) {
         // Any item of this list, filled or empty, ends before the parent's text.
         // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
         // item line is left open for that text to continue.
-        if (!insideInlineWrapper(element))
+        if (!state.collapseNonSpanDepth)
           state.listTailPending = true
         state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
         const marker = state.emptyListMarkerFragment
