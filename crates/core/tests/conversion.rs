@@ -2803,6 +2803,13 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     "- a\n-\n- b"
   );
   assert_eq!(convert("<ul><li></li><li>a</li></ul>"), "-\n- a");
+  // A parent's bare marker is no paragraph either, and a blank line under it
+  // would end that item and turn the nested one into its sibling.
+  assert_eq!(convert("<ul><li><ul><li></li></ul></li></ul>"), "-\n  -");
+  assert_eq!(
+    convert("<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>"),
+    "-\n  - \n    > q"
+  );
   // A child that is not an item does not make the first item a later one.
   assert_eq!(
     convert("<ul><li>a<ul><script>s</script><li></li></ul></li></ul>"),
@@ -2818,6 +2825,191 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     convert("<ul><li>a<ul><li><blockquote>q</blockquote><ul><li>b</li></ul></li></ul></li></ul>"),
     "- a\n\n  - \n    > q\n    - b"
   );
+}
+
+#[test]
+fn parent_text_after_empty_nested_list_stays_in_parent() {
+  for (html, expected) in [
+    ("<ul><li><ul></ul>text</li></ul>", "- text"),
+    ("<ul><li><ol></ol>text</li></ul>", "- text"),
+    ("<ul><li>before<ul></ul>text</li></ul>", "- before text"),
+    (
+      "<ul><li><ul><template><li></li></template></ul>text</li></ul>",
+      "- text",
+    ),
+    ("<ul><li><ul><span></span></ul>text</li></ul>", "- text"),
+    ("<ul><li><ul> \n </ul>text</li></ul>", "- text"),
+    (
+      "<ul><li><ul></ul><strong>text</strong></li></ul>",
+      "- **text**",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><ul></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<blockquote><ul><li><ol><li></li></ol>text</li></ul></blockquote>",
+      "> -\n>   1.\n>\n>   text",
+    ),
+    (
+      "<ul><li><blockquote><ol><li></li></ol>text</blockquote></li></ul>",
+      "- \n  >\n  > 1.\n  >\n  > text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol>text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ol start=\"10\"><li><ul><li></li></ul>text</li></ol>",
+      "10.\n    -\n\n    text",
+    ),
+    (
+      "<ul><li><ol><li>child</li></ol>text</li></ul>",
+      "-\n  1. child\n\n  text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol><strong>text</strong></li></ul>",
+      "-\n  1.\n\n  **text**",
+    ),
+    (
+      "<ul><li><ol><li></li></ol><script>hidden</script> text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol></li><li>next</li></ul>",
+      "-\n  1.\n- next",
+    ),
+    (
+      "<ul><li><pre><ul></ul>x</pre></li></ul>",
+      "- ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>",
+      "- x\n\n  - \n  \n\n  y",
+    ),
+    (
+      "<table><tr><td><ul><li><ol><li></li></ol>text</li></ul></td></tr></table>",
+      "| <ul><li><ol><li></li></ol>text</li></ul> |\n| --- |",
+    ),
+  ] {
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      transparent_override("span", true),
+    ] {
+      assert_eq!(
+        html_to_markdown(html, options.clone()),
+        expected,
+        "html={html}"
+      );
+      for split in 0..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = processor.process_chunk(&html[..split]);
+        output.push_str(&processor.process_chunk(&html[split..]));
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "html={html}, split={split}");
+      }
+    }
+  }
+}
+
+#[test]
+fn empty_inline_after_nested_list_keeps_the_list_tight() {
+  // Only visible parent text needs its own paragraph after a nested list. An
+  // element that stays empty, or a list its inline wrapper wrote inline, must
+  // not leave a blank line that turns the list loose.
+  for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul>",
+      "- x\n  - a\n- next",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><a id=\"anchor\"></a></li><li>next</li></ul>",
+      "- x\n  - a\n- next",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  - a\n- next",
+    ),
+    (
+      "<ol><li>x<ol><li>a</li></ol><span></span><em></em></li><li>next</li></ol>",
+      "1. x\n   1. a\n2. next",
+    ),
+    (
+      "<blockquote><ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul></blockquote>",
+      "> - x\n>   - a\n> - next",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><ul><li>a</li></ul></a>t</li></ul>",
+      "- [  - a](/x)t",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><span></span>tail</li><li>next</li></ul>",
+      "- x\n  - a\n\n  tail\n- next",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = processor.process_chunk(&html[..split]);
+      output.push_str(&processor.process_chunk(&html[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "html={html}, split={split}");
+    }
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut output = String::new();
+    for index in 0..html.len() {
+      output.push_str(&processor.process_chunk(&html[index..=index]));
+    }
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "html={html}, one byte per chunk");
+  }
+}
+
+#[test]
+fn block_marker_after_nested_list_stays_literal() {
+  for (text, expected) in [
+    ("# h", "\\# h"),
+    ("## h", "\\## h"),
+    ("1. x", "1\\. x"),
+    ("1) x", "1\\) x"),
+    ("999999999. x", "999999999\\. x"),
+    ("- x", "\\- x"),
+    ("+ x", "\\+ x"),
+    ("&gt; q", "\\> q"),
+    ("---", "\\---"),
+  ] {
+    let html = format!("<ol start=\"10\"><li><ul><li>child</li></ul>{text}</li></ol>");
+    let expected = format!("10.\n    - child\n\n    {expected}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      transparent_override("span", true),
+    ] {
+      assert_eq!(
+        html_to_markdown(&html, options.clone()),
+        expected,
+        "html={html}"
+      );
+      for split in 0..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = processor.process_chunk(&html[..split]);
+        output.push_str(&processor.process_chunk(&html[split..]));
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "html={html}, split={split}");
+      }
+    }
+  }
 }
 
 #[test]

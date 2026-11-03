@@ -304,7 +304,7 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
         && element.parent?.index === 0
         && (fragment === 0 || newlineRunBefore(state.buffer, fragment) > 0)
         && (code === 45 || code === 46)
-      state.emptyItemFragment = (recordedParent || listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length))
+      state.emptyItemFragment = (recordedParent || listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3))
         ? undefined
         : state.buffer.length - 1
       return
@@ -616,9 +616,8 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
 }
 
 /**
- * Return the current GFM line indent when a block marker may still start at
- * this position. A non-space byte, or more than three leading spaces, makes
- * the position ordinary inline text.
+ * Return block indentation after the active list continuation prefix.
+ * Four additional spaces make the position ordinary inline text.
  */
 function markdownLineIndent(buffer: string[], structuralIndent: number): number {
   let spaces = 0

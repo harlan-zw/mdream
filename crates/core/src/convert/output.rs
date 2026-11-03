@@ -832,6 +832,7 @@ impl ConvertState {
       self.code_spans.first().map(|span| span.output_start),
       link_start,
       self.empty_item_hazard.then_some(self.empty_item_line_start),
+      (self.list_tail_start != usize::MAX).then_some(self.list_tail_start),
     ]
     .into_iter()
     .flatten()
@@ -3363,6 +3364,13 @@ impl ConvertState {
       _ => return false,
     }
     let mut spaces = 0;
+    while index >= 8
+      && max_spaces.saturating_sub(spaces) >= 8
+      && bytes[index - 8..index] == [b' '; 8]
+    {
+      index -= 8;
+      spaces += 8;
+    }
     while index > 0 && bytes[index - 1] == b' ' {
       // The space after a decoded `\r` separates the marker from the line end
       // before it; it is not indentation, so it never counts against the cap.
@@ -6069,6 +6077,28 @@ mod tests {
         "depth={depth}: {} parent scans",
         state.parent_marker_scans
       );
+    }
+  }
+
+  #[test]
+  fn list_marker_indent_cap_survives_word_skips() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    for indent in 0..=24 {
+      state.list_indent = " ".repeat(indent);
+      let max_spaces = indent + 3;
+      for spaces in 0..=60 {
+        for lead in ["", "\n", "x"] {
+          for marker in ["-", "3."] {
+            let line = format!("{lead}{}{marker}", " ".repeat(spaces));
+            let expected = (lead.is_empty() || lead == "\n") && spaces <= max_spaces;
+            assert_eq!(
+              state.list_marker_line_start(line.as_bytes(), line.len(), max_spaces),
+              expected,
+              "indent={indent} spaces={spaces} lead={lead:?} marker={marker}"
+            );
+          }
+        }
+      }
     }
   }
 

@@ -3336,6 +3336,38 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
   }
 }
 
+// Quoting the completed lines of a long blockquote rewrites the bytes before a
+// pending nested-list separator. Its offset must survive until the item decides
+// whether to drop it, or streaming leaves a blank line one-shot removes.
+#[test]
+fn long_quote_flush_keeps_a_retractable_list_tail() {
+  let lead = "x".repeat(9000);
+  for tail in ["<span></span>", "<a id=\"anchor\"></a>", "<span></span> "] {
+    let html = format!(
+      "<blockquote><p>{lead}</p><ul><li>x<ul><li>a</li></ul>{tail}</li><li>next</li></ul></blockquote>"
+    );
+    let expected = format!("> {lead}\n>\n> - x\n>   - a\n> - next");
+    assert_eq!(
+      html_to_markdown(&html, HtmlToMarkdownOptions::default()),
+      expected
+    );
+    for chunk in [1, 7, 64, 4096, 9050] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "tail={tail}, chunk={chunk}"
+      );
+    }
+    for split in html.len() - 80..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = processor.process_chunk(&html[..split]);
+      output.push_str(&processor.process_chunk(&html[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "tail={tail}, split={split}");
+    }
+  }
+}
+
 #[test]
 fn builtin_blockquote_alias_streams_as_div() {
   let opts = HtmlToMarkdownOptions {
