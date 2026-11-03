@@ -1316,19 +1316,24 @@ impl ConvertState {
   #[inline(never)]
   fn drop_vertical_tab_marker_pair(&mut self, open_marker: OpenMarker, is_inline: bool) {
     let run = self.buffer[open_marker.content_start..].to_owned();
-    // As in `push_output_before_emphasis_whitespace`, the kept run still ends
-    // with any hard break the output ended with.
-    let break_at_end = self.hard_break_end == self.buffer.len();
+    // The run is written back unchanged without the opener, so a hard break
+    // ending in it still ends the same bytes. A block after it in a list item
+    // reads that end to keep its blank line once trailing whitespace is trimmed.
+    let break_end = (self.hard_break_end > open_marker.content_start
+      && self.hard_break_end <= self.buffer.len())
+    .then(|| self.hard_break_end - open_marker.content_start + open_marker.output_start);
     let moved = self.take_break_runs_from(open_marker.content_start);
     self.truncate_buffer(open_marker.output_start);
     if open_marker.starts_at_hard_break {
       self.hard_break_end = open_marker.output_start;
     }
     self.buffer.push_str(&run);
-    self.last_content_cache_len = run.len();
+    // Only the last write stays trimmable, as in JS. The whole run would let a
+    // block's trim reach back past the hard breaks to the vertical tab.
+    self.last_content_cache_len = self.last_content_cache_len.min(run.len());
     self.restore_break_runs(moved, open_marker.content_start, open_marker.output_start);
-    if break_at_end {
-      self.hard_break_end = self.buffer.len();
+    if let Some(end) = break_end {
+      self.hard_break_end = end;
     }
     self.last_node_is_inline = is_inline;
   }

@@ -7080,6 +7080,53 @@ fn emphasis_vertical_tabs_keep_list_item_block_boundaries() {
 }
 
 #[test]
+fn emphasis_holding_only_vertical_tabs_keeps_breaks_before_list_item_blocks() {
+  // Dropping the pair leaves the run as it was without the emphasis, so the
+  // block after it trims only the trailing whitespace and keeps every break.
+  for (html, expected) in [
+    (
+      "<ul><li>z<em>&#11;<br><br> &#9;</em><p>X</p></li></ul>",
+      "- z\u{000b}  \n    \n  \n\n  X",
+    ),
+    (
+      "<ul><li>z<em>&#11;<br><br><br> &#9;</em><p>X</p></li></ul>",
+      "- z\u{000b}  \n    \n    \n  \n\n  X",
+    ),
+    (
+      "<ul><li>z<em>&#11;<br><br>&#9; </em><p>X</p></li></ul>",
+      "- z\u{000b}  \n    \n  X",
+    ),
+    (
+      "<ul><li>z<strong>&#11;<br><br> &#9;</strong><pre>X</pre></li></ul>",
+      "- z\u{000b}  \n    \n  ```\n  X\n  ```",
+    ),
+    (
+      "<ul><li>z<em>&#11;<br><br> &#9;</em></li><li>X</li></ul>",
+      "- z\u{000b}  \n    \n- X",
+    ),
+    (
+      "<ol><li>z<em>&#11;<br> &#9;</em><ol start=\"3\"><li>X</li></ol></li></ol>",
+      "1. z\u{000b}  \n\n   3. X",
+    ),
+    (
+      "<ol><li>z<em>&#11;<br><br> &#9;</em><ol start=\"3\"><li>X</li></ol></li></ol>",
+      "1. z\u{000b}  \n     \n\n   3. X",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
 fn nested_ordered_start_separates_parent_paragraph() {
   for (html, expected) in [
     (
