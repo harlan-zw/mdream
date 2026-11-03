@@ -327,6 +327,14 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<li>a -<span>&#9;</span><br>b</li>', '- a -  \n  b', 'a -\nb'],
   ['<li>a<br>b 3.&#12;<br>c</li>', '- a  \n  b 3.  \n  c', 'a\nb 3.\nc'],
   ['<ul><li>a<ul><li>see 2)&#9;<br>c</li></ul></li></ul>', '- a\n  - see 2)  \n    c', 'a\nsee 2)\nc'],
+  // The break takes the form feed after a marker, which so ends its line and
+  // is escaped as at a paragraph's break.
+  ['<li>#&#12;<br>b</li>', '- \\#  \n  b', '#\nb'],
+  ['<li>a<br>=&#12;<br>b</li>', '- a  \n  \\=  \n  b', 'a\n=\nb'],
+  ['<li>a<br>---&#12;<br>b</li>', '- a  \n  \\---  \n  b', 'a\n---\nb'],
+  ['<li>a<br>-&#12;<br>b</li>', '- a  \n  \\-  \n  b', 'a\n-\nb'],
+  ['<ol><li>a<br>2)&#12;<br>b</li></ol>', '1. a  \n   2\\)  \n   b', 'a\n2)\nb'],
+  ['<li>--&#12;</li>', '- \\--', '--'],
   ['<blockquote>a&#9;<br>b</blockquote>', '> a  \n> b', 'a\nb'],
   // HTML's ASCII whitespace leaves out U+000B, so it is content and stops a trim.
   ['<p>a&#11;<br></p>', 'a\u000B', 'a\u000B'],

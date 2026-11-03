@@ -278,6 +278,26 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
 }
 
 #[test]
+fn a_list_item_break_escapes_a_marker_before_a_trimmed_form_feed() {
+  // The item's break takes the form feed after a marker, which so ends its
+  // line and is escaped as at a paragraph's break.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<li>#&#12;<br>b</li>", "- \\#  \n  b"),
+    ("<li>a<br>=&#12;<br>b</li>", "- a  \n  \\=  \n  b"),
+    ("<li>a<br>---&#12;<br>b</li>", "- a  \n  \\---  \n  b"),
+    ("<li>a<br>-&#12;<br>b</li>", "- a  \n  \\-  \n  b"),
+    (
+      "<ol><li>a<br>2)&#12;<br>b</li></ol>",
+      "1. a  \n   2\\)  \n   b",
+    ),
+    ("<li>--&#12;</li>", "- \\--"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
 fn a_wrapped_item_line_keeps_the_run_after_a_marker_like_word() {
   // Wrapping can open an item's line with a word that only the form feed after
   // it keeps from reading as a marker, so a break there leaves the run. A word
