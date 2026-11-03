@@ -307,6 +307,33 @@ fn transparent_wrappers_preserve_the_formatting_whitespace_tail() {
 }
 
 #[test]
+fn a_break_after_a_whitespace_only_wrapper_keeps_its_line_end() {
+  let markdown = HtmlToMarkdownOptions::default();
+  for (html, expected_markdown, expected_text) in [
+    ("<p>a<span> &#9;</span><br>b</p>", "a  \nb", "a\nb"),
+    ("<p>a<span>&#9; </span><br>b</p>", "a  \nb", "a\nb"),
+    (
+      "<p>a<span> &#9;</span><br><br>b</p>",
+      "a  \n  \nb",
+      "a\n\nb",
+    ),
+    (
+      "<ul><li>a<span> &#9;</span><br>b</li></ul>",
+      "- a  \n  b",
+      "a\nb",
+    ),
+    (
+      "<blockquote>a<span> &#9;</span><br>b</blockquote>",
+      "> a  \n> b",
+      "a\nb",
+    ),
+  ] {
+    assert_every_chunking(html, &markdown, expected_markdown);
+    assert_every_text_chunking(html, expected_text);
+  }
+}
+
+#[test]
 fn quote_flushing_keeps_the_inline_source_tail_mutable() {
   let text = "a".repeat(8200);
   for (tag, marker) in [("em", "*"), ("strong", "**"), ("del", "~~")] {

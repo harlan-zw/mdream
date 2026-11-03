@@ -2600,8 +2600,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             }
           }
 
-          // Transparent exits leave the source tail available to an enclosing delimiter.
-          if (eventType !== NodeEventExit || !isInlineElement || handler?.literalExit || output)
+          // Transparent exits leave the source tail available to an enclosing
+          // delimiter while some of it is left. A tail trimmed to nothing is
+          // spent: kept, it would trim the next output, such as a break's.
+          if (eventType !== NodeEventExit || !isInlineElement || handler?.literalExit || output || !state.lastContentCache)
             state.lastTextNode = undefined
         }
       }
