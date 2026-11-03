@@ -190,6 +190,7 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<ul><li>&#13; &#13;<em><blockquote><br><br><br></blockquote><ol><li>&#13;<br><br></li></ol></em></li></ul>',
   '<ol start="123456789"><li><blockquote><br><br><br></blockquote><ul><li><em><br><br></em><h2>h</h2></li></ul></li></ol>',
   '<ol start="123456789"><li><blockquote><br><br><br></blockquote><ul><li><em><br><br></em><pre>c</pre></li></ul></li></ol>',
+  '<ul><li><ol start="3"><li><em><p></p></em><blockquote><br><br></blockquote><ul><li></li></ul></li></ol></li></ul>',
   { html: '<script><b>x</b></script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'div' } } } },
   { html: '<script>a</div>b</script><p>tail</p>', options: { plugins: { tagOverrides: { script: 'div' } } } },
   { html: '<style><b>x</b></style><p>tail</p>', options: { plugins: { tagOverrides: { style: 'div' } } } },

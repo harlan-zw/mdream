@@ -4342,6 +4342,8 @@ fn drained_bare_marker_line_still_reads_as_one() {
     "<ul><li>&#13; &#13;<em><blockquote><br><br><br></blockquote><ol><li>&#13;<br><br></li></ol></em></li></ul>",
     "<ol start=\"123456789\"><li><blockquote><br><br><br></blockquote><ul><li><em><br><br></em><h2>h</h2></li></ul></li></ol>",
     "<ol start=\"123456789\"><li><blockquote><br><br><br></blockquote><ul><li><em><br><br></em><pre>c</pre></li></ul></li></ol>",
+    // Two drains split the indent of the line holding the closing `*` alone.
+    "<ul><li><ol start=\"3\"><li><em><p></p></em><blockquote><br><br></blockquote><ul><li></li></ul></li></ol></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());

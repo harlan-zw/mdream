@@ -972,6 +972,10 @@ pub struct ConvertState {
   /// the drain took the marker and only whitespace after it.
   bare_marker_end: usize,
   bare_marker_indent: usize,
+  /// Spaces the line holding `buffer[0]` lost to drains while spaces were all
+  /// it lost, so the marker line readers still count its whole indent.
+  /// `usize::MAX` once anything else left with them.
+  drained_line_spaces: usize,
   #[cfg(test)]
   parent_marker_scans: usize,
   /// `LIST_RULE_PENDING`: a list item rule waiting to see whether visible
@@ -1244,6 +1248,7 @@ impl ConvertState {
       last_item_marker_end: usize::MAX,
       bare_marker_end: usize::MAX,
       bare_marker_indent: 0,
+      drained_line_spaces: 0,
       #[cfg(test)]
       parent_marker_scans: 0,
       list_pending: 0,
@@ -3089,6 +3094,9 @@ impl ConvertState {
     }
     let drained_bare_marker = self.bare_marker_line_before(drain_end);
     let bytes = self.buffer.as_bytes();
+    let after_cr = self.cut_line_lead != CutLineLead::Uncut && self.flushed_tail[1] == b'\r';
+    self.drained_line_spaces =
+      Self::cut_line_spaces(&bytes[..drain_end], self.drained_line_spaces, after_cr);
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
     } else if self.cut_line_lead == CutLineLead::Uncut {
@@ -3185,6 +3193,22 @@ impl ConvertState {
   /// counts from the line's real start. Read each fragment's indent on its own
   /// and a line indented past three claims a suspension it never had, dropping
   /// the escapes one-shot writes.
+  /// The spaces the line ending `cut` has lost to drains, `previous` counted by
+  /// earlier cuts of it, or `usize::MAX` once it lost anything else. The space
+  /// right after a `\r` separates a marker from that line end and is no indent.
+  fn cut_line_spaces(cut: &[u8], previous: usize, after_cr: bool) -> usize {
+    match cut.iter().rposition(|&byte| matches!(byte, b'\n' | b'\r')) {
+      Some(at) if cut[at + 1..].iter().all(|&byte| byte == b' ') => {
+        let spaces = cut.len() - at - 1;
+        spaces - usize::from(cut[at] == b'\r' && spaces > 0)
+      }
+      None if previous != usize::MAX && cut.iter().all(|&byte| byte == b' ') => {
+        previous + cut.len() - usize::from(previous == 0 && after_cr)
+      }
+      _ => usize::MAX,
+    }
+  }
+
   fn classify_cut_line(bytes: &[u8], drain_end: usize, previous: CutLineLead) -> CutLineLead {
     if bytes[drain_end - 1] == b'\n' {
       // The cut ends the line, so the next one starts fresh at column zero.

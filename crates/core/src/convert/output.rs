@@ -3413,6 +3413,14 @@ impl ConvertState {
     if index == 0 {
       return if !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r') {
         MarkerLine::Bare(spaces)
+      } else if self.drained_line_spaces != usize::MAX {
+        // Only indent left with the drain: count it as the whole line would.
+        let spaces = spaces + self.drained_line_spaces;
+        if spaces <= max_spaces {
+          MarkerLine::Bare(spaces)
+        } else {
+          MarkerLine::Other
+        }
       } else {
         MarkerLine::Cut
       };
