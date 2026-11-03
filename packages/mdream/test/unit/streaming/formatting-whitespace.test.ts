@@ -356,6 +356,10 @@ describe.each(engines)('$name formatting whitespace', (engine) => {
   it.each([
     ['<p>aaaaaaaaaa ===&#12; # x</p>', 'aaaaaaaaaa\n===\f # x'],
     ['<p>aaaaaaaaaa ---&#12; + x</p>', 'aaaaaaaaaa\n---\f + x'],
+    // A list item's break keeps the form feed that stops the word from being a
+    // marker at the start of its wrapped line.
+    ['<li>aaaaaaaaaa -&#12;<br>b</li>', '- aaaaaaaaaa\n  -\f  \n  b'],
+    ['<li>aaaaaaaaaa 1.&#12;<br>b</li>', '- aaaaaaaaaa\n  1.\f  \n  b'],
   ])('wraps a marker run before a form feed onto the next line: %j', async (html, expected) => {
     expect(engine.markdownWrapped(html)).toBe(expected)
     await assertChunkings(html, engine.markdownWrappedStream, expected)

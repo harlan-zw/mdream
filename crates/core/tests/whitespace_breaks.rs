@@ -251,9 +251,50 @@ fn whitespace_before_a_final_break_never_reaches_the_stream() {
       "<ul><li>a<ul><li><br><br>x</li></ul></li></ul>",
       "- a\n\n  -   \n      \n    x",
     ),
+    (
+      "<blockquote><ul><li><span>&#9;</span><br>b</li></ul></blockquote>",
+      "> - \t  \n>   b",
+    ),
+    (
+      "<ol start=\"10\"><li>a<ul><li><span>&#9;</span><br>b</li></ul></li></ol>",
+      "10. a\n    - \t  \n      b",
+    ),
+    // Only a marker that opens its line keeps the run; item text that just
+    // ends like one loses it.
+    (
+      "<li>see item 1.<span>&#9;</span><br>b</li>",
+      "- see item 1.  \n  b",
+    ),
+    ("<li>a -<span>&#9;</span><br>b</li>", "- a -  \n  b"),
+    ("<li>a<br>b 3.&#12;<br>c</li>", "- a  \n  b 3.  \n  c"),
+    (
+      "<ul><li>a<ul><li>see 2)&#9;<br>c</li></ul></li></ul>",
+      "- a\n  - see 2)  \n    c",
+    ),
     ("<blockquote>a&#9;<br>b</blockquote>", "> a  \n> b"),
   ] {
     assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn a_wrapped_item_line_keeps_the_run_after_a_marker_like_word() {
+  // Wrapping can open an item's line with a word that only the form feed after
+  // it keeps from reading as a marker, so a break there leaves the run. A word
+  // that stays mid-line still loses it.
+  let wrapped = HtmlToMarkdownOptions::default().with_wrap_width(10);
+  for (html, expected) in [
+    (
+      "<li>aaaaaaaaaa -&#12;<br>b</li>",
+      "- aaaaaaaaaa\n  -\u{c}  \n  b",
+    ),
+    (
+      "<li>aaaaaaaaaa 1.&#12;<br>b</li>",
+      "- aaaaaaaaaa\n  1.\u{c}  \n  b",
+    ),
+    ("<li>aaaaaaaaaa -&#9;<br>b</li>", "- aaaaaaaaaa -  \n  b"),
+  ] {
+    assert_every_chunking(html, &wrapped, expected);
   }
 }
 

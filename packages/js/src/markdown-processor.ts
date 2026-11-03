@@ -987,8 +987,11 @@ function startsWithBreak(fragments: string[] | undefined): boolean {
 }
 
 /**
- * Whether the text ending at `end` in `buffer[fragment]` is a list marker that
- * opens its line or follows a space: `-`, `*`, `+`, or digits then `.` or `)`.
+ * Whether the text ending at `end` in `buffer[fragment]` is a list marker, `-`,
+ * `*`, `+`, or digits then `.` or `)`, that only spaces and other such markers
+ * precede on its line: the item's own, or item text that a wrap left where the
+ * trim would make it one. Item text that just ends like a marker, as in
+ * `see item 1.`, is not.
  */
 function followsItemMarker(buffer: readonly string[], fragment: number, end: number): boolean {
   let index = fragment
@@ -1002,23 +1005,30 @@ function followsItemMarker(buffer: readonly string[], fragment: number, end: num
     return buffer[index]!.charCodeAt(--offset)
   }
   let code = previous()
-  if (code === 46 || code === 41) {
-    let digits = 0
-    code = previous()
-    while (code >= 48 && code <= 57) {
-      digits++
+  for (;;) {
+    if (code === 46 || code === 41) {
+      let digits = 0
+      code = previous()
+      while (code >= 48 && code <= 57) {
+        digits++
+        code = previous()
+      }
+      if (digits === 0 || digits > 9)
+        return false
+    }
+    else if (code === 45 || code === 42 || code === 43) {
       code = previous()
     }
-    if (digits === 0 || digits > 9)
+    else {
       return false
+    }
+    if (code !== 32)
+      return code === -1 || code === 10 || code === 13
+    while (code === 32)
+      code = previous()
+    if (code === -1 || code === 10 || code === 13)
+      return true
   }
-  else if (code === 45 || code === 42 || code === 43) {
-    code = previous()
-  }
-  else {
-    return false
-  }
-  return code === -1 || code === 32 || code === 10
 }
 
 /** HTML's ASCII whitespace, as in Rust: U+000B is content. */
@@ -1703,7 +1713,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // line feed, which ends block spacing or an earlier break and so stays. A
   // run that opens a line keeps the `indent` the break writes after its own
   // line feed, an earlier break's or a block's, and a run right after a list
-  // item's marker stays whole, the marker's own space included.
+  // item's marker stays whole, the marker's own space included, while item
+  // text that just ends like a marker loses its run.
   function trimBeforeBreak(buff: string[], indent: number): void {
     let floor = state.codeFence ? state.codeFence.fragment + 1 : 0
     const span = gfmLifecycle.openCodeSpans.at(-1)

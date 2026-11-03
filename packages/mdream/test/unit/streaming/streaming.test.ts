@@ -315,10 +315,18 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<li>&#9;<br>b</li>', '- \t  \n  b'],
   ['<ol><li>&#9;<br>b</li></ol>', '1. \t  \n   b'],
   ['<ul><li>a<ul><li><br><br>x</li></ul></li></ul>', '- a\n\n  -   \n      \n    x'],
+  ['<blockquote><ul><li><span>&#9;</span><br>b</li></ul></blockquote>', '> - \t  \n>   b', 'b'],
+  ['<ol start="10"><li>a<ul><li><span>&#9;</span><br>b</li></ul></li></ol>', '10. a\n    - \t  \n      b', 'a\n\nb'],
   // Plain text writes no list marker, so text that looks like one keeps no run.
   ['<li>1.<span>&#9;</span><br>b</li>', '- 1\\.  \n  b', '1.\nb'],
   ['<li>-<span>&#9;</span><br>b</li>', '- \\-  \n  b', '-\nb'],
   ['<li>x<br>12)<i></i>&#12;<br>b</li>', '- x  \n  12\\)  \n  b', 'x\n12)\nb'],
+  // Only a marker that opens its line keeps the run; item text that just ends
+  // like one loses it.
+  ['<li>see item 1.<span>&#9;</span><br>b</li>', '- see item 1.  \n  b', 'see item 1.\nb'],
+  ['<li>a -<span>&#9;</span><br>b</li>', '- a -  \n  b', 'a -\nb'],
+  ['<li>a<br>b 3.&#12;<br>c</li>', '- a  \n  b 3.  \n  c', 'a\nb 3.\nc'],
+  ['<ul><li>a<ul><li>see 2)&#9;<br>c</li></ul></li></ul>', '- a\n  - see 2)  \n    c', 'a\nsee 2)\nc'],
   ['<blockquote>a&#9;<br>b</blockquote>', '> a  \n> b', 'a\nb'],
   // HTML's ASCII whitespace leaves out U+000B, so it is content and stops a trim.
   ['<p>a&#11;<br></p>', 'a\u000B', 'a\u000B'],

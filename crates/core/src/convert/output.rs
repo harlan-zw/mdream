@@ -3951,8 +3951,9 @@ impl ConvertState {
   /// run is the same whatever the text's source whitespace; U+000B is content.
   /// A run that opens a line keeps the `indent` the break writes after its own
   /// line feed, an earlier break's or a block's, and in Markdown a run right
-  /// after a list item's marker stays whole, the marker's own space included.
-  /// Plain text writes no marker, so its run always goes, as in JS.
+  /// after a list item's marker stays whole, the marker's own space included,
+  /// while item text that just ends like a marker loses its run. Plain text
+  /// writes no marker, so its run always goes, as in JS.
   fn trim_before_break(&mut self, indent: usize) {
     let floor = self.trim_floor().max(self.text_cell_start);
     if self.buffer.len() > floor {
@@ -3967,7 +3968,7 @@ impl ConvertState {
       } else if !plain_text!(self)
         && trimmed_len > floor
         && self.depth_map[TAG_LI as usize] > 0
-        && Self::follows_item_marker(&bytes[..trimmed_len])
+        && self.follows_item_marker(&bytes[..trimmed_len])
       {
         return;
       }
@@ -3982,27 +3983,44 @@ impl ConvertState {
     }
   }
 
-  /// Whether `text` ends in a list marker that opens its line or follows a
-  /// space: `-`, `*`, `+`, or digits then `.` or `)`.
-  fn follows_item_marker(text: &[u8]) -> bool {
+  /// Whether `text` ends in a list marker, `-`, `*`, `+`, or digits then `.`
+  /// or `)`, that only spaces and other such markers precede on its line: the
+  /// item's own, or item text that a wrap left where the trim would make it
+  /// one. Item text that just ends like a marker, as in `see item 1.`, is not.
+  fn follows_item_marker(&self, text: &[u8]) -> bool {
     let mut end = text.len();
-    match text.last() {
-      Some(b'.' | b')') => {
-        end -= 1;
-        let digits = text[..end]
-          .iter()
-          .rev()
-          .take_while(|byte| byte.is_ascii_digit())
-          .count();
-        if digits == 0 || digits > 9 {
-          return false;
+    loop {
+      match text[..end].last() {
+        Some(b'.' | b')') => {
+          end -= 1;
+          let digits = text[..end]
+            .iter()
+            .rev()
+            .take_while(|byte| byte.is_ascii_digit())
+            .count();
+          if digits == 0 || digits > 9 {
+            return false;
+          }
+          end -= digits;
         }
-        end -= digits;
+        Some(b'-' | b'*' | b'+') => end -= 1,
+        _ => return false,
       }
-      Some(b'-' | b'*' | b'+') => end -= 1,
-      _ => return false,
+      let marker_start = end;
+      while end > 0 && text[end - 1] == b' ' {
+        end -= 1;
+      }
+      if end == 0 {
+        // A streamed buffer can start mid-line once earlier output drains.
+        return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
+      }
+      if matches!(text[end - 1], b'\n' | b'\r') {
+        return true;
+      }
+      if end == marker_start {
+        return false;
+      }
     }
-    end == 0 || matches!(text[end - 1], b' ' | b'\n')
   }
 
   /// Plain text ends a line on a space and tab run, as in JS. Kept out of
