@@ -4636,6 +4636,24 @@ fn cr_only_parent_item_matches_every_split() {
 }
 
 #[test]
+fn drained_bare_marker_line_still_reads_as_one() {
+  // Breaks under a bare marker push its line out of the drain window before a
+  // first nested item reads back for it: in part, or with the blank lines too.
+  for html in [
+    "<ul><li><blockquote><br><br><br></blockquote><ul><li></li></ul></li></ul>",
+    "<ul><li>&#13;<ul><li><blockquote><br><br></blockquote><ul><li></li></ul></li></ul></li></ul>",
+    "<ul><li><ol start=\"123456789\"><li><br></li></ol><ul><li><ul><li></li></ul></li></ul></li></ul>",
+    "lead<br><ul><li><ol start=\"123456789\"><li><br><br></li></ol><ul><li><ul><li><ul><li>&#13;&#13;</li></ul></li></ul></li></ul><b></b></li></ul>",
+    "lead<ul><li>&#13;<ul><li><blockquote><blockquote><blockquote><em><br><br></em></blockquote></blockquote></blockquote><ul><li><ul><li><b></b></li></ul></li><li>&#13;<p>p</p>&#13;<br><br></li></ul></li></ul></li></ul>",
+    "lead<ul><li>a&#13;<ol><li><br><ol start=\"123456789\"><li>&#13;<em>&#13;<br><br></em></li></ol><ol><li><blockquote>&#13;&#13;</blockquote>&#13;&#13;</li></ol></li></ol></li></ul>",
+    "lead<br><ul><li><blockquote><b></b></blockquote><ol><li><blockquote><em><br><br></em></blockquote><ol><li><ol start=\"123456789\"><li><ol><li><em><br><br></em></li><li>x<br>&#13;<br><br></li></ol></li></ol></li></ol></li></ol></li></ul>",
+    "lead<br><ul><li><br><br><em>&#13;</em><ol start=\"123456789\"><li><br><ul><li><ol start=\"3\"><li><ol start=\"3\"><li><b></b>t&#13;</li></ol></li></ol></li></ul></li><li><ol start=\"3\"><li>x<br></li></ol></li></ol></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn empty_quote_keeps_nested_list_tail() {
   for (html, expected) in [
     (

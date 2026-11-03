@@ -33,6 +33,18 @@ fn get_language_from_data_attribute(value: Option<&str>) -> Option<&str> {
   Some(value)
 }
 
+/// What precedes a list marker on its line, as `ConvertState::marker_line`
+/// reads it.
+#[derive(Clone, Copy, PartialEq)]
+enum MarkerLine {
+  /// The marker is all its line holds, after this many spaces of indent.
+  Bare(usize),
+  /// The line holds more than the marker, or more indent than allowed.
+  Other,
+  /// A drain cut the line before its start: only the stream's past can tell.
+  Cut,
+}
+
 /// Buffer size at which a streaming flush starts quoting completed blockquote
 /// lines, so a long quote releases instead of growing with the document.
 const STREAMING_FLUSH_THRESHOLD: usize = 8 * 1024;
@@ -3362,6 +3374,15 @@ impl ConvertState {
   /// Whether `end` sits just past a list marker that is all its line holds: up
   /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
   fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
+    matches!(
+      self.marker_line(bytes, end, max_spaces),
+      MarkerLine::Bare(_)
+    )
+  }
+
+  /// The line `list_marker_line_start` reads, told apart from one whose start
+  /// a drain already took.
+  fn marker_line(&self, bytes: &[u8], end: usize, max_spaces: usize) -> MarkerLine {
     let mut index = end - 1;
     match bytes[index] {
       b'.' | b')' => {
@@ -3369,12 +3390,15 @@ impl ConvertState {
         while index > 0 && bytes[index - 1].is_ascii_digit() {
           index -= 1;
         }
+        if index == 0 && self.has_flushed_tail() && self.flushed_tail[1].is_ascii_digit() {
+          return MarkerLine::Cut;
+        }
         if index == digits || digits - index > 9 {
-          return false;
+          return MarkerLine::Other;
         }
       }
       b'-' | b'*' | b'+' => {}
-      _ => return false,
+      _ => return MarkerLine::Other,
     }
     let mut spaces = 0;
     while index >= 8
@@ -3397,9 +3421,36 @@ impl ConvertState {
       index -= 1;
     }
     if index == 0 {
-      return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
+      return if !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r') {
+        MarkerLine::Bare(spaces)
+      } else {
+        MarkerLine::Cut
+      };
     }
-    matches!(bytes[index - 1], b'\n' | b'\r')
+    if matches!(bytes[index - 1], b'\n' | b'\r') {
+      MarkerLine::Bare(spaces)
+    } else {
+      MarkerLine::Other
+    }
+  }
+
+  /// Remember whether the marker just written from `output_start` is all its
+  /// line holds. A later first item reads back over blank lines for it, and a
+  /// stream may have drained that line's start by then.
+  fn note_bare_marker(&mut self, output_start: usize) {
+    let bytes = self.buffer.as_bytes();
+    let mut end = bytes.len();
+    while end > output_start && bytes[end - 1] == b' ' {
+      end -= 1;
+    }
+    self.bare_marker_end = usize::MAX;
+    self.bare_marker_gap_newline = false;
+    if end > output_start
+      && let MarkerLine::Bare(indent) = self.marker_line(bytes, end, usize::MAX)
+    {
+      self.bare_marker_end = end;
+      self.bare_marker_indent = indent;
+    }
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -3416,6 +3467,12 @@ impl ConvertState {
     }
     let parent_marker_end = self.last_item_marker_end;
     self.last_item_marker_end = usize::MAX;
+    let (bare_marker_end, bare_marker_indent, bare_marker_gap_newline) = (
+      self.bare_marker_end,
+      self.bare_marker_indent,
+      self.bare_marker_gap_newline,
+    );
+    self.note_bare_marker(output_start.min(self.buffer.len()));
     // Only a list's first item can follow a paragraph, so every later sibling
     // skips the line scan below.
     if index != 0 {
@@ -3483,7 +3540,8 @@ impl ConvertState {
         self.parent_marker_scans += 1;
       }
       let mut above_end = above_end;
-      if line_ending == b'\n' && above_end > 0 && bytes[above_end - 1] == b'\r' {
+      let line_above_only = line_ending == b'\n' && above_end > 0 && bytes[above_end - 1] == b'\r';
+      if line_above_only {
         // `\r\n` is one line ending, so a parent holding only that `\r` keeps a
         // bare marker on the line above. Read that line alone: past a blank line
         // the `\r` let the drain take the marker, and the stream would disagree.
@@ -3498,12 +3556,31 @@ impl ConvertState {
           above_end -= 1;
         }
       }
-      above_end > 0
+      let max_spaces = self.list_indent.len() + 3;
+      let line = if above_end > 0 {
+        self.marker_line(bytes, above_end, max_spaces)
+      } else if self.has_flushed_tail() {
+        MarkerLine::Cut
+      } else {
+        MarkerLine::Other
+      };
+      let bare = match line {
+        MarkerLine::Bare(_) => true,
+        MarkerLine::Other => false,
+        // The drain took the line's start, or the whole line and the blank
+        // lines under it: answer from the marker's own record, as one-shot
+        // reads the line.
+        MarkerLine::Cut => {
+          above_end == bare_marker_end
+            && bare_marker_indent <= max_spaces
+            && !(above_end == 0 && line_above_only && bare_marker_gap_newline)
+        }
+      };
+      bare
         && self
           .blockquotes
           .last()
           .is_none_or(|frame| above_end > frame.content_start)
-        && self.list_marker_line_start(bytes, above_end, self.list_indent.len() + 3)
     };
     self.empty_item_hazard = !starts_document && !blank_above && !follows_marker;
     self.empty_item_after_cr = line_ending == b'\r';
@@ -3719,6 +3796,10 @@ impl ConvertState {
     }
     if self.last_item_marker_end != usize::MAX && self.last_item_marker_end >= at {
       self.last_item_marker_end += 1;
+    }
+    // A newline written at a bare marker's end leaves the marker where it is.
+    if self.bare_marker_end != usize::MAX && self.bare_marker_end > at {
+      self.bare_marker_end += 1;
     }
     for marker in &mut self.open_markers {
       if marker.output_start >= at {
