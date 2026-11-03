@@ -3191,13 +3191,6 @@ impl ConvertState {
 }
 
 impl ConvertState {
-  /// What the line ending at `drain_end` leads with, given what an earlier cut
-  /// of the same line already found. `previous` makes the indent additive: a
-  /// line's leading spaces can be split across any number of drains, and the
-  /// rule that only three of them may precede the `<` suspending Markdown
-  /// counts from the line's real start. Read each fragment's indent on its own
-  /// and a line indented past three claims a suspension it never had, dropping
-  /// the escapes one-shot writes.
   /// The spaces the line ending `cut` has lost to drains, `previous` counted by
   /// earlier cuts of it, or `usize::MAX` once it lost anything else. The space
   /// right after a `\r` separates a marker from that line end and is no indent.
@@ -3214,6 +3207,13 @@ impl ConvertState {
     }
   }
 
+  /// What the line ending at `drain_end` leads with, given what an earlier cut
+  /// of the same line already found. `previous` makes the indent additive: a
+  /// line's leading spaces can be split across any number of drains, and the
+  /// rule that only three of them may precede the `<` suspending Markdown
+  /// counts from the line's real start. Read each fragment's indent on its own
+  /// and a line indented past three claims a suspension it never had, dropping
+  /// the escapes one-shot writes.
   fn classify_cut_line(bytes: &[u8], drain_end: usize, previous: CutLineLead) -> CutLineLead {
     if bytes[drain_end - 1] == b'\n' {
       // The cut ends the line, so the next one starts fresh at column zero.
