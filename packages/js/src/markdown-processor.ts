@@ -1563,7 +1563,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let captionBreakRun = 0
   // A marker-only item cannot release its whitespace yet. Keep repeated
   // ordinary breaks counted until another event can observe their contents.
-  let itemBreakRun: { fragment: number, unit: string, count: number } | undefined
+  // The run's fragment always ends the buffer: only a break extends the run,
+  // every other event flushes it first, and a stream drain that compacts the
+  // buffer keeps the final fragment. Its index does not survive that drain.
+  let itemBreakRun: { unit: string, count: number } | undefined
 
   function flushItemBreakRun(): void {
     const run = itemBreakRun
@@ -1572,7 +1575,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     itemBreakRun = undefined
     if (run.count > 1) {
       // Keep the final fragment separate: close handlers trim it by identity.
-      state.buffer[run.fragment] = run.unit.repeat(run.count - 1)
+      state.buffer[state.buffer.length - 1] = run.unit.repeat(run.count - 1)
       state.buffer.push(run.unit)
     }
   }
@@ -2315,13 +2318,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           && !gfmLifecycle.openCodeSpans.length && !state.codeFence && openLinkFragment === -1
           && !inPre && !state.depthMap[TAG_CODE] && !cleanPass?.holdsOutput
           && !hasNonWhitespace(breakOutput)) {
-          if (itemBreakRun && itemBreakRun.unit === breakOutput
-            && itemBreakRun.fragment === buff.length - 1 && buff[itemBreakRun.fragment] === breakOutput) {
+          if (itemBreakRun && itemBreakRun.unit === breakOutput && buff[buff.length - 1] === breakOutput) {
             itemBreakRun.count++
             return
           }
           flushItemBreakRun()
-          itemBreakRun = { fragment: buff.length, unit: breakOutput, count: 1 }
+          itemBreakRun = { unit: breakOutput, count: 1 }
         }
         else {
           flushItemBreakRun()

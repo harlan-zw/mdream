@@ -934,6 +934,16 @@ it.each(['parent</li></ul>', '</li></ul><p>after</p>', '<ul><li>nested</li></ul>
   await expectEverySplitParity(html)
 })
 
+// A drain can compact the buffer while a counted break run is still open.
+it.each([
+  '<ul><li><em><ul><li></li></ul></em><br><br></li></ul>',
+  '<ul><li><em><ol><li><br></li></ol></em><br><br></li></ul>',
+  '<ul><li><em><ul><li></li></ul></em><br><br><br><br>x</li></ul>',
+  '<p>lead</p><ul><li><br><br><em>&#13;<br><br></em></li></ul>',
+])('keeps counted list breaks across a drain at every width in %s', async (html) => {
+  await expectStreamingParity(html)
+})
+
 it.each(['<table></table>', '<pre></pre>'])('keeps the nested list tail across %s', async (block) => {
   const html = `<ul><li>A<ul><li>inner</li></ul>${block}parent</li></ul>`
   expect(convertOnce(html)).toBe('- A\n  - inner\n\n  parent')
