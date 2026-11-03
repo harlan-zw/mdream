@@ -2546,7 +2546,7 @@ impl ConvertState {
         // A hard break already ended the item. Its continuation indentation
         // must not become a whitespace-only line before the following block.
         if self.hard_break_end == self.buffer.len()
-          && !self.empty_item_hazard
+          && (!self.empty_item_hazard || self.break_follows_item_marker())
           && !has_override
           && self.depth_map[TAG_PRE as usize] == 0
           && !self.in_table_cell()
@@ -3461,8 +3461,10 @@ impl ConvertState {
       {
         self.parent_marker_scans += 1;
       }
+      // A line of spaces only is blank, as in JS: a hard break's continuation
+      // indent left one between the parent's marker and this one.
       let mut above_end = above_end;
-      while above_end > 0 && bytes[above_end - 1] == b' ' {
+      while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n') {
         above_end -= 1;
       }
       above_end > 0
@@ -3500,6 +3502,8 @@ impl ConvertState {
   /// the same, and waiting for it pins the marker's line and everything the
   /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
   /// blank line also survives a nested list whose first `<li>` dropped it.
+  /// An open fence takes nothing back: its opener stays on the marker's line,
+  /// and the stream drain already answers there, so one-shot does too.
   /// Kept out of line so the token loop stays small when nothing is pending.
   #[inline(never)]
   pub(crate) fn settle_item_marker(&mut self) {
@@ -3534,7 +3538,6 @@ impl ConvertState {
       && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
-      && self.code_fence.is_none()
       && self.depth_map[TAG_A as usize] == 0
       && self.first_tentative_caption_start().is_none()
       // The blank line leaves quote frames where they are, right only for those
@@ -3549,6 +3552,19 @@ impl ConvertState {
     self.item_settle_pending = self.empty_item_hazard
       || self.empty_list_marker_end != usize::MAX
       || self.list_tail_start != usize::MAX;
+  }
+
+  /// Whether the output ends in a line break written after the open item's
+  /// marker and then spaces only. Those spaces are the break's continuation
+  /// indent, never the marker's own space that the empty-item guard keeps.
+  #[cold]
+  fn break_follows_item_marker(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let mut start = bytes.len();
+    while start > 0 && bytes[start - 1] == b' ' {
+      start -= 1;
+    }
+    start > self.empty_item_len && bytes[start - 1] == b'\n'
   }
 
   /// Give a marker that ended up alone on its line the blank line it needs: the

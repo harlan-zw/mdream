@@ -467,6 +467,19 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
+
+  it.each([
+    ['<ul><li>a<ul><li><br></li></ul><pre>d</pre></li></ul>', '- a\n\n  -   \n\n  ```\n  d\n  ```'],
+    ['<ul><li>a<ul><li><br></li></ul><blockquote>q</blockquote></li></ul>', '- a\n\n  -   \n\n  > q'],
+    ['<ul><li>a<ul><li><br></li></ul><hr></li></ul>', '- a\n\n  -   \n  ---'],
+    ['<ul><li>a<ul><li><br></li></ul><h2>h</h2></li></ul>', '- a\n\n  -   \n\n  ## h'],
+    ['<ol start="4"><li>a<ol start="2"><li><br><br></li></ol><ul><li></li></ul></li></ol>', '4. a\n\n   2.   \n        \n   -'],
+    ['<ul><li>a<ul><li><pre>c</pre><br></li></ul><ul><li></li></ul></li></ul>', '- a\n  - ```\n    c\n    ```\n\n      \n\n  -'],
+    ['<ul><li>a<ul><li><br></li></ul><ol start="5"><li>z</li></ol></li></ul>', '- a\n\n  -   \n\n  5. z'],
+  ])('leaves no indent line after a hard break in an empty item: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
 })
 
 describe.each(engines)('blocks opening a quote in an item $name', (engineConfig) => {

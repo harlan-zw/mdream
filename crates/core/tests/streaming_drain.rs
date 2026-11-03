@@ -266,11 +266,12 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 #[test]
 fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
   // The item's tab ends a drained chunk, which settled the empty-item guard early.
-  // The `</li>` trim then removed the continuation indent one-shot keeps.
+  // The `</li>` trim must not depend on that guard: one-shot drops the
+  // continuation indent after the break too, as JS does.
   let html = "<b>1) x<small><br> <ul><li>&#9;<br></li></ul></small>===<hr></b>";
   assert_eq!(
     html_to_markdown(html, HtmlToMarkdownOptions::default()),
-    "**1) x  \n- \t  \n  \\=== ---**"
+    "**1) x  \n- \t  \n\\=== ---**"
   );
   assert_stream_matches(html, HtmlToMarkdownOptions::default());
 }
@@ -4287,6 +4288,23 @@ fn heading_after_nested_hard_break_keeps_indent_across_drains() {
       stream_chunks(&long, width, HtmlToMarkdownOptions::default()),
       long_expected
     );
+  }
+}
+
+#[test]
+fn hard_break_in_an_empty_nested_item_matches_every_split() {
+  for html in [
+    "<ul><li>a<ul><li><br></li></ul><pre>d</pre></li></ul>",
+    "<ul><li>a<ul><li><br></li></ul><blockquote>q</blockquote></li></ul>",
+    "<ul><li>a<ul><li><br></li></ul><hr></li></ul>",
+    "<ol start=\"4\"><li>a<ol start=\"2\"><li><br><br></li></ol><ul><li></li></ul></li></ol>",
+    "<ul><li>a<ul><li><pre>c</pre><br></li></ul><ul><li></li></ul></li></ul>",
+    "<ul><li>a<ul><li><pre>c</pre><br></li></ul><hr></li></ul>",
+    "<ul><li>a<ul><li><br><br></li></ul><ol start=\"5\"><li></li></ol></li></ul>",
+    "<ul><li>a<ul><li><pre>c</pre><br></li></ul><ol start=\"3\"><li>z</li><li></li></ol></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 
