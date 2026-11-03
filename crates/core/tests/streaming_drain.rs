@@ -4626,6 +4626,9 @@ fn cr_only_parent_item_matches_every_split() {
     "<p>lead</p><ul><li>&#13;<ul><li><br></li></ul>x</li></ul>",
     "<ul><li>a&#13;<ul><li></li></ul></li></ul>",
     "<blockquote><ul><li>&#13;<ul><li><blockquote><ul><li>t</li><li><br><br></li></ul>t</blockquote></li></ul>x<br></li></ul></blockquote>",
+    // Breaks after the `\r` let the drain take the parent's marker.
+    "<ul><li><ol><li><ol><li><ol><li>&#13;<br><br></li></ol><ol><li></li></ol></li></ol></li></ol></li></ul>",
+    "<ul><li><ol><li><ol><li><ol><li><ol><li><ol start=\"123456789\"><li>&#13;<ul><li></li></ul></li></ol></li></ol></li></ol></li></ol></li></ol></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());

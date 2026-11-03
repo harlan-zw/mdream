@@ -316,14 +316,29 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // A parent's bare marker is no paragraph, and a blank line under it would end
   // that item and turn this one into its sibling. A marker outside the
   // innermost blockquote keeps the blank line it already had, which the quote's
-  // prefix makes harmless. A decoded CR ends its line too, so a parent holding
-  // only one stays bare.
+  // prefix makes harmless. A CR ends a line too: alone it ends this marker's
+  // own line, which Rust reads past, and before the LF of a CRLF it ends the
+  // line above. That line is then read alone, as in Rust: past a blank line
+  // the CR let the drain take the marker, and the stream would disagree.
+  let lineFeeds = 0
+  let previous = 0
+  let crSkipped = false
+  let lineAboveOnly = false
   for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
     const value = state.buffer[fragment]!
     for (let cursor = value.length - 1; cursor >= 0; cursor--) {
       const code = value.charCodeAt(cursor)
-      if (code === 10 || code === 32 || code === 13)
+      if (code === 32 || (code === 10 && !lineAboveOnly)) {
+        if (code === 10)
+          lineFeeds++
+        previous = code
         continue
+      }
+      if (code === 13 && !crSkipped && (lineFeeds === 0 ? afterCr : lineFeeds === 1 && previous === 10)) {
+        crSkipped = true
+        lineAboveOnly = lineFeeds === 1
+        continue
+      }
       // A direct first-child list cannot have inserted content before its
       // parent's built-in marker. A drain/rewrite that moves that fragment
       // misses this shortcut and keeps the general line recognizer.

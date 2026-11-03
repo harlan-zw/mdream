@@ -3482,12 +3482,21 @@ impl ConvertState {
       {
         self.parent_marker_scans += 1;
       }
-      // A line of spaces only is blank, as in JS: a hard break's continuation
-      // indent left one between the parent's marker and this one. A decoded
-      // `\r` ends its line too, so a parent holding only one stays bare.
       let mut above_end = above_end;
-      while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n' | b'\r') {
+      if line_ending == b'\n' && above_end > 0 && bytes[above_end - 1] == b'\r' {
+        // `\r\n` is one line ending, so a parent holding only that `\r` keeps a
+        // bare marker on the line above. Read that line alone: past a blank line
+        // the `\r` let the drain take the marker, and the stream would disagree.
         above_end -= 1;
+        while above_end > 0 && bytes[above_end - 1] == b' ' {
+          above_end -= 1;
+        }
+      } else {
+        // A line of spaces only is blank, as in JS: a hard break's continuation
+        // indent left one between the parent's marker and this one.
+        while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n') {
+          above_end -= 1;
+        }
       }
       above_end > 0
         && self
