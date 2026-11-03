@@ -4617,6 +4617,22 @@ fn empty_ancestor_list_markers_match_every_split() {
 }
 
 #[test]
+fn cr_only_parent_item_matches_every_split() {
+  for html in [
+    "<ul><li>&#13;<ul><li><ul><li>t</li></ul></li></ul></li></ul>",
+    "<ul><li>&#13;<ul><li><blockquote><ul><li>t</li></ul></blockquote></li></ul></li></ul>",
+    "<ul><li>&#13;<ul><li></li></ul></li></ul>",
+    "<ul><li><ul><li>&#13;<ol><li></li></ol></li></ul></li></ul>",
+    "<p>lead</p><ul><li>&#13;<ul><li><br></li></ul>x</li></ul>",
+    "<ul><li>a&#13;<ul><li></li></ul></li></ul>",
+    "<blockquote><ul><li>&#13;<ul><li><blockquote><ul><li>t</li><li><br><br></li></ul>t</blockquote></li></ul>x<br></li></ul></blockquote>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn empty_quote_keeps_nested_list_tail() {
   for (html, expected) in [
     (

@@ -7634,6 +7634,39 @@ fn empty_ancestor_list_markers_do_not_underline_parent_text() {
 }
 
 #[test]
+fn cr_only_parent_item_keeps_a_bare_marker() {
+  // A decoded `\r` ends the parent's line, so its marker stays bare and a blank
+  // line under it would turn the nested item into its sibling.
+  for (html, expected) in [
+    (
+      "<ul><li>&#13;<ul><li><ul><li>t</li></ul></li></ul></li></ul>",
+      "- \r\n  -\n    - t",
+    ),
+    (
+      "<ul><li>&#13;<ul><li><blockquote><ul><li>t</li></ul></blockquote></li></ul></li></ul>",
+      "- \r\n  - \n    > - t",
+    ),
+    ("<ul><li>&#13;<ul><li></li></ul></li></ul>", "- \r\n  -"),
+    (
+      "<ul><li><ul><li>&#13;<ol><li></li></ol></li></ul></li></ul>",
+      "-\n  - \r\n    1.",
+    ),
+    (
+      "<p>lead</p><ul><li>&#13;<ul><li><br></li></ul>x</li></ul>",
+      "lead\n\n- \r\n  -   \n\n  x",
+    ),
+    // Text before the `\r` still needs the blank line.
+    ("<ul><li>a&#13;<ul><li></li></ul></li></ul>", "- a\r\n\n  -"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn nested_ordered_start_separates_parent_paragraph() {
   for (html, expected) in [
     (

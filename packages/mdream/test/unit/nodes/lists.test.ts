@@ -17,6 +17,18 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li>&#13;<ul><li><ul><li>t</li></ul></li></ul></li></ul>', '- \r\n  -\n    - t'],
+    ['<ul><li>&#13;<ul><li><blockquote><ul><li>t</li></ul></blockquote></li></ul></li></ul>', '- \r\n  - \n    > - t'],
+    ['<ul><li>&#13;<ul><li></li></ul></li></ul>', '- \r\n  -'],
+    ['<ul><li><ul><li>&#13;<ol><li></li></ol></li></ul></li></ul>', '-\n  - \r\n    1.'],
+    ['<p>lead</p><ul><li>&#13;<ul><li><br></li></ul>x</li></ul>', 'lead\n\n- \r\n  -   \n\n  x'],
+    ['<ul><li>a&#13;<ul><li></li></ul></li></ul>', '- a\r\n\n  -'],
+  ])('keeps a CR-only parent marker bare: %j', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li><ol><li></li></ol>text</li></ul>', '-\n  1.\n\n  text'],
     ['<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>', '-\n  -\n\n  text'],
     ['<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>', '-\n  -\n- next'],

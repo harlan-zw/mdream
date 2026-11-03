@@ -3483,9 +3483,10 @@ impl ConvertState {
         self.parent_marker_scans += 1;
       }
       // A line of spaces only is blank, as in JS: a hard break's continuation
-      // indent left one between the parent's marker and this one.
+      // indent left one between the parent's marker and this one. A decoded
+      // `\r` ends its line too, so a parent holding only one stays bare.
       let mut above_end = above_end;
-      while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n') {
+      while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n' | b'\r') {
         above_end -= 1;
       }
       above_end > 0

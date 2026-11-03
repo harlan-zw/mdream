@@ -316,12 +316,13 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // A parent's bare marker is no paragraph, and a blank line under it would end
   // that item and turn this one into its sibling. A marker outside the
   // innermost blockquote keeps the blank line it already had, which the quote's
-  // prefix makes harmless.
+  // prefix makes harmless. A decoded CR ends its line too, so a parent holding
+  // only one stays bare.
   for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
     const value = state.buffer[fragment]!
     for (let cursor = value.length - 1; cursor >= 0; cursor--) {
       const code = value.charCodeAt(cursor)
-      if (code === 10 || code === 32)
+      if (code === 10 || code === 32 || code === 13)
         continue
       // A direct first-child list cannot have inserted content before its
       // parent's built-in marker. A drain/rewrite that moves that fragment
