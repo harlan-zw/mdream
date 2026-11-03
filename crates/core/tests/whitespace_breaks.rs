@@ -415,6 +415,22 @@ fn a_wrapped_item_line_keeps_the_run_after_a_marker_like_word() {
       "<li>aaaaaaaaaa 1.&#12;<br>b</li>",
       "- aaaaaaaaaa\n  1.\u{c}  \n  b",
     ),
+    (
+      "<li>aaaaaaaaaa ===&#12;<br>b</li>",
+      "- aaaaaaaaaa\n  ===\u{c}  \n  b",
+    ),
+    (
+      "<li>aaaaaaaaaa --&#12;<br>b</li>",
+      "- aaaaaaaaaa\n  --\u{c}  \n  b",
+    ),
+    (
+      "<li>aaaaaaaaaa #&#12;<br>b</li>",
+      "- aaaaaaaaaa\n  #\u{c}  \n  b",
+    ),
+    (
+      "<li>aaaaaaaaaa ##&#12;<br>b</li>",
+      "- aaaaaaaaaa\n  ##\u{c}  \n  b",
+    ),
     ("<li>aaaaaaaaaa -&#9;<br>b</li>", "- aaaaaaaaaa -  \n  b"),
   ] {
     assert_every_chunking(html, &wrapped, expected);
