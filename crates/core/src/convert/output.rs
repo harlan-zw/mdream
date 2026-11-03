@@ -3667,15 +3667,23 @@ impl ConvertState {
     // still open across it measures emptiness from `content_start`, so left
     // unshifted it stops looking empty and streaming leaks markers one-shot drops.
     //
-    // Not the blockquote frames. Their `content_start` marks where quote
-    // prefixing begins, which belongs *before* this newline; shifting it turns
-    // `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's sibling
-    // rather than its child. `link_bracket_pos` needs no shift either — a pending
-    // `[` is the tail this function has already returned on.
+    // Not the blockquote frames the item sits in. Their `content_start` marks
+    // where quote prefixing begins, which belongs *before* this newline; shifting
+    // it turns `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's
+    // sibling rather than its child. A quote opened inside the item, which a
+    // descendant marker settling this one leaves open, starts past the line and
+    // moves with its content. `link_bracket_pos` needs no shift either — a
+    // pending `[` is the tail this function has already returned on.
 
     self.empty_list_marker_end = list_marker_end;
     for _ in replaced..separator.len() {
       self.shift_offsets_at_or_after(at);
+    }
+    let inserted = separator.len() - replaced;
+    for frame in &mut self.blockquotes {
+      if frame.content_start > at {
+        frame.content_start += inserted;
+      }
     }
     if break_at_end {
       self.hard_break_end = self.buffer.len();

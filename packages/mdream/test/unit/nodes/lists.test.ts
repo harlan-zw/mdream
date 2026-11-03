@@ -7,6 +7,10 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>', '- \n  > lead\n  >\n  > -\n  >   -'],
     ['<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>', '- lead\n\n  -\n    - x'],
     ['<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>', '-\n  -\n    -'],
+    ['<ul><li>lead<ul><li><blockquote><ol><li></li></ol></blockquote></li></ul></li></ul>', '- lead\n\n  - \n    >\n    > 1.'],
+    ['<ol><li>lead<ul><li><blockquote><ol><li>y</li></ol></blockquote></li></ul></li></ol>', '1. lead\n\n   - \n     > 1. y'],
+    ['<ul><li>lead<ul><li><blockquote><blockquote><ol><li></li></ol></blockquote></blockquote></li></ul></li></ul>', '- lead\n\n  - \n    > >\n    > > 1.'],
+    ['<dl><li><blockquote><ol><li></li></ol></blockquote></li></dl>', '<dl>\n\n- \n  >\n  > 1.</dl>'],
   ])('keeps empty ancestor markers below paragraphs: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)

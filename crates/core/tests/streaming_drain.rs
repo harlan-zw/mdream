@@ -4606,6 +4606,10 @@ fn empty_ancestor_list_markers_match_every_split() {
     "<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>",
     "<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>",
     "<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>",
+    "<ul><li>lead<ul><li><blockquote><ol><li></li></ol></blockquote></li></ul></li></ul>",
+    "<ol><li>lead<ul><li><blockquote><ol><li>y</li></ol></blockquote></li></ul></li></ol>",
+    "<ul><li>lead<ul><li><blockquote><blockquote><ol><li></li></ol></blockquote></blockquote></li></ul></li></ul>",
+    "<dl><li><blockquote><ol><li></li></ol></blockquote></li></dl>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());

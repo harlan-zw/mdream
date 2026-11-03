@@ -7606,6 +7606,24 @@ fn empty_ancestor_list_markers_do_not_underline_parent_text() {
       "<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>",
       "-\n  -\n    -",
     ),
+    // A quote that opened inside the bare item moves with its content, so its
+    // prefix still starts on the line after the marker.
+    (
+      "<ul><li>lead<ul><li><blockquote><ol><li></li></ol></blockquote></li></ul></li></ul>",
+      "- lead\n\n  - \n    >\n    > 1.",
+    ),
+    (
+      "<ol><li>lead<ul><li><blockquote><ol><li>y</li></ol></blockquote></li></ul></li></ol>",
+      "1. lead\n\n   - \n     > 1. y",
+    ),
+    (
+      "<ul><li>lead<ul><li><blockquote><blockquote><ol><li></li></ol></blockquote></blockquote></li></ul></li></ul>",
+      "- lead\n\n  - \n    > >\n    > > 1.",
+    ),
+    (
+      "<dl><li><blockquote><ol><li></li></ol></blockquote></li></dl>",
+      "<dl>\n\n- \n  >\n  > 1.</dl>",
+    ),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),
