@@ -4332,6 +4332,23 @@ fn hard_break_in_an_empty_nested_item_matches_every_split() {
 }
 
 #[test]
+fn drained_bare_marker_line_still_reads_as_one() {
+  // Space-only lines under a bare marker let the drain take its line before a
+  // first nested item, or a block, reads back for it.
+  for html in [
+    "<ul><li><blockquote><br><br><br></blockquote><ul><li></li></ul></li></ul>",
+    "<ul><li>x</li><li><blockquote><br><br><br></blockquote><ul><li></li></ul></li></ul>",
+    "<p>lead</p><ol start=\"123456789\"><li>&#13;<ol><li><br><br><blockquote><b></b></blockquote></li></ol><ol start=\"123456789\"><li><b></b></li></ol></li></ol>",
+    "<ul><li>&#13; &#13;<em><blockquote><br><br><br></blockquote><ol><li>&#13;<br><br></li></ol></em></li></ul>",
+    "<ol start=\"123456789\"><li><blockquote><br><br><br></blockquote><ul><li><em><br><br></em><h2>h</h2></li></ul></li></ol>",
+    "<ol start=\"123456789\"><li><blockquote><br><br><br></blockquote><ul><li><em><br><br></em><pre>c</pre></li></ul></li></ol>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn nested_list_tail_in_a_raw_html_block_matches_every_split() {
   for html in [
     "<details><summary>s</summary><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></details>",

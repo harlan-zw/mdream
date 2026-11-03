@@ -967,6 +967,11 @@ pub struct ConvertState {
   item_settle_pending: bool,
   /// Last built-in marker end, excluding its trailing space.
   last_item_marker_end: usize,
+  /// End of the latest item marker that its line holds alone, and that line's
+  /// indent, for the marker line readers once a drain has cut the line. 0 once
+  /// the drain took the marker and only whitespace after it.
+  bare_marker_end: usize,
+  bare_marker_indent: usize,
   #[cfg(test)]
   parent_marker_scans: usize,
   /// `LIST_RULE_PENDING`: a list item rule waiting to see whether visible
@@ -1237,6 +1242,8 @@ impl ConvertState {
       empty_item_len: 0,
       item_settle_pending: false,
       last_item_marker_end: usize::MAX,
+      bare_marker_end: usize::MAX,
+      bare_marker_indent: 0,
       #[cfg(test)]
       parent_marker_scans: 0,
       list_pending: 0,
@@ -2677,6 +2684,9 @@ impl ConvertState {
     if self.last_item_marker_end != usize::MAX && offset < self.last_item_marker_end {
       self.last_item_marker_end = usize::MAX;
     }
+    if self.bare_marker_end != usize::MAX && offset < self.bare_marker_end {
+      self.bare_marker_end = usize::MAX;
+    }
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -3077,6 +3087,7 @@ impl ConvertState {
     if self.raw_html_scanned_to < drain_end && !self.raw_html_markdown && self.in_raw_html_block() {
       self.track_raw_html_markdown_context(drain_end);
     }
+    let drained_bare_marker = self.bare_marker_line_before(drain_end);
     let bytes = self.buffer.as_bytes();
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
@@ -3090,6 +3101,28 @@ impl ConvertState {
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
+    // A bare marker leaving with only whitespace after it stays readable at the
+    // buffer start, where the marker line readers stop.
+    if self.bare_marker_end != usize::MAX {
+      self.bare_marker_end = match self.bare_marker_end.checked_sub(drain_end) {
+        Some(end) => end,
+        None
+          if bytes[self.bare_marker_end..drain_end]
+            .iter()
+            .all(|&byte| matches!(byte, b' ' | b'\n')) =>
+        {
+          0
+        }
+        None => usize::MAX,
+      };
+    }
+    // Any other line the readers take for a bare marker leaves the same way.
+    if self.bare_marker_end == usize::MAX
+      && let Some(indent) = drained_bare_marker
+    {
+      self.bare_marker_end = 0;
+      self.bare_marker_indent = indent;
+    }
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);

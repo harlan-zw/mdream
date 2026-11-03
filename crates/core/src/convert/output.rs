@@ -33,6 +33,18 @@ fn get_language_from_data_attribute(value: Option<&str>) -> Option<&str> {
   Some(value)
 }
 
+/// What precedes a list marker on its line, as `ConvertState::marker_line`
+/// reads it.
+#[derive(Clone, Copy, PartialEq)]
+enum MarkerLine {
+  /// The marker is all its line holds, after this many spaces of indent.
+  Bare(usize),
+  /// The line holds more than the marker, or more indent than allowed.
+  Other,
+  /// A drain cut the line before its start: only the stream's past can tell.
+  Cut,
+}
+
 /// Buffer size at which a streaming flush starts quoting completed blockquote
 /// lines, so a long quote releases instead of growing with the document.
 const STREAMING_FLUSH_THRESHOLD: usize = 8 * 1024;
@@ -3348,7 +3360,19 @@ impl ConvertState {
 
   /// Whether `end` sits just past a list marker that is all its line holds: up
   /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+  /// `bytes` is the buffer: a line a drain cut is answered from the record of
+  /// the latest bare marker, as one-shot reads it.
   fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
+    match self.marker_line(bytes, end, max_spaces) {
+      MarkerLine::Bare(_) => true,
+      MarkerLine::Other => false,
+      MarkerLine::Cut => end == self.bare_marker_end && self.bare_marker_indent <= max_spaces,
+    }
+  }
+
+  /// The line `list_marker_line_start` reads, told apart from one whose start
+  /// a drain already took.
+  fn marker_line(&self, bytes: &[u8], end: usize, max_spaces: usize) -> MarkerLine {
     let mut index = end - 1;
     match bytes[index] {
       b'.' | b')' => {
@@ -3356,12 +3380,15 @@ impl ConvertState {
         while index > 0 && bytes[index - 1].is_ascii_digit() {
           index -= 1;
         }
+        if index == 0 && self.has_flushed_tail() && self.flushed_tail[1].is_ascii_digit() {
+          return MarkerLine::Cut;
+        }
         if index == digits || digits - index > 9 {
-          return false;
+          return MarkerLine::Other;
         }
       }
       b'-' | b'*' | b'+' => {}
-      _ => return false,
+      _ => return MarkerLine::Other,
     }
     let mut spaces = 0;
     while index >= 8
@@ -3384,9 +3411,52 @@ impl ConvertState {
       index -= 1;
     }
     if index == 0 {
-      return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
+      return if !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r') {
+        MarkerLine::Bare(spaces)
+      } else {
+        MarkerLine::Cut
+      };
     }
-    matches!(bytes[index - 1], b'\n' | b'\r')
+    if matches!(bytes[index - 1], b'\n' | b'\r') {
+      MarkerLine::Bare(spaces)
+    } else {
+      MarkerLine::Other
+    }
+  }
+
+  /// The indent of the bare marker line that `end` closes once the spaces and
+  /// line feeds before it are skipped, read before a drain takes those bytes.
+  pub(super) fn bare_marker_line_before(&self, end: usize) -> Option<usize> {
+    let bytes = self.buffer.as_bytes();
+    let mut end = end;
+    while end > 0 && matches!(bytes[end - 1], b' ' | b'\n') {
+      end -= 1;
+    }
+    if end == 0 {
+      return None;
+    }
+    match self.marker_line(bytes, end, usize::MAX) {
+      MarkerLine::Bare(indent) => Some(indent),
+      MarkerLine::Other | MarkerLine::Cut => None,
+    }
+  }
+
+  /// Remember whether the marker just written from `output_start` is all its
+  /// line holds. A later block or first item reads back for it, and a stream
+  /// may have drained that line's start by then.
+  fn note_bare_marker(&mut self, output_start: usize) {
+    let bytes = self.buffer.as_bytes();
+    let mut end = bytes.len();
+    while end > output_start && bytes[end - 1] == b' ' {
+      end -= 1;
+    }
+    self.bare_marker_end = usize::MAX;
+    if end > output_start
+      && let MarkerLine::Bare(indent) = self.marker_line(bytes, end, usize::MAX)
+    {
+      self.bare_marker_end = end;
+      self.bare_marker_indent = indent;
+    }
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -3396,13 +3466,14 @@ impl ConvertState {
   fn record_item_marker(&mut self, index: usize, output_start: usize) {
     let parent_marker_end = self.last_item_marker_end;
     self.last_item_marker_end = usize::MAX;
+    let output_start = output_start.min(self.buffer.len());
     // Only a list's first item can follow a paragraph, so every later sibling
     // skips the line scan below.
     if index != 0 {
       self.empty_item_hazard = false;
+      self.note_bare_marker(output_start);
       return;
     }
-    let output_start = output_start.min(self.buffer.len());
     let bytes = self.buffer.as_bytes();
     let mut line_start = bytes[output_start..]
       .iter()
@@ -3467,17 +3538,27 @@ impl ConvertState {
       while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n') {
         above_end -= 1;
       }
-      above_end > 0
+      let max_spaces = self.list_indent.len() + 3;
+      // Past the buffer start the drain took the marker with only whitespace
+      // after it, so its record answers as one-shot reads the line.
+      let bare = if above_end > 0 {
+        self.list_marker_line_start(bytes, above_end, max_spaces)
+      } else {
+        self.has_flushed_tail()
+          && self.bare_marker_end == 0
+          && self.bare_marker_indent <= max_spaces
+      };
+      bare
         && self
           .blockquotes
           .last()
           .is_none_or(|frame| above_end > frame.content_start)
-        && self.list_marker_line_start(bytes, above_end, self.list_indent.len() + 3)
     };
     self.empty_item_hazard = !starts_document && !blank_above && !follows_marker;
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
+    self.note_bare_marker(output_start);
   }
 
   /// Scan only bytes appended since the last settlement or buffer rewrite.
@@ -3639,8 +3720,14 @@ impl ConvertState {
     } else {
       "\n"
     };
+    let bare_marker_end = self.bare_marker_end;
     if !self.replace_code_span_content(at..at + replaced, separator) {
       return;
+    }
+    // The lines from `at` on keep their bytes, so a bare marker there stays
+    // bare, and a drain may still need its record. The shift below moves it.
+    if bare_marker_end != usize::MAX && bare_marker_end > at + replaced {
+      self.bare_marker_end = bare_marker_end;
     }
     // The insertion moves cached offsets at or past the line: an inline marker
     // still open across it measures emptiness from `content_start`, so left
@@ -3680,6 +3767,10 @@ impl ConvertState {
     }
     if self.last_item_marker_end != usize::MAX && self.last_item_marker_end >= at {
       self.last_item_marker_end += 1;
+    }
+    // A newline written at a bare marker's end leaves the marker where it is.
+    if self.bare_marker_end != usize::MAX && self.bare_marker_end > at {
+      self.bare_marker_end += 1;
     }
     for marker in &mut self.open_markers {
       if marker.output_start >= at {
