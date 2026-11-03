@@ -3591,8 +3591,6 @@ impl ConvertState {
   /// the same, and waiting for it pins the marker's line and everything the
   /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
   /// blank line also survives a nested list whose first `<li>` dropped it.
-  /// An open fence takes nothing back: its opener stays on the marker's line,
-  /// and the stream drain already answers there, so one-shot does too.
   /// Kept out of line so the token loop stays small when nothing is pending.
   #[inline(never)]
   pub(crate) fn settle_item_marker(&mut self) {
@@ -3627,6 +3625,7 @@ impl ConvertState {
       && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
+      && self.code_fence.is_none()
       && self.depth_map[TAG_A as usize] == 0
       && self.first_tentative_caption_start().is_none()
       // The blank line leaves quote frames where they are, right only for those
