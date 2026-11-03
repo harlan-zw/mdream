@@ -4651,6 +4651,24 @@ impl ConvertState {
     }
   }
 
+  /// Whether the output ends in a line holding spaces only, read through a
+  /// drain via `flushed_tail` like `trailing_new_lines`.
+  fn ends_in_indent_line(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let mut start = bytes.len();
+    while start > 0 && bytes[start - 1] == b' ' {
+      start -= 1;
+    }
+    if start == bytes.len() {
+      return false;
+    }
+    if start > 0 {
+      bytes[start - 1] == b'\n'
+    } else {
+      self.has_flushed_tail() && self.flushed_tail[1] == b'\n'
+    }
+  }
+
   fn flush_list_tail(&mut self, preserve_marker_space: bool) {
     if !preserve_marker_space {
       self.trim_trailing_spaces();
@@ -4680,6 +4698,16 @@ impl ConvertState {
         tag_id,
         Some(TAG_BLOCKQUOTE | TAG_LI | TAG_H1..=TAG_H6 | TAG_HR)
       ) {
+        // A closed nested item can leave its indent alone on the last line, as
+        // after a fence. A heading or rule reads it as its own prefix and lands
+        // in that item, so the parent's prefix replaces it after a blank line.
+        if matches!(tag_id, Some(TAG_H1..=TAG_H6 | TAG_HR)) && self.ends_in_indent_line() {
+          self.trim_trailing_spaces();
+          if self.trailing_new_lines() == 2 {
+            let prefix = self.continuation_prefix();
+            self.last_content_cache_len = self.push_code_span_content(&prefix, true);
+          }
+        }
         self.list_pending &= !LIST_TAIL_PENDING;
         self.empty_list_marker_end = usize::MAX;
       } else {

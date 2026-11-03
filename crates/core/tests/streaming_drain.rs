@@ -4292,6 +4292,29 @@ fn heading_after_nested_hard_break_keeps_indent_across_drains() {
 }
 
 #[test]
+fn parent_block_drops_the_indent_a_closed_item_left_at_every_split() {
+  for html in [
+    "<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>",
+    "<ul><li>a<ul><li><pre>c</pre></li></ul><h2>h</h2></li></ul>",
+    "<blockquote><ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul></blockquote>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+  // A long lead lets the stream drain before the nested list closes.
+  let html = "<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>";
+  let long = format!("<p>{}</p>{html}", "lead ".repeat(1000));
+  let expected = html_to_markdown(&long, HtmlToMarkdownOptions::default());
+  assert!(expected.ends_with("\n\n  ***"), "{expected:?}");
+  for width in [1, 7, 4096] {
+    assert_eq!(
+      stream_chunks(&long, width, HtmlToMarkdownOptions::default()),
+      expected
+    );
+  }
+}
+
+#[test]
 fn hard_break_in_an_empty_nested_item_matches_every_split() {
   for html in [
     "<ul><li>a<ul><li><br></li></ul><pre>d</pre></li></ul>",

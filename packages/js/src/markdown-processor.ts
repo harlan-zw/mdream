@@ -241,6 +241,21 @@ function crFollowsLineEnding(buffer: string[], index: number): boolean {
   return false
 }
 
+/** Whether the output ends in a line holding spaces only. */
+function endsInIndentLine(buffer: readonly string[]): boolean {
+  let spaces = 0
+  for (let fragment = buffer.length - 1; fragment >= 0; fragment--) {
+    const value = buffer[fragment]!
+    for (let index = value.length - 1; index >= 0; index--) {
+      const code = value.charCodeAt(index)
+      if (code !== 32)
+        return code === 10 && spaces > 0
+      spaces++
+    }
+  }
+  return false
+}
+
 function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string): number {
   let fragment = index - 1
   let offset = fragment >= 0 ? buffer[fragment]!.length : 0
@@ -2027,6 +2042,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         else if (tagId === TAG_BLOCKQUOTE || tagId === TAG_LI
           || (tagId! >= TAG_H1 && tagId! <= TAG_H6) || tagId === TAG_HR) {
+          // A closed nested item can leave its indent alone on the last line, as
+          // after a fence. A heading or rule reads it as its own prefix and lands
+          // in that item, so the parent's prefix replaces it after a blank line.
+          if (tagId !== TAG_BLOCKQUOTE && tagId !== TAG_LI && endsInIndentLine(state.buffer)) {
+            trimTrailingSpaces(state.buffer)
+            if (newlineRunBefore(state.buffer, state.buffer.length) === 2) {
+              state.buffer.push(state.listIndent)
+              state.lastContentCache = state.listIndent
+              state.lastTextNode = undefined
+            }
+          }
           state.listTailPending = false
           state.emptyListMarkerFragment = undefined
         }

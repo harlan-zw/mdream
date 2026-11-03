@@ -7422,6 +7422,30 @@ fn heading_after_nested_hard_break_stays_in_parent_item() {
 }
 
 #[test]
+fn parent_block_drops_the_indent_a_closed_item_left() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n  ***",
+    ),
+    (
+      "<ul><li>a<ul><li><pre>c</pre></li></ul><h2>h</h2></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>x</li><li><pre>c</pre></li></ul><hr></li></ul>",
+      "- a\n  - x\n  - ```\n    c\n    ```\n\n  ***",
+    ),
+    (
+      "<blockquote><ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul></blockquote>",
+      "> - a\n>   - ```\n>     c\n>     ```\n>\n>   ***",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
 fn hard_break_in_an_empty_nested_item_leaves_no_indent_line() {
   for (html, expected) in [
     (

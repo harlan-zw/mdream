@@ -469,6 +469,15 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
   })
 
   it.each([
+    ['<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>', '- a\n  - ```\n    c\n    ```\n\n  ***'],
+    ['<ul><li>a<ul><li><pre>c</pre></li></ul><h2>h</h2></li></ul>', '- a\n  - ```\n    c\n    ```\n\n  ## h'],
+    ['<blockquote><ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul></blockquote>', '> - a\n>   - ```\n>     c\n>     ```\n>\n>   ***'],
+  ])('drops the indent a closed item left: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>a<ul><li><br></li></ul><pre>d</pre></li></ul>', '- a\n\n  -   \n\n  ```\n  d\n  ```'],
     ['<ul><li>a<ul><li><br></li></ul><blockquote>q</blockquote></li></ul>', '- a\n\n  -   \n\n  > q'],
     ['<ul><li>a<ul><li><br></li></ul><hr></li></ul>', '- a\n\n  -   \n  ---'],
