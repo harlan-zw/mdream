@@ -4614,6 +4614,8 @@ fn empty_ancestor_list_markers_match_every_split() {
     "<ul><li><em><br><ul><li><br><ol start=\"123456789\"><li></li></ol></li></ul></em></li></ul>",
     "<ul><li><ul><li><ol><li><ol><li></li></ol></li></ol></li></ul><ul><li><ul><li></li></ul></li></ul></li></ul>",
     "<ul><li><ol start=\"123456789\"><li><ul><li></li></ul></li></ol><ol><li><ol start=\"123456789\"><li></li></ol></li></ol></li></ul>",
+    "<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+    "lead<br><ul><li> <ol><li><br></li><li><em>x<br></em><ul><li><blockquote>q</blockquote></li><li>z</li></ul></li></ol></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());

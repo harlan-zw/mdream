@@ -47,6 +47,16 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '- *x  \n  *\n\n  - \n    > q'],
+    ['<ol><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '1. *x  \n   *\n\n   - \n     > q'],
+    ['lead<br><ul><li> <ol><li><br></li><li><em>x<br></em><ul><li><blockquote>q</blockquote></li><li>z</li></ul></li></ol></li></ul>', 'lead  \n\n-\n  1.   \n  2. *x  \n     *\n\n     - \n       > q\n     - z'],
+    ['<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-\n  - \n    > q'],
+  ])('reads an emphasis closer alone on its line as no parent marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>&#13;<ul><li><ul><li>t</li></ul></li></ul></li></ul>', '- \r\n  -\n    - t'],
     ['<ul><li>&#13;<ul><li><blockquote><ul><li>t</li></ul></blockquote></li></ul></li></ul>', '- \r\n  - \n    > - t'],
     ['<ul><li>&#13;<ul><li></li></ul></li></ul>', '- \r\n  -'],

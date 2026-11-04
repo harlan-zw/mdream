@@ -3599,9 +3599,23 @@ impl ConvertState {
       }
       let max_spaces = self.list_indent.len() + 3;
       // Past the buffer start the drain took the marker with only whitespace
-      // after it, so its record answers as one-shot reads the line.
+      // after it, so its record answers as one-shot reads the line. A list
+      // writes only `-` and `N.` markers, so a lone `*` or `+` is an emphasis
+      // closer or text, which the marker line would underline. Right after a
+      // `\r` it starts a line of its own, and reads as a marker there.
       let bare = if above_end > 0 {
-        self.list_marker_line_start(bytes, above_end, max_spaces)
+        let written = matches!(bytes[above_end - 1], b'-' | b'.' | b')') || {
+          let mut at = above_end - 1;
+          while at > 0 && bytes[at - 1] == b' ' {
+            at -= 1;
+          }
+          if at > 0 {
+            bytes[at - 1] == b'\r'
+          } else {
+            self.has_flushed_tail() && self.flushed_tail[1] == b'\r'
+          }
+        };
+        written && self.list_marker_line_start(bytes, above_end, max_spaces)
       } else {
         self.has_flushed_tail()
           && self.bare_marker_end == 0
