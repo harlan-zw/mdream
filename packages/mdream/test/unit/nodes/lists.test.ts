@@ -27,6 +27,14 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li><ul><li><ol><li><ol><li></li></ol></li></ol></li></ul><ul><li><ul><li></li></ul></li></ul></li></ul>', '-\n  -\n    1.\n       1.\n\n  -\n    -'],
+    ['<ul><li><ol start="123456789"><li><ul><li></li></ul></li></ol><ol><li><ol start="123456789"><li></li></ol></li></ol></li></ul>', '-\n  123456789.\n             -\n\n  1.\n     123456789.'],
+  ])('reads a closed deeper marker as no parent marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>&#13;<ul><li><ul><li>t</li></ul></li></ul></li></ul>', '- \r\n  -\n    - t'],
     ['<ul><li>&#13;<ul><li><blockquote><ul><li>t</li></ul></blockquote></li></ul></li></ul>', '- \r\n  - \n    > - t'],
     ['<ul><li>&#13;<ul><li></li></ul></li></ul>', '- \r\n  -'],

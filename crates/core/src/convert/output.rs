@@ -3553,7 +3553,13 @@ impl ConvertState {
     let above_end = line_start.saturating_sub(1);
     let follows_marker = if starts_document || blank_above {
       false
-    } else if above_end > 0 && above_end == parent_marker_end {
+    } else if above_end > 0
+      && above_end == parent_marker_end
+      // A closed deeper item's marker indented past this list's reach is no
+      // parent marker: leave it to the scan below, as JS does.
+      && (self.bare_marker_end != above_end
+        || self.bare_marker_indent <= self.list_indent.len() + 3)
+    {
       self
         .blockquotes
         .last()

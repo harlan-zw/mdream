@@ -7664,6 +7664,28 @@ fn hard_break_indent_in_an_open_inline_keeps_the_marker_guard() {
 }
 
 #[test]
+fn closed_deeper_marker_is_no_parent_marker() {
+  // The line above holds the last marker written, but it belongs to a closed
+  // deeper item indented past this list's reach, so the guard still arms.
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li><ol><li><ol><li></li></ol></li></ol></li></ul><ul><li><ul><li></li></ul></li></ul></li></ul>",
+      "-\n  -\n    1.\n       1.\n\n  -\n    -",
+    ),
+    (
+      "<ul><li><ol start=\"123456789\"><li><ul><li></li></ul></li></ol><ol><li><ol start=\"123456789\"><li></li></ol></li></ol></li></ul>",
+      "-\n  123456789.\n             -\n\n  1.\n     123456789.",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn cr_only_parent_item_keeps_a_bare_marker() {
   // A decoded `\r` ends the parent's line, so its marker stays bare and a blank
   // line under it would turn the nested item into its sibling.
