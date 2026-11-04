@@ -29,6 +29,16 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ol start="10"><li><em>a<br><ul><li></li></ul></em></li></ol>', '10. *a  \n        - *'],
+    ['<ul><li><ul><li><em>a<br><ul><li></li></ul></em></li></ul></li></ul>', '-\n  - *a  \n        - *'],
+    ['<ul><li><ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul></li></ul>', '-\n  - *a  \n        -   \n      x*'],
+    ['<ol start="10"><li>a<br><ul><li></li></ul></li></ol>', '10. a  \n\n    -'],
+  ])('leaves a marker past the content column on its line after a hard break: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li><ul><li><ol><li><ol><li></li></ol></li></ol></li></ul><ul><li><ul><li></li></ul></li></ul></li></ul>', '-\n  -\n    1.\n       1.\n\n  -\n    -'],
     ['<ul><li><ol start="123456789"><li><ul><li></li></ul></li></ol><ol><li><ol start="123456789"><li></li></ol></li></ol></li></ul>', '-\n  123456789.\n             -\n\n  1.\n     123456789.'],
   ])('reads a closed deeper marker as no parent marker: %s', async (html, expected) => {
