@@ -9862,6 +9862,54 @@ fn hard_break_indent_past_the_content_column_leaves_the_marker_line() {
 }
 
 #[test]
+fn hard_break_indent_counts_from_the_column_the_parent_marker_was_written_at() {
+  // A list inside an open inline writes its marker after the delimiter, past
+  // the column the list indent assumes. A `*` with spaces after it is itself a
+  // list marker, so the item's content starts that much further right, and a
+  // nested marker within three columns of it still underlines the text above.
+  for (html, expected) in [
+    (
+      "<ul><li><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul>",
+      "- *  1. x  \n\n          -   \n*",
+    ),
+    (
+      "<blockquote><ul><li><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul></blockquote>",
+      "> - *  1. x  \n>\n>           -   \n> *",
+    ),
+    (
+      "<ol start=\"10\"><li><em><ul><li>x<br><ul><li><br></li></ul></li></ul></em></li></ol>",
+      "10. *    - x  \n\n            -   \n*",
+    ),
+    // `**` is no list marker, so the item after it is text, and the nested
+    // marker's line only continues it.
+    (
+      "<ul><li><strong><ol><li>x<br><ul><li><br></li></ul></li></ol></strong></li></ul>",
+      "- **  1. x  \n          -   \n**",
+    ),
+    // A parent marker alone at the end of such a line is no paragraph.
+    (
+      "<ul><li><em><ol><li><br><ol><li><br></li></ol></li></ol></em></li></ul>",
+      "- *  1.   \n          1.   \n*",
+    ),
+    (
+      "<ul><li><em><ol><li></li><li><br><ol><li><br></li></ol></li></ol></em></li></ul>",
+      "- *  1.   2.   \n          1.   \n*",
+    ),
+    // A quote inside the parent holds the text above, at the indent it strips.
+    (
+      "<ul><li><em><ol><li><blockquote>x<br><ol><li><br></li></ol></blockquote></li></ol></em></li></ul>",
+      "- *  1. \n     > x  \n     >      1.*",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn nested_list_tail_in_a_raw_html_block_matches_the_plain_context() {
   for (html, expected) in [
     (

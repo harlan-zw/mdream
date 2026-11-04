@@ -1358,6 +1358,14 @@ pub struct ConvertState {
   /// Per-`<li>` contribution width stack, parallel to `list_indent`. Used to
   /// truncate the correct number of bytes on close without re-walking ancestors.
   list_indent_widths: Vec<u8>,
+  /// Column each open `<li>`'s content starts at in the emitted line, parallel
+  /// to `list_indent_widths`, with the number of quote frames open around it.
+  /// `list_indent` assumes every marker sits at its container's content column,
+  /// but a marker written after an open inline's delimiter sits further right,
+  /// and its item's content with it.
+  list_content_columns: Vec<(usize, usize)>,
+  /// Column of the marker `record_item_marker` just read, `usize::MAX` if none.
+  item_marker_column: usize,
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
@@ -1400,6 +1408,8 @@ pub struct ConvertState {
   item_settle_pending: bool,
   /// Last built-in marker end, excluding its trailing space.
   last_item_marker_end: usize,
+  /// That marker follows other list markers on its line rather than its indent.
+  last_item_marker_chained: bool,
   /// End of the latest item marker that its line holds alone, and that line's
   /// indent, for the marker line readers once a drain has cut the line. 0 once
   /// the drain took the marker and only whitespace after it.
@@ -1704,6 +1714,8 @@ impl ConvertState {
 
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
+      list_content_columns: Vec::with_capacity(8),
+      item_marker_column: usize::MAX,
       ordered_starts: Vec::new(),
       list_item_counts: Vec::new(),
 
@@ -1717,6 +1729,7 @@ impl ConvertState {
       empty_item_len: 0,
       item_settle_pending: false,
       last_item_marker_end: usize::MAX,
+      last_item_marker_chained: false,
       bare_marker_end: usize::MAX,
       bare_marker_indent: 0,
       bare_marker_gap_newline: false,

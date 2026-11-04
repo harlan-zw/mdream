@@ -143,6 +143,19 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul>', '- *  1. x  \n\n          -   \n*'],
+    ['<blockquote><ul><li><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul></blockquote>', '> - *  1. x  \n>\n>           -   \n> *'],
+    ['<ol start="10"><li><em><ul><li>x<br><ul><li><br></li></ul></li></ul></em></li></ol>', '10. *    - x  \n\n            -   \n*'],
+    ['<ul><li><strong><ol><li>x<br><ul><li><br></li></ul></li></ol></strong></li></ul>', '- **  1. x  \n          -   \n**'],
+    ['<ul><li><em><ol><li><br><ol><li><br></li></ol></li></ol></em></li></ul>', '- *  1.   \n          1.   \n*'],
+    ['<ul><li><em><ol><li></li><li><br><ol><li><br></li></ol></li></ol></em></li></ul>', '- *  1.   2.   \n          1.   \n*'],
+    ['<ul><li><em><ol><li><blockquote>x<br><ol><li><br></li></ol></blockquote></li></ol></em></li></ul>', '- *  1. \n     > x  \n     >      1.*'],
+  ])('reads the parent content column where its marker was written after a hard break: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>x<a href="u"><ol start="10"><li>y</li></ol></a></li></ul>', '- x [  10. y](u)'],
     ['<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>', '- [x  10. y](u)'],
     ['<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>', '- [x  \n    10. y](u)'],

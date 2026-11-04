@@ -4439,18 +4439,105 @@ impl ConvertState {
         .any(|run| (start..=end).contains(run))
   }
 
+  /// Column the item marker written from `output_start` starts at on its line,
+  /// or `usize::MAX` unless only spaces and list markers precede it, each marker
+  /// followed by one to four spaces: then CommonMark reads it as a marker at
+  /// that column too. The space after a decoded `\r` separates the marker from
+  /// the line end, as in `marker_line`, so it is no column. Also whether other
+  /// markers precede it on a line that a line feed began.
+  fn item_marker_column(&self, output_start: usize) -> (usize, bool) {
+    const NONE: (usize, bool) = (usize::MAX, false);
+    let bytes = self.buffer.as_bytes();
+    let Some(offset) = bytes[output_start..]
+      .iter()
+      .position(|&byte| !matches!(byte, b' ' | b'\n' | b'\r'))
+    else {
+      return NONE;
+    };
+    let marker = output_start + offset;
+    if !matches!(bytes[marker], b'-' | b'*' | b'+' | b'0'..=b'9') {
+      return NONE;
+    }
+    let mut start = marker;
+    while start > 0
+      && matches!(
+        bytes[start - 1],
+        b' ' | b'-' | b'*' | b'+' | b'.' | b')' | b'0'..=b'9'
+      )
+    {
+      start -= 1;
+    }
+    // A drain may have taken the line's start: only its indent is known then.
+    let (line_end, mut column) = if start > 0 {
+      (bytes[start - 1], 0)
+    } else if !self.has_flushed_tail() {
+      (b'\n', 0)
+    } else {
+      match self.flushed_tail[1] {
+        line_end @ (b'\n' | b'\r') => (line_end, 0),
+        _ if self.drained_line_spaces != usize::MAX => (b' ', self.drained_line_spaces),
+        _ => return NONE,
+      }
+    };
+    match line_end {
+      b'\r' if start < marker && bytes[start] == b' ' => start += 1,
+      b'\n' | b'\r' | b' ' => {}
+      _ => return NONE,
+    }
+    let line = &bytes[start..marker];
+    let mut index = line.iter().take_while(|&&byte| byte == b' ').count();
+    let chained = index < line.len() && line_end != b'\r';
+    while index < line.len() {
+      if matches!(line[index], b'-' | b'*' | b'+') {
+        index += 1;
+      } else {
+        let digits = index;
+        while index < line.len() && line[index].is_ascii_digit() {
+          index += 1;
+        }
+        if index == digits || index - digits > 9 || !matches!(line.get(index), Some(b'.' | b')')) {
+          return NONE;
+        }
+        index += 1;
+      }
+      let spaces = line[index..]
+        .iter()
+        .take_while(|&&byte| byte == b' ')
+        .count();
+      if spaces == 0 || spaces > 4 {
+        return NONE;
+      }
+      index += spaces;
+    }
+    column += line.len();
+    (column, chained)
+  }
+
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
   /// `output_start`. A marker line continuing the paragraph above turns a lone
   /// marker into a setext underline: the text becomes a heading and the item
   /// disappears. A blank line, or a sibling marker, opens its own block instead.
   fn record_item_marker(&mut self, index: usize, output_start: usize) {
     let parent_marker_end = self.last_item_marker_end;
+    let parent_marker_chained = self.last_item_marker_chained;
     self.last_item_marker_end = usize::MAX;
     let output_start = output_start.min(self.buffer.len());
+    let (column, chained) = self.item_marker_column(output_start);
+    self.item_marker_column = column;
+    self.last_item_marker_chained = chained;
     // Only a list's first item can follow a paragraph, so every later sibling
-    // skips the line scan below.
+    // skips the line scan below. One written after other markers on its line
+    // still leaves its end for a nested item, which the line reader cannot see.
     if index != 0 {
       self.empty_item_hazard = false;
+      if chained {
+        let marker_end = self.buffer.trim_end_matches(' ').len();
+        if marker_end > output_start
+          && matches!(self.buffer.as_bytes()[marker_end - 1], b'-' | b'.' | b')')
+        {
+          self.last_item_marker_end = marker_end;
+        }
+      }
       self.note_bare_marker(output_start);
       return;
     }
@@ -4469,13 +4556,20 @@ impl ConvertState {
     // That indent can add to the marker's own, the parent item's content
     // column. Four columns or more past it, the marker's line only continues
     // the text above and cannot underline it, and a blank line would turn it
-    // into an indented code block.
+    // into an indented code block. The column is the one the parent's marker
+    // was written at, which an open inline before it moves past `list_indent`.
+    // A quote opened inside the parent holds the text above instead, and its
+    // content starts at the indent the quote strips.
+    let content_column = match self.list_content_columns.last() {
+      Some(&(column, quotes)) if quotes == self.blockquotes.len() => column,
+      _ => self.list_indent.len(),
+    };
     let past_content_column = line_start < output_line_start
       && bytes[line_start..]
         .iter()
         .take_while(|&&byte| byte == b' ')
         .count()
-        > self.list_indent.len() + 3;
+        > content_column + 3;
     // Draining removes the front of the buffer, so read through it the way
     // `write_output` does: `flushed_tail` holds the two bytes before `buffer[0]`.
     let before = |offset: usize| -> u8 {
@@ -4498,7 +4592,7 @@ impl ConvertState {
     while marker_end > 0 && bytes[marker_end - 1] == b' ' {
       marker_end -= 1;
     }
-    if (starts_document || before(1) == b'\n')
+    if (starts_document || before(1) == b'\n' || chained)
       && self.buffer.len() > output_start
       && bytes
         .get(marker_end.wrapping_sub(1))
@@ -4537,7 +4631,7 @@ impl ConvertState {
     };
     let follows_marker = if starts_document || blank_above {
       false
-    } else if above_end > 0 && above_end == parent_marker_end {
+    } else if above_end > 0 && above_end == parent_marker_end && !parent_marker_chained {
       self
         .blockquotes
         .last()
@@ -4561,8 +4655,16 @@ impl ConvertState {
       // Past the buffer start the drain took the marker with only whitespace
       // after it, so its record answers as one-shot reads the line. A lone `*`
       // or `+` can be text continuing the line above, such as an emphasis
-      // closer, which the marker line would underline.
-      let bare = if above_end > 0 {
+      // closer, which the marker line would underline. A parent marker after
+      // other markers on its line is bare too, though the line reader stops at
+      // them; only a hard break's indent reads past it. The drain holds that
+      // marker's end until something visible follows it.
+      let bare = if above_end == parent_marker_end
+        && parent_marker_chained
+        && line_start < output_line_start
+      {
+        true
+      } else if above_end > 0 {
         let lone_closer = matches!(bytes[above_end - 1], b'*' | b'+');
         match self.marker_line(bytes, above_end, max_spaces) {
           // After a lone `\r` this marker sits past a space only the blank
