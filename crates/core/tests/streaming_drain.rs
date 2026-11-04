@@ -4611,7 +4611,6 @@ fn empty_ancestor_list_markers_match_every_split() {
     "<ul><li>lead<ul><li><blockquote><blockquote><ol><li></li></ol></blockquote></blockquote></li></ul></li></ul>",
     "<dl><li><blockquote><ol><li></li></ol></blockquote></li></dl>",
     "<ul><li><em>a<br><ul><li><br><ol start=\"123456789\"><li></li></ol></li></ul></em></li></ul>",
-    "<ul><li><em>a<br><ul><li></li></ul></em></li></ul>",
     "<ul><li><em><br><ul><li><br><ol start=\"123456789\"><li></li></ol></li></ul></em></li></ul>",
     "<ul><li><ul><li><ol><li><ol><li></li></ol></li></ol></li></ul><ul><li><ul><li></li></ul></li></ul></li></ul>",
     "<ul><li><ol start=\"123456789\"><li><ul><li></li></ul></li></ol><ol><li><ol start=\"123456789\"><li></li></ol></li></ol></li></ul>",
@@ -5072,6 +5071,18 @@ fn hard_break_in_an_empty_nested_item_matches_every_split() {
     "<ul><li>a<ul><li><pre>c</pre><br></li></ul><hr></li></ul>",
     "<ul><li>a<ul><li><br><br></li></ul><ol start=\"5\"><li></li></ol></li></ul>",
     "<ul><li>a<ul><li><pre>c</pre><br></li></ul><ol start=\"3\"><li>z</li><li></li></ol></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn hard_break_indent_in_an_open_inline_matches_every_split() {
+  for html in [
+    "<ul><li><em>a<br><ul><li></li></ul></em></li></ul>",
+    "<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>",
+    "<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());

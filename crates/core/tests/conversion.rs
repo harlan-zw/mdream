@@ -7651,6 +7651,14 @@ fn hard_break_indent_in_an_open_inline_keeps_the_marker_guard() {
       "- *a  \n\n    -   \n    x*",
     ),
     (
+      "<ul><li><em><br><ul><li></li></ul></em></li></ul>",
+      "- *  \n\n    - *",
+    ),
+    (
+      "<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>",
+      "- *  \n\n    -   \n    x*",
+    ),
+    (
       "<ul><li><em><br><ul><li><br><ol start=\"123456789\"><li></li></ol></li></ul></em></li></ul>",
       "- *  \n\n    -   \n        123456789. *",
     ),

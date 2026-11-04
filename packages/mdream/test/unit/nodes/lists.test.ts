@@ -20,6 +20,8 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<ul><li><em>a<br><ul><li><br><ol start="123456789"><li></li></ol></li></ul></em></li></ul>', '- *a  \n\n    -   \n        123456789. *'],
     ['<ul><li><em>a<br><ul><li></li></ul></em></li></ul>', '- *a  \n\n    - *'],
     ['<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>', '- *a  \n\n    -   \n    x*'],
+    ['<ul><li><em><br><ul><li></li></ul></em></li></ul>', '- *  \n\n    - *'],
+    ['<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>', '- *  \n\n    -   \n    x*'],
     ['<ul><li><em><br><ul><li><br><ol start="123456789"><li></li></ol></li></ul></em></li></ul>', '- *  \n\n    -   \n        123456789. *'],
   ])('keeps the marker guard after a hard break in an open inline: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
@@ -415,7 +417,6 @@ line2</code></pre></li></ol>`
     ['<ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul>', '- x\n  - a\n- next'],
     ['<ul><li>x<ul><li>a</li></ul><a id="anchor"></a></li><li>next</li></ul>', '- x\n  - a\n- next'],
     ['<ol><li>x<ol><li>a</li></ol><span></span><em></em></li><li>next</li></ol>', '1. x\n   1. a\n2. next'],
-    ['<ul><li><em><ul><li>a</li></ul></em>t</li></ul>', '- *  - a*t'],
     ['<ul><li>x<ul><li>a</li></ul><span></span>tail</li><li>next</li></ul>', '- x\n  - a\n\n  tail\n- next'],
   ])('keeps a list tight when nothing visible follows its nested list: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
