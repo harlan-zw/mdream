@@ -458,6 +458,10 @@ const CLEAN_SELF_LINK_HEADINGS: u8 = 8;
 const CLEAN_EMPTY_IMAGES: u8 = 16;
 const CLEAN_EMPTY_LINK_TEXT: u8 = 32;
 
+// `list_pending` bits: separators deferred until visible content follows.
+const LIST_RULE_PENDING: u8 = 1;
+const LIST_TAIL_PENDING: u8 = 2;
+
 const SCRIPT_DATA: u8 = 0;
 const SCRIPT_DATA_ESCAPED: u8 = 1;
 const SCRIPT_DATA_ESCAPED_DASH: u8 = 2;
@@ -956,11 +960,45 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// Set with `empty_item_hazard`, `empty_list_marker_end` or `list_tail_start`
+  /// and recomputed by `settle_item_marker`, so the token loop and the hot
+  /// paths test one flag. It may stay set after all three clear, never the
+  /// other way round.
+  item_settle_pending: bool,
+  /// Last built-in marker end, excluding its trailing space.
+  last_item_marker_end: usize,
+  /// End of the latest item marker that its line holds alone, and that line's
+  /// indent, for the marker line readers once a drain has cut the line. 0 once
+  /// the drain took the marker and only whitespace after it.
+  bare_marker_end: usize,
+  bare_marker_indent: usize,
+  /// The whitespace a drain took after that marker held a line feed.
+  bare_marker_gap_newline: bool,
+  /// Spaces the line holding `buffer[0]` lost to drains while spaces were all
+  /// it lost, so the marker line readers still count its whole indent.
+  /// `usize::MAX` once anything else left with them.
+  drained_line_spaces: usize,
+  #[cfg(test)]
+  parent_marker_scans: usize,
+  /// `LIST_RULE_PENDING`: a list item rule waiting to see whether visible
+  /// content follows it. `LIST_TAIL_PENDING`: a nested list ended and the
+  /// parent item's text, if any, needs its own paragraph.
+  list_pending: u8,
+  /// `blockquotes` depth of the quote that took a pending tail, 0 for none.
+  list_tail_quote_depth: usize,
+  /// Actual built-in item marker end, distinct from marker-like source text.
+  empty_list_marker_end: usize,
+  /// `<li>` nesting level of the latest built-in item marker.
+  empty_list_marker_depth: usize,
+  /// A tentative separator retractable while following wrappers are empty.
+  list_tail_start: usize,
+  list_tail_scanned_to: usize,
+  empty_list_marker_scanned_to: usize,
+  #[cfg(test)]
+  list_settlement_bytes_read: usize,
   /// That line follows a decoded `\r`, which a single `\n` only turns into one
   /// `\r\n` line ending.
   empty_item_after_cr: bool,
-  /// A list item rule waiting to see whether visible content follows it.
-  list_rule_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1210,8 +1248,24 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      item_settle_pending: false,
+      last_item_marker_end: usize::MAX,
+      bare_marker_end: usize::MAX,
+      bare_marker_indent: 0,
+      bare_marker_gap_newline: false,
+      drained_line_spaces: 0,
+      #[cfg(test)]
+      parent_marker_scans: 0,
+      list_pending: 0,
+      list_tail_quote_depth: 0,
+      empty_list_marker_end: usize::MAX,
+      empty_list_marker_depth: 0,
+      list_tail_start: usize::MAX,
+      list_tail_scanned_to: 0,
+      empty_list_marker_scanned_to: 0,
+      #[cfg(test)]
+      list_settlement_bytes_read: 0,
       empty_item_after_cr: false,
-      list_rule_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -1362,7 +1416,14 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
-    if self.empty_item_hazard {
+    debug_assert!(
+      self.item_settle_pending
+        || (!self.empty_item_hazard
+          && self.empty_list_marker_end == usize::MAX
+          && self.list_tail_start == usize::MAX),
+      "list item state is pending without item_settle_pending"
+    );
+    if self.item_settle_pending {
       self.settle_item_marker();
     }
     self.check_held_output();
@@ -2619,6 +2680,24 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    // Both scan cursors restart whenever their start is set, so they only
+    // matter while the settle flag is.
+    if self.item_settle_pending {
+      self.list_tail_scanned_to = self.list_tail_scanned_to.min(offset);
+      self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.min(offset);
+      if offset < self.empty_list_marker_end {
+        self.empty_list_marker_end = usize::MAX;
+      }
+      if offset < self.list_tail_start {
+        self.list_tail_start = usize::MAX;
+      }
+    }
+    if self.last_item_marker_end != usize::MAX && offset < self.last_item_marker_end {
+      self.last_item_marker_end = usize::MAX;
+    }
+    if self.bare_marker_end != usize::MAX && offset < self.bare_marker_end {
+      self.bare_marker_end = usize::MAX;
+    }
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -2639,6 +2718,14 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    self.list_tail_scanned_to = self.list_tail_scanned_to.saturating_sub(removed);
+    self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.saturating_sub(removed);
+    if self.last_item_marker_end != usize::MAX {
+      self.last_item_marker_end = self
+        .last_item_marker_end
+        .checked_sub(removed)
+        .unwrap_or(usize::MAX);
+    }
     if self.blockquote_line_scanned_to != 0 {
       self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
       self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);
@@ -2810,6 +2897,12 @@ impl ConvertState {
     if self.empty_item_hazard {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.empty_list_marker_end != usize::MAX {
+      stable_end = stable_end.min(self.empty_list_marker_end);
+    }
+    if self.list_tail_start != usize::MAX {
+      stable_end = stable_end.min(self.list_tail_start);
+    }
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
     // closes) until the heading is complete.
@@ -2980,6 +3073,12 @@ impl ConvertState {
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.empty_list_marker_end != usize::MAX {
+      drain_end = drain_end.min(self.empty_list_marker_end);
+    }
+    if self.list_tail_start != usize::MAX {
+      drain_end = drain_end.min(self.list_tail_start);
+    }
     if drain_end == 0 {
       return;
     }
@@ -2999,7 +3098,11 @@ impl ConvertState {
     if self.raw_html_scanned_to < drain_end && !self.raw_html_markdown && self.in_raw_html_block() {
       self.track_raw_html_markdown_context(drain_end);
     }
+    let drained_bare_marker = self.bare_marker_line_before(drain_end);
     let bytes = self.buffer.as_bytes();
+    let after_cr = self.cut_line_lead != CutLineLead::Uncut && self.flushed_tail[1] == b'\r';
+    self.drained_line_spaces =
+      Self::cut_line_spaces(&bytes[..drain_end], self.drained_line_spaces, after_cr);
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
     } else if self.cut_line_lead == CutLineLead::Uncut {
@@ -3012,6 +3115,30 @@ impl ConvertState {
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
+    // A bare marker leaving with only whitespace after it stays readable at the
+    // buffer start, where the marker line readers stop.
+    if self.bare_marker_end != usize::MAX {
+      self.bare_marker_end = match self.bare_marker_end.checked_sub(drain_end) {
+        Some(end) => end,
+        None => {
+          let gap = &bytes[self.bare_marker_end..drain_end];
+          if gap.iter().all(|&byte| matches!(byte, b' ' | b'\n')) {
+            self.bare_marker_gap_newline |= gap.contains(&b'\n');
+            0
+          } else {
+            usize::MAX
+          }
+        }
+      };
+    }
+    // Any other line the readers take for a bare marker leaves the same way.
+    if self.bare_marker_end == usize::MAX
+      && let Some((indent, gap_newline)) = drained_bare_marker
+    {
+      self.bare_marker_end = 0;
+      self.bare_marker_indent = indent;
+      self.bare_marker_gap_newline = gap_newline;
+    }
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);
@@ -3052,6 +3179,12 @@ impl ConvertState {
     }
     self.empty_item_line_start = self.empty_item_line_start.saturating_sub(drain_end);
     self.empty_item_len = self.empty_item_len.saturating_sub(drain_end);
+    if self.empty_list_marker_end != usize::MAX {
+      self.empty_list_marker_end -= drain_end;
+    }
+    if self.list_tail_start != usize::MAX {
+      self.list_tail_start -= drain_end;
+    }
     // Buffer-indexed like every other stored offset: left alone, streaming reads
     // a different line start than one-shot.
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
@@ -3061,6 +3194,22 @@ impl ConvertState {
 }
 
 impl ConvertState {
+  /// The spaces the line ending `cut` has lost to drains, `previous` counted by
+  /// earlier cuts of it, or `usize::MAX` once it lost anything else. The space
+  /// right after a `\r` separates a marker from that line end and is no indent.
+  fn cut_line_spaces(cut: &[u8], previous: usize, after_cr: bool) -> usize {
+    match cut.iter().rposition(|&byte| matches!(byte, b'\n' | b'\r')) {
+      Some(at) if cut[at + 1..].iter().all(|&byte| byte == b' ') => {
+        let spaces = cut.len() - at - 1;
+        spaces - usize::from(cut[at] == b'\r' && spaces > 0)
+      }
+      None if previous != usize::MAX && cut.iter().all(|&byte| byte == b' ') => {
+        previous + cut.len() - usize::from(previous == 0 && after_cr)
+      }
+      _ => usize::MAX,
+    }
+  }
+
   /// What the line ending at `drain_end` leads with, given what an earlier cut
   /// of the same line already found. `previous` makes the indent additive: a
   /// line's leading spaces can be split across any number of drains, and the

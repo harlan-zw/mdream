@@ -26,7 +26,7 @@ export async function* streamHtmlToMarkdown(
   const decoder = new TextDecoder('utf-8', { ignoreBOM: true })
   const reader = htmlStream.getReader()
 
-  const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, resolvedPlugins.length > 0))
+  const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, resolvedPlugins.length > 0), resolvedPlugins.length > 0)
   const parseState: ParseState = {
     depthMap: processor.state.depthMap,
     depth: 0,
@@ -35,6 +35,7 @@ export async function* streamHtmlToMarkdown(
     tagOverrideHandlers,
     plainText: false,
     urlBaseTarget: processor.state,
+    collapseDepthTarget: processor.state,
     discardExcludedText: resolvedPlugins.length === 0,
   }
   const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
