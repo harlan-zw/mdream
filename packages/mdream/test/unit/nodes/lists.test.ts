@@ -156,6 +156,24 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<em><ol><li><br><ul><li></li></ul></li></ol></em>', '*1.   \n      - *'],
+    ['<ul><li><em><ol><li>a</li><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul>', '- *  1. a  2. x  \n\n          -   \n*'],
+    ['<ul><li><blockquote><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></blockquote></li></ul>', '- \n  > *  1. x  \n  >\n  >         -   \n  > *'],
+    ['<ul><li>y<br><em><ol start="10"><li>x<br><ul><li></li></ul></li></ol></em></li></ul>', '- y  \n  *  10. x  \n            - *'],
+  ])('counts a hard break indent from the container holding the parent line: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li><em><ol start="999"><li></li><li><strong>x<br><ol start="10"><li><br></li><li>z</li></ol></li></ol></em></li></ul>', '- *  999.   1000. **x  \n                10.   \n        11. z***'],
+    ['<ul><li><em><ol><li>x<br><ol start="123456789"><li><blockquote>a</blockquote></li></ol></li></ol></em></li></ul>', '- *  1. x  \n          123456789. \n                > a*'],
+  ])('keeps a nested marker line that cannot underline in place: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>x<a href="u"><ol start="10"><li>y</li></ol></a></li></ul>', '- x [  10. y](u)'],
     ['<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>', '- [x  10. y](u)'],
     ['<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>', '- [x  \n    10. y](u)'],

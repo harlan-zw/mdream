@@ -4444,9 +4444,14 @@ impl ConvertState {
   /// followed by one to four spaces: then CommonMark reads it as a marker at
   /// that column too. The space after a decoded `\r` separates the marker from
   /// the line end, as in `marker_line`, so it is no column. Also whether other
-  /// markers precede it on a line that a line feed began.
-  fn item_marker_column(&self, output_start: usize) -> (usize, bool) {
-    const NONE: (usize, bool) = (usize::MAX, false);
+  /// markers precede it on a line that a line feed began, and whether it is an
+  /// ordered marker numbered other than 1 on a line right under other text,
+  /// starting inside that text's container. That one cannot interrupt the
+  /// paragraph above when it opens the line, and micromark keeps it in that
+  /// paragraph after other markers too, so its item's content starts at the
+  /// marker itself.
+  fn item_marker_column(&self, output_start: usize) -> (usize, bool, bool) {
+    const NONE: (usize, bool, bool) = (usize::MAX, false, false);
     let bytes = self.buffer.as_bytes();
     let Some(offset) = bytes[output_start..]
       .iter()
@@ -4479,6 +4484,30 @@ impl ConvertState {
         _ => return NONE,
       }
     };
+    let before = |offset: usize| -> u8 {
+      match start.checked_sub(offset) {
+        Some(at) => bytes[at],
+        None if self.has_flushed_tail() => self.flushed_tail[2 - (offset - start)],
+        None => 0,
+      }
+    };
+    // A bare marker line above holds no paragraph, nor does a quote above its
+    // own first line.
+    let after_text = match before(1) {
+      b'\n' => !matches!(before(2), b'\n' | 0),
+      b'\r' => !matches!(before(2), b'\n' | b'\r' | 0),
+      _ => false,
+    } && self
+      .blockquotes
+      .last()
+      .is_none_or(|frame| start != frame.content_start)
+      && {
+        let mut end = start.saturating_sub(1);
+        while end > 0 && bytes[end - 1] == b' ' {
+          end -= 1;
+        }
+        end == 0 || !self.list_marker_line_start(bytes, end, usize::MAX)
+      };
     match line_end {
       b'\r' if start < marker && bytes[start] == b' ' => start += 1,
       b'\n' | b'\r' | b' ' => {}
@@ -4486,6 +4515,7 @@ impl ConvertState {
     }
     let line = &bytes[start..marker];
     let mut index = line.iter().take_while(|&&byte| byte == b' ').count();
+    let mut lead = column + index;
     let chained = index < line.len() && line_end != b'\r';
     while index < line.len() {
       if matches!(line[index], b'-' | b'*' | b'+') {
@@ -4510,7 +4540,28 @@ impl ConvertState {
       index += spaces;
     }
     column += line.len();
-    (column, chained)
+    // A quote's first line gets the list indent only when the quote closes, but
+    // its later lines carry it already, and the guard counts their spaces.
+    if let Some(frame) = self.blockquotes.last()
+      && start == frame.content_start
+      && !line.starts_with(frame.list_indent.as_bytes())
+    {
+      column += frame.list_indent.len();
+      lead += frame.list_indent.len();
+    }
+    // A line opening with a later item of an outer list ends the paragraph
+    // instead: only a marker inside that paragraph's container interrupts it.
+    let container = match self.list_content_columns.last() {
+      Some(&(column, quotes, _)) if quotes == self.blockquotes.len() => column,
+      _ => self.list_indent.len(),
+    };
+    let digits = bytes[marker..]
+      .iter()
+      .take_while(|byte| byte.is_ascii_digit())
+      .count();
+    let text =
+      after_text && lead >= container && digits > 0 && bytes[marker..marker + digits] != *b"1";
+    (column, chained, text)
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -4522,8 +4573,27 @@ impl ConvertState {
     let parent_marker_chained = self.last_item_marker_chained;
     self.last_item_marker_end = usize::MAX;
     let output_start = output_start.min(self.buffer.len());
-    let (column, chained) = self.item_marker_column(output_start);
-    self.item_marker_column = column;
+    let (column, chained, text) = self.item_marker_column(output_start);
+    // Text before a marker on its line makes it text too, held by the container
+    // that holds the line: an earlier sibling written on the same line, or the
+    // container the list sits in.
+    let quotes = self.blockquotes.len();
+    let held_by = if index != 0 {
+      Some(self.closed_content_column)
+    } else {
+      self.list_content_columns.last().copied()
+    };
+    self.item_marker_column = if column != usize::MAX {
+      column
+    } else {
+      held_by
+        .filter(|&(_, frames, _)| frames == quotes)
+        .map_or(self.list_indent.len(), |(column, _, _)| column)
+    };
+    // A later item continues its list rather than interrupting the paragraph,
+    // once an earlier one opened the list.
+    let opens_list = index == 0 || !self.closed_content_column.2;
+    self.item_marker_adds_width = column != usize::MAX && !(text && opens_list);
     self.last_item_marker_chained = chained;
     // Only a list's first item can follow a paragraph, so every later sibling
     // skips the line scan below. One written after other markers on its line
@@ -4556,20 +4626,34 @@ impl ConvertState {
     // That indent can add to the marker's own, the parent item's content
     // column. Four columns or more past it, the marker's line only continues
     // the text above and cannot underline it, and a blank line would turn it
-    // into an indented code block. The column is the one the parent's marker
-    // was written at, which an open inline before it moves past `list_indent`.
-    // A quote opened inside the parent holds the text above instead, and its
-    // content starts at the indent the quote strips.
+    // into an indented code block. Left of it the line is lazy, which no
+    // underline can be either. The column is the one the parent's marker was
+    // written at, which an open inline before it moves past `list_indent`, or
+    // for a parent marker that reads as text, the content column of the
+    // container holding its line. A quote opened inside the parent holds the
+    // text above instead, and its content starts at the indent the quote
+    // strips. Only a `-` underlines, though: any other marker arms no further
+    // right than the column the list indent assumes.
     let content_column = match self.list_content_columns.last() {
-      Some(&(column, quotes)) if quotes == self.blockquotes.len() => column,
+      Some(&(column, quotes, _)) if quotes == self.blockquotes.len() => column,
       _ => self.list_indent.len(),
     };
-    let past_content_column = line_start < output_line_start
-      && bytes[line_start..]
-        .iter()
-        .take_while(|&&byte| byte == b' ')
-        .count()
-        > content_column + 3;
+    let spaces = bytes[line_start..]
+      .iter()
+      .take_while(|&&byte| byte == b' ')
+      .count();
+    // The space after a decoded `\r` is no indent, as in `marker_line`.
+    let separator = usize::from(line_start > 0 && bytes[line_start - 1] == b'\r' && spaces > 0);
+    let dash = bytes[output_line_start..]
+      .iter()
+      .find(|&&byte| byte != b' ')
+      .is_some_and(|&byte| byte == b'-');
+    let off_content_column = if dash {
+      line_start < output_line_start && spaces > content_column + 3
+        || line_start + separator < output_line_start && spaces - separator < content_column
+    } else {
+      line_start < output_line_start && spaces > content_column.min(self.list_indent.len()) + 3
+    };
     // Draining removes the front of the buffer, so read through it the way
     // `write_output` does: `flushed_tail` holds the two bytes before `buffer[0]`.
     let before = |offset: usize| -> u8 {
@@ -4703,11 +4787,8 @@ impl ConvertState {
       past_paragraph &= inside;
       bare && inside
     };
-    self.empty_item_hazard = !starts_document
-      && !blank_above
-      && !follows_marker
-      && !past_content_column
-      && !past_paragraph;
+    self.empty_item_hazard =
+      !starts_document && !blank_above && !follows_marker && !off_content_column && !past_paragraph;
     self.empty_item_answered = false;
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;

@@ -1535,14 +1535,19 @@ impl ConvertState {
         0
       };
       let column = core::mem::replace(&mut self.item_marker_column, usize::MAX);
-      let column = if column == usize::MAX {
-        self.list_indent.len()
+      let adds_width = core::mem::take(&mut self.item_marker_adds_width);
+      let content = if column == usize::MAX {
+        self.list_indent.len() + width
+      } else if adds_width {
+        column + width
       } else {
         column
       };
-      self
-        .list_content_columns
-        .push((column + width, self.blockquotes.len()));
+      self.list_content_columns.push((
+        content,
+        self.blockquotes.len(),
+        column == usize::MAX || adds_width,
+      ));
       self
         .list_indent_widths
         .push(u8::try_from(width).unwrap_or(u8::MAX));
@@ -1712,7 +1717,9 @@ impl ConvertState {
           if id == TAG_LI
             && let Some(w) = self.list_indent_widths.pop()
           {
-            self.list_content_columns.pop();
+            if let Some(closed) = self.list_content_columns.pop() {
+              self.closed_content_column = closed;
+            }
             let new_len = self.list_indent.len().saturating_sub(w as usize);
             self.list_indent.truncate(new_len);
           }
@@ -1756,7 +1763,9 @@ impl ConvertState {
       if id == TAG_LI
         && let Some(w) = self.list_indent_widths.pop()
       {
-        self.list_content_columns.pop();
+        if let Some(closed) = self.list_content_columns.pop() {
+          self.closed_content_column = closed;
+        }
         let new_len = self.list_indent.len().saturating_sub(w as usize);
         self.list_indent.truncate(new_len);
       }

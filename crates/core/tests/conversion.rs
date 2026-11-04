@@ -9910,6 +9910,62 @@ fn hard_break_indent_counts_from_the_column_the_parent_marker_was_written_at() {
 }
 
 #[test]
+fn hard_break_indent_counts_from_the_container_holding_the_parent_line() {
+  for (html, expected) in [
+    // Text before a parent marker on its line keeps it from being a marker, so the
+    // text belongs to the container around the list, here the document.
+    (
+      "<em><ol><li><br><ul><li></li></ul></li></ol></em>",
+      "*1.   \n      - *",
+    ),
+    // After an earlier sibling's text the marker is text in that sibling.
+    (
+      "<ul><li><em><ol><li>a</li><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul>",
+      "- *  1. a  2. x  \n\n          -   \n*",
+    ),
+    // A quote's first line gets the list indent its later lines already carry.
+    (
+      "<ul><li><blockquote><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></blockquote></li></ul>",
+      "- \n  > *  1. x  \n  >\n  >         -   \n  > *",
+    ),
+    // A marker numbered other than 1 under text stays in that paragraph.
+    (
+      "<ul><li>y<br><em><ol start=\"10\"><li>x<br><ul><li></li></ul></li></ol></em></li></ul>",
+      "- y  \n  *  10. x  \n            - *",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
+fn nested_marker_line_that_cannot_underline_keeps_its_place() {
+  for (html, expected) in [
+    // Left of the parent's content column the line is lazy.
+    (
+      "<ul><li><em><ol start=\"999\"><li></li><li><strong>x<br><ol start=\"10\"><li><br></li><li>z</li></ol></li></ol></em></li></ul>",
+      "- *  999.   1000. **x  \n                10.   \n        11. z***",
+    ),
+    // An ordered marker's line underlines nothing, and a blank line would push its
+    // content, short of the marker's column, into an indented code block.
+    (
+      "<ul><li><em><ol><li>x<br><ol start=\"123456789\"><li><blockquote>a</blockquote></li></ol></li></ol></em></li></ul>",
+      "- *  1. x  \n          123456789. \n                > a*",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn nested_list_tail_in_a_raw_html_block_matches_the_plain_context() {
   for (html, expected) in [
     (

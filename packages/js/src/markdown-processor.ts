@@ -113,8 +113,23 @@ export interface MarkdownState {
   listContentColumns: number[]
   /** Quote frames open around each of those items. */
   listContentQuotes: number[]
-  /** Column of the marker `recordItemMarker` just read, or -1. */
+  /** Whether each of those items' markers opens an item at all. */
+  listContentOpens: boolean[]
+  /**
+   * The latest `<li>` popped from `listContentColumns`, with its quote frames
+   * and marker, which holds the text before a later sibling's marker on the
+   * same line.
+   */
+  closedContentColumn: number
+  closedContentQuotes: number
+  closedContentOpens: boolean
+  /**
+   * Column of the marker `recordItemMarker` just read, or -1, and whether the
+   * item's content starts a marker width past it. Without it the column is the
+   * content column of the container holding the line's text.
+   */
   itemMarkerColumn: number
+  itemMarkerAddsWidth: boolean
   /** The last item marker follows other list markers on its line. */
   lastItemMarkerChained: boolean
   /**
@@ -384,10 +399,15 @@ function lineSpacesBefore(buffer: string[], fragment: number): number {
  * to four spaces: then CommonMark reads it as a marker at that column too. The
  * space after a decoded CR separates the marker from the line end, as in
  * `listMarkerLineStart`, so it is no column. The column comes shifted left by
- * one, its low bit set when other markers precede it on a line a line feed
- * began.
+ * two. Bit 0 is set when other markers precede it on a line a line feed began,
+ * and bit 1 when it is an ordered marker numbered other than 1 on a line right
+ * under other text, starting inside that text's container. That one cannot
+ * interrupt the paragraph above when it opens the line, and micromark keeps it
+ * in that paragraph after other markers too, so its item's content starts at
+ * the marker itself.
  */
-function itemMarkerColumn(buffer: readonly string[], index: number): number {
+function itemMarkerColumn(state: MarkdownState, index: number): number {
+  const buffer = state.buffer
   const value = buffer[index]!
   let column = 0
   while (column < value.length && value.charCodeAt(column) === 32)
@@ -397,6 +417,8 @@ function itemMarkerColumn(buffer: readonly string[], index: number): number {
     return -1
   let prefix = ''
   let lineEnd = 0
+  let lineFragment = -1
+  let lineOffset = 0
   for (let fragment = index - 1; fragment >= 0 && lineEnd === 0; fragment--) {
     const text = buffer[fragment]!
     let cursor = text.length
@@ -404,6 +426,8 @@ function itemMarkerColumn(buffer: readonly string[], index: number): number {
       const char = text.charCodeAt(cursor - 1)
       if (char === 10 || char === 13) {
         lineEnd = char
+        lineFragment = fragment
+        lineOffset = cursor
         break
       }
       if (!(char === 32 || char === 45 || char === 42 || char === 43 || char === 46 || char === 41 || (char >= 48 && char <= 57)))
@@ -439,7 +463,56 @@ function itemMarkerColumn(buffer: readonly string[], index: number): number {
     if (cursor === spaces || cursor - spaces > 4)
       return -1
   }
-  return prefix.length * 2 + (chained ? 1 : 0)
+  let length = prefix.length
+  let lead = 0
+  while (lead < prefix.length && prefix.charCodeAt(lead) === 32)
+    lead++
+  // A quote's first line gets the list indent only when the quote closes, but
+  // its later lines carry it already, and the guard counts their spaces.
+  const frame = state.blockquotes.at(-1)
+  let atFrame = false
+  if (frame && lineEnd !== 0 && lineFragment < frame.fragment) {
+    atFrame = buffer[lineFragment]!.length === lineOffset
+    for (let fragment = lineFragment + 1; atFrame && fragment < frame.fragment; fragment++)
+      atFrame = buffer[fragment] === ''
+    if (atFrame && !prefix.startsWith(frame.listIndent)) {
+      length += frame.listIndent.length
+      lead += frame.listIndent.length
+    }
+  }
+  // A line opening with a later item of an outer list ends the paragraph
+  // instead: only a marker inside that paragraph's container interrupts it.
+  const container = state.listContentQuotes.at(-1) === state.blockquotes.length
+    ? state.listContentColumns.at(-1)!
+    : state.listIndent.length
+  // A bare marker line above holds no paragraph, nor does a quote above its
+  // own first line.
+  let text = false
+  if (lineEnd !== 0 && !atFrame && lead >= container && code >= 48 && code <= 57
+    && !(value.charCodeAt(column) === 49 && !(value.charCodeAt(column + 1) >= 48 && value.charCodeAt(column + 1) <= 57))) {
+    let fragment = lineFragment
+    let cursor = lineOffset - 1
+    let above = -1
+    while (fragment >= 0) {
+      if (cursor === 0) {
+        if (--fragment >= 0)
+          cursor = buffer[fragment]!.length
+        continue
+      }
+      const char = buffer[fragment]!.charCodeAt(--cursor)
+      if (above === -1) {
+        above = char
+        if (char === 10 || (lineEnd === 13 && char === 13))
+          break
+        text = true
+      }
+      if (char !== 32) {
+        text = !listMarkerLineStart(buffer, fragment, cursor, Infinity)
+        break
+      }
+    }
+  }
+  return length * 4 + (text ? 2 : 0) + (chained ? 1 : 0)
 }
 
 /**
@@ -459,9 +532,28 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // skips the scan below.
   const buffer = state.buffer
   const marker = buffer.length - 1
-  const column = builtIn ? itemMarkerColumn(buffer, marker) : -1
-  state.itemMarkerColumn = column === -1 ? -1 : column >> 1
-  state.lastItemMarkerChained = (column & 1) === 1
+  const column = builtIn ? itemMarkerColumn(state, marker) : -1
+  // Text before a marker on its line makes it text too, held by the container
+  // that holds the line: an earlier sibling written on the same line, or the
+  // container the list sits in.
+  if (column !== -1) {
+    state.itemMarkerColumn = column >> 2
+  }
+  else if (builtIn) {
+    const quotes = state.blockquotes.length
+    if (index !== 0)
+      state.itemMarkerColumn = state.closedContentQuotes === quotes ? state.closedContentColumn : state.listIndent.length
+    else
+      state.itemMarkerColumn = state.listContentQuotes.at(-1) === quotes ? state.listContentColumns.at(-1)! : state.listIndent.length
+  }
+  else {
+    state.itemMarkerColumn = -1
+  }
+  // A later item continues its list rather than interrupting the paragraph,
+  // once an earlier one opened the list.
+  const opensList = index === 0 || !state.closedContentOpens
+  state.itemMarkerAddsWidth = column !== -1 && ((column & 2) === 0 || !opensList)
+  state.lastItemMarkerChained = column !== -1 && (column & 1) === 1
   let run = index === 0 ? newlineRunBefore(buffer, marker) : -1
   // A hard break inside an open inline writes the next line's indent with its
   // line ending, so the marker's line starts before that indent, as in Rust.
@@ -494,18 +586,25 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // That indent can add to the marker's own, the parent item's content column.
   // Four columns or more past it, the marker's line only continues the text
   // above and cannot underline it, and a blank line would turn it into an
-  // indented code block. The column is the one the parent's marker was written
-  // at, which an open inline before it moves past `listIndent`. A quote opened
-  // inside the parent holds the text above instead, and its content starts at
-  // the indent the quote strips.
+  // indented code block. Left of it the line is lazy, which no underline can be
+  // either. The column is the one the parent's marker was written at, which an
+  // open inline before it moves past `listIndent`, or for a parent marker that
+  // reads as text, the content column of the container holding its line. A
+  // quote opened inside the parent holds the text above instead, and its
+  // content starts at the indent the quote strips. Only a `-` underlines,
+  // though: any other marker arms no further right than the column the list
+  // indent assumes.
   const quoted = state.listContentQuotes.at(-1) === state.blockquotes.length
+  const base = quoted ? state.listContentColumns.at(-1)! : state.listIndent.length
   let indent = breakIndent
+  let dash = false
   if (breakIndent > 0) {
     const value = buffer[marker]!
     while (indent - breakIndent < value.length && value.charCodeAt(indent - breakIndent) === 32)
       indent++
+    dash = value.charCodeAt(indent - breakIndent) === 45
   }
-  if (indent > (quoted ? state.listContentColumns.at(-1)! : state.listIndent.length) + 3
+  if ((dash ? indent > base + 3 || indent < base : indent > Math.min(base, state.listIndent.length) + 3)
     || (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1)) {
     state.emptyItemFragment = undefined
     return
@@ -1127,16 +1226,23 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
   if (eventType === NodeEventEnter) {
     const isOrdered = element.parent?.tagId === TAG_OL
     const width = isOrdered ? String(orderedItemNumber(element.parent, element.index)).length + 2 : 2
-    const column = state.itemMarkerColumn === -1 ? state.listIndent.length : state.itemMarkerColumn
-    state.itemMarkerColumn = -1
-    state.listContentColumns.push(column + width)
+    const column = state.itemMarkerColumn === -1
+      ? state.listIndent.length + width
+      : state.itemMarkerAddsWidth ? state.itemMarkerColumn + width : state.itemMarkerColumn
+    state.listContentColumns.push(column)
     state.listContentQuotes.push(state.blockquotes.length)
+    state.listContentOpens.push(state.itemMarkerColumn === -1 || state.itemMarkerAddsWidth)
+    state.itemMarkerColumn = -1
+    state.itemMarkerAddsWidth = false
     state.listIndentWidths.push(width)
     state.listIndent += ' '.repeat(width)
   }
   else if (eventType === NodeEventExit) {
-    state.listContentColumns.pop()
-    state.listContentQuotes.pop()
+    if (state.listContentColumns.length > 0) {
+      state.closedContentColumn = state.listContentColumns.pop()!
+      state.closedContentQuotes = state.listContentQuotes.pop()!
+      state.closedContentOpens = state.listContentOpens.pop()!
+    }
     const width = state.listIndentWidths.pop() ?? 0
     state.listIndent = state.listIndent.slice(0, state.listIndent.length - width)
   }
@@ -2420,7 +2526,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     listIndentWidths: [],
     listContentColumns: [],
     listContentQuotes: [],
+    listContentOpens: [],
+    closedContentColumn: 0,
+    closedContentQuotes: -1,
+    closedContentOpens: false,
     itemMarkerColumn: -1,
+    itemMarkerAddsWidth: false,
     lastItemMarkerChained: false,
     blockquotes: [],
     bufferedBlockquoteDepth: 0,

@@ -1359,13 +1359,20 @@ pub struct ConvertState {
   /// truncate the correct number of bytes on close without re-walking ancestors.
   list_indent_widths: Vec<u8>,
   /// Column each open `<li>`'s content starts at in the emitted line, parallel
-  /// to `list_indent_widths`, with the number of quote frames open around it.
-  /// `list_indent` assumes every marker sits at its container's content column,
-  /// but a marker written after an open inline's delimiter sits further right,
-  /// and its item's content with it.
-  list_content_columns: Vec<(usize, usize)>,
-  /// Column of the marker `record_item_marker` just read, `usize::MAX` if none.
+  /// to `list_indent_widths`, with the number of quote frames open around it
+  /// and whether its marker opens an item at all. `list_indent` assumes every
+  /// marker sits at its container's content column, but a marker written after
+  /// an open inline's delimiter sits further right, and its item's content
+  /// with it.
+  list_content_columns: Vec<(usize, usize, bool)>,
+  /// The latest `<li>` popped from `list_content_columns`, which holds the text
+  /// before a later sibling's marker on the same line.
+  closed_content_column: (usize, usize, bool),
+  /// Column of the marker `record_item_marker` just read, `usize::MAX` if none,
+  /// and whether the item's content starts a marker width past it. Without it
+  /// the column is the content column of the container holding the line's text.
   item_marker_column: usize,
+  item_marker_adds_width: bool,
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
@@ -1715,7 +1722,9 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       list_content_columns: Vec::with_capacity(8),
+      closed_content_column: (0, usize::MAX, false),
       item_marker_column: usize::MAX,
+      item_marker_adds_width: false,
       ordered_starts: Vec::new(),
       list_item_counts: Vec::new(),
 
