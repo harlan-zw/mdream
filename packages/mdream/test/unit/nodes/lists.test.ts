@@ -17,6 +17,16 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li><em>a<br><ul><li><br><ol start="123456789"><li></li></ol></li></ul></em></li></ul>', '- *a  \n\n    -   \n        123456789. *'],
+    ['<ul><li><em>a<br><ul><li></li></ul></em></li></ul>', '- *a  \n\n    - *'],
+    ['<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>', '- *a  \n\n    -   \n    x*'],
+    ['<ul><li><em><br><ul><li><br><ol start="123456789"><li></li></ol></li></ul></em></li></ul>', '- *  \n\n    -   \n        123456789. *'],
+  ])('keeps the marker guard after a hard break in an open inline: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>&#13;<ul><li><ul><li>t</li></ul></li></ul></li></ul>', '- \r\n  -\n    - t'],
     ['<ul><li>&#13;<ul><li><blockquote><ul><li>t</li></ul></blockquote></li></ul></li></ul>', '- \r\n  - \n    > - t'],
     ['<ul><li>&#13;<ul><li></li></ul></li></ul>', '- \r\n  -'],

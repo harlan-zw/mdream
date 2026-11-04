@@ -133,6 +133,8 @@ export interface MarkdownState {
   lastItemMarkerOwner?: ElementNode
   /** That line follows a decoded CR, which a single LF only turns into one CRLF. */
   emptyItemAfterCr?: boolean
+  /** Spaces a hard break wrote ahead of that marker, which start its line. */
+  emptyItemBreakIndent?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
   /** Last built-in item marker, retained until its emptiness is settled. */
@@ -304,7 +306,25 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // skips the scan below.
   const buffer = state.buffer
   const marker = buffer.length - 1
-  const run = index === 0 ? newlineRunBefore(buffer, marker) : -1
+  let run = index === 0 ? newlineRunBefore(buffer, marker) : -1
+  // A hard break inside an open inline writes the next line's indent with its
+  // line ending, so the marker's line starts before that indent, as in Rust.
+  let breakIndent = 0
+  if (run === 0 && marker > 0) {
+    const previous = buffer[marker - 1]!
+    let cursor = previous.length
+    while (cursor > 0 && previous.charCodeAt(cursor - 1) === 32)
+      cursor--
+    if (cursor > 0 && cursor < previous.length && previous.charCodeAt(cursor - 1) === 10) {
+      breakIndent = previous.length - cursor
+      while (cursor > 0 && previous.charCodeAt(cursor - 1) === 10) {
+        cursor--
+        run++
+      }
+      if (cursor === 0)
+        run += newlineRunBefore(buffer, marker - 1)
+    }
+  }
   // CRLF is a single line ending, so it opens no blank line by itself. `run`
   // stops at the space `needsSpacing` puts between a CR and the marker.
   const afterCr = run === 0 && lastChar === '\r'
@@ -313,6 +333,7 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
     return
   }
   state.emptyItemAfterCr = afterCr
+  state.emptyItemBreakIndent = breakIndent
   // A parent's bare marker is no paragraph, and a blank line under it would end
   // that item and turn this one into its sibling. A marker outside the
   // innermost blockquote keeps the blank line it already had, which the quote's
@@ -404,6 +425,18 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   // underline there, and a blank line would split the link across two blocks.
   if (first === -1 && afterCr && linkOpen)
     return
+  // The blank line goes before the indent a hard break wrote for the marker.
+  const breakIndent = state.emptyItemBreakIndent ?? 0
+  const previous = buffer[fragment - 1]
+  if (breakIndent > 0 && previous !== undefined && previous.length > breakIndent
+    && previous.charCodeAt(previous.length - breakIndent - 1) === 10) {
+    const head = previous.slice(0, previous.length - breakIndent)
+    const moved = `\n${previous.slice(head.length)}${buffer[fragment]}`
+    state.outputPositions?.replace(fragment - 1, fragment + 1, [head, moved], offset => offset >= head.length ? offset + 1 : offset)
+    buffer[fragment - 1] = head
+    buffer[fragment] = moved
+    return
+  }
   // An LF after a decoded CR only completes one CRLF line ending, so the blank
   // line takes two. They replace the space `needsSpacing` put after the CR: it
   // moves the item's content column past the indent of its next lines.
@@ -1554,6 +1587,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     lastItemMarkerOwner: undefined,
     collapseNonSpanDepth: 0,
     emptyItemAfterCr: false,
+    emptyItemBreakIndent: 0,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -2925,7 +2959,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : Math.min(
           openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
-          state.emptyItemFragment ?? Infinity,
+          state.emptyItemFragment === undefined ? Infinity : state.emptyItemFragment - (state.emptyItemBreakIndent ? 1 : 0),
           state.emptyListMarkerFragment ?? Infinity,
           state.listTailStart ?? Infinity,
           state.codeFence?.fragment ?? Infinity,

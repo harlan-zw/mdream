@@ -82,6 +82,8 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<ul><li><blockquote><p>lead</p><ul><li><ul><li></li></ul></li></ul></blockquote></li></ul>',
   '<ul><li>lead<ul><li><ul><li>x</li></ul></li></ul></li></ul>',
   '<ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>',
+  '<ul><li><em>a<br><ul><li><br><ol start="123456789"><li></li></ol></li></ul></em></li></ul>',
+  '<ul><li><em>a<br><ul><li></li></ul></em></li></ul>',
   '<ul><li><ul><li></li><li>a</li></ul>text</li></ul>',
   '<ul><li><ul><li>a</li></ul>text</li></ul>',
   '<ul><li>lead<ul><li>a</li></ul>text</li></ul>',
