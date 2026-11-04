@@ -9815,6 +9815,10 @@ fn hard_break_indent_in_an_open_inline_keeps_the_marker_guard() {
       "<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>",
       "- *  \n\n    -   \n    x*",
     ),
+    (
+      "<ul><li><em>a<br> &#32;<ul><li><br>x</li></ul></em></li></ul>",
+      "- *a  \n\n    -   \n    x*",
+    ),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),

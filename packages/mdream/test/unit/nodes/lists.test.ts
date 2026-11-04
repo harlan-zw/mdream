@@ -126,6 +126,7 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>', '- *a  \n\n    -   \n    x*'],
     ['<ul><li><em><br><ul><li></li></ul></em></li></ul>', '- *  \n\n    - *'],
     ['<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>', '- *  \n\n    -   \n    x*'],
+    ['<ul><li><em>a<br> &#32;<ul><li><br>x</li></ul></em></li></ul>', '- *a  \n\n    -   \n    x*'],
   ])('keeps the marker guard after a hard break in an open inline: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)

@@ -6114,6 +6114,7 @@ fn hard_break_indent_in_an_open_inline_matches_every_split() {
     "<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>",
     "<ul><li><em><br><ul><li></li></ul></em></li></ul>",
     "<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>",
+    "<ul><li><em>a<br> &#32;<ul><li><br>x</li></ul></em></li></ul>",
     "<ol start=\"10\"><li><em>a<br><ul><li></li></ul></em></li></ol>",
     "<ul><li><ul><li><em>a<br><ul><li></li></ul></em></li></ul></li></ul>",
     "<ul><li><ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul></li></ul>",
