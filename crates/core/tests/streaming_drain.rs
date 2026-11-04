@@ -6118,6 +6118,10 @@ fn hard_break_indent_in_an_open_inline_matches_every_split() {
     "<ol start=\"10\"><li><em>a<br><ul><li></li></ul></em></li></ol>",
     "<ul><li><ul><li><em>a<br><ul><li></li></ul></em></li></ul></li></ul>",
     "<ul><li><ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul></li></ul>",
+    "<ul><li><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul>",
+    "<blockquote><ul><li><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul></blockquote>",
+    "<ul><li><em><ol><li><br><ol><li><br></li></ol></li></ol></em></li></ul>",
+    "<ul><li><em><ol><li></li><li><br><ol><li><br></li></ol></li></ol></em></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
