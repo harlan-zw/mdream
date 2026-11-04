@@ -321,7 +321,18 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // CRLF is a single line ending, so it opens no blank line by itself. `run`
   // stops at the space `needsSpacing` puts between a CR and the marker.
   const afterCr = run === 0 && lastChar === '\r'
-  if (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1) {
+  // That indent can add to the marker's own, the parent item's content column.
+  // Four columns or more past it, the marker's line only continues the text
+  // above and cannot underline it, and a blank line would turn it into an
+  // indented code block.
+  let indent = breakIndent
+  if (breakIndent > 0) {
+    const value = buffer[marker]!
+    while (indent - breakIndent < value.length && value.charCodeAt(indent - breakIndent) === 32)
+      indent++
+  }
+  if (indent > state.listIndent.length + 3
+    || (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1)) {
     state.emptyItemFragment = undefined
     return
   }

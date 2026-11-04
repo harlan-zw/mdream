@@ -3489,12 +3489,23 @@ impl ConvertState {
       .iter()
       .rposition(|&byte| byte == b'\n')
       .map_or(output_start, |i| output_start + i + 1);
+    let output_line_start = line_start;
     // A hard break may already have written the continuation indentation.
     // Include that indent when locating the marker line, so the guard sees
     // the preceding newline rather than mistaking spaces for a blank line.
     while line_start > 0 && bytes[line_start - 1] == b' ' {
       line_start -= 1;
     }
+    // That indent can add to the marker's own, the parent item's content
+    // column. Four columns or more past it, the marker's line only continues
+    // the text above and cannot underline it, and a blank line would turn it
+    // into an indented code block.
+    let past_content_column = line_start < output_line_start
+      && bytes[line_start..]
+        .iter()
+        .take_while(|&&byte| byte == b' ')
+        .count()
+        > self.list_indent.len() + 3;
     // Draining removes the front of the buffer, so read through it the way
     // `write_output` does: `flushed_tail` holds the two bytes before `buffer[0]`.
     let before = |offset: usize| -> u8 {
@@ -3569,7 +3580,8 @@ impl ConvertState {
           .last()
           .is_none_or(|frame| above_end > frame.content_start)
     };
-    self.empty_item_hazard = !starts_document && !blank_above && !follows_marker;
+    self.empty_item_hazard =
+      !starts_document && !blank_above && !follows_marker && !past_content_column;
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();

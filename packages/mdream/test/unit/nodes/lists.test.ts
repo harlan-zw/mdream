@@ -47,6 +47,16 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ol start="10"><li><em>a<br><ul><li></li></ul></em></li></ol>', '10. *a  \n        - *'],
+    ['<ul><li><ul><li><em>a<br><ul><li></li></ul></em></li></ul></li></ul>', '-\n  - *a  \n        - *'],
+    ['<ul><li><ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul></li></ul>', '-\n  - *a  \n        -   \n      x*'],
+    ['<ol start="10"><li>a<br><ul><li></li></ul></li></ol>', '10. a  \n\n    -'],
+  ])('leaves a marker past the content column on its line after a hard break: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>x<a href="u"><ol start="10"><li>y</li></ol></a></li></ul>', '- x [  10. y](u)'],
     ['<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>', '- [x  10. y](u)'],
     ['<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>', '- [x  \n    10. y](u)'],

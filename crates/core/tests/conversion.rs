@@ -7552,6 +7552,39 @@ fn hard_break_indent_in_an_open_inline_keeps_the_marker_guard() {
 }
 
 #[test]
+fn hard_break_indent_past_the_content_column_leaves_the_marker_line() {
+  // That indent adds to the nested marker's own. Four columns past the parent
+  // item's content column, the marker's line only continues the text above,
+  // and a blank line would turn it into an indented code block.
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><em>a<br><ul><li></li></ul></em></li></ol>",
+      "10. *a  \n        - *",
+    ),
+    (
+      "<ul><li><ul><li><em>a<br><ul><li></li></ul></em></li></ul></li></ul>",
+      "-\n  - *a  \n        - *",
+    ),
+    (
+      "<ul><li><ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul></li></ul>",
+      "-\n  - *a  \n        -   \n      x*",
+    ),
+    // Outside an inline the break's indent gives way to the marker's, which
+    // still sits right under the text above.
+    (
+      "<ol start=\"10\"><li>a<br><ul><li></li></ul></li></ol>",
+      "10. a  \n\n    -",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn nested_list_tail_in_a_raw_html_block_matches_the_plain_context() {
   for (html, expected) in [
     (
