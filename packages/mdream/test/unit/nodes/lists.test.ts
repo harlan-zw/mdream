@@ -37,6 +37,16 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li><em>a<br><ul><li></li></ul></em></li></ul>', '- *a  \n\n    - *'],
+    ['<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>', '- *a  \n\n    -   \n    x*'],
+    ['<ul><li><em><br><ul><li></li></ul></em></li></ul>', '- *  \n\n    - *'],
+    ['<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>', '- *  \n\n    -   \n    x*'],
+  ])('keeps the marker guard after a hard break in an open inline: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>x<a href="u"><ol start="10"><li>y</li></ol></a></li></ul>', '- x [  10. y](u)'],
     ['<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>', '- [x  10. y](u)'],
     ['<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>', '- [x  \n    10. y](u)'],

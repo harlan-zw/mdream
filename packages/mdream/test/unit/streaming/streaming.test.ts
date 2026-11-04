@@ -78,6 +78,8 @@ const LINK_SPACE_CASES: [string, string][] = [
 
 const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { tagOverrides: Record<string, string> } } }> = [
   ...LINK_SPACE_CASES.map(([html]) => html),
+  '<ul><li><em>a<br><ul><li></li></ul></em></li></ul>',
+  '<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>',
   '<ul><li><ul><li></li><li>a</li></ul>text</li></ul>',
   '<ul><li><ul><li>a</li></ul>text</li></ul>',
   '<ul><li>lead<ul><li>a</li></ul>text</li></ul>',

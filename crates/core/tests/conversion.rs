@@ -7522,6 +7522,36 @@ fn hard_break_in_an_empty_nested_item_leaves_no_indent_line() {
 }
 
 #[test]
+fn hard_break_indent_in_an_open_inline_keeps_the_marker_guard() {
+  // A hard break inside an open inline writes the next line's indent with its
+  // line ending, so a marker after it still sits right under the text above.
+  for (html, expected) in [
+    (
+      "<ul><li><em>a<br><ul><li></li></ul></em></li></ul>",
+      "- *a  \n\n    - *",
+    ),
+    (
+      "<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>",
+      "- *a  \n\n    -   \n    x*",
+    ),
+    (
+      "<ul><li><em><br><ul><li></li></ul></em></li></ul>",
+      "- *  \n\n    - *",
+    ),
+    (
+      "<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>",
+      "- *  \n\n    -   \n    x*",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn nested_list_tail_in_a_raw_html_block_matches_the_plain_context() {
   for (html, expected) in [
     (

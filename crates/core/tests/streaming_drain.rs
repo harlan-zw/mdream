@@ -4332,6 +4332,18 @@ fn hard_break_in_an_empty_nested_item_matches_every_split() {
 }
 
 #[test]
+fn hard_break_indent_in_an_open_inline_matches_every_split() {
+  for html in [
+    "<ul><li><em>a<br><ul><li></li></ul></em></li></ul>",
+    "<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>",
+    "<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn drained_bare_marker_line_still_reads_as_one() {
   // Space-only lines under a bare marker let the drain take its line before a
   // first nested item, or a block, reads back for it.
