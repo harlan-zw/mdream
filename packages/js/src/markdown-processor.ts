@@ -356,7 +356,36 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
         && element.parent?.index === 0
         && (fragment === 0 || newlineRunBefore(state.buffer, fragment) > 0)
         && (code === 45 || code === 46)
-      state.emptyItemFragment = (recordedParent || listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3))
+      // A lone `*` or `+` indented to the item's content column continues the
+      // paragraph above: an emphasis closer or text, which the marker line
+      // would underline. Indented less, as after a CR or a CRLF, it leaves the
+      // item and opens a list of its own, so it reads as a marker.
+      // A literal marker from a tag override is no emphasis closer, and Rust
+      // never records one, so the line above keeps its old reading there.
+      let readsAsMarker = !builtIn || (code !== 42 && code !== 43)
+      if (!readsAsMarker) {
+        let indent = 0
+        let before = -1
+        let at = cursor
+        for (let f = fragment; f >= 0 && before === -1; f--) {
+          const part = state.buffer[f]!
+          if (f !== fragment)
+            at = part.length
+          while (--at >= 0) {
+            const char = part.charCodeAt(at)
+            if (char !== 32) {
+              before = char
+              break
+            }
+            indent++
+          }
+        }
+        // The space after a CR separates the marker from it.
+        if (before === 13 && indent > 0)
+          indent--
+        readsAsMarker = indent < state.listIndent.length
+      }
+      state.emptyItemFragment = (recordedParent || (readsAsMarker && listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3)))
         ? undefined
         : state.buffer.length - 1
       return

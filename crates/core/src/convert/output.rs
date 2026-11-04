@@ -3565,9 +3565,20 @@ impl ConvertState {
       }
       let max_spaces = self.list_indent.len() + 3;
       // Past the buffer start the drain took the marker with only whitespace
-      // after it, so its record answers as one-shot reads the line.
+      // after it, so its record answers as one-shot reads the line. A lone `*`
+      // or `+` indented to the item's content column continues the paragraph
+      // above: an emphasis closer or text, which the marker line would
+      // underline. Indented less, as after a `\r` or a CRLF, it leaves the item
+      // and opens a list of its own, so it reads as a marker.
       let bare = if above_end > 0 {
-        self.list_marker_line_start(bytes, above_end, max_spaces)
+        let lone_closer = matches!(bytes[above_end - 1], b'*' | b'+');
+        match self.marker_line(bytes, above_end, max_spaces) {
+          MarkerLine::Bare(indent) => !lone_closer || indent < self.list_indent.len(),
+          MarkerLine::Other => false,
+          MarkerLine::Cut => {
+            above_end == self.bare_marker_end && self.bare_marker_indent <= max_spaces
+          }
+        }
       } else {
         self.has_flushed_tail()
           && self.bare_marker_end == 0
