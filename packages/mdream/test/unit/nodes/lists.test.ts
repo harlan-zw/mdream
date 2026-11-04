@@ -13,10 +13,15 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 
-  it('keeps a literal `*` item marker as a parent marker', async () => {
+  it.each([
+    ['* ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n* \n    > q'],
+    ['  * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n  * \n    > q'],
+    ['    * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n    * \n    > q'],
+    ['  + ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '+\n  + \n    > q'],
+    ['* ', '<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '* *x  \n  *\n* \n    > q'],
+  ])('keeps a literal %j item marker as a parent marker: %s', async (enter, html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
-    const options = { engine, plugins: { tagOverrides: { li: { enter: '* ' } } } }
-    expect(htmlToMarkdown('<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', options)).toBe('*\n* \n    > q')
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides: { li: { enter } } } })).toBe(expected)
   })
 
   it.each([

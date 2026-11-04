@@ -307,7 +307,9 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
       // paragraph above: an emphasis closer or text, which the marker line
       // would underline. Indented less, as after a CR or a CRLF, it leaves the
       // item and opens a list of its own, so it reads as a marker.
-      let readsAsMarker = code !== 42 && code !== 43
+      // A literal marker from a tag override is no emphasis closer, and Rust
+      // never records one, so the line above keeps its old reading there.
+      let readsAsMarker = !builtIn || (code !== 42 && code !== 43)
       if (!readsAsMarker) {
         let indent = 0
         let before = -1
