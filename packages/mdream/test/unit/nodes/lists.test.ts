@@ -174,6 +174,16 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['a<span><ol start="999"><li>x<br><ul><li><br></li></ul></li></ol></span>', 'a\n999. x  \n     -'],
+    ['<blockquote>a<span><ol start="999"><li>a</li><li>x<br><em></em><ul><li><br></li></ul></li></ol></span></blockquote><p>q</p>', '> a\n> 999. a\n> 1000. x  \n>       -\n\nq'],
+    ['<ul><li><em><ul><li><em><ol><li>x<br></li></ol><ul><li><br></li></ul></em></li></ul></em></li></ul>', '- *  - *    1. x  \n\n    -   \n**'],
+    ['<ul><li><em><ul><li><em><ol><li>x<br></li></ol><em><br></em><ul><li><br></li></ul></em></li></ul></em></li></ul>', '- *  - *    1. x  \n\n    -   \n**'],
+  ])('starts the marker line at a hard break indent outside an open inline: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>x<a href="u"><ol start="10"><li>y</li></ol></a></li></ul>', '- x [  10. y](u)'],
     ['<ul><li><a href="u">x<ol start="10"><li>y</li></ol></a></li></ul>', '- [x  10. y](u)'],
     ['<ul><li><a href="u">x<br><ol start="10"><li>y</li></ol></a></li></ul>', '- [x  \n    10. y](u)'],

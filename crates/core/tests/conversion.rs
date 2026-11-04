@@ -9966,6 +9966,38 @@ fn nested_marker_line_that_cannot_underline_keeps_its_place() {
 }
 
 #[test]
+fn hard_break_indent_outside_an_open_inline_starts_the_marker_line() {
+  for (html, expected) in [
+    // Outside an open inline a text parent marker's column bounds the line too.
+    (
+      "a<span><ol start=\"999\"><li>x<br><ul><li><br></li></ul></li></ol></span>",
+      "a\n999. x  \n     -",
+    ),
+    (
+      "<blockquote>a<span><ol start=\"999\"><li>a</li><li>x<br><em></em><ul><li><br></li></ul></li></ol></span></blockquote><p>q</p>",
+      "> a\n> 999. a\n> 1000. x  \n>       -\n\nq",
+    ),
+    // An item closing after the break trims that indent, so the marker writes
+    // its own.
+    (
+      "<ul><li><em><ul><li><em><ol><li>x<br></li></ol><ul><li><br></li></ul></em></li></ul></em></li></ul>",
+      "- *  - *    1. x  \n\n    -   \n**",
+    ),
+    // So does an empty pair dropping the breaks inside it.
+    (
+      "<ul><li><em><ul><li><em><ol><li>x<br></li></ol><em><br></em><ul><li><br></li></ul></em></li></ul></em></li></ul>",
+      "- *  - *    1. x  \n\n    -   \n**",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn nested_list_tail_in_a_raw_html_block_matches_the_plain_context() {
   for (html, expected) in [
     (

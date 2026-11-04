@@ -197,6 +197,8 @@ export interface MarkdownState {
   emptyItemBreakIndent?: number
   /** Empty fragments between that indent and the marker. */
   emptyItemBreakGap?: number
+  /** Items open when the latest hard break was written. */
+  hardBreakDepth?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
   /** Last built-in item marker, retained until its emptiness is settled. */
@@ -596,15 +598,26 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // indent assumes.
   const quoted = state.listContentQuotes.at(-1) === state.blockquotes.length
   const base = quoted ? state.listContentColumns.at(-1)! : state.listIndent.length
+  // Outside an open inline the list's own enter trims that indent and the
+  // marker writes it again, where Rust keeps the break's: the marker's spaces
+  // then start its line too. An item closing after the break trims it in both,
+  // and the marker writes its own indent then.
+  let afterBreak = breakIndent > 0
+  if (!afterBreak && run === 1 && marker > 0 && state.hardBreakDepth === state.listIndentWidths.length) {
+    let previous = marker - 1
+    while (previous > 0 && buffer[previous] === '')
+      previous--
+    afterBreak = buffer[previous]!.endsWith('  \n')
+  }
   let indent = breakIndent
   let dash = false
-  if (breakIndent > 0) {
+  if (afterBreak) {
     const value = buffer[marker]!
     while (indent - breakIndent < value.length && value.charCodeAt(indent - breakIndent) === 32)
       indent++
     dash = value.charCodeAt(indent - breakIndent) === 45
   }
-  if ((dash ? indent > base + 3 || indent < base : indent > Math.min(base, state.listIndent.length) + 3)
+  if ((indent > 0 && (dash ? indent > base + 3 || indent < base : indent > Math.min(base, state.listIndent.length) + 3))
     || (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1)) {
     state.emptyItemFragment = undefined
     return
@@ -2576,6 +2589,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let pendingRawHtmlBoundary = false
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
+  // The latest hard break's item depth as each of those markers opened.
+  const openMarkerBreakDepths: Array<number | undefined> = []
   let openMarkerCount = 0
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
@@ -3460,6 +3475,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           buff.push(' ')
         buff.push(breakOutput)
         state.lastContentCache = breakOutput
+        state.hardBreakDepth = state.listIndentWidths.length
         if (openMarkerCount && hasNonWhitespace(breakOutput))
           openMarkerCount = 0
       }
@@ -3775,6 +3791,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const restoresHeadingBreak = buff[packed >> 3]?.includes('\n')
         const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
         if (idx >= 0) {
+          // The breaks inside the pair go with it, as in Rust.
+          state.hardBreakDepth = openMarkerBreakDepths[openMarkerCount]
           noteListTailRewrite(state, idx)
           noteBufferRewrite(state)
           if (restoresHeadingBreak)
@@ -4150,6 +4168,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastContentCache = fragment
         }
       }
+      if (tagId === TAG_BR && eventType === NodeEventEnter)
+        state.hardBreakDepth = state.listIndentWidths.length
     }
 
     if (trailingEmphasisWhitespace) {
@@ -4203,6 +4223,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
+        openMarkerBreakDepths[openMarkerCount] = state.hardBreakDepth
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }
       else if (openMarkerCount
