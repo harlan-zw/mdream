@@ -480,6 +480,33 @@ describe.each(engines)('parent heading after nested hard break $name', (engineCo
   })
 })
 
+describe.each(engines)('ordered list after a dropped block $name', (engineConfig) => {
+  it.each([
+    ['<ul><li><br><blockquote></blockquote><ol start="123456789"><li></li></ol></li></ul>', '-   \n  \n\n  123456789.'],
+  ])('keeps the blank line a hard break owes it: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('open fence in a quoted item $name', (engineConfig) => {
+  it.each([
+    ['<ul><li><blockquote><ul><li><blockquote></blockquote><pre>c</pre><ol start="123456789"><li></li></ol></li></ul></blockquote></li></ul>', '- \n  >\n  > - \n  >   ```\n  >   c\n  >   ```\n  >\n  >   123456789.'],
+  ])('writes no quoted blank line before a fenced first block: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
+describe.each(engines)('nested marker after a CR $name', (engineConfig) => {
+  it.each([
+    ['<ul><li><em><br><ul><li><br>&#13;<ol start="123456789"><li></li></ol></li></ul></em></li></ul>', '- *  \n\n    -   \n    \r\n\n    123456789. *'],
+  ])('reads only the line above a marker after a CR: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+})
+
 describe.each(engines)('parent block after a closed nested fence $name', (engineConfig) => {
   it.each([
     ['<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>', '- a\n  - ```\n    c\n    ```\n\n  ***'],

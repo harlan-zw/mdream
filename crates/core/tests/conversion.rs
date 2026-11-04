@@ -7928,6 +7928,38 @@ fn scout9_list_tail_quote_spacing() {
 }
 
 #[test]
+fn ordered_list_after_a_dropped_block_keeps_its_blank_line() {
+  // The empty quote's rewrite forgot the break's end; the bytes still end there.
+  let html =
+    "<ul><li><br><blockquote></blockquote><ol start=\"123456789\"><li></li></ol></li></ul>";
+  assert_eq!(convert(html), "-   \n  \n\n  123456789.");
+}
+
+#[test]
+fn marker_after_a_cr_reads_only_its_own_line_above() {
+  // JS stops at the `\r` rather than reading past it for the parent's marker.
+  // The hard break's indent leaves the nested marker under `*`, so that marker
+  // keeps its own blank line.
+  let html = "<ul><li><em><br><ul><li><br>&#13;<ol start=\"123456789\"><li></li></ol></li></ul></em></li></ul>";
+  assert_eq!(
+    convert(html),
+    "- *  \n\n    -   \n    \r\n\n    123456789. *"
+  );
+}
+
+#[test]
+fn open_fence_leaves_a_quoted_empty_item_guard_open() {
+  // Settled while the fence was open, the guard took the fence's line break for
+  // an empty item and wrote a quoted blank line that JS does not. The quote
+  // opened in the bare item still starts on its own line.
+  let html = "<ul><li><blockquote><ul><li><blockquote></blockquote><pre>c</pre><ol start=\"123456789\"><li></li></ol></li></ul></blockquote></li></ul>";
+  assert_eq!(
+    convert(html),
+    "- \n  >\n  > - \n  >   ```\n  >   c\n  >   ```\n  >\n  >   123456789."
+  );
+}
+
+#[test]
 fn hard_break_trim_preserves_an_empty_item_guard() {
   let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
   assert_eq!(convert(html), "- x\n\n  - \n  \n\n  y");

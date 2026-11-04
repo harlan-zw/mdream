@@ -339,11 +339,10 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // innermost blockquote keeps the blank line it already had, which the quote's
   // prefix makes harmless. A CR ends a line too: alone it ends this marker's
   // own line, which Rust reads past, and before the LF of a CRLF it ends the
-  // line above. That line is then read alone, as in Rust: past a blank line
-  // the CR let the drain take the marker, and the stream would disagree.
+  // line above. Either way that line is read alone, as in Rust: past a blank
+  // line the CR let the drain take the marker, and the stream would disagree.
   let lineFeeds = 0
   let previous = 0
-  let crSkipped = false
   let lineAboveOnly = false
   for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
     const value = state.buffer[fragment]!
@@ -355,9 +354,8 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
         previous = code
         continue
       }
-      if (code === 13 && !crSkipped && (lineFeeds === 0 ? afterCr : lineFeeds === 1 && previous === 10)) {
-        crSkipped = true
-        lineAboveOnly = lineFeeds === 1
+      if (code === 13 && !lineAboveOnly && (lineFeeds === 0 ? afterCr : lineFeeds === 1 && previous === 10)) {
+        lineAboveOnly = true
         continue
       }
       // A direct first-child list cannot have inserted content before its

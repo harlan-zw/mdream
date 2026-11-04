@@ -4640,10 +4640,18 @@ fn cr_only_parent_item_matches_every_split() {
 
 #[test]
 fn drained_bare_marker_line_still_reads_as_one() {
-  // Breaks under a bare marker push its line out of the drain window before a
-  // first nested item reads back for it: in part, or with the blank lines too.
+  // Space-only lines under a bare marker let the drain take its line before a
+  // first nested item, or a block, reads back for it.
   for html in [
     "<ul><li><blockquote><br><br><br></blockquote><ul><li></li></ul></li></ul>",
+    "<ul><li>x</li><li><blockquote><br><br><br></blockquote><ul><li></li></ul></li></ul>",
+    "<p>lead</p><ol start=\"123456789\"><li>&#13;<ol><li><br><br><blockquote><b></b></blockquote></li></ol><ol start=\"123456789\"><li><b></b></li></ol></li></ol>",
+    "<ul><li>&#13; &#13;<em><blockquote><br><br><br></blockquote><ol><li>&#13;<br><br></li></ol></em></li></ul>",
+    "<ol start=\"123456789\"><li><blockquote><br><br><br></blockquote><ul><li><em><br><br></em><h2>h</h2></li></ul></li></ol>",
+    "<ol start=\"123456789\"><li><blockquote><br><br><br></blockquote><ul><li><em><br><br></em><pre>c</pre></li></ul></li></ol>",
+    // Two drains split the indent of the line holding the closing `*` alone.
+    "<ul><li><ol start=\"3\"><li><em><p></p></em><blockquote><br><br></blockquote><ul><li></li></ul></li></ol></li></ul>",
+    // The line's start, or the whole line and the blank lines under it.
     "<ul><li>&#13;<ul><li><blockquote><br><br></blockquote><ul><li></li></ul></li></ul></li></ul>",
     "<ul><li><ol start=\"123456789\"><li><br></li></ol><ul><li><ul><li></li></ul></li></ul></li></ul>",
     "lead<br><ul><li><ol start=\"123456789\"><li><br><br></li></ol><ul><li><ul><li><ul><li>&#13;&#13;</li></ul></li></ul></li></ul><b></b></li></ul>",
@@ -4653,6 +4661,7 @@ fn drained_bare_marker_line_still_reads_as_one() {
     "lead<br><ul><li><br><br><em>&#13;</em><ol start=\"123456789\"><li><br><ul><li><ol start=\"3\"><li><ol start=\"3\"><li><b></b>t&#13;</li></ol></li></ol></li></ul></li><li><ol start=\"3\"><li>x<br></li></ol></li></ol></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
 

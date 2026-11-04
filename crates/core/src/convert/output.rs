@@ -3373,11 +3373,14 @@ impl ConvertState {
 
   /// Whether `end` sits just past a list marker that is all its line holds: up
   /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+  /// `bytes` is the buffer: a line a drain cut is answered from the record of
+  /// the latest bare marker, as one-shot reads it.
   fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
-    matches!(
-      self.marker_line(bytes, end, max_spaces),
-      MarkerLine::Bare(_)
-    )
+    match self.marker_line(bytes, end, max_spaces) {
+      MarkerLine::Bare(_) => true,
+      MarkerLine::Other => false,
+      MarkerLine::Cut => end == self.bare_marker_end && self.bare_marker_indent <= max_spaces,
+    }
   }
 
   /// The line `list_marker_line_start` reads, told apart from one whose start
@@ -3423,6 +3426,14 @@ impl ConvertState {
     if index == 0 {
       return if !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r') {
         MarkerLine::Bare(spaces)
+      } else if self.drained_line_spaces != usize::MAX {
+        // Only indent left with the drain: count it as the whole line would.
+        let spaces = spaces + self.drained_line_spaces;
+        if spaces <= max_spaces {
+          MarkerLine::Bare(spaces)
+        } else {
+          MarkerLine::Other
+        }
       } else {
         MarkerLine::Cut
       };
@@ -3434,9 +3445,27 @@ impl ConvertState {
     }
   }
 
+  /// The indent of the bare marker line that `end` closes once the spaces and
+  /// line feeds before it are skipped, read before a drain takes those bytes,
+  /// and whether a line feed was among them.
+  pub(super) fn bare_marker_line_before(&self, end: usize) -> Option<(usize, bool)> {
+    let bytes = self.buffer.as_bytes();
+    let mut start = end;
+    while start > 0 && matches!(bytes[start - 1], b' ' | b'\n') {
+      start -= 1;
+    }
+    if start == 0 {
+      return None;
+    }
+    match self.marker_line(bytes, start, usize::MAX) {
+      MarkerLine::Bare(indent) => Some((indent, bytes[start..end].contains(&b'\n'))),
+      MarkerLine::Other | MarkerLine::Cut => None,
+    }
+  }
+
   /// Remember whether the marker just written from `output_start` is all its
-  /// line holds. A later first item reads back over blank lines for it, and a
-  /// stream may have drained that line's start by then.
+  /// line holds. A later block or first item reads back for it, and a stream
+  /// may have drained that line's start by then.
   fn note_bare_marker(&mut self, output_start: usize) {
     let bytes = self.buffer.as_bytes();
     let mut end = bytes.len();
@@ -3467,19 +3496,14 @@ impl ConvertState {
     }
     let parent_marker_end = self.last_item_marker_end;
     self.last_item_marker_end = usize::MAX;
-    let (bare_marker_end, bare_marker_indent, bare_marker_gap_newline) = (
-      self.bare_marker_end,
-      self.bare_marker_indent,
-      self.bare_marker_gap_newline,
-    );
-    self.note_bare_marker(output_start.min(self.buffer.len()));
+    let output_start = output_start.min(self.buffer.len());
     // Only a list's first item can follow a paragraph, so every later sibling
     // skips the line scan below.
     if index != 0 {
       self.empty_item_hazard = false;
+      self.note_bare_marker(output_start);
       return;
     }
-    let output_start = output_start.min(self.buffer.len());
     let bytes = self.buffer.as_bytes();
     let mut line_start = bytes[output_start..]
       .iter()
@@ -3539,42 +3563,33 @@ impl ConvertState {
       {
         self.parent_marker_scans += 1;
       }
+      // A line of spaces only is blank, as in JS: a hard break's continuation
+      // indent left one between the parent's marker and this one. A marker
+      // right after a `\r` reads only its own line, which JS stops at too.
+      // `\r\n` is one line ending, so a parent holding only that `\r` keeps a
+      // bare marker on the line above, read alone as well: past a blank line
+      // the `\r` let the drain take the marker, and the stream would disagree.
       let mut above_end = above_end;
       let line_above_only = line_ending == b'\n' && above_end > 0 && bytes[above_end - 1] == b'\r';
       if line_above_only {
-        // `\r\n` is one line ending, so a parent holding only that `\r` keeps a
-        // bare marker on the line above. Read that line alone: past a blank line
-        // the `\r` let the drain take the marker, and the stream would disagree.
         above_end -= 1;
-        while above_end > 0 && bytes[above_end - 1] == b' ' {
-          above_end -= 1;
-        }
-      } else {
-        // A line of spaces only is blank, as in JS: a hard break's continuation
-        // indent left one between the parent's marker and this one.
-        while above_end > 0 && matches!(bytes[above_end - 1], b' ' | b'\n') {
-          above_end -= 1;
-        }
+      }
+      let across_lines = line_ending == b'\n' && !line_above_only;
+      while above_end > 0
+        && (bytes[above_end - 1] == b' ' || across_lines && bytes[above_end - 1] == b'\n')
+      {
+        above_end -= 1;
       }
       let max_spaces = self.list_indent.len() + 3;
-      let line = if above_end > 0 {
-        self.marker_line(bytes, above_end, max_spaces)
-      } else if self.has_flushed_tail() {
-        MarkerLine::Cut
+      // Past the buffer start the drain took the marker with only whitespace
+      // after it, so its record answers as one-shot reads the line.
+      let bare = if above_end > 0 {
+        self.list_marker_line_start(bytes, above_end, max_spaces)
       } else {
-        MarkerLine::Other
-      };
-      let bare = match line {
-        MarkerLine::Bare(_) => true,
-        MarkerLine::Other => false,
-        // The drain took the line's start, or the whole line and the blank
-        // lines under it: answer from the marker's own record, as one-shot
-        // reads the line.
-        MarkerLine::Cut => {
-          above_end == bare_marker_end
-            && bare_marker_indent <= max_spaces
-            && !(above_end == 0 && line_above_only && bare_marker_gap_newline)
-        }
+        self.has_flushed_tail()
+          && self.bare_marker_end == 0
+          && self.bare_marker_indent <= max_spaces
+          && (across_lines || !self.bare_marker_gap_newline)
       };
       bare
         && self
@@ -3586,6 +3601,7 @@ impl ConvertState {
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
+    self.note_bare_marker(output_start);
   }
 
   /// Scan only bytes appended since the last settlement or buffer rewrite.
@@ -3610,8 +3626,6 @@ impl ConvertState {
   /// the same, and waiting for it pins the marker's line and everything the
   /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
   /// blank line also survives a nested list whose first `<li>` dropped it.
-  /// An open fence takes nothing back: its opener stays on the marker's line,
-  /// and the stream drain already answers there, so one-shot does too.
   /// Kept out of line so the token loop stays small when nothing is pending.
   #[inline(never)]
   pub(crate) fn settle_item_marker(&mut self) {
@@ -3646,6 +3660,7 @@ impl ConvertState {
       && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
+      && self.code_fence.is_none()
       && self.depth_map[TAG_A as usize] == 0
       && self.first_tentative_caption_start().is_none()
       // The blank line leaves quote frames where they are, right only for those
@@ -3668,10 +3683,7 @@ impl ConvertState {
   #[cold]
   fn break_follows_item_marker(&self) -> bool {
     let bytes = self.buffer.as_bytes();
-    let mut start = bytes.len();
-    while start > 0 && bytes[start - 1] == b' ' {
-      start -= 1;
-    }
+    let start = bytes.len() - trailing_spaces(bytes);
     start > self.empty_item_len && bytes[start - 1] == b'\n'
   }
 
@@ -3747,8 +3759,14 @@ impl ConvertState {
     } else {
       "\n"
     };
+    let bare_marker_end = self.bare_marker_end;
     if !self.replace_code_span_content(at..at + replaced, separator) {
       return;
+    }
+    // The lines from `at` on keep their bytes, so a bare marker there stays
+    // bare, and a drain may still need its record. The shift below moves it.
+    if bare_marker_end != usize::MAX && bare_marker_end > at + replaced {
+      self.bare_marker_end = bare_marker_end;
     }
     // The insertion moves cached offsets at or past the line: an inline marker
     // still open across it measures emptiness from `content_start`, so left
@@ -4770,14 +4788,27 @@ impl ConvertState {
     }
   }
 
+  /// Whether only indentation follows a prose hard break, read from the bytes
+  /// as JS reads its buffer: an empty block dropped after the break moves no
+  /// line, though its rewrite forgets `hard_break_end`.
+  fn ends_at_hard_break(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let end = bytes.len() - trailing_spaces(bytes);
+    let byte = |back: usize| match end.checked_sub(back) {
+      Some(at) => Some(bytes[at]),
+      None if self.has_flushed_tail() && back - end <= 2 => {
+        Some(self.flushed_tail[2 - (back - end)])
+      }
+      None => None,
+    };
+    byte(1) == Some(b'\n') && byte(2) == Some(b' ') && byte(3) == Some(b' ')
+  }
+
   /// Whether the output ends in a line holding spaces only, read through a
   /// drain via `flushed_tail` like `trailing_new_lines`.
   fn ends_in_indent_line(&self) -> bool {
     let bytes = self.buffer.as_bytes();
-    let mut start = bytes.len();
-    while start > 0 && bytes[start - 1] == b' ' {
-      start -= 1;
-    }
+    let start = bytes.len() - trailing_spaces(bytes);
     if start == bytes.len() {
       return false;
     }
@@ -5953,7 +5984,7 @@ impl ConvertState {
       && self.ordered_item_number(0) != 1
       && !self.in_table_cell()
       && !self.inside_open_inline_delimiter()
-      && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
+      && (self.block_open_prefix("").is_some() || self.ends_at_hard_break())
     {
       return DEFAULT_BLOCK_SPACING;
     }

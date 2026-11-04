@@ -968,12 +968,16 @@ pub struct ConvertState {
   /// Last built-in marker end, excluding its trailing space.
   last_item_marker_end: usize,
   /// End of the latest item marker that its line holds alone, and that line's
-  /// indent, for `record_item_marker` to read once a drain has cut the line.
-  /// 0 once the drain took the marker and only whitespace after it.
+  /// indent, for the marker line readers once a drain has cut the line. 0 once
+  /// the drain took the marker and only whitespace after it.
   bare_marker_end: usize,
   bare_marker_indent: usize,
-  /// The whitespace a drain took after the bare marker held a line feed.
+  /// The whitespace a drain took after that marker held a line feed.
   bare_marker_gap_newline: bool,
+  /// Spaces the line holding `buffer[0]` lost to drains while spaces were all
+  /// it lost, so the marker line readers still count its whole indent.
+  /// `usize::MAX` once anything else left with them.
+  drained_line_spaces: usize,
   #[cfg(test)]
   parent_marker_scans: usize,
   /// `LIST_RULE_PENDING`: a list item rule waiting to see whether visible
@@ -1249,6 +1253,7 @@ impl ConvertState {
       bare_marker_end: usize::MAX,
       bare_marker_indent: 0,
       bare_marker_gap_newline: false,
+      drained_line_spaces: 0,
       #[cfg(test)]
       parent_marker_scans: 0,
       list_pending: 0,
@@ -3093,7 +3098,11 @@ impl ConvertState {
     if self.raw_html_scanned_to < drain_end && !self.raw_html_markdown && self.in_raw_html_block() {
       self.track_raw_html_markdown_context(drain_end);
     }
+    let drained_bare_marker = self.bare_marker_line_before(drain_end);
     let bytes = self.buffer.as_bytes();
+    let after_cr = self.cut_line_lead != CutLineLead::Uncut && self.flushed_tail[1] == b'\r';
+    self.drained_line_spaces =
+      Self::cut_line_spaces(&bytes[..drain_end], self.drained_line_spaces, after_cr);
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
     } else if self.cut_line_lead == CutLineLead::Uncut {
@@ -3107,7 +3116,7 @@ impl ConvertState {
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     // A bare marker leaving with only whitespace after it stays readable at the
-    // buffer start, where `record_item_marker`'s line scan stops.
+    // buffer start, where the marker line readers stop.
     if self.bare_marker_end != usize::MAX {
       self.bare_marker_end = match self.bare_marker_end.checked_sub(drain_end) {
         Some(end) => end,
@@ -3121,6 +3130,14 @@ impl ConvertState {
           }
         }
       };
+    }
+    // Any other line the readers take for a bare marker leaves the same way.
+    if self.bare_marker_end == usize::MAX
+      && let Some((indent, gap_newline)) = drained_bare_marker
+    {
+      self.bare_marker_end = 0;
+      self.bare_marker_indent = indent;
+      self.bare_marker_gap_newline = gap_newline;
     }
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
@@ -3177,6 +3194,22 @@ impl ConvertState {
 }
 
 impl ConvertState {
+  /// The spaces the line ending `cut` has lost to drains, `previous` counted by
+  /// earlier cuts of it, or `usize::MAX` once it lost anything else. The space
+  /// right after a `\r` separates a marker from that line end and is no indent.
+  fn cut_line_spaces(cut: &[u8], previous: usize, after_cr: bool) -> usize {
+    match cut.iter().rposition(|&byte| matches!(byte, b'\n' | b'\r')) {
+      Some(at) if cut[at + 1..].iter().all(|&byte| byte == b' ') => {
+        let spaces = cut.len() - at - 1;
+        spaces - usize::from(cut[at] == b'\r' && spaces > 0)
+      }
+      None if previous != usize::MAX && cut.iter().all(|&byte| byte == b' ') => {
+        previous + cut.len() - usize::from(previous == 0 && after_cr)
+      }
+      _ => usize::MAX,
+    }
+  }
+
   /// What the line ending at `drain_end` leads with, given what an earlier cut
   /// of the same line already found. `previous` makes the indent additive: a
   /// line's leading spaces can be split across any number of drains, and the
