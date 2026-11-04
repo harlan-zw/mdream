@@ -3469,11 +3469,28 @@ impl ConvertState {
       while above_end > 0 && bytes[above_end - 1] == b' ' {
         above_end -= 1;
       }
+      // A list writes only `-` and `N.` markers, so a lone `*` or `+` is an
+      // emphasis closer or text, which the marker line would underline. Right
+      // after a `\r` it starts a line of its own, and reads as a marker there.
+      let written_marker = |end: usize| {
+        matches!(bytes[end - 1], b'-' | b'.' | b')') || {
+          let mut at = end - 1;
+          while at > 0 && bytes[at - 1] == b' ' {
+            at -= 1;
+          }
+          if at > 0 {
+            bytes[at - 1] == b'\r'
+          } else {
+            self.has_flushed_tail() && self.flushed_tail[1] == b'\r'
+          }
+        }
+      };
       above_end > 0
         && self
           .blockquotes
           .last()
           .is_none_or(|frame| above_end > frame.content_start)
+        && written_marker(above_end)
         && self.list_marker_line_start(bytes, above_end, self.list_indent.len() + 3)
     };
     self.empty_item_hazard = !starts_document && !blank_above && !follows_marker;

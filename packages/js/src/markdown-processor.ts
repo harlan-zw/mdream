@@ -303,7 +303,28 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
         && element.parent?.index === 0
         && (fragment === 0 || newlineRunBefore(state.buffer, fragment) > 0)
         && (code === 45 || code === 46)
-      state.emptyItemFragment = (recordedParent || listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3))
+      // A list writes only `-` and `N.` markers, so a lone `*` or `+` is an
+      // emphasis closer or text, which the marker line would underline. Right
+      // after a CR it starts a line of its own, and reads as a marker there.
+      let builtInMarker = code === 45 || code === 46 || code === 41
+      if (!builtInMarker) {
+        let before = 0
+        let at = cursor
+        for (let f = fragment; f >= 0 && before === 0; f--) {
+          const part = state.buffer[f]!
+          if (f !== fragment)
+            at = part.length
+          while (--at >= 0) {
+            const char = part.charCodeAt(at)
+            if (char !== 32) {
+              before = char
+              break
+            }
+          }
+        }
+        builtInMarker = before === 13
+      }
+      state.emptyItemFragment = (recordedParent || (builtInMarker && listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3)))
         ? undefined
         : state.buffer.length - 1
       return

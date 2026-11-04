@@ -7444,6 +7444,33 @@ fn hard_break_trim_preserves_an_empty_item_guard() {
 }
 
 #[test]
+fn emphasis_closer_alone_on_its_line_is_no_parent_marker() {
+  // A list writes only `-` and `N.` markers, so the `*` an emphasis closes with
+  // after a hard break is text, and a bare marker under it would underline it.
+  for (html, expected) in [
+    (
+      "<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "- *x  \n  *\n\n  - \n    > q",
+    ),
+    (
+      "<ol><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "1. *x  \n   *\n\n   - \n     > q",
+    ),
+    (
+      "lead<br><ul><li> <ol><li><br></li><li><em>x<br></em><ul><li><blockquote>q</blockquote></li><li>z</li></ul></li></ol></li></ul>",
+      "lead  \n\n-\n  1.   \n  2. *x  \n     *\n\n     - \n       > q\n     - z",
+    ),
+    // A parent's own bare marker still takes the item without a blank line.
+    (
+      "<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-\n  - \n    > q",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
 fn heading_after_nested_hard_break_stays_in_parent_item() {
   for (html, expected) in [
     ("<ul><li><p>a</p><h2>h</h2></li></ul>", "- a\n\n  ## h"),

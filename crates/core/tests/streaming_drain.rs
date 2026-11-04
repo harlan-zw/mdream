@@ -2052,6 +2052,8 @@ fn streaming_empty_nested_item_marker_matches_one_shot() {
     "<ul><li>a<ul><li></li><li>b</li></ul></li></ul>",
     "<ul><li>a<ul><script>s</script><li></li></ul></li></ul>",
     "<ul><li>a<ol><template>t</template><li></li></ol></li></ul>",
+    "<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+    "lead<br><ul><li> <ol><li><br></li><li><em>x<br></em><ul><li><blockquote>q</blockquote></li><li>z</li></ul></li></ol></li></ul>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
