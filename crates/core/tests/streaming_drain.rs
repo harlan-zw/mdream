@@ -2054,6 +2054,17 @@ fn streaming_empty_nested_item_marker_matches_one_shot() {
     "<ul><li>a<ol><template>t</template><li></li></ol></li></ul>",
     "<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
     "lead<br><ul><li> <ol><li><br></li><li><em>x<br></em><ul><li><blockquote>q</blockquote></li><li>z</li></ul></li></ol></li></ul>",
+    "<ul><li>&#13;&#10;<em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+    "<ol start=\"10\"><li><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+    // A drain takes the start of the line above, and with it the item it opens.
+    "<ol start=\"10\"><li><em>xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+    "<ol start=\"123456789\"><li><em>x<ul><li>y<br></li></ul></em><b></b><ul><li><br></li><li>z</li></ul><p>t</p></li></ol>",
+    // A drain takes the line above whole, or a paragraph over several lines.
+    "<ol start=\"10\"><li><em>abcdefghijklmnopqrstuvwxyz0123456789&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+    "<ol start=\"10\"><li><em>abcdefghij&#13;&#10;klmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+    "<ol start=\"10\"><li>abcdefghijklmnopqrstuvwxyz&#13;&#10;<em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+    // A stream writes the spaces of a hard break run after the `*`.
+    "<ol start=\"123456789\"><li><em>x<br><br></em><blockquote></blockquote><ul><li><em></em></li><li></li></ul></li></ol>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
@@ -4610,5 +4621,46 @@ fn block_on_a_nested_pending_marker_streams_like_one_shot() {
         assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
       }
     }
+  }
+}
+
+#[test]
+fn lone_closer_after_closed_item_and_hard_break_streams() {
+  for (html, expected) in [
+    (
+      "<ul><li><ol><li>lead<br><em>x<br><br></em><em> </em><em>x&#10;</em><em></em><ul><li><br></li><li>z</li></ul><b></b></li></ol></li></ul>",
+      "-\n  1. lead  \n     *x  \n       \n     **x\n*\n     -   \n     - z",
+    ),
+    (
+      "<ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-   \n    \n  *x\n*\n\n  - \n    > q",
+    ),
+    (
+      "<ul><li><br><br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li>&#10;<br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "- \n  \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><br><br>a&#10;<em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  a\n*x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><br><br>a<br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  a  \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>",
+      "-\n  - y  \n    *x  \n      \n    *  \n    1.   \n    2.",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }

@@ -7465,11 +7465,61 @@ fn emphasis_closer_alone_on_its_line_is_no_parent_marker() {
       "<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
       "-\n  - \n    > q",
     ),
-    // Past a CRLF the `*` sits short of the item's content column, where it
-    // opens a list of its own, so the guard leaves it alone.
+    // Past a CRLF the `*` sits short of the content column of the item the
+    // line above opens, where it opens a list of its own, so the guard leaves
+    // it alone.
     (
       "<ol start=\"10\"><li><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
       "10. *x\r\n*\n    - \n      > q",
+    ),
+    (
+      "<blockquote><ul><li><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></blockquote>",
+      "> - *x\r\n> *\n>   - \n>     > q",
+    ),
+    // Under a text line the `*` continues it: inside a quote, and after a
+    // parent marker alone on its line, where that text left the item.
+    (
+      "<ul><li><blockquote><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></blockquote></li></ul>",
+      "- \n  > *x\r\n  > *\n  >\n  > - \n  >   > q",
+    ),
+    (
+      "<ul><li>&#13;&#10;<em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "- \r\n*x\r\n*\n\n  - \n    > q",
+    ),
+    // A quote in an item counts its columns past the item's indent, whether
+    // its first line carries that indent or not.
+    (
+      "<ul><li><blockquote><ol start=\"10\"><li><em>x<br></em><ol><li><br></li></ol></li></ol></blockquote></li></ul>",
+      "- \n  > 10. *x  \n  >     *\n  >\n  >     1.",
+    ),
+    (
+      "<ul><li><blockquote><ol start=\"10\"><li><em>x&#13;&#10;</em><ol><li><br></li></ol></li></ol></blockquote></li></ul>",
+      "- \n  > 10. *x\r\n  > *\n  >     1.",
+    ),
+    (
+      "<ul><li><blockquote><ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul></blockquote></li></ul>",
+      "- \n  > - *x  \n  >   *\n  >\n  >   - \n  >     > q",
+    ),
+    // The `*` answers to the whole paragraph above: the item a lazy line
+    // continues still holds it, and past a blank line none goes on.
+    (
+      "<ol start=\"10\"><li>a&#10;<em>b&#10;</em><br><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10. a\n*b\n*  \n    - \n      > q",
+    ),
+    (
+      "<ol start=\"10\"><li>a&#13;&#10;<em>x&#10;&#10;</em><br><ol><li></li></ol>z</li></ol>",
+      "10. a\r\n*x\n\n*  \n    1.\n\n    z",
+    ),
+    // An item holding only another marker, as `- *` does, opens no paragraph,
+    // so the text under it starts one at its own column.
+    (
+      "<ul><li><em>&#13;y&#10;</em><ul><li><br></li><li>z</li></ul></li></ul>",
+      "- *\ry\n*\n\n  -   \n  - z",
+    ),
+    // A nested marker after a lone `\r` keeps the blank line.
+    (
+      "<p>lead</p><em><em>x<br>&#13;&#10;</em>&#13;<ol start=\"10\"><li><blockquote>q</blockquote></li><li>z</li></ol>z</em>",
+      "lead\n\n**x  \n\r\n*\r\n\n10. \n    > q 11. z z*",
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html}");
@@ -7659,4 +7709,44 @@ fn text_after_a_closed_nested_item_stays_escaped() {
     convert("<ul><li>a<ul><li></li></ul># t</li></ul>"),
     "- a\n\n  -\n\n  \\# t"
   );
+}
+
+#[test]
+fn lone_closer_after_closed_item_and_hard_break() {
+  for (html, expected) in [
+    (
+      "<ul><li><ol><li>lead<br><em>x<br><br></em><em> </em><em>x&#10;</em><em></em><ul><li><br></li><li>z</li></ul><b></b></li></ol></li></ul>",
+      "-\n  1. lead  \n     *x  \n       \n     **x\n*\n     -   \n     - z",
+    ),
+    (
+      "<ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-   \n    \n  *x\n*\n\n  - \n    > q",
+    ),
+    (
+      "<ul><li><br><br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li>&#10;<br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "- \n  \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><br><br>a&#10;<em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  a\n*x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><br><br>a<br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  a  \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>",
+      "-\n  - y  \n    *x  \n      \n    *  \n    1.   \n    2.",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
 }

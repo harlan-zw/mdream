@@ -3401,6 +3401,116 @@ impl ConvertState {
     matches!(bytes[index - 1], b'\n' | b'\r')
   }
 
+  /// Whether a lone `*` or `+` at `closer`, after `indent` spaces, reads as a
+  /// list marker rather than as text continuing the paragraph above, such as
+  /// an emphasis closer. Right after a `\r` it starts a line of its own. Past
+  /// a line feed it reads as a marker when no paragraph goes on above it, or
+  /// when it sits short of that paragraph's column: the column of the item
+  /// content the paragraph starts with, or zero outside an item. Such a line falls
+  /// out of the paragraph's container and opens a list of its own. Columns
+  /// count inside the quote that holds the `*`. `hard_break` says a hard break
+  /// follows the `*` on its line.
+  fn lone_closer_reads_as_marker(
+    &self,
+    bytes: &[u8],
+    closer: usize,
+    indent: usize,
+    hard_break: bool,
+  ) -> bool {
+    let mut start = closer;
+    while start > 0 && bytes[start - 1] == b' ' {
+      start -= 1;
+    }
+    let after_cr = if start > 0 {
+      bytes[start - 1] == b'\r'
+    } else {
+      self.has_flushed_tail() && self.flushed_tail[1] == b'\r'
+    };
+    if after_cr {
+      return true;
+    }
+    // The innermost quote holding the `*`: a stream can drain its line from
+    // inside a quote opened later.
+    let quote = self
+      .blockquotes
+      .iter()
+      .rev()
+      .find(|frame| frame.content_start <= start)
+      .map(|frame| (frame.content_start, frame.list_indent.len()));
+    let (quote_start, quote_indent) = quote.unwrap_or((0, 0));
+    if quote.is_some() && start <= quote_start || start == 0 && !self.has_flushed_tail() {
+      return false;
+    }
+    // A quoted line keeps the indent the quote opened under ahead of its own.
+    let relative = |column: usize, indent: usize| {
+      if indent >= quote_indent {
+        column - quote_indent
+      } else {
+        column
+      }
+    };
+    // Walk up the paragraph above to the line it starts with.
+    let mut line_end = start;
+    let mut below = None;
+    let column = loop {
+      if quote.is_some() && line_end <= quote_start {
+        break below;
+      }
+      // The `\n` of a `\r\n` split across cuts ends a line a drain took.
+      let split_crlf = line_end == 1
+        && bytes[0] == b'\n'
+        && self.has_flushed_tail()
+        && self.flushed_tail[1] == b'\r';
+      if line_end == 0 || split_crlf {
+        // Drains took the lines above whole: the paragraph they left answers.
+        break match self.drained_paragraph {
+          Paragraph::Spaced(_) if hard_break && below.is_none() => None,
+          Paragraph::Open(column) | Paragraph::Spaced(column) => Some(column),
+          Paragraph::Closed => below,
+        };
+      }
+      // `\r\n` is a single line ending.
+      let mut end = line_end - 1;
+      if bytes[end] == b'\n' && end > 0 && bytes[end - 1] == b'\r' {
+        end -= 1;
+      }
+      let line_start = bytes[..end]
+        .iter()
+        .rposition(|&byte| matches!(byte, b'\n' | b'\r'))
+        .map_or(0, |at| at + 1);
+      // The quote's first line counts from where its content starts.
+      let first_quoted = quote.is_some() && line_start < quote_start;
+      let begin = if first_quoted {
+        quote_start
+      } else {
+        line_start
+      };
+      // A drain may have taken the start of the buffer's first line.
+      let read = if begin == 0 {
+        self.cut_line
+      } else {
+        LineRead::START
+      };
+      match read.extend(&bytes[begin..end]).end() {
+        LineKind::Blank => break below,
+        LineKind::Spaces if first_quoted => break below,
+        // Only a bare closer can precede the deferred break run. A hard break
+        // after it settles the run, so the spaces above end the paragraph.
+        LineKind::Spaces if hard_break && below.is_none() => break below,
+        LineKind::Spaces => line_end = line_start,
+        LineKind::Item { indent, column } => break Some(relative(column, indent)),
+        LineKind::Text(_) => {
+          below = Some(0);
+          if first_quoted {
+            break below;
+          }
+          line_end = line_start;
+        }
+      }
+    };
+    column.is_none_or(|column| relative(indent, indent) < column)
+  }
+
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
   /// `output_start`. A marker line continuing the paragraph above turns a lone
   /// marker into a setext underline: the text becomes a heading and the item
@@ -3465,14 +3575,15 @@ impl ConvertState {
       {
         self.parent_marker_scans += 1;
       }
+      let line_end = above_end;
       let mut above_end = above_end;
       while above_end > 0 && bytes[above_end - 1] == b' ' {
         above_end -= 1;
       }
-      // A lone `*` or `+` indented to the item's content column continues the
-      // paragraph above: an emphasis closer or text, which the marker line
-      // would underline. Indented less, as after a `\r` or a CRLF, it leaves
-      // the item and opens a list of its own, so it reads as a marker.
+      // Two spaces before the line feed are a hard break after the `*`.
+      let hard_break = line_end - above_end >= 2;
+      // A lone `*` or `+` can be text continuing the line above, such as an
+      // emphasis closer, which the marker line would underline.
       let written_marker = |end: usize| {
         if !matches!(bytes[end - 1], b'*' | b'+') {
           return true;
@@ -3486,7 +3597,9 @@ impl ConvertState {
           }
           at -= 1;
         }
-        indent < self.list_indent.len()
+        // After a lone `\r` this marker sits past a space only the blank line
+        // takes away, which leaves it short of the lines indented under it.
+        line_ending != b'\r' && self.lone_closer_reads_as_marker(bytes, end - 1, indent, hard_break)
       };
       above_end > 0
         && self
@@ -5975,7 +6088,7 @@ impl ConvertState {
 #[cfg(test)]
 mod tests {
   use super::{
-    BlockquoteFrame, ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_H2, TAG_LI, TAG_P,
+    BlockquoteFrame, ConvertState, CutLineLead, Paragraph, TAG_A, TAG_CODE, TAG_H2, TAG_LI, TAG_P,
     push_decimal,
   };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
@@ -6083,6 +6196,26 @@ mod tests {
 
     state.flushed_tail = *b"cd";
     assert_eq!(state.markdown_line_indent(), None);
+  }
+
+  // A run of hard breaks leaves a line of spaces that a stream can write after
+  // the lone `*` below it, so the rule reads past that line. A hard break after
+  // the `*` settles the run first, and then the spaces end the paragraph, in
+  // the buffer and in the paragraph a drain leaves open alike.
+  #[test]
+  fn lone_closer_after_a_hard_break_stops_at_the_spaces_above() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let text = b"- y  \n  *x  \n    \n  *";
+    let closer = text.len() - 1;
+    assert!(!state.lone_closer_reads_as_marker(text, closer, 2, false));
+    assert!(state.lone_closer_reads_as_marker(text, closer, 2, true));
+
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Blank(0);
+    state.flushed_tail = *b" \n";
+    state.drained_paragraph = Paragraph::Spaced(2);
+    assert!(!state.lone_closer_reads_as_marker(b"  *", 2, 2, false));
+    assert!(state.lone_closer_reads_as_marker(b"  *", 2, 2, true));
   }
 
   /// An open list item whose buffer a drain emptied: the item's content line

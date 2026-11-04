@@ -127,6 +127,12 @@ export interface MarkdownState {
   blockquotes: BlockquoteFrame[]
   /** Public runtime view used by tag handlers without exposing frame internals. */
   bufferedBlockquoteDepth: number
+  /** How the start of the buffer's first line a stream dropped reads, once it compacted. */
+  compactedRead?: LineRead
+  /** Open paragraph column; -(column + 1) retains it across a space-only line. */
+  compactedParagraph?: number
+  /** The dropped bytes end in a CR, whose LF may follow in the buffer. */
+  compactedCr?: boolean
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
   lastItemMarkerFragment?: number
@@ -289,12 +295,19 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // that item and turn this one into its sibling. A marker outside the
   // innermost blockquote keeps the blank line it already had, which the quote's
   // prefix makes harmless.
+  let trailingSpaces = 0
   for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
     const value = state.buffer[fragment]!
     for (let cursor = value.length - 1; cursor >= 0; cursor--) {
       const code = value.charCodeAt(cursor)
-      if (code === 10 || code === 32)
+      if (code === 10) {
+        trailingSpaces = 0
         continue
+      }
+      if (code === 32) {
+        trailingSpaces++
+        continue
+      }
       // A direct first-child list cannot have inserted content before its
       // parent's built-in marker. A drain/rewrite that moves that fragment
       // misses this shortcut and keeps the general line recognizer.
@@ -303,10 +316,8 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
         && element.parent?.index === 0
         && (fragment === 0 || newlineRunBefore(state.buffer, fragment) > 0)
         && (code === 45 || code === 46)
-      // A lone `*` or `+` indented to the item's content column continues the
-      // paragraph above: an emphasis closer or text, which the marker line
-      // would underline. Indented less, as after a CR or a CRLF, it leaves the
-      // item and opens a list of its own, so it reads as a marker.
+      // A lone `*` or `+` can be text continuing the line above, such as an
+      // emphasis closer, which the marker line would underline.
       // A literal marker from a tag override is no emphasis closer, and Rust
       // never records one, so the line above keeps its old reading there.
       let readsAsMarker = !builtIn || (code !== 42 && code !== 43)
@@ -330,7 +341,9 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
         // The space after a CR separates the marker from it.
         if (before === 13 && indent > 0)
           indent--
-        readsAsMarker = indent < state.listIndent.length
+        // After a lone CR this marker sits past a space only the blank line
+        // takes away, which leaves it short of the lines indented under it.
+        readsAsMarker = !afterCr && loneCloserReadsAsMarker(state, fragment, cursor, indent, trailingSpaces >= 2)
       }
       state.emptyItemFragment = (recordedParent || (readsAsMarker && listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3)))
         ? undefined
@@ -339,6 +352,237 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
     }
   }
   state.emptyItemFragment = state.buffer.length - 1
+}
+
+/**
+ * How a line reads for the lone `*` rule, taken one character at a time so a
+ * later compaction can carry the reading on. `kind` is 0 while only spaces
+ * came, 1 inside an ordered marker's digits, 2 after a marker and `count`
+ * spaces, 3 for an item whose content starts at `column`, 4 for other text.
+ * A whole line of spaces is the one a run of hard breaks leaves: a stream can
+ * write it after the line below it, so the rule reads past it.
+ */
+export interface LineRead {
+  kind: number
+  indent: number
+  column: number
+  count: number
+  /** The content column of the item a marker would nest in, or -1. */
+  outer: number
+}
+
+const LINE_START: LineRead = { kind: 0, indent: 0, column: 0, count: 0, outer: -1 }
+
+/** The same reading once `more` of the line follows. */
+function extendLineRead(read: LineRead, more: string): LineRead {
+  let { kind, indent, column, count, outer } = read
+  // No marker starts where one could: the content of the item it would have
+  // nested in, or text.
+  const content = () => {
+    if (outer >= 0) {
+      kind = 3
+      column = outer
+    }
+    else {
+      kind = 4
+    }
+  }
+  // A marker or digits starting at column `at`.
+  const markerStart = (code: number, at: number) => {
+    if (code === 45 || code === 42 || code === 43) {
+      kind = 2
+      column = at + 1
+      count = 0
+    }
+    else if (code >= 48 && code <= 57) {
+      kind = 1
+      column = at + 1
+      count = 1
+    }
+    else {
+      content()
+    }
+  }
+  for (let at = 0; at < more.length && kind < 3; at++) {
+    const code = more.charCodeAt(at)
+    if (kind === 0) {
+      if (code === 32)
+        indent++
+      else
+        markerStart(code, indent)
+    }
+    else if (kind === 1) {
+      if (code >= 48 && code <= 57 && count < 9) {
+        column++
+        count++
+      }
+      else if (code === 46 || code === 41) {
+        kind = 2
+        column++
+        count = 0
+      }
+      else {
+        content()
+      }
+    }
+    else if (code === 32) {
+      count++
+    }
+    else if (count === 0) {
+      content()
+    }
+    else if (count > 4) {
+      // Past four spaces the content is code, and the column sits one past the marker.
+      kind = 3
+      column++
+    }
+    else {
+      // The content can open a list of its own, as `- *` does.
+      outer = column + count
+      markerStart(code, outer)
+    }
+  }
+  return { kind, indent, column, count, outer }
+}
+
+/** A whole line's reading: digits that open no marker are the content of the item they sit in. */
+function endLineRead(read: LineRead): LineRead {
+  return read.kind === 1 && read.outer >= 0 ? { ...read, kind: 3, column: read.outer } : read
+}
+
+/**
+ * The paragraph open once a whole line reading as `read` follows one open at
+ * `paragraph`: none after a blank line or a marker alone, the item's content
+ * column after an item, and zero for text outside an item.
+ */
+function nextParagraph(paragraph: number | undefined, read: LineRead): number | undefined {
+  const line = endLineRead(read)
+  // A negative column remembers spaces above a possible hard-break closer.
+  if (line.kind === 0 && line.indent > 0)
+    return paragraph === undefined || paragraph < 0 ? paragraph : -paragraph - 1
+  if (line.kind === 0 || line.kind === 2)
+    return undefined
+  if (line.kind === 3)
+    return line.column
+  return paragraph === undefined ? 0 : paragraph < 0 ? -paragraph - 1 : paragraph
+}
+
+/**
+ * Note that a stream drops the buffer's front up to `cut` in `text`: fold the
+ * lines it drops whole into the paragraph they leave open, and carry the
+ * reading of the line it cuts, for the lone `*` rule. The LF of a CRLF split
+ * across cuts ends nothing new.
+ */
+export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
+  let read = state.compactedRead ?? LINE_START
+  let paragraph = state.compactedParagraph
+  let start = 0
+  for (let at = 0; at < cut; at++) {
+    const code = text.charCodeAt(at)
+    if (code !== 10 && code !== 13)
+      continue
+    const crlf = code === 10 && (at === 0 ? state.compactedCr === true : text.charCodeAt(at - 1) === 13)
+    if (!crlf)
+      paragraph = nextParagraph(paragraph, extendLineRead(read, text.slice(start, at)))
+    read = LINE_START
+    start = at + 1
+  }
+  state.compactedRead = extendLineRead(read, text.slice(start, cut))
+  state.compactedParagraph = paragraph
+  if (cut > 0)
+    state.compactedCr = text.charCodeAt(cut - 1) === 13
+}
+
+/**
+ * Whether a lone `*` or `+` at `fragment`/`cursor`, after `indent` spaces,
+ * reads as a list marker rather than as text continuing the paragraph above,
+ * such as an emphasis closer. Right after a CR it starts a line of its own.
+ * Past a line feed it reads as a marker when no paragraph goes on above it, or
+ * when it sits short of that paragraph's column: the column of the item
+ * content the paragraph starts with, or zero outside an item. Such a line falls
+ * out of the paragraph's container and opens a list of its own. Columns count
+ * inside the quote that holds the `*`.
+ */
+function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor: number, indent: number, hardBreak: boolean): boolean {
+  const buffer = state.buffer
+  // The innermost quote holding the `*`.
+  let quote: BlockquoteFrame | undefined
+  for (let index = state.blockquotes.length - 1; index >= 0 && !quote; index--) {
+    if (state.blockquotes[index]!.fragment <= fragment)
+      quote = state.blockquotes[index]
+  }
+  const quoteFragment = quote?.fragment ?? 0
+  const quoteIndent = quote?.listIndent.length ?? 0
+  // A quoted line keeps the indent the quote opened under ahead of its own.
+  const relative = (column: number, lead: number) => lead >= quoteIndent ? column - quoteIndent : column
+  let at = fragment
+  let offset = cursor
+  // Read back one character, across fragments; -1 at the buffer start.
+  const back = (): number => {
+    while (offset === 0) {
+      if (at === 0)
+        return -1
+      offset = buffer[--at]!.length
+    }
+    return buffer[at]!.charCodeAt(--offset)
+  }
+  let code = back()
+  while (code === 32)
+    code = back()
+  if (code === 13 || (code === -1 && state.compactedCr === true))
+    return true
+  if ((quote && (code === -1 || at < quoteFragment)) || (code === -1 && !state.compactedRead) || (code !== 10 && code !== -1))
+    return false
+  const decide = (column: number | undefined) => column === undefined || relative(indent, indent) < column
+  // Walk up the paragraph above to the line it starts with.
+  let below: number | undefined
+  const compacted = () => {
+    const paragraph = state.compactedParagraph
+    return paragraph !== undefined && paragraph < 0
+      ? hardBreak && below === undefined ? undefined : -paragraph - 1
+      : paragraph ?? below
+  }
+  for (;;) {
+    if (quote && (code === -1 || at < quoteFragment))
+      return decide(below)
+    // A compaction dropped the lines above whole: the paragraph they left answers.
+    if (code === -1)
+      return decide(compacted())
+    // CRLF is a single line ending; the LF of one split across compactions
+    // ends a line a compaction dropped.
+    let char = back()
+    if (code === 10 && char === -1 && state.compactedCr === true)
+      return decide(compacted())
+    if (code === 10 && char === 13)
+      char = back()
+    let line = ''
+    let firstQuoted = false
+    while (char !== -1 && char !== 10 && char !== 13) {
+      line = String.fromCharCode(char) + line
+      // The quote's first line counts from where its content starts.
+      if (quote && at === quoteFragment && offset === 0) {
+        firstQuoted = true
+        break
+      }
+      char = back()
+    }
+    // A compaction may have dropped the start of the buffer's first line.
+    const read = endLineRead(extendLineRead(char === -1 && !firstQuoted ? state.compactedRead ?? LINE_START : LINE_START, line))
+    // Only a bare closer can precede the deferred break run. A hard break
+    // after it settles the run, so the spaces above end the paragraph.
+    if (read.kind === 0 && read.indent > 0 && !firstQuoted && (below !== undefined || !hardBreak)) {
+      code = char
+      continue
+    }
+    if (read.kind === 0 || read.kind === 2)
+      return decide(below)
+    if (read.kind === 3)
+      return decide(relative(read.column, read.indent))
+    below = 0
+    if (firstQuoted)
+      return decide(below)
+    code = char
+  }
 }
 
 /**
@@ -1516,6 +1760,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
     lastItemMarkerFragment: undefined,
+    compactedRead: undefined,
+    compactedParagraph: undefined,
+    compactedCr: undefined,
     lastItemMarkerOwner: undefined,
     listTailStart: undefined,
     collapseNonSpanDepth: 0,
