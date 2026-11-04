@@ -3469,21 +3469,24 @@ impl ConvertState {
       while above_end > 0 && bytes[above_end - 1] == b' ' {
         above_end -= 1;
       }
-      // A list writes only `-` and `N.` markers, so a lone `*` or `+` is an
-      // emphasis closer or text, which the marker line would underline. Right
-      // after a `\r` it starts a line of its own, and reads as a marker there.
+      // A lone `*` or `+` indented to the item's content column continues the
+      // paragraph above: an emphasis closer or text, which the marker line
+      // would underline. Indented less, as after a `\r` or a CRLF, it leaves
+      // the item and opens a list of its own, so it reads as a marker.
       let written_marker = |end: usize| {
-        matches!(bytes[end - 1], b'-' | b'.' | b')') || {
-          let mut at = end - 1;
-          while at > 0 && bytes[at - 1] == b' ' {
-            at -= 1;
-          }
-          if at > 0 {
-            bytes[at - 1] == b'\r'
-          } else {
-            self.has_flushed_tail() && self.flushed_tail[1] == b'\r'
-          }
+        if !matches!(bytes[end - 1], b'*' | b'+') {
+          return true;
         }
+        let mut at = end - 1;
+        let mut indent = 0;
+        while at > 0 && bytes[at - 1] == b' ' {
+          // The space after a decoded `\r` separates the marker from it.
+          if !(at >= 2 && bytes[at - 2] == b'\r') {
+            indent += 1;
+          }
+          at -= 1;
+        }
+        indent < self.list_indent.len()
       };
       above_end > 0
         && self
