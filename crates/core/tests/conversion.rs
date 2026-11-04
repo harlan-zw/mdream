@@ -7748,6 +7748,12 @@ fn emphasis_closer_alone_on_its_line_is_no_parent_marker() {
       "<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
       "-\n  - \n    > q",
     ),
+    // Past a CRLF the `*` sits short of the item's content column, where it
+    // opens a list of its own, so the guard leaves it alone.
+    (
+      "<ol start=\"10\"><li><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10. *x\r\n*\n    - \n      > q",
+    ),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),
