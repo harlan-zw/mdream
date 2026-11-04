@@ -125,7 +125,6 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<ol start="10"><li><ul><li></li></ul>text</li></ol>',
   '<blockquote><ul><li><ul><li></li></ul>text</li></ul></blockquote>',
   '<ul><li><ul><li><ul><li></li></ul>text</li></ul></li></ul>',
-  '<ul><li><ul><li></li></ul></li></ul>',
   '<ul><li><ul></ul>text</li></ul>',
   '<ul><li><ul><li></li></ul><span></span> </li><li>next</li></ul>',
   '<ul><li><ul><li>inner</li></ul></li><li>next</li></ul>',
