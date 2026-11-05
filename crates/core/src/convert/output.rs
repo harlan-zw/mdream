@@ -1152,6 +1152,13 @@ impl ConvertState {
       || fragment.trim_start_matches(' ').starts_with('\n')
     {
       self.heading_break_pending = false;
+      // The caption's frame is already pushed; an empty caption hands it back.
+      if tag_id == Some(TAG_FIGCAPTION)
+        && self.depth_map[TAG_PRE as usize] == 0
+        && let Some(frame) = self.caption_frames.last_mut()
+      {
+        frame.restores_heading_break = true;
+      }
     } else if has_visible(fragment.as_bytes()) {
       self.heading_break_pending = false;
       let fragment = fragment.trim_start_matches(' ');
@@ -1726,6 +1733,7 @@ impl ConvertState {
         },
         deferred_breaks: None,
         has_internal_break: false,
+        restores_heading_break: false,
       });
     }
 
@@ -2510,10 +2518,12 @@ impl ConvertState {
     }
     if caption_exit && let Some(frame) = self.caption_frames.pop() {
       let deferred_breaks = frame.deferred_breaks;
+      let mut restores_heading_break = false;
       match frame.state {
         CaptionState::Pending => {
           if !has_override {
             output = None;
+            restores_heading_break = frame.restores_heading_break;
           }
         }
         CaptionState::Tentative {
@@ -2542,6 +2552,7 @@ impl ConvertState {
             }
             if !has_override {
               output = None;
+              restores_heading_break = frame.restores_heading_break;
             }
           }
         }
@@ -2550,6 +2561,10 @@ impl ConvertState {
         }
       }
       self.write_deferred_break_run(deferred_breaks);
+      // A break the dropped caption left behind already ends the heading's line.
+      if restores_heading_break && !self.caption_exit_opens_block_line() {
+        self.heading_break_pending = true;
+      }
     }
 
     if !has_override
@@ -3539,6 +3554,10 @@ impl ConvertState {
       index -= 1;
       gap += 1;
     }
+    #[cfg(test)]
+    self
+      .block_line_bytes_read
+      .set(self.block_line_bytes_read.get() + gap + 1);
     if index > 0 && bytes[index - 1] != b'\n' {
       if gap == 0 {
         return false;
@@ -3557,14 +3576,43 @@ impl ConvertState {
         }
         _ => return false,
       }
+      #[cfg(test)]
+      let marker = index;
       while index > 0 && bytes[index - 1] == b' ' {
         index -= 1;
       }
+      #[cfg(test)]
+      self
+        .block_line_bytes_read
+        .set(self.block_line_bytes_read.get() + marker - index);
     }
     if index == 0 {
       return !self.has_flushed_tail() || self.flushed_tail[1] == b'\n';
     }
     bytes[index - 1] == b'\n'
+  }
+
+  /// `opens_block_line` at the buffer end, for a dropped caption's exit. Past
+  /// its first space a gap only counts as present, so the answer holds while
+  /// the bytes before the space run stay put: a line that empty captions in a
+  /// row leave untouched is not read again at each exit.
+  fn caption_exit_opens_block_line(&mut self) -> bool {
+    let end = self.buffer.len();
+    let start = self
+      .caption_line_spaces
+      .start(self.buffer.as_bytes(), end, |byte| byte == b' ');
+    if start == end {
+      self.caption_line_opens = None;
+      return self.opens_block_line(self.buffer.as_bytes(), end);
+    }
+    if let Some((known, opens)) = self.caption_line_opens
+      && known == start
+    {
+      return opens;
+    }
+    let opens = self.opens_block_line(self.buffer.as_bytes(), start + 1);
+    self.caption_line_opens = Some((start, opens));
+    opens
   }
 
   /// Deepest indent of a marker a block can share a line with. A list writes the

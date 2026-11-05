@@ -173,6 +173,34 @@ describe.each(engines)('headings $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li><ul><li><h3></h3><figure><figcaption><code><em><div></div></em></code></figcaption></figure><div>x</div></li></ul></li></ul>', '-\n  - ###\n\n    x'],
+    ['<ul><li><h3></h3><figure><figcaption><em></em></figcaption></figure>x</li></ul>', '- ###\n\n  x'],
+    ['<ul><li><h3></h3><figcaption></figcaption>x</li></ul>', '- ###\n\n  x'],
+    // A heading with text owes the same break.
+    ['<ul><li><h3>T</h3><figcaption></figcaption>x</li></ul>', '- ### T\n\n  x'],
+    // A break the empty caption already wrote is not doubled.
+    ['<ul><li><h3></h3><figcaption><div></div></figcaption>x</li></ul>', '- ###\n\n  x'],
+    ['<ul><li><h3></h3><figcaption><br></figcaption>x</li></ul>', '- ###  \n  x'],
+    ['<ul><li><h3></h3><figure><figcaption>cap</figcaption></figure><div>x</div></li></ul>', '- ###\n\n  *cap*\n\n  x'],
+  ])('keeps the heading break owed past an empty caption: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(engine.htmlToMarkdown(html)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output, `width=${width}`).toBe(expected)
+    }
+  })
+
+  it.each([
     ['<ul><li>#######<div>x</div></li></ul>', '- ####### x'],
     ['<ul><li>########<div>x</div></li></ul>', '- ######## x'],
   ])('keeps a run of seven or more hashes as text before a div: %s', async (html, expected) => {

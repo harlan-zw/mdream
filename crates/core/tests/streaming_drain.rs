@@ -4906,3 +4906,15 @@ fn block_on_a_nested_pending_marker_streams_like_one_shot() {
     }
   }
 }
+
+#[test]
+fn empty_caption_after_list_heading_streams_consistently() {
+  assert_stream_matches(
+    concat!(
+      "<ul><li><ul><li><h3></h3><figure><figcaption>",
+      "<code><em><div></div></em></code>",
+      "</figcaption></figure><div>x</div></li></ul></li></ul>",
+    ),
+    HtmlToMarkdownOptions::default(),
+  );
+}

@@ -177,6 +177,9 @@ const MARKER_TYPE_MASK = 7
 const CAPTION_FRAME_SIZE = 4
 const CAPTION_OPEN = 1
 const CAPTION_INTERNAL_BREAK = 2
+// The caption took a pending heading break at its enter; dropped empty, it
+// owes the break again.
+const CAPTION_HEADING_BREAK = 4
 const CAPTION_DEFAULT_SPACING = -1
 const CAPTION_NO_ANCHOR = -1
 INLINE_MARKER_TYPE[TAG_STRONG] = 1 // **
@@ -1509,6 +1512,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let captionBoundary = 0
   let captionBoundarySpacing = 0
   let captionBreakRun = 0
+  // The space run ending the buffer when a dropped caption's exit last checked
+  // it: the buffer's length and last fragment then, the fragment holding the
+  // run's first space, -1 when there was none, and whether the line opened a
+  // block. Strings are immutable, so while both fragments are unchanged the run
+  // and the answer are too, and empty captions in a row do not read the line
+  // again at every exit.
+  let captionLineEnd = 0
+  let captionLineTail = ''
+  let captionLineFragment = -1
+  let captionLineHead = ''
+  let captionLineOpens = false
   const gfmLifecycle: GfmLifecycleState = { openCodeSpans: [] }
   let openLinkFragment = -1
   let openLinkHeadingBreak = false
@@ -1758,6 +1772,41 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     else if (captionBreakRun !== 0 && captionFrameCount === 0) {
       captionBoundary = 2
     }
+  }
+
+  // `opensBlockLine` at the buffer end, for a dropped caption's exit. Past its
+  // first space a gap only counts as present, so the check starts there.
+  function captionExitOpensBlockLine(buff: string[]): boolean {
+    let fragment = buff.length - 1
+    let cursor = buff[fragment]!.length
+    let runFragment = -1
+    let runCursor = 0
+    for (;;) {
+      if (fragment === captionLineEnd - 1 && cursor === buff[fragment]!.length && captionLineFragment >= 0
+        && buff[fragment] === captionLineTail && buff[captionLineFragment] === captionLineHead) {
+        captionLineEnd = buff.length
+        captionLineTail = buff[captionLineEnd - 1]!
+        return captionLineOpens
+      }
+      if (cursor === 0) {
+        if (fragment === 0)
+          break
+        cursor = buff[--fragment]!.length
+        continue
+      }
+      if (buff[fragment]!.charCodeAt(cursor - 1) !== 32) // space
+        break
+      runFragment = fragment
+      runCursor = --cursor
+    }
+    captionLineEnd = buff.length
+    captionLineTail = buff[captionLineEnd - 1]!
+    captionLineFragment = runFragment
+    captionLineHead = runFragment < 0 ? '' : buff[runFragment]!
+    captionLineOpens = runFragment < 0
+      ? opensBlockLine(buff, buff.length - 1, buff.at(-1)!.length)
+      : opensBlockLine(buff, runFragment, runCursor + 1)
+    return captionLineOpens
   }
 
   function finishRawHtmlBlock(value: string, generated = false): void {
@@ -2380,6 +2429,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (captionExit && captionFrameCount !== 0) {
         const offset = (captionFrameCount - 1) * CAPTION_FRAME_SIZE
         const opened = (captionFrames![offset + 2]! & CAPTION_OPEN) !== 0
+        const restoresHeadingBreak = !opened && defaultCaptionExit
+          && (captionFrames![offset + 2]! & CAPTION_HEADING_BREAK) !== 0
         if (!opened && defaultCaptionExit) {
           output = undefined
           handlerOutput = undefined
@@ -2394,6 +2445,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         finishCaptionFrame()
         if (!opened && flushCaptionBreakRun())
           captionBufferChanged = true
+        // A break the dropped caption left behind already ends the heading's line.
+        if (restoresHeadingBreak && buff.length > 0 && !captionExitOpensBlockLine(buff))
+          state.headingBreakPending = true
       }
       else if (meaningfulOutput && captionNeedsPreparation()) {
         captionBufferChanged = prepareCaptionOutput(captionEnter, tagId !== TAG_LI) || captionBufferChanged
@@ -2659,6 +2713,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (state.headingBreakPending && eventType === NodeEventEnter) {
       if (tagId === TAG_LI || tagId === TAG_FIGCAPTION || (output?.[0] && trimLeadingSpaces(output[0]).startsWith('\n'))) {
         state.headingBreakPending = false
+        // The caption's frame is already pushed; an empty caption hands it back.
+        if (tagId === TAG_FIGCAPTION && !state.depthMap[TAG_PRE] && captionFrameCount !== 0)
+          captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! |= CAPTION_HEADING_BREAK
       }
       else if (output?.some(hasNonWhitespace)) {
         state.headingBreakPending = false

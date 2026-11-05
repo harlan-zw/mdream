@@ -1,6 +1,6 @@
 import type { MarkdownState } from '../../src/markdown-processor'
 import type { HandlerContext } from '../../src/types'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { MAX_TAG_ID, TAG_DIV, TAG_LI } from '../../src/const'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { tagHandlers } from '../../src/tags'
@@ -163,5 +163,32 @@ describe('div after a hash run in a list item', () => {
     const context = { node: {}, state } as unknown as HandlerContext
     expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
     expect(reads).toBeLessThanOrEqual(7)
+  })
+})
+
+describe('empty captions after a heading in a list item', () => {
+  it.each([
+    ['<figcaption></figcaption>', ''],
+    ['<figure><figcaption></figcaption></figure>', ''],
+    // An empty inline splits the run across fragments.
+    ['<figcaption></figcaption>', '<b></b>&#32;'],
+    // A marker after the run sends the check through the spaces before it.
+    ['<figcaption></figcaption>', '-&#32;'],
+  ])('reads the heading line once past %s with %j after the run', (caption, tail) => {
+    // Each empty caption hands the heading break back and checks the heading's
+    // line again; the spaces ending that line must not be read at every exit.
+    const html = `<ul><li><h3>T${'&#32;'.repeat(2000)}${tail}</h3>${caption.repeat(200)}x</li></ul>`
+    const charCodeAt = vi.spyOn(String.prototype, 'charCodeAt')
+    let output = ''
+    let reads = 0
+    try {
+      output = htmlToMarkdown(html)
+      reads = charCodeAt.mock.calls.length
+    }
+    finally {
+      charCodeAt.mockRestore()
+    }
+    expect(output.endsWith('\n\n  x')).toBe(true)
+    expect(reads).toBeLessThan(html.length * 4)
   })
 })
