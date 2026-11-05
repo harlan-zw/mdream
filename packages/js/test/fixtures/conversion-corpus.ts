@@ -147,4 +147,9 @@ export const CONVERSION_CORPUS: string[] = [
   `S<pre>  </pre>`,
   `S<pre></pre><pre>`,
   `a<pre> <b></b> </pre>`,
+  // Content in blocks nested in a link
+  `<a href="/a" title="A"><div><p>x</p><p>y</p></div></a>`,
+  `<a href="/a" title="A"><p>x</a><a href="/b" title="B"><p>y</a>`,
+  `<a href="/a" title="A"><div><a href="/b" title="B"><p>y</p>z</a>w</div></a>`,
+  `<a href="/a" title="A"><div><img src="/i" alt="I"><a href="/b" title="B"><p>y</p></a></div></a>`,
 ]

@@ -124,6 +124,37 @@ describe.each(engines)('declarative extraction (plugins.extraction) $name', (eng
     expect(extracted).toEqual(['ABC'])
   })
 
+  it('keeps the space between link words when include filtering omits them', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const extracted: string[] = []
+
+    htmlToMarkdown('<h1><a href="/x"><span>B</span> <span>C</span></a></h1>', {
+      plugins: {
+        filter: { include: ['h1'], processChildren: false },
+        extraction: { h1: element => extracted.push(element.textContent) },
+      },
+      engine,
+    })
+
+    expect(extracted).toEqual(['B C'])
+  })
+
+  it('extracts the link text, not the label that replaces it in the output', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const extracted: string[] = []
+
+    const markdown = htmlToMarkdown('<div><a href="/x" aria-label="L"><span>x</span></a></div>', {
+      plugins: {
+        filter: { include: ['a'], processChildren: false },
+        extraction: { a: element => extracted.push(element.textContent) },
+      },
+      engine,
+    })
+
+    expect(markdown).toBe('[L](/x)')
+    expect(extracted).toEqual(['x'])
+  })
+
   it('extracts comma-separated selector lists across sibling branches', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `

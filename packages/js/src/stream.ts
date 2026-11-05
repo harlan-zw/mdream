@@ -31,6 +31,7 @@ export async function* streamHtmlToMarkdown(
     depthMap: processor.state.depthMap,
     depth: 0,
     resolvedPlugins,
+    outputEvent: processor.processEvent,
     tagHandlers,
     tagOverrideHandlers,
     plainText: false,

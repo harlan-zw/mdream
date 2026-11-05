@@ -349,7 +349,11 @@ impl ConvertState {
 
   #[inline]
   pub(super) fn mark_rendered_child_content(&mut self) {
-    let image_index = self.stack.len().saturating_sub(1);
+    self.mark_rendered_content_below(self.stack.len().saturating_sub(1));
+  }
+
+  /// Count rendered content for the open nodes before `image_index`, up to their block.
+  fn mark_rendered_content_below(&mut self, image_index: usize) {
     let mut scope_start = self.first_block_parent_index.unwrap_or(0);
     if scope_start >= image_index {
       scope_start = if self.block_parent_indices.len() > 1 {
@@ -359,28 +363,45 @@ impl ConvertState {
       };
     }
 
-    let mut anchor_in_scope = false;
     for parent in &mut self.stack[scope_start..image_index] {
       parent.child_text_node_index += 1;
-      if parent.tag_id == Some(TAG_A) {
-        anchor_in_scope = true;
-      }
     }
-    if anchor_in_scope {
-      return;
-    }
-    let mut anchor_found = false;
-    for parent in self.stack[..scope_start].iter_mut().rev() {
-      if !anchor_found {
-        if parent.tag_id != Some(TAG_A) {
-          continue;
-        }
-        anchor_found = true;
-      }
-      parent.child_text_node_index += 1;
-      if !parent.is_inline {
+    // A link in this block already counts it, but a link around the block, as in
+    // `<a><div><a><img></a></div></a>`, holds it too.
+    self.count_content_in_enclosing_link(scope_start);
+  }
+
+  /// Content inside a block nested in a link is link content too: count it for
+  /// each link before `scope_start` and the inline nodes up to their blocks. A
+  /// link in a block of another link is content of that one as well. Only the
+  /// first count matters, since a link with content stays above 0 and above its
+  /// hidden count, so each node walked is marked and the next walk stops there.
+  /// A node's ancestors never change, so its mark holds for as long as it is open.
+  pub(super) fn count_content_in_enclosing_link(&mut self, scope_start: usize) {
+    let mut index = scope_start;
+    while index > 0 {
+      index -= 1;
+      let node = &mut self.stack[index];
+      if node.link_content_counted {
         return;
       }
+      node.link_content_counted = true;
+      if node.tag_id != Some(TAG_A) {
+        continue;
+      }
+      // The walk goes on from the link's block, which this loop counts too.
+      loop {
+        let node = &mut self.stack[index];
+        node.child_text_node_index += 1;
+        if !node.is_inline {
+          break;
+        }
+        if index == 0 {
+          return;
+        }
+        index -= 1;
+      }
+      index += 1;
     }
   }
 
@@ -1309,6 +1330,7 @@ impl ConvertState {
     let tag_id = node.tag_id;
     let is_inline = node.is_inline;
     let spacing = node.spacing;
+    let empty_text = node.child_text_node_index == 0;
     if link {
       let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
       self.link.empty_text_pending = false;
@@ -1317,7 +1339,13 @@ impl ConvertState {
       if !(self.clean_flags != 0
         && self.try_link_clean_rewrite(&attributes, is_inline, false, &mut resolved_href))
       {
-        self.write_link_exit(&attributes, is_inline, new_line_config[1], resolved_href);
+        self.write_link_exit(
+          &attributes,
+          is_inline,
+          new_line_config[1],
+          resolved_href,
+          empty_text,
+        );
       }
       self.stack.retired_mut().attributes = attributes;
       return;
@@ -1987,6 +2015,36 @@ impl ConvertState {
     false
   }
 
+  /// Before a visible link label: drop the spaces, written or pending, that are
+  /// all the link text so far. They only spaced out hidden text, so the caller
+  /// moves them past the link, as it does a `trailing_blank` the parser dropped.
+  pub(crate) fn take_blank_link_text(&mut self, label: &str, trailing_blank: bool) -> bool {
+    if !self.is_markdown()
+      || !has_visible(label.as_bytes())
+      || !self.link.open
+      || !self.link.bracket_emitted
+      || self.link.hold_released
+      || self.link.begin_depth != self.depth
+    {
+      return false;
+    }
+    let text_start = self.link.bracket_pos + 1;
+    let Some(text) = self.buffer.as_bytes().get(text_start..) else {
+      return false;
+    };
+    if !text.iter().all(|&byte| byte == b' ')
+      || (text.is_empty() && !self.pending_inline_whitespace && !trailing_blank)
+    {
+      return false;
+    }
+    if !text.is_empty() {
+      self.truncate_buffer(text_start);
+      self.last_content_cache_len = self.last_content_cache_len.min(1);
+    }
+    self.pending_inline_whitespace = false;
+    true
+  }
+
   /// Clean-mode empty link: drop the whole `[](url)`, restoring the caption state it changed.
   fn drop_empty_link_text(&mut self, bracket_pos: usize, is_inline: bool) {
     self.truncate_buffer(bracket_pos);
@@ -2074,15 +2132,20 @@ impl ConvertState {
     is_inline: bool,
     configured_new_lines: u8,
     resolved_href: Option<Cow<'_, str>>,
+    empty_text: bool,
   ) {
     self.write_output(false, is_inline, configured_new_lines, None, false);
 
     // That trim misses a space before an empty element (`<a>A <span></span></a>`).
     let text_end = self.buffer.trim_end_matches(' ').len();
     if self.link.bracket_emitted
-      && text_end > self.link.bracket_pos + 1
+      && (self.link.hold_released || text_end > self.link.bracket_pos + 1)
       && text_end < self.buffer.len()
-      && !is_whitespace(self.buffer.as_bytes()[text_end - 1])
+      && if text_end > 0 {
+        !is_whitespace(self.buffer.as_bytes()[text_end - 1])
+      } else {
+        self.has_flushed_tail() && !is_whitespace(self.flushed_tail[1])
+      }
       && self.code_spans.is_empty()
     {
       let removed = self.buffer.len() - text_end;
@@ -2127,6 +2190,11 @@ impl ConvertState {
       }
       // A length, not an offset. `bracket_pos` is `buffer.len()` when no `[` was emitted.
       self.last_content_cache_len = self.buffer.len().saturating_sub(self.link.bracket_pos);
+      // An empty link still writes `[](url)`. Like an image, it is content of
+      // its block, so the text after it keeps its leading space.
+      if empty_text {
+        self.mark_rendered_content_below(self.stack.len());
+      }
       if self.clean_flags & CLEAN_FRAGMENTS != 0
         && self.depth_map[TAG_CODE as usize] == 0
         // A skipped anchor has no link of its own; `self.link` is an ancestor's.
@@ -2453,6 +2521,7 @@ impl ConvertState {
         is_inline,
         configured_new_lines,
         resolved_href,
+        node.child_text_node_index == 0,
       );
       return;
     }
@@ -5831,7 +5900,7 @@ impl ConvertState {
 mod tests {
   use super::{
     BlockquoteFrame, ConvertState, CutLineLead, TAG_A, TAG_CODE, TAG_H2, TAG_LI, TAG_P,
-    push_decimal,
+    URL_RESOLVE_SLACK, push_decimal,
   };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
@@ -5926,7 +5995,7 @@ mod tests {
       current_walk_index: 0,
       child_text_node_index: 0,
       tag_id: Some(tag_id),
-      contains_whitespace: false,
+      link_content_counted: false,
       excluded_from_markdown: false,
       enter_skipped: false,
       is_inline,
@@ -6189,6 +6258,46 @@ mod tests {
           processor.state.code_span_closed_bytes,
           html.len()
         );
+      }
+    }
+  }
+
+  #[test]
+  fn long_links_move_decoded_trailing_spaces_past_the_close() {
+    let text = "x".repeat(65_536);
+    let blanks = "&#32;".repeat(20);
+    for html in [
+      format!(r#"<a href="/x" aria-label="Label">{text}{blanks}</a>Next"#),
+      format!(r#"<a href="/x">{text}{blanks}</a>Next"#),
+      format!(r#"<a href="/x"><span>{text}{blanks}</span></a>Next"#),
+    ] {
+      let expected = format!("[{text}](/x) Next");
+      assert_eq!(
+        crate::html_to_markdown(&html, HtmlToMarkdownOptions::default()),
+        expected
+      );
+      for width in 1..=64 {
+        let mut stream = crate::MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert!(
+          output == expected,
+          "width={width}, tail={:?}",
+          &output[output.len() - 40..]
+        );
+      }
+      let text_start = html.find(&text).unwrap();
+      let blanks_start = html.find("&#32;").unwrap();
+      let release = text_start + URL_RESOLVE_SLACK + 1 + "/x".len();
+      for split in (release - 8..=release + 8).chain(blanks_start - 8..html.len()) {
+        let mut stream = crate::MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = stream.process_chunk(&html[..split]);
+        output.push_str(&stream.process_chunk(&html[split..]));
+        output.push_str(&stream.finish());
+        assert!(output == expected, "split={split}");
       }
     }
   }

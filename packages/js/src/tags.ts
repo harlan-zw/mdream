@@ -699,6 +699,17 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (lastContent === title) {
         title = ''
       }
+      else if (title) {
+        let titleEnd = title.length
+        while (titleEnd > 0) {
+          const code = title.charCodeAt(titleEnd - 1)
+          if (code !== 32 && (code < 9 || code === 11 || code > 13))
+            break
+          titleEnd--
+        }
+        if (titleEnd < title.length && lastContent === title.slice(0, titleEnd))
+          title = ''
+      }
       // GFM autolink shorthand: when the link text equals href and href is a
       // bare absolute URI, emit `<href>` instead of `[href](href)`. Mirrors
       // the Rust core (crates/core/src/convert.rs).
@@ -736,6 +747,10 @@ export const tagHandlers: Record<number, TagHandler> = {
           return ''
         }
       }
+      // An empty link still writes `[](url)`. Like an image, it is content of
+      // its block, so the text after it keeps its leading space.
+      if (!node.childTextNodeIndex && !state.depthMap?.[TAG_PRE])
+        markRenderedChildContent(node)
       return `]${serializeMarkdownResource(href, title)}`
     },
     collapsesInnerWhiteSpace: true,
