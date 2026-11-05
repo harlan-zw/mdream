@@ -887,3 +887,9 @@ describe('flattened declaration carry', () => {
     }
   })
 })
+
+it.each(['<table></table>', '<pre></pre>'])('keeps the nested list tail across %s', async (block) => {
+  const html = `<ul><li>A<ul><li>inner</li></ul>${block}parent</li></ul>`
+  expect(convertOnce(html)).toBe('- A\n  - inner\n\n  parent')
+  await expectEverySplitParity(html)
+})

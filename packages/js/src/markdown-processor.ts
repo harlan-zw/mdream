@@ -55,6 +55,7 @@ import {
   TAG_TH,
   TAG_TR,
   TAG_U,
+  TAG_UL,
   TAG_VAR,
   TEXT_NODE,
 } from './const'
@@ -128,10 +129,29 @@ export interface MarkdownState {
   bufferedBlockquoteDepth: number
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
+  lastItemMarkerFragment?: number
+  lastItemMarkerOwner?: ElementNode
   /** That line follows a decoded CR, which a single LF only turns into one CRLF. */
   emptyItemAfterCr?: boolean
+  /** Spaces a hard break wrote ahead of that marker, which start its line. */
+  emptyItemBreakIndent?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  /** Last built-in item marker, retained until its emptiness is settled. */
+  emptyListMarkerFragment?: number
+  /** `<li>` nesting level of the latest built-in item marker. */
+  emptyListMarkerDepth: number
+  /** A separate parent-paragraph boundary after a nested list. */
+  listTailPending?: boolean
+  listTailStart?: number
+  /** First fragment to recheck, including the last fragment a writer may append to. */
+  listTailScanFrom?: number
+  emptyListMarkerScanFrom?: number
+  /**
+   * Open elements, other than `<span>`, that collapse block spacing as
+   * `calculateNewLineConfig` does for `<li>`. The parser keeps the count.
+   */
+  collapseNonSpanDepth: number
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -223,6 +243,21 @@ function crFollowsLineEnding(buffer: string[], index: number): boolean {
   return false
 }
 
+/** Whether the output ends in a line holding spaces only. */
+function endsInIndentLine(buffer: readonly string[]): boolean {
+  let spaces = 0
+  for (let fragment = buffer.length - 1; fragment >= 0; fragment--) {
+    const value = buffer[fragment]!
+    for (let index = value.length - 1; index >= 0; index--) {
+      const code = value.charCodeAt(index)
+      if (code !== 32)
+        return code === 10 && spaces > 0
+      spaces++
+    }
+  }
+  return false
+}
+
 function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string): number {
   let fragment = index - 1
   let offset = fragment >= 0 ? buffer[fragment]!.length : 0
@@ -254,20 +289,80 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
  * underline: the text becomes a heading and the item disappears. A blank line, or
  * a sibling marker, opens its own block instead.
  */
-function recordItemMarker(state: MarkdownState, index: number, lastChar: string): void {
+function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: boolean, lastChar: string): void {
+  const previousFragment = state.lastItemMarkerFragment
+  const previousOwner = state.lastItemMarkerOwner
+  state.lastItemMarkerFragment = builtIn ? state.buffer.length - 1 : undefined
+  state.lastItemMarkerOwner = builtIn ? element : undefined
+  const index = element.index
   // Only a list's first item can follow a paragraph, so every later sibling
   // skips the scan below.
   const buffer = state.buffer
   const marker = buffer.length - 1
-  const run = index === 0 ? newlineRunBefore(buffer, marker) : -1
+  let run = index === 0 ? newlineRunBefore(buffer, marker) : -1
+  // A hard break inside an open inline writes the next line's indent with its
+  // line ending, so the marker's line starts before that indent, as in Rust.
+  let breakIndent = 0
+  if (run === 0 && marker > 0) {
+    const previous = buffer[marker - 1]!
+    let cursor = previous.length
+    while (cursor > 0 && previous.charCodeAt(cursor - 1) === 32)
+      cursor--
+    if (cursor > 0 && cursor < previous.length && previous.charCodeAt(cursor - 1) === 10) {
+      breakIndent = previous.length - cursor
+      while (cursor > 0 && previous.charCodeAt(cursor - 1) === 10) {
+        cursor--
+        run++
+      }
+      if (cursor === 0)
+        run += newlineRunBefore(buffer, marker - 1)
+    }
+  }
   // CRLF is a single line ending, so it opens no blank line by itself. `run`
   // stops at the space `needsSpacing` puts between a CR and the marker.
   const afterCr = run === 0 && lastChar === '\r'
-  if (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1) {
+  // That indent can add to the marker's own, the parent item's content column.
+  // Four columns or more past it, the marker's line only continues the text
+  // above and cannot underline it, and a blank line would turn it into an
+  // indented code block.
+  let indent = breakIndent
+  if (breakIndent > 0) {
+    const value = buffer[marker]!
+    while (indent - breakIndent < value.length && value.charCodeAt(indent - breakIndent) === 32)
+      indent++
+  }
+  if (indent > state.listIndent.length + 3
+    || (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1)) {
     state.emptyItemFragment = undefined
     return
   }
-  state.emptyItemFragment = marker
+  state.emptyItemAfterCr = afterCr
+  state.emptyItemBreakIndent = breakIndent
+  // A parent's bare marker is no paragraph, and a blank line under it would end
+  // that item and turn this one into its sibling. A marker outside the
+  // innermost blockquote keeps the blank line it already had, which the quote's
+  // prefix makes harmless.
+  for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
+    const value = state.buffer[fragment]!
+    for (let cursor = value.length - 1; cursor >= 0; cursor--) {
+      const code = value.charCodeAt(cursor)
+      if (code === 10 || code === 32)
+        continue
+      // A direct first-child list cannot have inserted content before its
+      // parent's built-in marker. A drain/rewrite that moves that fragment
+      // misses this shortcut and keeps the general line recognizer.
+      const recordedParent = fragment === previousFragment
+        && previousOwner === element.parent?.parent
+        && element.parent?.index === 0
+        && (fragment === 0 || newlineRunBefore(state.buffer, fragment) > 0)
+        && (code === 45 || code === 46)
+      state.emptyItemFragment = (recordedParent || listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3))
+        ? undefined
+        : state.buffer.length - 1
+      return
+    }
+  }
+  state.emptyItemFragment = state.buffer.length - 1
   state.emptyItemAfterCr = afterCr
 }
 
@@ -319,6 +414,18 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   // underline there, and a blank line would split the link across two blocks.
   if (first === -1 && afterCr && linkOpen)
     return
+  // The blank line goes before the indent a hard break wrote for the marker.
+  const breakIndent = state.emptyItemBreakIndent ?? 0
+  const previous = buffer[fragment - 1]
+  if (breakIndent > 0 && previous !== undefined && previous.length > breakIndent
+    && previous.charCodeAt(previous.length - breakIndent - 1) === 10) {
+    const head = previous.slice(0, previous.length - breakIndent)
+    const moved = `\n${previous.slice(head.length)}${buffer[fragment]}`
+    state.outputPositions?.replace(fragment - 1, fragment + 1, [head, moved], offset => offset >= head.length ? offset + 1 : offset)
+    buffer[fragment - 1] = head
+    buffer[fragment] = moved
+    return
+  }
   // An LF after a decoded CR only completes one CRLF line ending, so the blank
   // line takes two. They replace the space `needsSpacing` put after the CR: it
   // moves the item's content column past the indent of its next lines.
@@ -331,6 +438,18 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   const replacement = separator + buffer[fragment]
   state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + separator.length)
   buffer[fragment] = replacement
+}
+
+/** Invalidate tail records when their source fragments are replaced or removed. */
+export function noteListTailRewrite(state: MarkdownState, fragment: number): void {
+  if (state.emptyListMarkerFragment !== undefined && fragment <= state.emptyListMarkerFragment)
+    state.emptyListMarkerFragment = undefined
+  if (state.listTailStart !== undefined && fragment < state.listTailStart)
+    state.listTailStart = undefined
+  if (state.listTailScanFrom !== undefined && fragment < state.listTailScanFrom)
+    state.listTailScanFrom = fragment
+  if (state.emptyListMarkerScanFrom !== undefined && fragment < state.emptyListMarkerScanFrom)
+    state.emptyListMarkerScanFrom = fragment
 }
 
 /**
@@ -561,9 +680,8 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
 }
 
 /**
- * Return the current GFM line indent when a block marker may still start at
- * this position. A non-space byte, or more than three leading spaces, makes
- * the position ordinary inline text.
+ * Return block indentation after the active list continuation prefix.
+ * Four additional spaces make the position ordinary inline text.
  */
 function markdownLineIndent(buffer: string[], structuralIndent: number): number {
   let spaces = 0
@@ -576,7 +694,7 @@ function markdownLineIndent(buffer: string[], structuralIndent: number): number 
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
       if (code !== 32 || spaces === structuralIndent + 3) {
-        return listMarkerLineStart(buffer, fragmentIndex, index) ? 0 : -1
+        return listMarkerLineStart(buffer, fragmentIndex, index, structuralIndent + 3) ? 0 : -1
       }
       spaces++
     }
@@ -958,6 +1076,14 @@ function insideOpenInlineDelimiter(node: ElementNode, state: MarkdownState): boo
   return false
 }
 
+function hasNonWhitespaceFrom(buffer: readonly string[], from: number): boolean {
+  for (let index = from; index < buffer.length; index++) {
+    if (hasNonWhitespace(buffer[index]!))
+      return true
+  }
+  return false
+}
+
 export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || (code >= 9 && code <= 13)
 }
@@ -1066,6 +1192,7 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
       }
       return offset + added
     })
+    noteListTailRewrite(state, span.fragment + 1)
     state.buffer.length = span.fragment + 1
     state.buffer.push(content)
   }
@@ -1202,6 +1329,7 @@ function finalizeBlockquote(state: MarkdownState): void {
         replacement.push(quoted.slice(end))
       state.outputPositions.replace(frame.fragment, buffer.length, replacement, mapPosition)
     }
+    noteListTailRewrite(state, frame.fragment)
     buffer.length = frame.fragment
     if (start > 0)
       buffer.push(quoted.slice(0, start))
@@ -1214,6 +1342,7 @@ function finalizeBlockquote(state: MarkdownState): void {
   }
 
   state.outputPositions?.replace(frame.fragment, buffer.length, [quoted], mapPosition)
+  noteListTailRewrite(state, frame.fragment)
   buffer.splice(frame.fragment, buffer.length - frame.fragment, quoted)
   state.lastContentCache = quoted
 }
@@ -1429,7 +1558,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
+    emptyListMarkerFragment: undefined,
+    emptyListMarkerDepth: 0,
+    listTailPending: false,
+    listTailStart: undefined,
+    listTailScanFrom: undefined,
+    emptyListMarkerScanFrom: undefined,
+    lastItemMarkerFragment: undefined,
+    lastItemMarkerOwner: undefined,
+    collapseNonSpanDepth: 0,
     emptyItemAfterCr: false,
+    emptyItemBreakIndent: 0,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -1664,10 +1803,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (end !== 0) {
         state.outputPositions?.replace(index, state.buffer.length, [value.slice(0, end)])
         state.buffer[index] = value.slice(0, end)
+        noteListTailRewrite(state, index + 1)
         state.buffer.length = index + 1
         break
       }
       state.outputPositions?.replace(index, state.buffer.length, [])
+      noteListTailRewrite(state, index)
       state.buffer.length = index
     }
     const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
@@ -1693,6 +1834,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     else if (anchor !== CAPTION_NO_ANCHOR) {
       state.outputPositions?.replace(anchor, state.buffer.length, [])
+      noteListTailRewrite(state, anchor)
       state.buffer.length = anchor
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
@@ -1854,7 +1996,25 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
+    if ((state.emptyListMarkerFragment !== undefined || state.listTailStart !== undefined)
+      && hasNonWhitespace(textNode.value)) {
+      state.emptyListMarkerFragment = undefined
+      state.listTailStart = undefined
+    }
     state.lastTextNode = textNode
+  }
+
+  function flushListTail(preserveMarkerSpace = false): void {
+    if (!preserveMarkerSpace)
+      trimTrailingSpaces(state.buffer)
+    state.listTailStart = state.buffer.length
+    state.listTailScanFrom = state.listTailStart
+    // A hard break has already ended the line; write only the newlines the
+    // blank line still lacks.
+    state.buffer.push(`${'\n\n'.slice(newlineRunBefore(state.buffer, state.buffer.length))}${state.listIndent}`)
+    state.lastContentCache = state.buffer.at(-1)
+    state.lastTextNode = undefined
+    state.listTailPending = false
   }
 
   /**
@@ -1913,6 +2073,43 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
       else if (node.type === TEXT_NODE) {
         return
+      }
+    }
+
+    if (state.listTailPending) {
+      if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
+        state.listTailPending = false
+      }
+      else if (node.type === ELEMENT_NODE && eventType === NodeEventEnter) {
+        const tagId = (node as ElementNode).tagId
+        if (tagId === TAG_UL || tagId === TAG_OL) {
+          // Empty lists cannot settle the parent paragraph boundary.
+        }
+        else if (tagId === TAG_BLOCKQUOTE || tagId === TAG_LI
+          || (tagId! >= TAG_H1 && tagId! <= TAG_H6) || tagId === TAG_HR) {
+          // A closed nested item can leave its indent alone on the last line, as
+          // after a fence. A heading or rule reads it as its own prefix and lands
+          // in that item, so the parent's prefix replaces it after a blank line.
+          if (tagId !== TAG_BLOCKQUOTE && tagId !== TAG_LI && endsInIndentLine(state.buffer)) {
+            trimTrailingSpaces(state.buffer)
+            if (newlineRunBefore(state.buffer, state.buffer.length) === 2) {
+              state.buffer.push(state.listIndent)
+              state.lastContentCache = state.listIndent
+              state.lastTextNode = undefined
+            }
+          }
+          state.listTailPending = false
+          state.emptyListMarkerFragment = undefined
+        }
+        else if (!node.tagHandler?.excludesTextNodes) {
+          flushListTail((tagId === TAG_PRE || tagId === TAG_TABLE) && state.emptyListMarkerFragment !== undefined)
+        }
+      }
+      else if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
+        if (!node.parent?.tagHandler?.excludesTextNodes && hasNonWhitespace((node as TextNode).value))
+          flushListTail()
+        else
+          return
       }
     }
 
@@ -1979,6 +2176,38 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const handler = node.tagHandler
     const tagId = element.tagId!
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
+    if (eventType === NodeEventExit) {
+      if (tagId === TAG_LI) {
+        if (state.listIndentWidths.length === 1)
+          state.emptyListMarkerFragment = undefined
+        if (state.listTailStart !== undefined) {
+          const start = state.listTailStart
+          if (!hasNonWhitespaceFrom(buff, start)) {
+            state.outputPositions?.replace(start, buff.length, [])
+            buff.length = start
+            state.lastContentCache = buff.at(-1)
+            state.lastTextNode = undefined
+            lastBuffEntry = buff.at(-1)!
+            lastChar = lastBuffEntry?.at(-1) || ''
+          }
+          state.listTailStart = undefined
+        }
+      }
+      else if ((tagId === TAG_UL || tagId === TAG_OL)
+        && state.emptyListMarkerDepth > state.depthMap[TAG_LI]!
+        && state.listIndent && !isInsideTableCell(state)
+        && !handler?.literalExit && !element.pluginOutput?.length) {
+        // Any item of this list, filled or empty, ends before the parent's text.
+        // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+        // item line is left open for that text to continue.
+        if (!state.collapseNonSpanDepth)
+          state.listTailPending = true
+        state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
+        const marker = state.emptyListMarkerFragment
+        if (marker !== undefined && (marker >= buff.length || hasNonWhitespaceFrom(buff, marker + 1)))
+          state.emptyListMarkerFragment = undefined
+      }
+    }
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
     if (eventType === NodeEventEnter && state.depthMap[TAG_LI] && !insideRawHtmlRegion
@@ -2125,6 +2354,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventExit
         && tagId === TAG_A) {
         if (dropEmptyLinkText(buff, openLinkFragment, state.outputPositions)) {
+          noteListTailRewrite(state, openLinkFragment)
           if (captionFrameCount !== 0) {
             captionBreakRun = openLinkCaptionBreakRun
             restoreCaptionBreakFlags(captionFrames, openLinkCaptionFlags, captionFrameCount)
@@ -2339,6 +2569,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && !handler?.literalExit) {
         const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
         if (idx >= 0) {
+          noteListTailRewrite(state, idx)
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
           return
@@ -2573,10 +2804,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, rawHtmlQuoteBoundary)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
-      if (eventType === NodeEventEnter)
-        recordItemMarker(state, element.index, handler?.literalEnter ? '' : lastChar)
-      else
+      if (eventType === NodeEventEnter) {
+        recordItemMarker(state, element, !handler?.literalEnter && !hasPluginOutput, handler?.literalEnter ? '' : lastChar)
+        if (!handler?.literalEnter && handlerOutput) {
+          state.emptyListMarkerFragment = state.buffer.length - 1
+          state.emptyListMarkerScanFrom = state.buffer.length
+          state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
+        }
+      }
+      else {
         resolveItemMarker(state, true, -1, openLinkFragment !== -1)
+        state.lastItemMarkerFragment = undefined
+        state.lastItemMarkerOwner = undefined
+      }
     }
 
     if (eventType === NodeEventEnter
@@ -2636,6 +2876,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
     // and a stream cannot take back a nbsp it already yielded.
     const result = trimAsciiWhitespaceEnd(trimOutputStart(state.buffer.join('')))
+    noteListTailRewrite(state, 0)
     state.buffer.length = 0
     return cleanPass ? cleanPass.finish(result).markdown : result
   }
@@ -2650,7 +2891,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : Math.min(
           openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
-          state.emptyItemFragment ?? Infinity,
+          state.emptyItemFragment === undefined ? Infinity : state.emptyItemFragment - (state.emptyItemBreakIndent ? 1 : 0),
+          state.emptyListMarkerFragment ?? Infinity,
+          state.listTailStart ?? Infinity,
           state.codeFence?.fragment ?? Infinity,
           openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment,
         )
@@ -2688,6 +2931,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         heldFragment = fragment
     }
     return heldFragment > state.buffer.length ? Infinity : heldFragment
+  }
+
+  let settledWhitespaceFragment = -1
+  let settledWhitespaceValue: string | undefined
+  function hasUnsettledListContent(from: number): boolean {
+    const buffer = state.buffer
+    // Strings are immutable. An unchanged last fragment needs no character
+    // scan; appends and replacements still go through the full content check.
+    if (from === settledWhitespaceFragment && buffer[from] === settledWhitespaceValue)
+      from++
+    const visible = hasNonWhitespaceFrom(buffer, from)
+    if (!visible && from < buffer.length) {
+      settledWhitespaceFragment = buffer.length - 1
+      settledWhitespaceValue = buffer[settledWhitespaceFragment]
+    }
+    return visible
   }
 
   const processor = {
@@ -2741,7 +3000,25 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const codeSpanFragment = gfmLifecycle.openCodeSpans[0]?.fragment
       if (codeSpanFragment !== undefined && (unresolvedCaptionFragment === -1 || codeSpanFragment < unresolvedCaptionFragment))
         unresolvedCaptionFragment = codeSpanFragment
+      if (unresolvedCaptionFragment === -1 && !state.codeFence) {
+        const marker = state.emptyListMarkerFragment
+        if (marker !== undefined) {
+          if (marker >= state.buffer.length || hasUnsettledListContent(Math.max(marker + 1, state.emptyListMarkerScanFrom ?? marker + 1)))
+            state.emptyListMarkerFragment = undefined
+          state.emptyListMarkerScanFrom = Math.max(marker + 1, state.buffer.length - 1)
+        }
+        const start = state.listTailStart
+        if (start !== undefined) {
+          if (start > state.buffer.length || hasUnsettledListContent(Math.max(start, state.listTailScanFrom ?? start)))
+            state.listTailStart = undefined
+          state.listTailScanFrom = Math.max(start, state.buffer.length - 1)
+        }
+      }
       resolveItemMarker(state, false, unresolvedCaptionFragment)
+      if (state.emptyListMarkerFragment === undefined && state.listTailStart === undefined) {
+        settledWhitespaceFragment = -1
+        settledWhitespaceValue = undefined
+      }
     },
     markYielded() { hasYieldedContent = true },
   }) }
