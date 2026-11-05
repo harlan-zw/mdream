@@ -906,11 +906,14 @@ impl ConvertState {
     if !is_builtin && tag_name.as_bytes().first() != Some(&b'#') {
       budget.charge(tag_name.len());
     }
+    // Read after the mask: the other order costs every start tag a spill.
+    let attr_mask = self.attr_mask(tag_handler);
+    let self_closing = self.tag_is_self_closing(tag_name, tag_id, is_builtin, tag_handler);
     let scan = process_tag_attributes(
       html_chunk,
       position,
-      tag_handler,
-      self.attr_mask(tag_handler),
+      self_closing,
+      attr_mask,
       budget,
       &mut self.attr_scratch,
     );
@@ -922,6 +925,7 @@ impl ConvertState {
         custom_name: (!is_builtin).then(|| tag_name.to_string()),
         tag_id,
         is_builtin,
+        self_closing,
         carry: scan.carry.expect("an incomplete scan carries its state"),
         attrs: std::mem::take(&mut self.attr_scratch),
       }));
@@ -941,6 +945,66 @@ impl ConvertState {
       scan.self_closing,
       scan.overflow,
     )
+  }
+
+  /// Whether a start tag of this element has no content. An `isSelfClosing`
+  /// override decides; without one the handler does, aliases included.
+  #[inline(always)]
+  fn tag_is_self_closing(
+    &self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    tag_handler: Option<&crate::types::TagHandler>,
+  ) -> bool {
+    let self_closing = tag_handler.is_some_and(|handler| handler.is_self_closing);
+    if self.has_tag_overrides {
+      self.overridden_self_closing(tag_name, tag_id, is_builtin, self_closing)
+    } else {
+      self_closing
+    }
+  }
+
+  /// The override branch of `tag_is_self_closing`, kept out of line so the
+  /// no-override path stays one field test at every start-tag call site. A
+  /// built-in name is looked up by id: the source spelling can be `<BR>`, and
+  /// the id of an aliased custom name would find the target's override instead.
+  #[cold]
+  #[inline(never)]
+  fn overridden_self_closing(
+    &self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    handler_value: bool,
+  ) -> bool {
+    let Some(overrides) = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|plugins| plugins.tag_overrides.as_ref())
+    else {
+      return handler_value;
+    };
+    let tag_override = match tag_id.filter(|_| is_builtin) {
+      Some(id) => Self::override_by_id(Some(overrides), self.override_idx.as_deref(), id),
+      None => overrides
+        .iter()
+        .find(|(name, _)| name == tag_name)
+        .map(|(_, config)| config),
+    };
+    tag_override
+      .and_then(|config| config.is_self_closing)
+      .unwrap_or(handler_value)
+  }
+
+  /// Only a void handler skips the depth-limit recovery. An override that makes
+  /// any other tag void needs no skip, and one that reopens this tag needs it.
+  #[cold]
+  fn end_tag_is_void(&self, tag_name: &str, tag_id: Option<u8>, is_builtin: bool) -> bool {
+    let tag_handler = tag_id.and_then(get_tag_handler);
+    tag_handler.is_some_and(|handler| handler.is_self_closing)
+      && self.tag_is_self_closing(tag_name, tag_id, is_builtin, tag_handler)
   }
 
   /// The attributes this tag's handler asks for, or all of them when a plugin
@@ -1894,10 +1958,7 @@ impl ConvertState {
     }
 
     if self.overflow_same_name_depth > 0 {
-      let is_self_closing = tag_id
-        .and_then(get_tag_handler)
-        .is_some_and(|handler| handler.is_self_closing);
-      if is_self_closing {
+      if self.end_tag_is_void(name, tag_id, is_builtin) {
         self.just_closed_tag = true;
         return true;
       }
@@ -2023,8 +2084,13 @@ impl ConvertState {
       }
       return;
     }
+    if result.self_closing {
+      self.close_node();
+      self.just_closed_tag = true;
+      return;
+    }
 
-    if !result.self_closing && !content.is_empty() {
+    if !content.is_empty() {
       let excluded = self
         .stack
         .last()
@@ -2039,9 +2105,7 @@ impl ConvertState {
         parent.child_text_node_index += 1;
       }
     }
-    if !result.self_closing {
-      self.close_node();
-    }
+    self.close_node();
   }
 
   #[inline]

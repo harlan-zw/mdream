@@ -438,12 +438,11 @@ impl TagScan {
 pub(crate) fn process_tag_attributes(
   html_chunk: &str,
   position: usize,
-  tag_handler: Option<&crate::types::TagHandler>,
+  self_closing: bool,
   attr_mask: u16,
   budget: AttrBudget,
   out: &mut Attributes,
 ) -> TagScan {
-  let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
   if attr_mask == ATTR_NONE {
     scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE, budget, out)
   } else {
@@ -1146,7 +1145,7 @@ pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
 #[cfg(test)]
 fn scan_attrs(html: &str, position: usize, mask: u16) -> (bool, usize, Attributes, bool) {
   let mut attrs = Attributes::new();
-  let scan = process_tag_attributes(html, position, None, mask, AttrBudget::new(0), &mut attrs);
+  let scan = process_tag_attributes(html, position, false, mask, AttrBudget::new(0), &mut attrs);
   (scan.complete, scan.new_position, attrs, scan.self_closing)
 }
 

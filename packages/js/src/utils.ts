@@ -1,10 +1,35 @@
 import type { ElementNode, MdreamRuntimeState, Node, TextNode } from './types'
-import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_ABBR, TAG_BDO, TAG_BLOCKQUOTE, TAG_FIGCAPTION, TAG_H1, TAG_H6, TAG_INS, TAG_KBD, TAG_LI, TAG_S, TAG_SMALL, TAG_SPAN, TAG_STRIKE, TAG_STRONG, TAG_TD, TAG_TH, TAG_U } from './const'
+import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_ABBR, TAG_BDO, TAG_BLOCKQUOTE, TAG_DIV, TAG_FIGCAPTION, TAG_H1, TAG_H6, TAG_INS, TAG_KBD, TAG_LI, TAG_P, TAG_S, TAG_SMALL, TAG_SPAN, TAG_STRIKE, TAG_STRONG, TAG_TD, TAG_TH, TAG_U } from './const'
 import {
   HTML_ENTITIES,
   MAX_ENTITY_NAME_LENGTH,
   MAX_LEGACY_ENTITY_NAME_LENGTH,
 } from './entities'
+import { parserTagHandlers } from './parser-tags'
+
+/**
+ * Whether a block child keeps its block spacing because every collapsing
+ * ancestor is an open built-in void override. Mirrors
+ * `block_child_of_open_void` in the Rust engine.
+ */
+export function isBlockChildOfOpenVoid(node: ElementNode): boolean {
+  const tagId = node.tagId
+  if (tagId === undefined || tagId < 0 || node.tagHandler?.isInline)
+    return false
+  // A span keeps only the block children its own exemption keeps.
+  const spanExempt = tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (!parent.tagHandler?.collapsesInnerWhiteSpace)
+      continue
+    const parentId = parent.tagId
+    if (parentId !== undefined && parserTagHandlers[parentId]?.isSelfClosing)
+      continue
+    if (parentId === TAG_SPAN && spanExempt)
+      continue
+    return false
+  }
+  return true
+}
 
 function lowerAscii(code: number): number {
   return code >= 65 && code <= 90 ? code + 32 : code
