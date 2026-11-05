@@ -310,6 +310,11 @@ describe('streaming drain parity', () => {
     ['newlines before any output', '<p>', '<span>&#10;</span>', 18, 'x</p>'],
     ['tabs at the document start', '', '<span>&#9;</span>', 17, 'x'],
     ['Unicode spaces before any output', '<p>', '<span>&nbsp;</span>', 19, 'x</p>'],
+    // The heading hold cuts before the run, at the heading's prefix or at a
+    // `#` run its exit may escape.
+    ['newlines opening a heading', '<h2>', '<span>&#10;</span>', 18, 'x</h2>'],
+    ['tabs opening a heading', '<h2>', '<span>&#9;</span>', 17, 'x</h2>'],
+    ['newlines after a heading\'s hash run', '<h2>a #', '<span>&#10;</span>', 18, '</h2>'],
   ])('does not rejoin a long held run on every chunk: %s', (_, open, unit, chunkSize, close) => {
     const html = `${open}${unit.repeat(16 * 1024)}${close}`
     let joinedLength = 0

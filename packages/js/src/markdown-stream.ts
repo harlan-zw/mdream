@@ -370,12 +370,15 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       if (bufferScan[5] === undefined)
         bufferScan[3] = state.buffer.length
     }
-    // A heading hold can cut before the run, and the heading's exit rewrites
-    // what it held, so only whitespace past the cut can skip the next drain.
+    // A heading hold can cut before the run, at a `#` run or at the heading's
+    // own prefix. More whitespace moves neither cut while the heading is open,
+    // so it still drains to nothing. Its exit can settle the held bytes without
+    // touching the run; they then wait for the next content, which only delays
+    // them. Measure from the run's start.
     // Before the first yield the leading trim takes the whole run, so measure
     // it in buffer coordinates: whitespace after it still drains to nothing.
-    const heldLength = currentContent.length === 0 ? content.length : currentContent.length - stableLength
-    if (heldRunStart !== -1 && stableLength >= heldRunStart && heldLength >= LONG_HELD_RUN) {
+    const heldLength = currentContent.length === 0 ? content.length : currentContent.length - Math.max(stableLength, heldRunStart)
+    if (heldRunStart !== -1 && heldLength >= LONG_HELD_RUN) {
       heldRunEnd = Math.min(context.getHeldOutputFragment(), state.buffer.length)
       heldRunLast = state.buffer[heldRunEnd - 1]
     }
