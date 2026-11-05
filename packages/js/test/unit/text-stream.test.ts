@@ -1,8 +1,12 @@
+import type { ParseState } from '../../src/parse'
 import type { ElementNode, MdreamOptions, MdreamRuntimeState } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/index'
+import { finalizeParse, parseHtmlStream } from '../../src/parse'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { htmlToText, streamHtmlToText } from '../../src/text'
+import { createTextOutputProcessor } from '../../src/text-output'
+import { textTagHandlers } from '../../src/text-tags'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
   return new ReadableStream({
@@ -79,6 +83,72 @@ describe('text stream', () => {
       expect(probe.largest).toBeLessThan(4096)
     })
   }
+})
+
+// A trailing whitespace run stays buffered until content settles it, since a
+// later trim can still take it. Copying the run on every chunk would make a
+// long one quadratic, so count what the drain joins.
+describe('text stream long held whitespace run', () => {
+  it.each([
+    ['tabs before empty pairs', '<p>a', '&#9;<i></i>', 13, '</p>'],
+    ['tabs in spans', '<p>a', '<span>&#9;</span>', 17, '</p>'],
+    ['newlines', '<p>a', '&#10;<i></i>', 12, '</p>'],
+    ['leading tabs', '', '&#9;<i></i>', 11, 'a'],
+    ['leading tabs in spans', '', '<span>&#9;</span>', 17, '<p>a</p>'],
+    ['leading tabs in a paragraph', '<p>', '&#9;<i></i>', 11, 'a</p>'],
+    ['a list item', '<ul><li>a', '&#9;<i></i>', 11, '</li><li>b</li></ul>'],
+    ['a quotation after the run', '<p>a', '&#9;<i></i>', 11, '<q></q>b</p>'],
+  ])('does not rejoin a long held run on every chunk: %s', (_, open, unit, chunkSize, close) => {
+    const html = `${open}${unit.repeat(16 * 1024)}${close}`
+    let joinedLength = 0
+    class CountingBuffer extends Array<string> {
+      override join(separator?: string): string {
+        const joined = super.join(separator)
+        joinedLength += joined.length
+        return joined
+      }
+    }
+    const processor = createTextOutputProcessor({}, false)
+    processor.state.buffer = new CountingBuffer()
+    const parseState: ParseState = {
+      depthMap: processor.state.depthMap,
+      depth: 0,
+      resolvedPlugins: [],
+      tagHandlers: textTagHandlers,
+      plainText: true,
+    }
+    let remainingHtml = ''
+    let text = ''
+    for (let offset = 0; offset < html.length; offset += chunkSize) {
+      remainingHtml = parseHtmlStream(remainingHtml + html.slice(offset, offset + chunkSize), parseState, processor.processEvent)
+      text += processor.takeOutput(false)
+    }
+    finalizeParse(remainingHtml, parseState, processor.processEvent)
+    text += processor.takeOutput(true)
+
+    expect(text).toBe(htmlToText(html))
+    expect(joinedLength).toBeLessThan(1024 * 1024)
+  })
+
+  it('releases a long held run with the first content after it', () => {
+    const processor = createTextOutputProcessor({}, false)
+    const parseState: ParseState = {
+      depthMap: processor.state.depthMap,
+      depth: 0,
+      resolvedPlugins: [],
+      tagHandlers: textTagHandlers,
+      plainText: true,
+    }
+    const feed = (html: string): string => {
+      parseHtmlStream(html, parseState, processor.processEvent)
+      return processor.takeOutput(false)
+    }
+
+    expect(feed('<p>a<i></i>')).toBe('a')
+    for (let index = 0; index < 2048; index++)
+      expect(feed('&#9;<i></i>')).toBe('')
+    expect(feed('b<i></i>')).toBe(`${'\t'.repeat(2048)}b`)
+  })
 })
 
 // A plugin can skip one side of a quotation, so its opener and exit no longer

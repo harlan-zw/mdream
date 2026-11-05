@@ -490,6 +490,8 @@ export type BufferScanState = [
   lineStartOffset: number,
   compactedLineOpensRawHtml: boolean | undefined,
   pendingLineSpaces: number,
+  compactedMarkerRun: number,
+  compactedMarkerRunBeforeBlanks: number,
 ]
 
 function trackRawHtmlMarkdownContext(buffer: string[], scan: BufferScanState): boolean {
@@ -584,8 +586,13 @@ function markdownLineIndent(buffer: string[], structuralIndent: number): number 
   return Math.max(0, spaces - structuralIndent)
 }
 
+/**
+ * Only a space or a tab ends a marker in CommonMark, but the escape takes a
+ * form feed too: a break or the block's end trims it with the rest of the
+ * trailing whitespace, which leaves the marker ending its line.
+ */
 function isMarkdownMarkerWhitespace(code: number): boolean {
-  return code === 0 || code === 9 || code === 10 || code === 13 || code === 32
+  return code === 9 || code === 10 || code === 12 || code === 13 || code === 32
 }
 
 function canStartGfmAngleConstruct(code: number): boolean {
@@ -598,14 +605,16 @@ function canStartGfmAngleConstruct(code: number): boolean {
 
 /**
  * A line of only `-` and blanks is a list marker, a thematic break, or a
- * setext underline, so its leading `-` always needs an escape.
+ * setext underline, so its leading `-` always needs an escape. The escape
+ * passes `formFeed`, since a break or the block's end can trim a form feed;
+ * the wrap guard counts only spaces and tabs.
  */
-function isDashLine(value: string, start: number): boolean {
+function isDashLine(value: string, start: number, formFeed: boolean): boolean {
   for (let index = start; index < value.length; index++) {
     const code = value.charCodeAt(index)
     if (code === 10 || code === 13)
       break
-    if (code !== 45 && code !== 32 && code !== 9)
+    if (code !== 45 && code !== 32 && code !== 9 && (!formFeed || code !== 12))
       return false
   }
   return true
@@ -613,9 +622,9 @@ function isDashLine(value: string, start: number): boolean {
 
 /**
  * A `=` run followed only by blanks is a setext underline; blanks inside the
- * run make it plain text.
+ * run make it plain text. `formFeed` is as for `isDashLine`.
  */
-function isEqualsLine(value: string, start: number): boolean {
+function isEqualsLine(value: string, start: number, formFeed: boolean): boolean {
   let index = start + 1
   while (index < value.length && value.charCodeAt(index) === 61)
     index++
@@ -623,7 +632,7 @@ function isEqualsLine(value: string, start: number): boolean {
     const code = value.charCodeAt(index)
     if (code === 10 || code === 13)
       break
-    if (code !== 32 && code !== 9)
+    if (code !== 32 && code !== 9 && (!formFeed || code !== 12))
       return false
   }
   return true
@@ -729,7 +738,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
       else if (code === 45 || code === 43) { // unordered list marker
         shouldEscape = index + 1 === value.length
           || isMarkdownMarkerWhitespace(value.charCodeAt(index + 1))
-          || (code === 45 && isDashLine(value, index))
+          || (code === 45 && isDashLine(value, index, true))
       }
       else if (code === 62) { // blockquote marker
         shouldEscape = true
@@ -737,7 +746,7 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
       // A node ending inside the run still escapes, since inline nodes can
       // split one setext underline.
       else if (code === 61) {
-        shouldEscape = isEqualsLine(value, index)
+        shouldEscape = isEqualsLine(value, index, true)
       }
     }
     else if (!shouldEscape && orderedDigits > 0 && (code === 46 || code === 41)) {
@@ -814,7 +823,7 @@ function columnWidth(value: string, start: number): number {
  */
 function isSetextMarkerRun(word: string): boolean {
   const first = word.charCodeAt(0)
-  return first === 45 ? isDashLine(word, 0) : first === 61 && isEqualsLine(word, 0)
+  return first === 45 ? isDashLine(word, 0, false) : first === 61 && isEqualsLine(word, 0, false)
 }
 
 /**
@@ -958,15 +967,175 @@ function insideOpenInlineDelimiter(node: ElementNode, state: MarkdownState): boo
   return false
 }
 
-export function isAsciiWhitespace(code: number): boolean {
-  return code === 32 || (code >= 9 && code <= 13)
+/** What a hard break subsumes: HTML's ASCII whitespace but a line feed. */
+function isBreakWhitespace(code: number): boolean {
+  return code === 32 || code === 9 || code === 12 || code === 13
 }
 
-export function trimAsciiWhitespaceEnd(value: string): string {
+/** A plugin break takes preceding whitespace only before its first content. */
+function startsWithBreak(fragments: string[] | undefined): boolean {
+  if (!fragments)
+    return false
+  for (const fragment of fragments) {
+    for (let index = 0; index < fragment.length; index++) {
+      const code = fragment.charCodeAt(index)
+      if (code === 10)
+        return true
+      if (!isBreakWhitespace(code))
+        return false
+    }
+  }
+  return false
+}
+
+// How a line reads as the block markers a list item's break checks for, as
+// `MarkerRun` in Rust: open where a marker may begin (a line start, after a
+// marker and a space or a tab, or after `>`), the count of an ordered marker's
+// digits from 1 to 9, right after a whole `*`, `+` or ordered marker, right
+// after a `-`, a run of `-` and blanks with two `-` in a row, a `=` run, a run
+// of one to six `#`, or broken by anything else. Compaction records it for the
+// line it cuts, so the check can go on past the buffer's start.
+const MARKER_RUN_OPEN = 0
+const MARKER_RUN_MARKER = 10
+const MARKER_RUN_DASH = 11
+const MARKER_RUN_DASHES = 12
+const MARKER_RUN_EQUALS = 13
+// One `#`, up to six at `MARKER_RUN_HASH + 5`.
+const MARKER_RUN_HASH = 14
+const MARKER_RUN_BROKEN = 20
+
+/**
+ * The marker run after `text` from `start` to `end`, which continue a line
+ * read up to `run`. A line end, `\n` or `\r`, starts the run over.
+ */
+function markerRunAfter(run: number, text: string, start: number, end: number): number {
+  let index = end
+  while (index > start) {
+    const code = text.charCodeAt(index - 1)
+    if (code === 10 || code === 13) {
+      run = MARKER_RUN_OPEN
+      break
+    }
+    index--
+  }
+  for (; index < end; index++) {
+    const code = text.charCodeAt(index)
+    if (((code === 32 || code === 9) && (run === MARKER_RUN_OPEN || run === MARKER_RUN_MARKER || run === MARKER_RUN_DASH)) || (code === 62 && run === MARKER_RUN_OPEN))
+      run = MARKER_RUN_OPEN
+    else if (code === 45 && run === MARKER_RUN_OPEN)
+      run = MARKER_RUN_DASH
+    else if ((code === 45 && (run === MARKER_RUN_DASH || run === MARKER_RUN_DASHES)) || ((code === 32 || code === 9) && run === MARKER_RUN_DASHES))
+      run = MARKER_RUN_DASHES
+    else if ((code === 42 || code === 43) && run === MARKER_RUN_OPEN)
+      run = MARKER_RUN_MARKER
+    else if ((code === 46 || code === 41) && run > MARKER_RUN_OPEN && run < MARKER_RUN_MARKER)
+      run = MARKER_RUN_MARKER
+    else if (code >= 48 && code <= 57 && run < 9)
+      run++
+    else if (code === 61 && (run === MARKER_RUN_OPEN || run === MARKER_RUN_EQUALS))
+      run = MARKER_RUN_EQUALS
+    else if (code === 35 && run === MARKER_RUN_OPEN)
+      run = MARKER_RUN_HASH
+    else if (code === 35 && run >= MARKER_RUN_HASH && run < MARKER_RUN_HASH + 5)
+      run++
+    else
+      return MARKER_RUN_BROKEN
+  }
+  return run
+}
+
+/**
+ * Whether a line ends right after a marker that the escape takes at a line
+ * start: a list marker, an ATX opening, or a setext or thematic run.
+ */
+function endsInMarker(run: number): boolean {
+  return run >= MARKER_RUN_MARKER && run < MARKER_RUN_BROKEN
+}
+
+/** Whether `code` can be part of a line `markerRunAfter` reads as markers. */
+function readsAsMarker(code: number): boolean {
+  return code === 32 || code === 9 || code === 45 || code === 42 || code === 43 || code === 46 || code === 41
+    || code === 61 || code === 35 || code === 62 || (code >= 48 && code <= 57)
+}
+
+/**
+ * Note that compaction dropped `content` up to `end`. A list item's break
+ * reads its line's markers back from the trailing run, so what it would have
+ * read there stays known, both up to the cut and up to the last byte before
+ * the trailing blanks the break's trim also takes.
+ */
+export function noteCompactedMarkerRun(scan: BufferScanState, content: string, end: number): void {
+  if (end <= 0)
+    return
+  let blanksStart = end
+  while (blanksStart > 0 && isBreakWhitespace(content.charCodeAt(blanksStart - 1)))
+    blanksStart--
+  const beforeBlanks = markerRunAfter(scan[7], content, 0, blanksStart)
+  if (blanksStart > 0)
+    scan[8] = beforeBlanks
+  scan[7] = markerRunAfter(beforeBlanks, content, blanksStart, end)
+}
+
+/**
+ * Whether the text ending at `end` in `buffer[fragment]` is a list marker, `-`,
+ * `*`, `+`, or digits then `.` or `)`, that only spaces or tabs and other such
+ * markers precede on its line: the item's own, or item text that a wrap left
+ * where the trim would make it one. Item text that just ends like a marker, as
+ * in `see item 1.`, is not. A line that ends in a `#`, `=` or dash run the
+ * escape left bare, as after a tab, counts too, since a form feed in the run
+ * is what keeps it from reading as a heading, a setext underline or a thematic
+ * break. `cutRun` is the run of what compaction dropped.
+ */
+function followsItemMarker(buffer: readonly string[], fragment: number, end: number, cutRun: number): boolean {
+  let index = fragment
+  let offset = end
+  for (;;) {
+    if (offset === 0) {
+      if (index === 0) {
+        // At the buffer's start, even inside a marker, the cut line's run goes
+        // on into the buffer.
+        let run = cutRun
+        for (let at = 0; at < fragment; at++)
+          run = markerRunAfter(run, buffer[at]!, 0, buffer[at]!.length)
+        return endsInMarker(markerRunAfter(run, buffer[fragment]!, 0, end))
+      }
+      offset = buffer[--index]!.length
+      continue
+    }
+    if (!readsAsMarker(buffer[index]!.charCodeAt(offset - 1)))
+      break
+    offset--
+  }
+  const code = buffer[index]!.charCodeAt(offset - 1)
+  if (code !== 10 && code !== 13)
+    return false
+  let run = MARKER_RUN_OPEN
+  for (let at = index; at < fragment; at++)
+    run = markerRunAfter(run, buffer[at]!, at === index ? offset : 0, buffer[at]!.length)
+  return endsInMarker(markerRunAfter(run, buffer[fragment]!, index === fragment ? offset : 0, end))
+}
+
+/** HTML's ASCII whitespace, as in Rust: U+000B is content. */
+export function isAsciiWhitespace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13 && code !== 11)
+}
+
+export function trimAsciiWhitespaceEnd(value: string, inlineClose = false): string {
   let end = value.length
-  while (end > 0 && isAsciiWhitespace(value.charCodeAt(end - 1)))
+  while (end > 0) {
+    const code = value.charCodeAt(end - 1)
+    if (!isAsciiWhitespace(code) && (!inlineClose || code !== 11))
+      break
     end--
+  }
   return end === value.length ? value : value.slice(0, end)
+}
+
+function textInPre(node: TextNode): boolean {
+  let parent = node.parent
+  while (parent && parent.tagId !== TAG_PRE)
+    parent = parent.parent
+  return !!parent
 }
 
 /** Drop the top marker when every following fragment is whitespace. */
@@ -1440,7 +1609,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFenceOwnerDepth: 0,
     preFenceOpener: undefined,
   }
-  const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
+  const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0, MARKER_RUN_OPEN, MARKER_RUN_OPEN]
   let inRawHtmlRegion = false
   let rawHtmlNeedsBoundary = false
   let pendingRawHtmlBoundary = false
@@ -1624,6 +1793,53 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
+  // A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+  // line feed, which ends block spacing or an earlier break and so stays. A
+  // run that opens a line keeps the `indent` the break writes after its own
+  // line feed, an earlier break's or a block's, and a run right after a list
+  // item's marker stays whole, the marker's own space included, while item
+  // text that just ends like a marker loses its run.
+  function trimBeforeBreak(buff: string[], indent: number): void {
+    let floor = state.codeFence ? state.codeFence.fragment + 1 : 0
+    const span = gfmLifecycle.openCodeSpans.at(-1)
+    if (span && span.fragment >= floor)
+      floor = span.fragment + 1
+    const quote = state.blockquotes.at(-1)
+    if (quote && quote.fragment > floor)
+      floor = quote.fragment
+    let run = 0
+    let opensLine = false
+    let index = buff.length - 1
+    for (; index >= floor; index--) {
+      const fragment = buff[index]!
+      let end = fragment.length
+      while (end > 0 && isBreakWhitespace(fragment.charCodeAt(end - 1)))
+        end--
+      run += fragment.length - end
+      if (end > 0) {
+        opensLine = fragment.charCodeAt(end - 1) === 10
+        if (!opensLine && state.depthMap[TAG_LI] && followsItemMarker(buff, index, end, bufferScan[7]))
+          return
+        break
+      }
+    }
+    // A run that reaches back past compaction ends where the cut line's own
+    // trailing blanks begin.
+    if (index < 0 && state.depthMap[TAG_LI] && endsInMarker(bufferScan[8]))
+      return
+    let remove = opensLine ? run - Math.min(indent, run) : run
+    for (let index = buff.length - 1; remove > 0; index--) {
+      const fragment = buff[index]!
+      const cut = Math.min(remove, fragment.length)
+      if (cut !== 0) {
+        const trimmed = fragment.slice(0, fragment.length - cut)
+        state.outputPositions?.replace(index, index + 1, [trimmed])
+        buff[index] = trimmed
+      }
+      remove -= cut
+    }
+  }
+
   function consumeCaptionTransition(isInlineElement: boolean, tagId: number): void {
     captionBoundary = isInlineElement && tagId !== TAG_IMG && tagId !== TAG_BR ? 2 : 0
   }
@@ -1777,7 +1993,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
 
       if (state.pendingInlineWhitespace) {
-        if (!textNode.value.trim())
+        // Only HTML's ASCII whitespace collapses into the pending space, as in
+        // Rust: U+000B, U+00A0 and other Unicode spaces are content.
+        if (!hasNonWhitespace(textNode.value))
           return
         if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || ''))
           textNode.value = ` ${textNode.value}`
@@ -1829,7 +2047,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
 
       const wrapWidth = state.options?.wrapWidth
-      if (wrapWidth && canWrapHere(state.depthMap)) {
+      if (lastChar === '\u000B' && state.lastTextNode?.containsWhitespace && !state.depthMap[TAG_PRE]
+        && state.lastContentCache && state.lastContentCache === state.buffer.at(-1)
+        && trimAsciiWhitespaceEnd(textNode.value).length === 0 && !textInPre(state.lastTextNode)) {
+        // Transparent wrappers can separate a mutable tail from its final source space.
+        const joined = state.lastContentCache + textNode.value
+        state.outputPositions?.replace(state.buffer.length - 1, state.buffer.length, [joined])
+        state.buffer[state.buffer.length - 1] = joined
+        state.lastContentCache = joined
+      }
+      else if (wrapWidth && canWrapHere(state.depthMap)) {
         const wrapped = wrapText(
           textNode.value,
           currentColumn(state.buffer),
@@ -2042,9 +2269,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
 
-      const lastFragment = state.lastContentCache
       const lastTextNode = state.lastTextNode
-      if (lastFragment && lastTextNode?.containsWhitespace && typeof lastTextNode.value === 'string') {
+      if (state.lastContentCache && lastTextNode?.containsWhitespace && typeof lastTextNode.value === 'string') {
         let parent = element.parent
         let parentInPre = false
         while (parent) {
@@ -2055,20 +2281,24 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           parent = parent.parent
         }
         if (!parentInPre || element.parent?.tagId === TAG_PRE) {
-          if (breakOutput?.endsWith('\n') && !parentInPre) {
-            const trimmed = trimAsciiWhitespaceEnd(lastFragment)
-            if (trimmed.length !== lastFragment.length && buff.at(-1) === lastFragment) {
+          const fragment = state.lastContentCache
+          if (!parentInPre && breakOutput?.endsWith('\n') && buff.at(-1) === fragment) {
+            const trimmed = trimAsciiWhitespaceEnd(fragment)
+            if (trimmed.length !== fragment.length) {
               state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
               buff[buff.length - 1] = trimmed
+              state.lastContentCache = trimmed
             }
           }
           state.lastTextNode = undefined
         }
       }
-      // Spaces before a line break have no visual effect, even when an emptied
-      // inline element left them, so the break subsumes them as in Rust.
-      if (!inPre && breakOutput?.endsWith('\n') && lastOutputChar(buff) === 32)
-        trimTrailingSpaces(buff)
+      // Whitespace before a line break has no visual effect, even when an
+      // emptied inline element left it or a list item's indent follows the line
+      // feed, so the break subsumes it as in Rust.
+      const breakLineEnd = breakOutput ? breakOutput.lastIndexOf('\n') : -1
+      if (!inPre && breakLineEnd !== -1 && isBreakWhitespace(lastOutputChar(buff)))
+        trimBeforeBreak(buff, breakOutput!.length - breakLineEnd - 1)
 
       const pendingCaption = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
@@ -2484,7 +2714,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // Don't trim if we're about to add inline content that needs spacing
       // Don't trim before block elements that need their own spacing
       if (lastFragment && state.lastTextNode?.containsWhitespace && (!!node.parent || isInlineElement) && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
-        let parent = node.parent
+        const breakConsumesSourceWhitespace = eventType === NodeEventEnter && tagId === TAG_BR
+          && !state.depthMap[TAG_PRE] && !handler?.literalEnter && startsWithBreak(output)
+        // A plugin break consumes source whitespace, while closed pre content keeps its newlines.
+        let parent = breakConsumesSourceWhitespace ? state.lastTextNode.parent : node.parent
         let parentInPre = false
         while (parent) {
           if (parent.tagId === TAG_PRE) {
@@ -2507,12 +2740,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // whitespace before it is content, as in Rust.
           const shouldTrim = !quoteAtStart
             && !(tagId === TAG_PRE && eventType === NodeEventExit && isInsideTableCell(state))
-            && ((tagId === TAG_BR && output?.[0]?.endsWith('\n') && !parentInPre)
+            && (breakConsumesSourceWhitespace
               || ((!isInlineElement || eventType === NodeEventExit) && !isBlockElement && !(collapsesWhiteSpace && eventType === NodeEventEnter) && !(hasSpacing && eventType === NodeEventEnter)))
 
           if (shouldTrim) {
             const originalLength = lastFragment.length
-            const trimmed = trimAsciiWhitespaceEnd(lastFragment)
+            const trimmed = trimAsciiWhitespaceEnd(lastFragment, eventType === NodeEventExit && isInlineElement
+              && !handler?.literalExit && (handlerOutput === '*' || handlerOutput === '**' || handlerOutput === '~~'))
             const trimmedChars = originalLength - trimmed.length
 
             // Update the last content in buffer regions with trimmed content
@@ -2520,13 +2754,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
               if (buff?.length && buff.at(-1) === lastFragment) {
                 state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
                 buff[buff.length - 1] = trimmed
+                state.lastContentCache = trimmed
               }
               if (eventType === NodeEventExit && isInlineElement)
                 state.pendingInlineWhitespace = true
             }
           }
 
-          state.lastTextNode = undefined
+          // Transparent exits leave the source tail available to an enclosing
+          // delimiter while some of it is left. A tail trimmed to nothing is
+          // spent: kept, it would trim the next output, such as a break's.
+          if (eventType !== NodeEventExit || !isInlineElement || handler?.literalExit || output || !state.lastContentCache)
+            state.lastTextNode = undefined
         }
       }
     }
@@ -2538,10 +2777,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     // An overridden <br> skips the break fast path, but its line break still
-    // subsumes the spaces before it.
+    // subsumes the whitespace before it.
     if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
-      && !handler?.literalEnter && output?.at(-1)?.endsWith('\n') && lastOutputChar(buff) === 32) {
-      trimTrailingSpaces(buff)
+      && !handler?.literalEnter && isBreakWhitespace(lastOutputChar(buff)) && startsWithBreak(output)) {
+      const breakText = renderBreak(element, state)
+      const breakLineEnd = breakText.lastIndexOf('\n')
+      if (breakLineEnd !== -1)
+        trimBeforeBreak(buff, breakText.length - breakLineEnd - 1)
     }
 
     const rawHtmlQuoteBoundary = pendingRawHtmlBoundary && gfmAction?._tag === 'BlockquoteEnter'

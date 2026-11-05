@@ -1,4 +1,3 @@
-import type { OutputPositions } from './output-positions'
 import type { ElementNode, HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
@@ -215,34 +214,87 @@ export const breakHandler: TagHandler = {
 }
 
 // A `#` run closing a heading is an ATX closing sequence and is dropped by the
-// renderer, so the last one is escaped back into content.
-function escapeTrailingHeadingHashes(buffer: string[], positions?: OutputPositions): void {
+// renderer, so the last one is escaped back into content. The heading's end is
+// read across fragments, as in Rust: spacing an emptied inline element left can
+// sit in a fragment of its own, and the run can span fragments. The trims take
+// a form feed or a line end after the run too, so the run still closes there.
+function escapeTrailingHeadingHashes(state: HandlerContext['state']): void {
+  const buffer = state.buffer
   let index = buffer.length - 1
-  while (index >= 0 && buffer[index] === '')
-    index--
-  if (index < 0)
+  let end = 0
+  for (; index >= 0; index--) {
+    const entry = buffer[index]!
+    end = entry.length
+    while (end > 0) {
+      const code = entry.charCodeAt(end - 1)
+      if (code !== 32 && code !== 9 && code !== 10 && code !== 12 && code !== 13)
+        break
+      end--
+    }
+    if (end > 0)
+      break
+  }
+  // Cheap reject: almost no heading ends in `#`.
+  if (index < 0 || buffer[index]!.charCodeAt(end - 1) !== 35)
     return
 
-  const entry = buffer[index]!
-  let end = entry.length
-  while (end > 0 && (entry[end - 1] === ' ' || entry[end - 1] === '\t'))
-    end--
-  let run = end
-  while (run > 0 && entry[run - 1] === '#')
-    run--
-  if (run === end)
-    return
+  let run = end - 1
+  let before = -1
+  for (;;) {
+    const entry = buffer[index]!
+    while (run > 0 && entry.charCodeAt(run - 1) === 35)
+      run--
+    if (run > 0) {
+      before = entry.charCodeAt(run - 1)
+      break
+    }
+    // The run reaches this fragment's start, so it may go on in the previous one.
+    let previous = index - 1
+    while (previous >= 0 && buffer[previous] === '')
+      previous--
+    if (previous < 0 || buffer[previous]!.charCodeAt(buffer[previous]!.length - 1) !== 35) {
+      if (previous >= 0)
+        before = buffer[previous]!.charCodeAt(buffer[previous]!.length - 1)
+      break
+    }
+    index = previous
+    run = buffer[index]!.length - 1
+  }
 
   // Only a run opening the heading content or preceded by whitespace closes it.
   // Requiring a space also rejects the `## ` prefix entry of an empty heading.
-  const previous = buffer[index - 1]
-  const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
-  if (before !== ' ' && before !== '\t')
+  if (before !== 32 && before !== 9)
     return
 
+  // An empty heading's run is its own opening sequence, after the line's
+  // indent or a list marker alone on the line.
+  let leadFragment = index
+  let lead = run
+  for (;;) {
+    if (lead === 0) {
+      if (--leadFragment < 0)
+        return
+      lead = buffer[leadFragment]!.length
+      continue
+    }
+    const code = buffer[leadFragment]!.charCodeAt(lead - 1)
+    if (code === 10)
+      return
+    if (code !== 32)
+      break
+    lead--
+  }
+  if (listMarkerLineStart(buffer, leadFragment, lead - 1, pendingMarkerIndent(state)))
+    return
+
+  const entry = buffer[index]!
   const replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
-  positions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
+  state.outputPositions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
   buffer[index] = replacement
+  // The trims that follow find the text's fragment by identity, so a form feed
+  // or a line end after the run still goes when the item or the block ends.
+  if (state.lastContentCache === entry)
+    state.lastContentCache = replacement
 }
 
 // What the current output line holds where a table row is about to be written.
@@ -370,7 +422,7 @@ function handleHeading(depth: number): TagHandler {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `</h${depth}>`
       }
-      escapeTrailingHeadingHashes(state.buffer, state.outputPositions)
+      escapeTrailingHeadingHashes(state)
     },
     collapsesInnerWhiteSpace: true,
   }
