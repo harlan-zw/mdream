@@ -166,7 +166,9 @@ describe('streaming drain parity', () => {
     expect(outputs).toEqual(expected)
   })
   it.each([
-    ['&nbsp;<b></b>#', '#'],
+    // The leading trim takes the nbsp, so the `#` opens the document's first
+    // line and stays text.
+    ['&nbsp;<b></b>#', '\\#'],
     ['<br>x<p>y</p>', 'x\n\ny'],
     ['<br>x<blockquote>y</blockquote>', 'x\n\n> y'],
     ['&nbsp;<p>x</p>y', 'x\n\ny'],

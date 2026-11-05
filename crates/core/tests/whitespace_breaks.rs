@@ -1,6 +1,6 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{
-  CleanConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+  CleanConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
@@ -359,6 +359,76 @@ fn a_marker_before_a_trimmed_form_feed_stays_text() {
   ] {
     let wrapped = HtmlToMarkdownOptions::default().with_wrap_width(10);
     assert_every_chunking(html, &wrapped, expected);
+  }
+}
+
+#[test]
+fn a_marker_behind_the_document_lead_stays_text() {
+  // The document's leading trim drops any whitespace before the first line,
+  // not just spaces, so a marker behind it opens that line.
+  let markdown = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>&#12;# x</p>", "\\# x"),
+    ("<p>&nbsp;# x</p>", "\\# x"),
+    ("<p><span>&#12;</span># x</p>", "\\# x"),
+    ("<p><span>&#9;</span>&gt; x</p>", "\\> x"),
+    ("<p><span>&#9;</span>- x</p>", "\\- x"),
+    ("<p>&#11;1. x</p>", "1\\. x"),
+    ("<p>&#8195;1) x</p>", "1\\) x"),
+    ("<p>&#12;+ x</p>", "\\+ x"),
+    ("<p>&#12;* x</p>", "\\* x"),
+    ("<p>&#12;---</p>", "\\---"),
+    ("<p>&#12;=</p>", "\\="),
+    ("<p>&#12;===</p>", "\\==="),
+    ("<p>&#12;    # x</p>", "\\# x"),
+    ("<p><span>&#12;</span><span> </span>- x</p>", "\\- x"),
+    ("&#12;# x", "\\# x"),
+    ("<span>&#9;</span><span>#</span> x", "\\# x"),
+    ("<!-- c -->&#12;# x", "\\# x"),
+    (
+      "<table><caption>&#10;# x</caption><tr><td>a</td></tr></table>",
+      "\\# x\n\n| a |\n| --- |",
+    ),
+    // A prefix written before the text keeps the whitespace, and the marker
+    // with it, as content.
+    ("<ul><li>&#12;# x</li></ul>", "- \u{c}# x"),
+    ("<blockquote>&#12;# x</blockquote>", "> \u{c}# x"),
+    (
+      "<table><tr><td>&#12;# x</td></tr></table>",
+      "| \u{c}# x |\n| --- |",
+    ),
+    ("<p>a</p><p>&#12;# x</p>", "a\n\n\u{c}# x"),
+  ] {
+    assert_every_chunking(html, &markdown, expected);
+  }
+}
+
+#[test]
+fn a_generated_prefix_keeps_the_document_lead_as_content() {
+  // Tailwind's emphasis goes before the escaped text, so the whitespace past
+  // it is no longer the document's lead: a caption's newline stays encoded.
+  let markdown = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tailwind: Some(TailwindConfig),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<table><caption class=\"italic\">&#10;a</caption><tr><td>a</td></tr></table>",
+      "*&#10;a*\n\n| a |\n| --- |",
+    ),
+    (
+      "<table><caption><span class=\"font-bold\">&#10;# x</span></caption><tr><td>a</td></tr></table>",
+      "**&#10;\\# x**\n\n| a |\n| --- |",
+    ),
+    ("<p class=\"font-bold\">&#12;# x</p>", "**\u{c}# x**"),
+    ("<p class=\"italic\">&#12;- x</p>", "*\u{c}- x*"),
+    // A class with no generated markup leaves the lead as it is.
+    ("<p class=\"text-lg\">&#12;# x</p>", "\\# x"),
+  ] {
+    assert_every_chunking(html, &markdown, expected);
   }
 }
 

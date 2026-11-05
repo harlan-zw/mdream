@@ -2734,6 +2734,7 @@ impl ConvertState {
     text: &str,
     hazard: bool,
     inside_raw_html_block: bool,
+    text_leads: bool,
     scratch: &mut String,
   ) -> bool {
     if !hazard
@@ -2745,7 +2746,7 @@ impl ConvertState {
     {
       self.gfm_escape_slow_path_calls += 1;
     }
-    self.escape_gfm_text_into(text, scratch)
+    self.escape_gfm_text_into(text, text_leads, scratch)
   }
 
   #[inline(always)]
@@ -2842,8 +2843,14 @@ impl ConvertState {
       !inside_raw_html_block && context_gfm_hazard(text, in_table, in_link, in_quote);
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
     let hazard =
-      has_inline_gfm_hazard || context_hazard || self.starts_with_gfm_block_candidate(text);
-    let text = if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
+      has_inline_gfm_hazard || context_hazard || self.starts_with_gfm_block_candidate(text, true);
+    let text = if self.escape_text_node(
+      text,
+      hazard,
+      inside_raw_html_block,
+      true,
+      &mut escape_scratch,
+    ) {
       escape_scratch.as_str()
     } else {
       text
@@ -3084,14 +3091,23 @@ impl ConvertState {
     let in_quote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
     let context_has_gfm_hazard =
       |text: &str| !inside_raw_html_block && context_gfm_hazard(text, in_table, in_link, in_quote);
+    // A generated prefix goes before the escaped text, so the text no longer
+    // starts the document's first line.
+    let text_leads = generated_prefix.is_none_or(str::is_empty);
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
     let hazard = !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
       && (has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
-        || self.starts_with_gfm_block_candidate(text));
-    let text = if self.escape_text_node(text, hazard, inside_raw_html_block, &mut escape_scratch) {
+        || self.starts_with_gfm_block_candidate(text, text_leads));
+    let text = if self.escape_text_node(
+      text,
+      hazard,
+      inside_raw_html_block,
+      text_leads,
+      &mut escape_scratch,
+    ) {
       escape_scratch.as_str()
     } else {
       text
@@ -3153,7 +3169,7 @@ impl ConvertState {
 
   /// Escape GFM syntax into `out`; returns false and leaves `out` alone if none is needed.
   #[inline]
-  fn escape_gfm_text_into(&self, text: &str, out: &mut String) -> bool {
+  fn escape_gfm_text_into(&self, text: &str, text_leads: bool, out: &mut String) -> bool {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
     let in_link = self.depth_map[TAG_A as usize] > 0;
     let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
@@ -3163,6 +3179,14 @@ impl ConvertState {
     let mut escaped = false;
     let mut copied_until = 0usize;
     let mut index = 0usize;
+    // The document's leading trim drops all whitespace before the first line,
+    // so a marker behind any run of it still starts that line. Whitespace-only
+    // text holds no marker, which keeps it off the buffer scan.
+    let rest = text.trim_start();
+    if text_leads && !rest.is_empty() && self.in_document_lead() {
+      index = text.len() - rest.len();
+      line_indent = Some(0);
+    }
 
     while index < bytes.len() {
       let byte = bytes[index];
@@ -3281,15 +3305,31 @@ impl ConvertState {
   }
 
   #[inline]
-  fn starts_with_gfm_block_candidate(&self, text: &str) -> bool {
+  fn starts_with_gfm_block_candidate(&self, text: &str, text_leads: bool) -> bool {
     // Text-side reject first: prose that cannot open a block skips the buffer
     // scan entirely, which is most text nodes.
     match text.as_bytes().first() {
-      Some(b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9') => {}
-      _ => return false,
+      Some(b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9') => {}
+      Some(_) => {
+        // Only a marker can follow the leading whitespace, which also keeps
+        // whitespace-only text off the buffer scan. Before the first line the
+        // document's leading trim drops any run of it, not just spaces.
+        let rest = text.trim_start();
+        if !matches!(
+          rest.as_bytes().first(),
+          Some(b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9')
+        ) {
+          return false;
+        }
+        let lead = text_leads && self.in_document_lead();
+        if lead || text.as_bytes()[0] != b' ' {
+          return lead;
+        }
+      }
+      None => return false,
     }
     let Some(mut indent) = self.markdown_line_indent() else {
-      return false;
+      return text_leads && self.in_document_lead();
     };
     for byte in text.bytes() {
       if byte == b' ' && indent < 3 {
@@ -3685,6 +3725,19 @@ impl ConvertState {
       index += 1;
     }
     index > start && value.get(index) == Some(&b';')
+  }
+
+  /// Whether everything buffered is whitespace the document's leading trim
+  /// drops, so the next visible text starts the first line at column zero. A
+  /// quote writes its prefix before that text, which keeps the whitespace.
+  /// Scans only the buffer's trailing whitespace, so callers ask only for text
+  /// with a visible byte: appending it ends the run the next call would scan.
+  #[inline]
+  fn in_document_lead(&self) -> bool {
+    !self.has_streamed_output
+      && !self.preserve_leading_whitespace
+      && self.depth_map[TAG_BLOCKQUOTE as usize] == 0
+      && self.buffer.trim_end().is_empty()
   }
 
   /// Current leading-space count when a GFM block marker may start here.

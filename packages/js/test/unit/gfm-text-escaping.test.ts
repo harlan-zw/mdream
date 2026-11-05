@@ -1,6 +1,7 @@
 import type { MdreamOptions, TextNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { createPlugin, htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown, TEXT_NODE } from '../../src/index'
+import { tailwindPlugin } from '../../src/plugins/tailwind'
 
 async function streamConvert(
   html: string,
@@ -163,6 +164,55 @@ describe('gfm text escaping', () => {
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
         expect(await streamConvert(html, chunkSize), `${html}: chunk size ${chunkSize}`).toBe(expected)
     }
+  })
+
+  // The document's leading trim drops any whitespace before the first line,
+  // not just spaces, so a marker behind it opens that line.
+  it.each([
+    ['<p>&#12;# x</p>', '\\# x'],
+    ['<p>&nbsp;# x</p>', '\\# x'],
+    ['<p><span>&#12;</span># x</p>', '\\# x'],
+    ['<p><span>&#9;</span>&gt; x</p>', '\\> x'],
+    ['<p><span>&#9;</span>- x</p>', '\\- x'],
+    ['<p>&#11;1. x</p>', '1\\. x'],
+    ['<p>&#8195;1) x</p>', '1\\) x'],
+    ['<p>&#12;+ x</p>', '\\+ x'],
+    ['<p>&#12;* x</p>', '\\* x'],
+    ['<p>&#12;---</p>', '\\---'],
+    ['<p>&#12;=</p>', '\\='],
+    ['<p>&#12;===</p>', '\\==='],
+    ['<p>&#12;    # x</p>', '\\# x'],
+    ['<p><span>&#12;</span><span> </span>- x</p>', '\\- x'],
+    ['&#12;# x', '\\# x'],
+    ['<span>&#9;</span><span>#</span> x', '\\# x'],
+    ['<!-- c -->&#12;# x', '\\# x'],
+    ['<table><caption>&#10;# x</caption><tr><td>a</td></tr></table>', '\\# x\n\n| a |\n| --- |'],
+    // A prefix written before the text keeps the whitespace, and the marker
+    // with it, as content.
+    ['<ul><li>&#12;# x</li></ul>', '- \f# x'],
+    ['<blockquote>&#12;# x</blockquote>', '> \f# x'],
+    ['<table><tr><td>&#12;# x</td></tr></table>', '| \f# x |\n| --- |'],
+    ['<p>a</p><p>&#12;# x</p>', 'a\n\n\f# x'],
+  ])('escapes a marker behind the document\'s leading whitespace: %j', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
+  // Tailwind's emphasis goes before the escaped text, so the whitespace past
+  // it is no longer the document's lead: a caption's newline stays encoded.
+  it.each([
+    ['<table><caption class="italic">&#10;a</caption><tr><td>a</td></tr></table>', '*&#10;a*\n\n| a |\n| --- |'],
+    ['<table><caption><span class="font-bold">&#10;# x</span></caption><tr><td>a</td></tr></table>', '**&#10;\\# x**\n\n| a |\n| --- |'],
+    ['<p class="font-bold">&#12;# x</p>', '**\f# x**'],
+    ['<p class="italic">&#12;- x</p>', '*\f- x*'],
+    // A class with no generated markup leaves the lead as it is.
+    ['<p class="text-lg">&#12;# x</p>', '\\# x'],
+  ])('keeps the lead behind a generated prefix as content: %j', async (html, expected) => {
+    const options = { plugins: [tailwindPlugin()] }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize, options), `chunk size ${chunkSize}`).toBe(expected)
   })
 
   it('widens code delimiters across every stream boundary', async () => {

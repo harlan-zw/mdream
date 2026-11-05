@@ -59,7 +59,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, bufferIsOutputLead, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -643,7 +643,7 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
  */
-function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number): boolean {
+function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number, atStart: boolean): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true
   if ((depthMap[TAG_TABLE] && value.includes('|'))
@@ -655,13 +655,22 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
   // Text-side reject first: prose that cannot open a block skips the buffer
   // scan entirely, which is most text nodes.
   const first = value.charCodeAt(0)
-  if (!' #+->='.includes(value[0]!) && !(first >= 48 && first <= 57)) {
-    return false
+  if (!'#+->='.includes(value[0]!) && !(first >= 48 && first <= 57)) {
+    // Only a marker can follow the leading whitespace, which also keeps
+    // whitespace-only text off the buffer scan. Before the first line the
+    // document's leading trim drops any run of it, not just spaces.
+    const rest = trimOutputStart(value)
+    const restFirst = rest.charCodeAt(0)
+    if (rest.length === 0 || (!'#+->='.includes(rest[0]!) && !(restFirst >= 48 && restFirst <= 57)))
+      return false
+    const lead = atStart && bufferIsOutputLead(buffer)
+    if (lead || first !== 32)
+      return lead
   }
 
   let lineIndent = markdownLineIndent(buffer, structuralIndent)
   if (lineIndent < 0)
-    return false
+    return atStart && bufferIsOutputLead(buffer)
 
   let index = 0
   while (index < value.length && lineIndent < 3 && value.charCodeAt(index) === 32) {
@@ -681,7 +690,7 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number, atStart: boolean): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
@@ -689,8 +698,19 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
   let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
+  let start = 0
+  // The document's leading trim drops all whitespace before the first line,
+  // so a marker behind any run of it still starts that line. Whitespace-only
+  // text holds no marker, which keeps it off the buffer scan.
+  if (atStart) {
+    const lead = value.length - trimOutputStart(value).length
+    if (lead !== value.length && bufferIsOutputLead(buffer)) {
+      start = lead
+      lineIndent = 0
+    }
+  }
 
-  for (let index = 0; index < value.length; index++) {
+  for (let index = start; index < value.length; index++) {
     const code = value.charCodeAt(index)
     const character = value[index]!
 
@@ -1869,6 +1889,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
 
       const insideRawHtmlBlock = isInsideRawHtmlBlock(state.depthMap)
+      // A quote writes its prefix before this text, which keeps the
+      // whitespace the document's leading trim would otherwise drop. A
+      // generated prefix goes before the escaped text the same way.
+      const atOutputStart = !hasYieldedContent && !state.depthMap[TAG_BLOCKQUOTE] && !textNode.generatedMarkdown?.prefix
       let rawHtmlMarkdown = false
       if (insideRawHtmlBlock)
         rawHtmlMarkdown = trackRawHtmlMarkdownContext(state.buffer, bufferScan)
@@ -1886,9 +1910,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
+        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length, atOutputStart)
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length, atOutputStart)
       }
 
       if (textNode.generatedMarkdown && textNode.value)
