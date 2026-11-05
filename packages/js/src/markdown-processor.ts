@@ -959,7 +959,7 @@ function insideOpenInlineDelimiter(node: ElementNode, state: MarkdownState): boo
 }
 
 export function isAsciiWhitespace(code: number): boolean {
-  return code === 32 || (code >= 9 && code <= 13)
+  return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
 }
 
 export function trimAsciiWhitespaceEnd(value: string): string {
@@ -976,6 +976,37 @@ function dropEmptyMarker(buffer: string[], packed: number, markerType: number, p
     return dropEmptyLinkText(buffer, idx, positions) ? idx : -1
   }
   return -1
+}
+
+/** Whether every character is ASCII whitespace or a vertical tab. */
+function isVerticalTabRun(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c !== 11 && !isAsciiWhitespace(c))
+      return false
+  }
+  return true
+}
+
+/**
+ * Drop an emphasis opener followed only by whitespace and vertical tabs. The
+ * closer would move that run after itself and leave the pair empty, so the
+ * run stays. Only the delimiter leaves the opener fragment, which can also
+ * hold a caption opener, and fragment indexes stay put.
+ */
+function dropVerticalTabMarker(buffer: string[], packed: number, markerType: number, marker: string, positions?: OutputPositions): boolean {
+  const idx = packed >> 3
+  const opener = buffer[idx]
+  if ((packed & MARKER_TYPE_MASK) !== markerType || opener === undefined || !opener.endsWith(marker))
+    return false
+  for (let index = idx + 1; index < buffer.length; index++) {
+    if (!isVerticalTabRun(buffer[index]!))
+      return false
+  }
+  const kept = opener.slice(0, opener.length - marker.length)
+  positions?.replace(idx, idx + 1, [kept])
+  buffer[idx] = kept
+  return true
 }
 
 function resetRetractedCaptionFrames(frames: number[] | undefined, count: number, fragment: number): void {
@@ -1849,7 +1880,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (openLinkFragment >= 0 && hasVisibleText)
           openLinkFragment = -openLinkFragment - 2
         if (openMarkerCount && hasVisibleText) {
-          openMarkerCount = 0
+          // Vertical tabs alone leave an emphasis pair empty once its closer
+          // moves them out, so the exit still has to see the open marker.
+          const first = textNode.value.charCodeAt(0)
+          if ((first !== 11 && !isAsciiWhitespace(first))
+            || (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) > 4
+            || !isVerticalTabRun(textNode.value)) {
+            openMarkerCount = 0
+          }
           commitCaptionFrames()
         }
       }
@@ -2337,10 +2375,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
-        const idx = dropEmptyMarker(buff, openMarkers[--openMarkerCount]!, markerType, state.outputPositions)
+        const packed = openMarkers[--openMarkerCount]!
+        const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
         if (idx >= 0) {
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+          return
+        }
+        if (markerType <= 4 && dropVerticalTabMarker(buff, packed, markerType, handlerOutput!, state.outputPositions)) {
+          state.lastContentCache = buff[buff.length - 1]
           return
         }
         openMarkerCount = 0
@@ -2537,6 +2580,48 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
+    // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
+    let trailingEmphasisWhitespace = ''
+    if (eventType === NodeEventExit && !handler?.literalExit
+      && INLINE_MARKER_TYPE[tagId]! >= 1 && INLINE_MARKER_TYPE[tagId]! <= 4
+      && (output?.[0]?.charCodeAt(0) === 42 || output?.[0]?.charCodeAt(0) === 126)) {
+      let firstFragment = buff.length
+      let firstOffset = 0
+      let hasVerticalTab = false
+      for (let index = buff.length - 1; index >= 0; index--) {
+        const fragment = buff[index]!
+        let end = fragment.length
+        while (end > 0) {
+          const code = fragment.charCodeAt(end - 1)
+          if (code !== 11 && !isAsciiWhitespace(code))
+            break
+          hasVerticalTab ||= code === 11
+          end--
+        }
+        if (end < fragment.length) {
+          firstFragment = index
+          firstOffset = end
+        }
+        if (end > 0)
+          break
+      }
+      if (hasVerticalTab) {
+        for (let index = firstFragment; index < buff.length; index++) {
+          const fragment = buff[index]!
+          const end = index === firstFragment ? firstOffset : 0
+          trailingEmphasisWhitespace += fragment.slice(end)
+          const trimmed = fragment.slice(0, end)
+          state.outputPositions?.replace(index, index + 1, [trimmed])
+          buff[index] = trimmed
+        }
+        if (newLines > 0 && output) {
+          // Exit spacing follows the closer and its displaced source whitespace.
+          output.splice(output.length - 1, 0, trailingEmphasisWhitespace)
+          trailingEmphasisWhitespace = ''
+        }
+      }
+    }
+
     // An overridden <br> skips the break fast path, but its line break still
     // subsumes the spaces before it.
     if (eventType === NodeEventEnter && tagId === TAG_BR && !state.depthMap[TAG_PRE]
@@ -2567,6 +2652,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastContentCache = fragment
         }
       }
+    }
+
+    if (trailingEmphasisWhitespace) {
+      state.buffer.push(trailingEmphasisWhitespace)
+      state.lastContentCache = trailingEmphasisWhitespace
     }
 
     if (gfmAction)
