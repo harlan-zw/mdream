@@ -302,6 +302,40 @@ fn is_hidden(node: &ElementNode) -> bool {
 }
 
 impl ConvertState {
+  /// Open the marker entry of a `<ul>`/`<ol>`.
+  #[inline(never)]
+  fn push_list_marker(&mut self, ordered: bool, skip_node: bool) {
+    let marker = if skip_node {
+      if ordered { b'.' } else { b'-' }
+    } else {
+      self.next_list_marker(ordered)
+    };
+    self.list_markers.push(ListMarker {
+      selected: marker,
+      written: 0,
+    });
+  }
+
+  /// Close what [`Self::push_list_marker`] opened for the same element, or end
+  /// the run of a list inside the quote that just closed.
+  #[inline(never)]
+  fn pop_list_marker(&mut self, id: u8) {
+    if id == TAG_UL || id == TAG_OL {
+      // An empty list writes nothing, leaving the one before it in place.
+      if let Some(marker) = self.list_markers.pop()
+        && marker.written != 0
+      {
+        self.sibling_list_marker = marker.written;
+        self.sibling_list_depth = self.depth_map[TAG_LI as usize];
+        self.sibling_list_quotes = self.blockquotes.len();
+        self.list_gap_from = self.buffer.len();
+      }
+    } else if self.sibling_list_quotes > self.blockquotes.len() {
+      // The quote's frame is gone, and the list before it was inside.
+      self.sibling_list_marker = 0;
+    }
+  }
+
   /// The tag id a `tagOverrides` alias gives a start or end tag name. Callers
   /// test `has_tag_overrides` first, so none of this is inlined into the
   /// unconfigured parser. Built-in names use the existing index; only custom
@@ -1446,16 +1480,24 @@ impl ConvertState {
     }
 
     match tag_id {
-      Some(TAG_OL) => {
-        self.ordered_starts.push(
-          tag
-            .attributes
-            .get_bit(ATTR_START)
-            .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
-        );
+      Some(list @ (TAG_UL | TAG_OL)) => {
+        let ordered = list == TAG_OL;
+        if ordered {
+          self.ordered_starts.push(
+            tag
+              .attributes
+              .get_bit(ATTR_START)
+              .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
+          );
+        }
         self.list_item_counts.push(0);
+        // A skipped node writes nothing and takes no part, as its events take
+        // none in the JS engine. Lists are blocks unless an override makes one
+        // inline, and the close takes the same test, so push and pop pair up.
+        if !self.stack[idx].is_inline || self.has_tag_overrides {
+          self.push_list_marker(ordered, skip_node);
+        }
       }
-      Some(TAG_UL) => self.list_item_counts.push(0),
       // An item's position counts only the items before it: a script, template
       // or stray text ahead of it must not renumber it or make it a later item.
       Some(TAG_LI) => {
@@ -1518,6 +1560,7 @@ impl ConvertState {
     if tag_id == Some(TAG_LI)
       && let Some(li) = self.stack.last()
     {
+      let excluded = li.excluded_from_markdown;
       let width: usize = if !skip_node && !self.in_table_cell() && !plain_text!(self) {
         let stack_len = self.stack.len();
         let parent_is_ordered = stack_len >= 2 && self.stack[stack_len - 2].tag_id == Some(TAG_OL);
@@ -1539,6 +1582,16 @@ impl ConvertState {
         .push(u8::try_from(width).unwrap_or(u8::MAX));
       for _ in 0..width {
         self.list_indent.push(' ');
+      }
+      if width != 0 && !excluded {
+        if self.has_tag_overrides {
+          self.note_item_with_overrides();
+        } else if let Some(marker) = self.list_markers.last_mut() {
+          marker.written = marker.selected;
+          self.last_item_star = marker.selected == b'*';
+        } else {
+          self.last_item_star = false;
+        }
       }
     }
 
@@ -1597,6 +1650,7 @@ impl ConvertState {
       node_excluded,
       node_enter_skipped,
       node_child_text_index,
+      node_is_inline,
     ) = {
       let node = self.stack.retired();
       (
@@ -1606,6 +1660,7 @@ impl ConvertState {
         node.excluded_from_markdown,
         node.enter_skipped,
         node.child_text_node_index,
+        node.is_inline,
       )
     };
 
@@ -1737,17 +1792,25 @@ impl ConvertState {
       }
       self.refresh_raw_html_block(id);
       self.update_in_pre_on_close(id);
-      if id == TAG_OL {
-        self.ordered_starts.pop();
-        self.list_item_counts.pop();
-      } else if id == TAG_UL {
-        self.list_item_counts.pop();
-      }
-      if id == TAG_LI
-        && let Some(w) = self.list_indent_widths.pop()
-      {
-        let new_len = self.list_indent.len().saturating_sub(w as usize);
-        self.list_indent.truncate(new_len);
+      match id {
+        TAG_UL | TAG_OL | TAG_BLOCKQUOTE => {
+          if id == TAG_OL {
+            self.ordered_starts.pop();
+          }
+          if id != TAG_BLOCKQUOTE {
+            self.list_item_counts.pop();
+          }
+          if !node_is_inline || self.has_tag_overrides {
+            self.pop_list_marker(id);
+          }
+        }
+        TAG_LI => {
+          if let Some(w) = self.list_indent_widths.pop() {
+            let new_len = self.list_indent.len().saturating_sub(w as usize);
+            self.list_indent.truncate(new_len);
+          }
+        }
+        _ => {}
       }
     }
 

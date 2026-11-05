@@ -248,8 +248,15 @@ export const MARKDOWN_CODE_BLOCK = '```'
 export const MARKDOWN_INLINE_CODE = '`'
 export const MARKDOWN_HORIZONTAL_RULE = '---'
 // Rule sharing a line with a list marker: `- ---` is dashes and spaces only, so
-// the whole line is a thematic break and the item is lost. `*` cannot collide.
+// the whole line is a thematic break and the item is lost. A `*` bullet takes
+// MARKDOWN_HORIZONTAL_RULE there instead.
 export const MARKDOWN_HORIZONTAL_RULE_ALT = '***'
+// A `listMarkers` entry holds the character the built-in enter of the list's
+// items writes in its low byte and, above it, the one the latest marker in the
+// list actually used, which an override can make any other, or 0 before an item
+// wrote a marker.
+export const LIST_SELECTED_MASK = 0xFF
+export const LIST_WRITTEN_SHIFT = 8
 
 // Raw-HTML blocks whose text/code is emitted verbatim rather than as Markdown.
 export function isInsideRawHtmlBlock(depthMap: Uint16Array): boolean {
