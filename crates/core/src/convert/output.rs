@@ -4930,8 +4930,10 @@ impl ConvertState {
           // heading marker needs a boundary before the div's first text.
           if tag_id == TAG_DIV {
             let bytes = self.buffer.as_bytes();
+            // Seven hashes already rule out a marker, so a long retained run
+            // is not rescanned at every div.
             let mut marker = bytes.len();
-            while marker > 0 && bytes[marker - 1] == b'#' {
+            while marker > 0 && bytes.len() - marker < 7 && bytes[marker - 1] == b'#' {
               marker -= 1;
             }
             if !(1..=6).contains(&(bytes.len() - marker)) || !self.opens_block_line(bytes, marker) {

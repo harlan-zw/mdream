@@ -978,7 +978,9 @@ export const tagHandlers: Record<number, TagHandler> = {
           index--
         const entry = state.buffer[index] || ''
         let marker = entry.length
-        while (marker > 0 && entry.charCodeAt(marker - 1) === 35)
+        // Seven hashes already rule out a marker, so a long retained run is
+        // not rescanned at every div.
+        while (marker > 0 && entry.length - marker < 7 && entry.charCodeAt(marker - 1) === 35)
           marker--
         const hashes = entry.length - marker
         if (hashes > 0 && hashes <= 6 && opensBlockLine(state.buffer, index, marker)) {

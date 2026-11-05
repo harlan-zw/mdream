@@ -172,6 +172,14 @@ describe.each(engines)('headings $name', (engineConfig) => {
     expect(output).toBe('- ## Heading\n- next')
   })
 
+  it.each([
+    ['<ul><li>#######<div>x</div></li></ul>', '- ####### x'],
+    ['<ul><li>########<div>x</div></li></ul>', '- ######## x'],
+  ])('keeps a run of seven or more hashes as text before a div: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(engine.htmlToMarkdown(html)).toBe(expected)
+  })
+
   it('converts h1', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<h1>Heading 1</h1>'

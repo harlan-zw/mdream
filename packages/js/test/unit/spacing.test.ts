@@ -1,6 +1,9 @@
 import type { MarkdownState } from '../../src/markdown-processor'
+import type { HandlerContext } from '../../src/types'
 import { describe, expect, it } from 'vitest'
+import { MAX_TAG_ID, TAG_DIV, TAG_LI } from '../../src/const'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { tagHandlers } from '../../src/tags'
 
 async function streamConvert(chunks: string[]): Promise<string> {
   const stream = new ReadableStream<string>({
@@ -139,5 +142,26 @@ describe('unknown tags', () => {
       expect(htmlToMarkdown(html), html).toBe(expected)
       expect(await streamConvert([html]), html).toBe(expected)
     }
+  })
+})
+
+describe('div after a hash run in a list item', () => {
+  it('reads at most seven hashes back from the end of the buffer', () => {
+    // Only one to six hashes can be a bare heading marker, so a long retained
+    // run must not be rescanned at every div.
+    let reads = 0
+    const run = {
+      length: 100_000,
+      charCodeAt: () => {
+        reads++
+        return 35
+      },
+    } as unknown as string
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- ', run], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
+    expect(reads).toBeLessThanOrEqual(7)
   })
 })
