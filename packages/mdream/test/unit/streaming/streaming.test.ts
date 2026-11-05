@@ -255,9 +255,12 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<h2>a&#9;</h2>', '## a', 'a'],
   ['<h2>a #&#9;</h2>', '## a \\#', 'a #'],
   // The closing-sequence escape reads the heading's real end, past spacing an
-  // emptied element left and across a run split between fragments.
+  // emptied element or a spacing-only one left and across a run split between
+  // fragments.
   ['<h2>a #&#9;<i></i>&#9;<i></i></h2>', '## a \\#', 'a #'],
   ['<h2>a #<i></i> <i></i></h2>', '## a \\#', 'a #'],
+  ['<h2>a #<span>&#9;</span></h2>', '## a \\#', 'a #'],
+  ['<h2>a #<span>&#32;</span></h2>', '## a \\#', 'a #'],
   ['<h2>a ##<i></i>#</h2>', '## a \\###', 'a ###'],
   ['<h2>#<i></i>&#9;</h2>', '## \\#', '#'],
   ['<h2>a #<q></q></h2>', '## a \\#', 'a #'],

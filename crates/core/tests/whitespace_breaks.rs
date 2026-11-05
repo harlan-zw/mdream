@@ -461,12 +461,15 @@ fn mixed_vertical_tab_and_space_keeps_emphasis() {
 
 #[test]
 fn heading_closing_run_is_read_at_the_real_end() {
-  // An emptied inline element can leave spacing after the run, and the run can
-  // be split around one; the escape still sees the run the renderer would.
+  // An emptied inline element, or one holding only spacing, can leave spacing
+  // after the run, and the run can be split around one; the escape still sees
+  // the run the renderer would.
   let options = HtmlToMarkdownOptions::default();
   for (html, expected) in [
     ("<h2>a #&#9;<i></i>&#9;<i></i></h2>", "## a \\#"),
     ("<h2>a #<i></i> <i></i></h2>", "## a \\#"),
+    ("<h2>a #<span>&#9;</span></h2>", "## a \\#"),
+    ("<h2>a #<span>&#32;</span></h2>", "## a \\#"),
     ("<h2>a ##<i></i>#</h2>", "## a \\###"),
     ("<h2>#<i></i>&#9;</h2>", "## \\#"),
     ("<h2>a #<q></q></h2>", "## a \\#"),
