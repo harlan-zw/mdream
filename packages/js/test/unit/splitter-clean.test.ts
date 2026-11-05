@@ -273,6 +273,19 @@ describe('splitter cleanup boundaries and options', () => {
     expect(chunkContractViolation(htmlToMarkdown(html, { clean: options.clean }), chunks)).toBeUndefined()
   })
 
+  it.each([
+    '<a href="#missing"><strong>b!</strong></a>c ',
+    '<strong>b!</strong><a href="#missing">c</a> ',
+  ])('maps chunk offsets past closer references from removed links: %s', (link) => {
+    // Each reference adds four characters; six of them on one line would
+    // move the next section's start back past the short line after it.
+    const html = `<h2>One</h2><p>${link.repeat(6)}</p><p>y</p><h2>Two</h2><p>z</p>`
+    const options = { clean: clean({ fragments: true }), chunkSize: 90, chunkOverlap: 0, stripHeaders: false }
+    const chunks = htmlToMarkdownSplitChunks(html, options)
+    expect(chunks.map(chunk => chunk.content)).toEqual([`## One\n\n${'**b!**&#99; '.repeat(5)}**b!**&#99;\n\ny`, '## Two\n\nz'])
+    expect(chunkContractViolation(htmlToMarkdown(html, { clean: options.clean }), chunks)).toBeUndefined()
+  })
+
   it('keeps an HR boundary before the quote writer prefixes its lines', () => {
     const html = '<blockquote><h2>One</h2><p>x</p><hr><p>y</p></blockquote><h2>Two</h2><p>z</p>'
     const options = { clean: clean({ fragments: true }), chunkSize: 1000, chunkOverlap: 0, stripHeaders: false }

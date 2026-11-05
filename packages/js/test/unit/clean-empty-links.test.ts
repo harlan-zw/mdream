@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { clean, slugify, stripHeadingFormatting } from '../../src/clean'
+import { ELEMENT_NODE, MAX_TAG_ID, TAG_A } from '../../src/const'
 import { htmlToMarkdown } from '../../src/index'
+import { createOutputPositions } from '../../src/output-positions'
 import { tailwindPlugin } from '../../src/plugins/tailwind'
 import { withMinimalPreset } from '../../src/preset/minimal'
 
@@ -9,6 +11,26 @@ const executableHrefs = [
   'DATA:text/html,payload',
   'VbScRiPt:msgbox(1)',
 ]
+
+it('maps content and boundary positions across an unwrapped closer reference', () => {
+  const buffer = ['**b!**', '[']
+  const depthMap = new Uint16Array(MAX_TAG_ID)
+  const outputPositions = createOutputPositions(buffer)
+  const target = { buffer, depthMap, outputPositions, lastContentCache: '' }
+  const pass = clean({ redundantLinks: true }).apply(target)!
+  const link = { type: ELEMENT_NODE, name: 'a', tagId: TAG_A, attributes: { href: 'cat!' }, depthMap, depth: 0, index: 0 }
+  pass.enter(link, 1, 42)
+  buffer.push('cat', '!')
+  const positions = [[0, 6], [1, 0], [1, 1], [2, 0], [2, 1], [2, 3], [3, 0], [3, 1]].flatMap(([fragment, offset]) =>
+    (['boundary', 'content'] as const).map(kind =>
+      outputPositions.capture(fragment, offset, kind)))
+  pass.exit(link)
+  expect(pass.unwrap(link)).toBe(true)
+  expect(buffer.join('')).toBe('**b!**&#99;at!')
+  expect(target.lastContentCache).toBe('&#99;at!')
+  const resolve = outputPositions.finish()
+  expect(positions.map(resolve)).toEqual([6, 6, 6, 6, 6, 6, 6, 6, 11, 11, 13, 13, 13, 13, 14, 14])
+})
 
 describe('clean.emptyLinks executable schemes', () => {
   it('uses the current cleanup rules for each conversion', () => {
