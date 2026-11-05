@@ -304,6 +304,10 @@ describe('streaming drain parity', () => {
     ['a heading', '<h2>a', '&#9;<i></i>', 11, '</h2>'],
     ['a list item', '<ul><li>a', '&#9;<i></i>', 11, '</li></ul>'],
     ['a fence held open', '<p>a', '&#9;<i></i>', 11, '</p><pre><code>x'],
+    // Before anything is emitted the leading trim takes the whole run.
+    ['newlines before any output', '<p>', '<span>&#10;</span>', 18, 'x</p>'],
+    ['tabs at the document start', '', '<span>&#9;</span>', 17, 'x'],
+    ['Unicode spaces before any output', '<p>', '<span>&nbsp;</span>', 19, 'x</p>'],
   ])('does not rejoin a long held run on every chunk: %s', (_, open, unit, chunkSize, close) => {
     const html = `${open}${unit.repeat(16 * 1024)}${close}`
     let joinedLength = 0

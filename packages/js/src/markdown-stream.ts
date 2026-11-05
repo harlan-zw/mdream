@@ -185,7 +185,9 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     if (end < heldRunEnd || buffer[heldRunEnd - 1] !== heldRunLast)
       return false
     for (let index = heldRunEnd; index < end; index++) {
-      if (trimAsciiWhitespaceEnd(buffer[index]!, true).length !== 0)
+      const fragment = buffer[index]!
+      // Before the first yield the leading trim also takes Unicode spaces.
+      if ((hasYieldedContent ? trimAsciiWhitespaceEnd(fragment, true) : trimOutputStart(fragment)).length !== 0)
         return false
     }
     heldRunEnd = end
@@ -370,7 +372,10 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     }
     // A heading hold can cut before the run, and the heading's exit rewrites
     // what it held, so only whitespace past the cut can skip the next drain.
-    if (heldRunStart !== -1 && stableLength >= heldRunStart && currentContent.length - stableLength >= LONG_HELD_RUN) {
+    // Before the first yield the leading trim takes the whole run, so measure
+    // it in buffer coordinates: whitespace after it still drains to nothing.
+    const heldLength = currentContent.length === 0 ? content.length : currentContent.length - stableLength
+    if (heldRunStart !== -1 && stableLength >= heldRunStart && heldLength >= LONG_HELD_RUN) {
       heldRunEnd = Math.min(context.getHeldOutputFragment(), state.buffer.length)
       heldRunLast = state.buffer[heldRunEnd - 1]
     }
