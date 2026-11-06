@@ -203,6 +203,25 @@ describe('div after a hash run in a list item', () => {
     expect(reads).toBeLessThanOrEqual(3 * spaces.length)
   })
 
+  it('reads a lead that reaches the buffer start once while divs leave it unchanged', () => {
+    let reads = 0
+    const text = `${'1'.repeat(10_000)}#`
+    const entry = {
+      length: text.length,
+      charCodeAt: (index: number) => {
+        reads++
+        return text.charCodeAt(index)
+      },
+    } as unknown as string
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- ', entry], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    for (let i = 0; i < 100; i++)
+      expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
+    expect(reads).toBeLessThanOrEqual(3 * text.length)
+  })
+
   it('separates a div after a list-item heading marker', () => {
     const depthMap = new Uint16Array(MAX_TAG_ID)
     depthMap[TAG_LI] = 1

@@ -266,8 +266,8 @@ export function opensBlockLine(buffer: string[], fragment: number, cursor: numbe
 
 // `opensBlockLine` before the trailing heading run in `buffer[index]`, which
 // every `<div>` that leaves the line unchanged checks again. The walk stops at
-// the first character no block lead holds, so the answer is kept with the
-// entries it ends and stops in. Like the caption check, this assumes the
+// the first character no block lead holds, or at the buffer start, so the
+// answer is kept with the entries it ends and stops in. Like the caption check, this assumes the
 // entries between those two, all block-lead characters, are not rewritten.
 function markerOpensBlockLine(state: HandlerContext['state'], index: number, marker: number): boolean {
   const buffer = state.buffer
@@ -281,9 +281,9 @@ function markerOpensBlockLine(state: HandlerContext['state'], index: number, mar
   let cursor = marker
   for (;;) {
     if (cursor === 0) {
-      if (--fragment < 0)
-        return opens
-      cursor = buffer[fragment]!.length
+      if (fragment === 0)
+        break
+      cursor = buffer[--fragment]!.length
     }
     else if (isLeadChar(buffer[fragment]!.charCodeAt(cursor - 1))) {
       cursor--
