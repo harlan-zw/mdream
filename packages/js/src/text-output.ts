@@ -275,6 +275,11 @@ function trailingNewlines(buffer: string[]): number {
   return count
 }
 
+/** An unknown tag with no handler is inline, as in the Rust engine. */
+function isInlineElement(element: ElementNode): boolean {
+  return element.tagHandler ? element.tagHandler.isInline === true : element.tagId === -1
+}
+
 function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined, afterLiteralOpener = false): void {
   const buffer = state.buffer
   const config = newlineConfig(element, state.depthMap)
@@ -289,8 +294,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
       buffer[buffer.length - 1] = trimmed
   }
   const missingNewlines = Math.max(0, wantedNewlines - trailingNewlines(buffer))
-  // An unknown tag with no handler is inline, as in the Rust engine.
-  const isInline = element.tagHandler ? element.tagHandler.isInline === true : element.tagId === -1
+  const isInline = isInlineElement(element)
 
   if (buffer.length === 0) {
     if (output)
@@ -612,8 +616,11 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
     else if (openQuotes.length !== 0) {
       // Content, or a block boundary, makes every open quotation permanent.
-      const isInline = element.tagHandler ? element.tagHandler.isInline === true : element.tagId === -1
-      if ((output && hasNonWhitespace(output)) || (element.tagId !== -1 && !isInline)) {
+      // An element that writes nothing, like a dropped <svg>, is no boundary.
+      const isInline = isInlineElement(element)
+      const blockWrites = element.tagId !== -1 && !isInline
+        && ((output !== undefined && output.length > 0) || newlineConfig(element, state.depthMap)[event.type] > 0)
+      if ((output && hasNonWhitespace(output)) || blockWrites) {
         openQuotes.length = 0
         openQuoteNodes.length = 0
       }

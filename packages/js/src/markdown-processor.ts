@@ -72,6 +72,10 @@ export interface MarkdownState {
   outputPositions?: OutputPositions
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
+  /** A separator was just written on its own. See MdreamRuntimeState. */
+  separatorPending?: boolean
+  /** The cached run follows such a separator. */
+  cacheFollowsSeparator?: boolean
   /** Reference to the last processed node */
   lastNode?: ElementNode | TextNode
   /** Reference to the last processed text node - for context tracking */
@@ -1428,6 +1432,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     emptyItemFragment: undefined,
     emptyItemAfterCr: false,
     pendingLeadingBlank: false,
+    separatorPending: false,
+    cacheFollowsSeparator: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
     tableRenderedTable: false,
     tableCurrentRowCells: 0,
@@ -1907,6 +1913,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           if (textNode.generatedMarkdown?.prefix || state.pendingLeadingBlank) {
             state.buffer.push(' ')
             state.lastContentCache = ' '
+            state.separatorPending = true
             lastChar = ' '
           }
           else {
@@ -1969,6 +1976,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (textNode.generatedMarkdown && textNode.value)
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
 
+      // The run written below follows the separator the pending flag recorded.
+      state.cacheFollowsSeparator = state.separatorPending === true
+      state.separatorPending = false
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
         const wrapped = wrapText(
@@ -2194,6 +2204,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           if (last !== -1 && last !== 32 && last !== 10 && last !== 9 && last !== 13) {
             buff.push(' ')
             state.lastContentCache = ' '
+            state.separatorPending = true
           }
         }
       }

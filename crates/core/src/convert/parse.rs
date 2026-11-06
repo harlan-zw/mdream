@@ -496,6 +496,16 @@ impl ConvertState {
     self.stack.last().is_some_and(|node| node.is_inline)
   }
 
+  /// A whitespace-only blank at an inline fragment root is a word separator the
+  /// output places. Mirrors the JS engine's `inlineAtRoot`.
+  #[inline(always)]
+  fn inline_at_root(&self, contains_non_whitespace: bool) -> bool {
+    !contains_non_whitespace
+      && self.first_block_parent_index == Some(0)
+      && self.block_parent_indices.is_empty()
+      && self.stack.first().is_some_and(|node| node.is_inline)
+  }
+
   /// Depth and walk index for an emitted text node, plus its hazard flag.
   #[inline(always)]
   fn begin_text_emit(&mut self, text: &str, has_inline_gfm_hazard: bool) -> (usize, usize) {
@@ -568,7 +578,10 @@ impl ConvertState {
           .as_bytes()
           .last()
           .is_none_or(|&last| last == b'\n'));
-    if contains_whitespace && is_first_text_in_block {
+    if contains_whitespace
+      && is_first_text_in_block
+      && !self.inline_at_root(contains_non_whitespace)
+    {
       let bytes = text.as_bytes();
       let mut start = 0;
       while start < bytes.len() && is_whitespace(bytes[start]) {
@@ -694,7 +707,10 @@ impl ConvertState {
           Some(&last) => last == b'\n',
           None => !self.is_html() || self.flushed_tail[1] == b'\n',
         });
-    if contains_whitespace && is_first_text_in_block {
+    if contains_whitespace
+      && is_first_text_in_block
+      && !self.inline_at_root(contains_non_whitespace)
+    {
       let mut start = 0;
       let bytes = text.as_bytes();
       while start < bytes.len()

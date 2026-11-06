@@ -2240,7 +2240,8 @@ impl ConvertState {
         .unwrap_or_else(|| resolve_url(href, self.options.origin.as_deref(), self.clean_urls));
       let resolved = resolved.as_ref();
       let mut title = attributes.get_bit(ATTR_TITLE).unwrap_or("");
-      if !title.is_empty() && self.last_content_cache_len > 0 {
+      if !title.is_empty() && self.last_content_cache_len > 0 && !self.cache_follows_separator
+      {
         let buf_len = self.buffer.len();
         let start = buf_len.saturating_sub(self.last_content_cache_len);
         if self.buffer.is_char_boundary(start) {
@@ -2974,7 +2975,9 @@ impl ConvertState {
       }
       add_space = false;
     }
+    let followed_separator = self.take_follows_separator();
     self.push_text_uncapped(text, add_space);
+    self.cache_follows_separator = followed_separator;
     self.finish_text_node(text, contains_whitespace, depth, index);
     self.return_escape_scratch(escape_scratch);
   }
@@ -3092,6 +3095,7 @@ impl ConvertState {
           relocated_space = true;
         } else {
           self.push_code_span_content(" ", true);
+          self.separator_end = self.buffer.len();
         }
       }
       self.pending_inline_whitespace = false;
@@ -3263,6 +3267,8 @@ impl ConvertState {
     let written_from = self.buffer.len();
     let owns_space =
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
+    // Read before any write, so every path counts the separator the same way.
+    self.cache_follows_separator = self.take_follows_separator();
     if self.wrap_width != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char, owns_leading_space, relocated_space);
     } else if self.options.max_node_bytes == 0 {
@@ -3692,6 +3698,16 @@ impl ConvertState {
     self.raw_html_scanned_to = self.raw_html_scanned_to.min(at);
   }
 
+  /// Whether the text about to be written follows a separator written on its
+  /// own, whether or not a drain already took that separator.
+  #[inline(always)]
+  fn take_follows_separator(&mut self) -> bool {
+    let follows = self.separator_end == self.buffer.len() || self.separator_drained;
+    self.separator_drained = false;
+    self.separator_end = usize::MAX;
+    follows
+  }
+
   /// Follow a rewrite that moved the bytes from `old_end` on to `new_end`. An
   /// opener ending before `old_end` had a whole line written after it.
   fn shift_literal_opener_ends(&mut self, old_end: usize, new_end: usize) {
@@ -3702,6 +3718,11 @@ impl ConvertState {
         end.1 - old_end + new_end
       };
     }
+    self.separator_end = if self.separator_end == usize::MAX || self.separator_end < old_end {
+      usize::MAX
+    } else {
+      self.separator_end - old_end + new_end
+    };
   }
 
   /// Move every cached offset at or past `at` one byte right, for a newline inserted at `at`.
@@ -3718,6 +3739,9 @@ impl ConvertState {
       if end.1 != usize::MAX && end.1 >= at {
         end.1 += 1;
       }
+    }
+    if self.separator_end != usize::MAX && self.separator_end >= at {
+      self.separator_end += 1;
     }
     for run in &mut self.streaming_break_runs {
       if run.output_start >= at {
@@ -4008,6 +4032,9 @@ impl ConvertState {
   pub(super) fn truncate_buffer(&mut self, len: usize) {
     self.note_buffer_rewrite(len);
     self.buffer.truncate(len);
+    if self.separator_end != usize::MAX && self.separator_end > len {
+      self.separator_end = usize::MAX;
+    }
     // Output that grows back to a trimmed opener's end is not that opener.
     for end in &mut self.literal_opener_ends {
       if end.1 != usize::MAX && end.1 > len {
@@ -5398,6 +5425,7 @@ impl ConvertState {
         self.finish_raw_html_block(output_str, true);
       }
     }
+    self.separator_drained = false;
     let is_line_boundary =
       || !literal && (output_str.starts_with('\n') || output_str.starts_with("\\\n"));
 
@@ -5422,6 +5450,7 @@ impl ConvertState {
           && (self.open_markers.is_empty() || !self.hoist_opener_space())
         {
           self.push_code_span_content(" ", true);
+          self.separator_end = self.buffer.len();
           // Only Markdown drops an empty pair with the separator in front of it.
           if self.is_markdown() {
             self.pending_space_end = self.buffer.len();

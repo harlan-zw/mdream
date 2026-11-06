@@ -1275,3 +1275,67 @@ fn raw_html_blocks_end_before_following_markdown() {
     }
   }
 }
+
+/// A separator written on its own is no part of the link text, so the
+/// redundant-title check keeps a `title` the text merely starts with, and
+/// still drops one the whole text repeats.
+#[test]
+fn redundant_link_title_ignores_a_standalone_separator() {
+  let cases = [
+    ("<a href=\"/x\" title=\"Q\"><div>x</div> ", "[x Q](/x \"Q\")"),
+    ("<i><<a title=e href=/\"><p>U</p> ", "*< [U e](/\" \"e\")*"),
+    ("<a href=\"/x\" title=\"Q\">Q</a>", "[Q](/x)"),
+    ("<a title=\"T\" href=\"/x\">T </a>", "[T](/x)"),
+    // A drain between the separator and the text must not change the answer.
+    (
+      "<a href title=\"Aa Bbbbbbbbb\"><span>< </span><o>Aa Bbbbbbbbb</",
+      "[< Aa Bbbbbbbbb](<> \"Aa Bbbbbbbbb\")",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(md(html), expected, "{html}");
+    for width in 1..=html.len() {
+      assert_eq!(md_streamed(html, width), expected, "{html}, width {width}");
+    }
+  }
+}
+
+/// A blank at the fragment root is a word separator the output places, so
+/// both engines keep it, including after a block element that writes nothing.
+#[test]
+fn retained_blank_at_the_fragment_root_separates_words() {
+  let cases = [
+    ("<span><svg>x</svg> <span>c</span></span>", "x c"),
+    ("<span><svg>x</svg> <b>c</b></span>", "x **c**"),
+    ("<span><svg>x</svg> y</span>", "x y"),
+    ("<span> <span>c</span></span>", "c"),
+    // Only a whitespace-only blank is exempt; a text node that starts with a
+    // blank still loses it at a line start.
+    ("<span><div>x</div> y</span>", "x\n\ny"),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(md(html), expected, "{html}");
+    for width in 1..=html.len() {
+      assert_eq!(md_streamed(html, width), expected, "{html}, width {width}");
+    }
+  }
+}
+
+/// An element that writes nothing is no boundary in text output either, so an
+/// empty quotation around it still drops its pair.
+#[test]
+fn text_output_drops_an_empty_quotation_around_a_dropped_element() {
+  let cases = [
+    ("<p>a<q><strong> <svg></svg></strong></q> b</p>", "a  b"),
+    ("<p>a<q><svg></svg></q>b</p>", "a b"),
+    ("<p>a<q></q>b</p>", "a b"),
+    ("<p>a<q>x</q>b</p>", "a \"x\"b"),
+    (
+      "<p>a<em><q><strong> <svg></svg></strong></q></em> b</p>",
+      "a  b",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(text(html), expected, "{html}");
+  }
+}

@@ -347,6 +347,14 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
 
+  /**
+   * A separator was just written on its own, so the next text does not start
+   * the run the redundant-title check compares.
+   */
+  separatorPending?: boolean
+  /** The cached run follows such a separator, whether or not a drain took it. */
+  cacheFollowsSeparator?: boolean
+
   /** Reference to the last processed node */
   lastNode?: Node
 

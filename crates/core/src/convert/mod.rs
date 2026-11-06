@@ -842,6 +842,14 @@ pub struct ConvertState {
   /// End of the space the current element's enter wrote for a pending
   /// separator, so an opener written right after it can take it along.
   pending_space_end: usize,
+  /// End of the last separator written on its own, which is not part of the
+  /// text after it.
+  separator_end: usize,
+  /// That separator has been drained, so the next text still follows it.
+  separator_drained: bool,
+  /// The cached run follows a separator written on its own, so the
+  /// redundant-title check must not treat it as the link's whole text.
+  cache_follows_separator: bool,
   /// Deferred spacing after a committed figcaption.
   caption_boundary: CaptionBoundary,
 
@@ -1174,6 +1182,9 @@ impl ConvertState {
       pending_inline_whitespace: false,
       pending_leading_blank: false,
       pending_space_end: usize::MAX,
+      separator_end: usize::MAX,
+      separator_drained: false,
+      cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
@@ -3030,6 +3041,12 @@ impl ConvertState {
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
+    if self.separator_end != usize::MAX && self.separator_end <= drain_end {
+      self.separator_drained = true;
+      self.separator_end = usize::MAX;
+    } else if self.separator_end != usize::MAX {
+      self.separator_end -= drain_end;
+    }
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;

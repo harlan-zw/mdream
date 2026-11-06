@@ -149,6 +149,26 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<h2>w<strong>a </strong><br>b</h2>',
     '<table><tr><th>h</th></tr><tr><td>w<strong>a </strong><br>b</td></tr></table>',
   ],
+  'redundant link title ignores a standalone separator': [[
+    '<a href="/x" title="Q"><div>x</div> ',
+    '<i><<a title=e href=/"><p>U</p> ',
+    '<a href="/x" title="Q">Q</a>',
+    '<a title="T" href="/x">T </a>',
+    '<a href title="Aa Bbbbbbbbb"><span>< </span><o>Aa Bbbbbbbbb</',
+  ], ['markdown']],
+  'retained blank at the fragment root': [[
+    '<span><svg>x</svg> <span>c</span></span>',
+    '<span><svg>x</svg> <b>c</b></span>',
+    '<span><svg>x</svg> y</span>',
+    '<span> <span>c</span></span>',
+    '<span><div>x</div> y</span>',
+  ], ['markdown', 'text']],
+  'empty quotation around a dropped element': [[
+    '<p>a<q><strong> <svg></svg></strong></q> b</p>',
+    '<p>a<q><svg></svg></q>b</p>',
+    '<p>a<q>x</q>b</p>',
+    '<p>a<em><q><strong> <svg></svg></strong></q></em> b</p>',
+  ], ['text']],
   'no-break space after an owed separator': [[
     '<p>Total:<span> </span>&nbsp;<b>5</b></p>',
     '<p>a<span>x </span>&nbsp;<span>b</span></p>',
