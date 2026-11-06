@@ -169,6 +169,9 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// The opener carries the block break a heading in a list item owed, so
+  /// dropping the empty pair owes it again.
+  restores_heading_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -206,6 +209,9 @@ struct CaptionFrame {
   spacing: [u8; 2],
   deferred_breaks: Option<DeferredBreakRun>,
   has_internal_break: bool,
+  /// The caption took a pending heading break at its enter. Dropped empty, it
+  /// writes no separation of its own, so its exit owes the break again.
+  restores_heading_break: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -259,6 +265,8 @@ struct LinkOutputState {
   /// The `[` starts where the latest hard break ends; see
   /// `OpenMarker::starts_at_hard_break`.
   starts_at_hard_break: bool,
+  /// Bytes before the link bracket owned by a pending heading break.
+  heading_break_prefix_len: usize,
 }
 
 struct FragmentLink {
@@ -809,6 +817,12 @@ pub struct ConvertState {
   held_whitespace: TailRun,
   held_spaces: TailRun,
   held_heading_run: TailRun,
+  /// The space run ending the line a dropped caption hands its heading break
+  /// back to, and the start of that run with whether the line opens a block.
+  /// Empty captions in a row check the same line, so it is read once rather
+  /// than at every exit.
+  caption_line_spaces: TailRun,
+  caption_line_opens: Option<(usize, bool)>,
   /// Bytes at the buffer start known to be whitespace, for the leading trim.
   leading_whitespace: usize,
   #[cfg(test)]
@@ -967,6 +981,10 @@ pub struct ConvertState {
   empty_item_after_cr: bool,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
+  /// A heading closed in a list item. Inside the item its block spacing is
+  /// collapsed, so the next visible content owes it the block break the root
+  /// writes, or that content joins the heading's line.
+  heading_break_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1001,6 +1019,9 @@ pub struct ConvertState {
   code_span_closed_bytes: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
+  /// Bytes `opens_block_line` reads through the space run before its end.
+  #[cfg(test)]
+  block_line_bytes_read: std::cell::Cell<usize>,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
   /// held inline it costs the override-free path more than the scan it replaces.
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
@@ -1145,6 +1166,8 @@ impl ConvertState {
       held_whitespace: TailRun::default(),
       held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
+      caption_line_spaces: TailRun::default(),
+      caption_line_opens: None,
       leading_whitespace: 0,
       #[cfg(test)]
       leading_whitespace_read: 0,
@@ -1218,6 +1241,7 @@ impl ConvertState {
       empty_item_len: 0,
       empty_item_after_cr: false,
       list_rule_pending: false,
+      heading_break_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -1233,6 +1257,8 @@ impl ConvertState {
       code_span_closed_bytes: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
+      #[cfg(test)]
+      block_line_bytes_read: std::cell::Cell::new(0),
     };
     // Resolve clean config into bitmask
     if let Some(ref clean) = s.options.clean {
@@ -2629,6 +2655,13 @@ impl ConvertState {
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
+    self.caption_line_spaces.note_rewrite(offset);
+    if self
+      .caption_line_opens
+      .is_some_and(|(start, _)| offset < start)
+    {
+      self.caption_line_opens = None;
+    }
     if offset < self.leading_whitespace {
       self.leading_whitespace = 0;
     }
@@ -2657,6 +2690,10 @@ impl ConvertState {
     self.held_whitespace.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
+    self.caption_line_spaces.note_drain(removed);
+    if removed != 0 {
+      self.caption_line_opens = None;
+    }
     self.leading_whitespace = 0;
     if self.hard_break_end != usize::MAX {
       self.hard_break_end = self
@@ -2693,7 +2730,7 @@ impl ConvertState {
     if let Some(bracket_pos) = std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| link.open && (link.pins_output || link.empty_text_pending))
-      .map(|link| link.bracket_pos)
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
     {
       floor = floor.min(bracket_pos);
@@ -2917,7 +2954,7 @@ impl ConvertState {
     std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| self.link_hold_required(link))
-      .map(|link| link.bracket_pos)
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
   }
 
@@ -3359,6 +3396,41 @@ mod tests {
         "{name}: read {read} bytes of a {}-byte input",
         html.len()
       );
+    }
+  }
+
+  // Each empty caption hands the heading break back and checks the heading's
+  // line again; the spaces ending that line must not be read at every exit.
+  #[test]
+  fn empty_captions_read_the_heading_line_once() {
+    for (caption, tail) in [
+      ("<figcaption></figcaption>", ""),
+      ("<figure><figcaption></figcaption></figure>", ""),
+      // A marker after the run sends the check through the spaces before it.
+      ("<figcaption></figcaption>", "-&#32;"),
+    ] {
+      let html = format!(
+        "<ul><li><h3>T{}{tail}</h3>{}x</li></ul>",
+        "&#32;".repeat(2_000),
+        caption.repeat(200)
+      );
+      for chunk_size in [html.len(), 64] {
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut markdown = String::new();
+        for chunk in html.as_bytes().chunks(chunk_size) {
+          markdown.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        markdown.push_str(&processor.finish());
+
+        assert!(markdown.ends_with("\n\n  x"), "{caption}: {markdown:?}");
+        let state = &processor.state;
+        let read = state.block_line_bytes_read.get() + state.caption_line_spaces.read;
+        assert!(
+          read <= 2 * html.len(),
+          "{caption}, chunks of {chunk_size}: read {read} bytes of a {}-byte input",
+          html.len()
+        );
+      }
     }
   }
 
