@@ -2611,6 +2611,29 @@ fn raw_html_region_text_is_not_gfm_escaped() {
   }
 }
 
+// One-shot read a line start cached before a trim; a drain rebased it, so
+// streaming alone got it right.
+#[test]
+fn raw_html_text_after_a_trimmed_block_break_matches_one_shot() {
+  for (html, expected) in [
+    (
+      "<dt><ul><dd><h6>a b<dd>*c",
+      "<dt><dd>###### a b</dd><dd>*c</dd></dt>",
+    ),
+    (
+      "<dt><ul><dd><h6>a ><dd>>><v>`",
+      "<dt><dd>###### a &gt;</dd><dd>&gt;&gt;`</dd></dt>",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // The one-shot finaliser trimmed the buffer with `str::trim_end`, whose Unicode
 // set includes U+00A0. Everywhere else nbsp is content, and streaming cannot
 // un-send a nbsp it has already yielded, so one-shot deleted a trailing one that

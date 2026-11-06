@@ -803,6 +803,9 @@ pub struct ConvertState {
   /// it. Recomputing walks the whole line, which is quadratic over a long one.
   line_start: usize,
   line_start_scanned_to: usize,
+  /// Lowest offset rewritten since the line start was last read. A trim and
+  /// regrowth in between leaves the buffer no shorter than the cache.
+  line_start_dirty_from: usize,
   /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
   /// escape, counted as text is written.
   heading_hash_run: usize,
@@ -1160,6 +1163,7 @@ impl ConvertState {
       raw_html_scanned_to: 0,
       line_start: 0,
       line_start_scanned_to: 0,
+      line_start_dirty_from: usize::MAX,
       heading_hash_run: 0,
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
@@ -2651,6 +2655,7 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -3104,6 +3109,7 @@ impl ConvertState {
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
     self.line_start = self.line_start.saturating_sub(drain_end);
     self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
+    self.line_start_dirty_from = self.line_start_dirty_from.saturating_sub(drain_end);
   }
 }
 
