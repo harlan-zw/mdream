@@ -6726,6 +6726,49 @@ fn code_span_offsets_follow_an_empty_item_blank_line() {
   }
 }
 
+// The same blank line, inserted while a quote the item opened is still open: a
+// literal `<li>` in a cell exits first and settles the outer item's guard. The
+// quote frames past the line were not shifted, so each quoted from a byte early
+// (`> a> b`), and inside a multi-byte character `html_to_markdown` panicked.
+#[test]
+fn blockquote_frames_follow_an_empty_item_blank_line() {
+  for (html, expected) in [
+    (
+      "a<li><blockquote><td>ab<blockquote><li>",
+      "a\n\n- \n  > ab> <li></li>",
+    ),
+    (
+      "a<li><blockquote><td>\u{e9}<blockquote><li>",
+      "a\n\n- \n  > \u{e9}> <li></li>",
+    ),
+    (
+      "\u{fffd}<li><e><blockquote><td>\u{fffd}<f><blockquote><li>",
+      "\u{fffd}\n\n- \n  > \u{fffd}> <li></li>",
+    ),
+    (
+      "><li><blockquote><td>\u{fffd}<blockquote><li>",
+      "\\>\n\n- \n  > \u{fffd}> <li></li>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html:?}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut streamed = String::new();
+      let mut start = 0;
+      while start < html.len() {
+        let mut end = (start + width).min(html.len());
+        while end < html.len() && !html.is_char_boundary(end) {
+          end += 1;
+        }
+        streamed.push_str(&processor.process_chunk(&html[start..end]));
+        start = end;
+      }
+      streamed.push_str(&processor.finish());
+      assert_eq!(streamed, expected, "{html:?} width={width}");
+    }
+  }
+}
+
 // Closing a blockquote rewrites its content with a `> ` prefix on every line, so
 // an offset inside it moves by however many prefixes precede it. Fragment links
 // were remapped; a code span and the code fence were not, leaving them pointing
