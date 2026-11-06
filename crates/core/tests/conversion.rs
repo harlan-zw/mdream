@@ -6483,6 +6483,30 @@ fn raw_html_regions_escape_markdown_past_a_blank_line() {
   assert!(!md.contains("C\\_D"), "got: {md:?}");
 }
 
+// The heading's block break is trimmed and the next `<dd>` grows the buffer
+// back past it, so the cached line start must not survive the trim.
+#[test]
+fn raw_html_text_after_a_trimmed_block_break_is_not_escaped() {
+  assert_eq!(
+    convert("<dt><ul><dd><h6>a b<dd>*c"),
+    "<dt><dd>###### a b</dd><dd>*c</dd></dt>"
+  );
+  assert_eq!(
+    convert("<dt><ul><dd><h6>a ><dd>`c"),
+    "<dt><dd>###### a &gt;</dd><dd>`c</dd></dt>"
+  );
+}
+
+// The blank line is inserted behind the cached line start, and Markdown resumes
+// after it, so the backtick on the next line stays escaped.
+#[test]
+fn text_after_a_blank_line_inserted_in_a_raw_html_block_is_escaped() {
+  assert_eq!(
+    convert("<dl><ul>><code><blockquote></code>`"),
+    "<dl>\n\n&gt;<code>></code>\\`\n\n</dl>"
+  );
+}
+
 #[test]
 fn a_row_closes_through_content_left_open_in_a_cell() {
   // `<tr>` must close an unclosed `<p>` inside the previous cell; otherwise the

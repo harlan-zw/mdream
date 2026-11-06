@@ -4712,22 +4712,27 @@ impl ConvertState {
     self.line_start_scanned_to = usize::MAX;
   }
 
-  /// Offset just past the buffer's last `\n`.
+  /// Offset just past the buffer's last `\n`. Read only in raw HTML and the
+  /// quoted-line cap check, so kept out of line.
+  #[cold]
+  #[inline(never)]
   pub(super) fn current_line_start(&mut self) -> usize {
     let len = self.buffer.len();
     let bytes = self.buffer.as_bytes();
-    // Only bytes appended since the last call can move the line start; a buffer
-    // that shrank behind the cache (a trim, or a streaming drain) rebuilds it.
-    if self.line_start_scanned_to > len || self.line_start > len {
+    let scanned_to = self.line_start_scanned_to.min(self.line_start_dirty_from);
+    self.line_start_dirty_from = usize::MAX;
+    // Only bytes appended or rewritten since the last call can move the line
+    // start; an invalidation, a shrink or a rewrite behind it rebuilds it.
+    if self.line_start_scanned_to > len || self.line_start > len || scanned_to < self.line_start {
       self.line_start = bytes[..len]
         .iter()
         .rposition(|&byte| byte == b'\n')
         .map_or(0, |i| i + 1);
-    } else if let Some(i) = bytes[self.line_start_scanned_to..len]
+    } else if let Some(i) = bytes[scanned_to..len]
       .iter()
       .rposition(|&byte| byte == b'\n')
     {
-      self.line_start = self.line_start_scanned_to + i + 1;
+      self.line_start = scanned_to + i + 1;
     }
     self.line_start_scanned_to = len;
     self.line_start
