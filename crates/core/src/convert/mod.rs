@@ -114,7 +114,7 @@ fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
     if bytes[index] == SPACE_CHAR
       && !matches!(
         bytes[index + 1],
-        b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
+        b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9'
       )
     {
       // A piece ending on a `-`/`=`/`*`/`_` run may end its line there, which the
@@ -182,6 +182,10 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// A word separator sits right before the opener, moved there or written for
+  /// a pending one. When the pair turns out empty it goes with the opener and
+  /// is owed to the content after it.
+  follows_separator: bool,
   /// The opener carries the block break a heading in a list item owed, so
   /// dropping the empty pair owes it again.
   restores_heading_break: bool,
@@ -894,6 +898,20 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// That separator is a blank that opened an inline element, or one an empty
+  /// pair took along and gave back, so it is written on its own.
+  pending_leading_blank: bool,
+  /// End of the space the current element's enter wrote for a pending
+  /// separator, so an opener written right after it can take it along.
+  pending_space_end: usize,
+  /// End of the last separator written on its own, which is not part of the
+  /// text after it.
+  separator_end: usize,
+  /// That separator has been drained, so the next text still follows it.
+  separator_drained: bool,
+  /// The cached run follows a separator written on its own, so the
+  /// redundant-title check must not treat it as the link's whole text.
+  cache_follows_separator: bool,
   /// Deferred spacing after a committed figcaption.
   caption_boundary: CaptionBoundary,
 
@@ -950,6 +968,10 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
+  /// Depth and buffer offset right after each open inline element's literal
+  /// `tagOverrides` opener. The offset still ends the buffer while nothing
+  /// has been written since.
+  literal_opener_ends: Vec<(usize, usize)>,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1233,6 +1255,11 @@ impl ConvertState {
       has_last_text_node: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      pending_leading_blank: false,
+      pending_space_end: usize::MAX,
+      separator_end: usize::MAX,
+      separator_drained: false,
+      cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
@@ -1257,6 +1284,7 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      literal_opener_ends: Vec::new(),
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -3103,6 +3131,12 @@ impl ConvertState {
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
+    if self.separator_end != usize::MAX && self.separator_end <= drain_end {
+      self.separator_drained = true;
+      self.separator_end = usize::MAX;
+    } else if self.separator_end != usize::MAX {
+      self.separator_end -= drain_end;
+    }
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;
@@ -3113,6 +3147,14 @@ impl ConvertState {
     for marker in &mut self.open_markers {
       marker.output_start -= drain_end;
       marker.content_start -= drain_end;
+    }
+    // An opener with drained output after it no longer ends anything.
+    for end in &mut self.literal_opener_ends {
+      end.1 = if end.1 == usize::MAX || end.1 < drain_end {
+        usize::MAX
+      } else {
+        end.1 - drain_end
+      };
     }
     for frame in &mut self.caption_frames {
       if let CaptionState::Tentative {

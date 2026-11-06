@@ -486,6 +486,26 @@ impl ConvertState {
     }
   }
 
+  /// A blank that opens an inline element can be the only word separator,
+  /// whether the element writes a delimiter, like `<strong>`, or nothing, like
+  /// a `<span>`. The output decides where it goes, or that it writes nothing.
+  /// Kept out of line: only blanks reach it, and inlined it slows every text
+  /// node.
+  #[inline(never)]
+  fn keeps_leading_blank(&self) -> bool {
+    self.stack.last().is_some_and(|node| node.is_inline)
+  }
+
+  /// A whitespace-only blank at an inline fragment root is a word separator the
+  /// output places. Mirrors the JS engine's `inlineAtRoot`.
+  #[inline(always)]
+  fn inline_at_root(&self, contains_non_whitespace: bool) -> bool {
+    !contains_non_whitespace
+      && self.first_block_parent_index == Some(0)
+      && self.block_parent_indices.is_empty()
+      && self.stack.first().is_some_and(|node| node.is_inline)
+  }
+
   /// Depth and walk index for an emitted text node, plus its hazard flag.
   #[inline(always)]
   fn begin_text_emit(&mut self, text: &str, has_inline_gfm_hazard: bool) -> (usize, usize) {
@@ -537,7 +557,9 @@ impl ConvertState {
       excludes_text_nodes = true;
     }
 
-    if !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty() {
+    let is_leading_blank =
+      !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty();
+    if is_leading_blank && (self.is_html() || !self.keeps_leading_blank()) {
       return;
     }
     if text_buffer.is_empty() {
@@ -556,7 +578,10 @@ impl ConvertState {
           .as_bytes()
           .last()
           .is_none_or(|&last| last == b'\n'));
-    if contains_whitespace && is_first_text_in_block {
+    if contains_whitespace
+      && is_first_text_in_block
+      && !self.inline_at_root(contains_non_whitespace)
+    {
       let bytes = text.as_bytes();
       let mut start = 0;
       while start < bytes.len() && is_whitespace(bytes[start]) {
@@ -566,6 +591,10 @@ impl ConvertState {
         text.drain(..start);
       }
     }
+    if is_leading_blank && text.is_empty() {
+      *text_buffer = text;
+      return;
+    }
 
     // Only raw HTML leaves decoded references unprotected.
     if self.has_encoded_html_entity {
@@ -574,6 +603,17 @@ impl ConvertState {
         std::mem::swap(&mut text, &mut self.entity_buffer);
       }
       self.has_encoded_html_entity = false;
+    }
+
+    // The output places a leading blank as a word separator; the counters stay
+    // as if it were dropped, so it is no content of the element.
+    if is_leading_blank {
+      if !excludes_text_nodes {
+        self.place_leading_blank();
+      }
+      text.clear();
+      *text_buffer = text;
+      return;
     }
 
     if !excludes_text_nodes {
@@ -637,14 +677,15 @@ impl ConvertState {
     let child_text_node_index = self.stack.last().map_or(0, |n| n.child_text_node_index);
 
     // Whitespace-only text before an element's first child is indentation and
-    // can be dropped. At the fragment root it can instead separate adjacent
+    // can be dropped, unless it parts words in inline content after
+    // earlier text. At the fragment root it can instead separate adjacent
     // inline siblings, so emit it and let the output layer trim or absorb it at
     // leading/trailing and block boundaries.
-    if !in_pre_tag
+    let is_leading_blank = !in_pre_tag
       && !contains_non_whitespace
       && child_text_node_index == 0
-      && !self.stack.is_empty()
-    {
+      && !self.stack.is_empty();
+    if is_leading_blank && (self.is_html() || !self.keeps_leading_blank()) {
       return;
     }
     if text_buffer.is_empty() {
@@ -666,7 +707,10 @@ impl ConvertState {
           Some(&last) => last == b'\n',
           None => !self.is_html() || self.flushed_tail[1] == b'\n',
         });
-    if contains_whitespace && is_first_text_in_block {
+    if contains_whitespace
+      && is_first_text_in_block
+      && !self.inline_at_root(contains_non_whitespace)
+    {
       let mut start = 0;
       let bytes = text.as_bytes();
       while start < bytes.len()
@@ -690,6 +734,10 @@ impl ConvertState {
         }
         text.drain(..start);
       }
+    }
+    if is_leading_blank && text.is_empty() {
+      *text_buffer = text;
+      return;
     }
 
     if self.has_encoded_html_entity {
@@ -735,6 +783,17 @@ impl ConvertState {
           tracked.text_content.push_str(&text);
         }
       }
+    }
+
+    // The output places a leading blank as a word separator; the counters stay
+    // as if it were dropped, so it is no content of the element.
+    if is_leading_blank {
+      if !excludes_text_nodes {
+        self.place_leading_blank();
+      }
+      text.clear();
+      *text_buffer = text;
+      return;
     }
 
     if !excludes_text_nodes {

@@ -29,6 +29,8 @@ describe('gfm text escaping', () => {
     ['<p>> quote</p>', '\\> quote'],
     ['<p>1. item</p>', '1\\. item'],
     ['<p>---</p>', '\\---'],
+    ['<p>===</p>', '\\==='],
+    ['<p>--</p>', '\\--'],
     ['<p>[label](url)</p>', '\\[label](url)'],
     ['<p>foo *bar* ~~baz~~ `qux`</p>', 'foo \\*bar\\* \\~\\~baz\\~\\~ \\`qux\\`'],
     ['<p>&#35; heading</p>', '\\# heading'],
@@ -45,6 +47,7 @@ describe('gfm text escaping', () => {
   it('escapes syntax introduced by entity decoding', () => {
     expect(htmlToMarkdown('<p>&#42;x&#42;</p><p>foo&#10;# heading</p>'))
       .toBe('\\*x\\*\n\nfoo\n\\# heading')
+    expect(htmlToMarkdown('<p>foo&#10;===</p>')).toBe('foo\n\\===')
   })
 
   it('escapes text replaced or mutated by plugins', async () => {

@@ -800,9 +800,12 @@ export const tagHandlers: Record<number, TagHandler> = {
         return safeAnchorOutput(node, state.options, false, true)
       const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
-      // Check if title matches the last content to avoid duplication
+      // Drop a title that repeats the link's last text run. A separator
+      // written on its own is no part of that text, so `[x e](u "e")` keeps
+      // its title while `[e](u "e")` still drops the duplicate.
       const lastContent = state.lastContentCache
-      if (lastContent === title) {
+      const trimmedTitle = title?.replace(/[ \t\n\f\r]+$/, '')
+      if (lastContent === trimmedTitle && !state.cacheFollowsSeparator) {
         title = ''
       }
       // GFM autolink shorthand: when the link text equals href and href is a
