@@ -373,6 +373,12 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   listRulePending?: string
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
+  /**
+   * A `<div>`'s heading-marker check on an entry whose own text decides it,
+   * kept so divs that leave the entry unchanged don't redo it.
+   * @internal
+   */
+  markerLine?: { entry: string, opens: boolean }
 }
 
 type NodeEventEnter = 0

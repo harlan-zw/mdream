@@ -264,6 +264,29 @@ export function opensBlockLine(buffer: string[], fragment: number, cursor: numbe
   }
 }
 
+// `opensBlockLine` before the trailing heading run in `buffer[index]`, which
+// every `<div>` that leaves the entry unchanged checks again. The walk stops at
+// the first character no block lead holds, so once that character lies in the
+// entry, the entry's text alone decides the answer.
+function markerOpensBlockLine(state: HandlerContext['state'], index: number, marker: number): boolean {
+  const entry = state.buffer[index]!
+  if (state.markerLine?.entry === entry)
+    return state.markerLine.opens
+  const opens = opensBlockLine(state.buffer, index, marker)
+  let stop = marker
+  while (stop > 0 && isLeadChar(entry.charCodeAt(stop - 1)))
+    stop--
+  if (stop > 0)
+    state.markerLine = { entry, opens }
+  return opens
+}
+
+// A space, digit or list-marker character a block lead can hold.
+function isLeadChar(code: number): boolean {
+  return code === 32 || (code >= 48 && code <= 57) || code === 45 || code === 42 || code === 43
+    || code === 46 || code === 41
+}
+
 // A `#` run closing a heading is an ATX closing sequence and is dropped by the
 // renderer, so the last one is escaped back into content. A run that only the
 // line's block lead precedes is the heading's own marker instead: the heading
@@ -984,7 +1007,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         while (marker > 0 && entry.length - marker < 7 && entry.charCodeAt(marker - 1) === 35)
           marker--
         const hashes = entry.length - marker
-        if (hashes > 0 && hashes <= 6 && opensBlockLine(state.buffer, index, marker)) {
+        if (hashes > 0 && hashes <= 6 && markerOpensBlockLine(state, index, marker)) {
           return `\n\n${state.listIndent}`
         }
       }
