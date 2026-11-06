@@ -264,6 +264,32 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
+fn a_fence_inside_a_quote_boundary_streams_like_one_shot() {
+  for html in [
+    "<li><blockquote/><em><pre><blockquote>",
+    "<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>",
+    "<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+  let isolate_main = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      isolate_main: Some(IsolateMainConfig),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<pre><i><h3><li><blockquote><code>",
+    "<pre><i><h3><li><blockquote><code></code></blockquote></li></h3></i></pre>",
+  ] {
+    assert_stream_matches(html, isolate_main.clone());
+    assert_stream_matches_every_split(html, isolate_main.clone());
+  }
+}
+
+#[test]
 fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
   // The item's tab ends a drained chunk, which settled the empty-item guard early.
   // The `</li>` trim then removed the continuation indent one-shot keeps.

@@ -589,6 +589,7 @@ impl ConvertState {
     let marker_offset = self.buffer[output_start..content_start]
       .rfind(MARKDOWN_CODE_BLOCK)
       .expect("code fence opener missing from output");
+    self.settle_quote_boundary_at_fence();
     self.code_fence = Some(CodeFenceState {
       output_start,
       marker_offset,
@@ -596,6 +597,24 @@ impl ConvertState {
       indent,
       language,
     });
+  }
+
+  // A quote that closed inside the fence may have trimmed the reservation already.
+  #[cold]
+  #[inline(never)]
+  fn drop_empty_fence_reservation(&mut self, indent: &str) {
+    if self.buffer.ends_with(indent) {
+      self.truncate_buffer(self.buffer.len() - indent.len());
+    }
+  }
+
+  // The fence took the tentative quote separator; restoring it would cut the fence.
+  #[cold]
+  #[inline(never)]
+  fn settle_quote_boundary_at_fence(&mut self) {
+    if matches!(self.caption_boundary, CaptionBoundary::QuoteTentative(_)) {
+      self.caption_boundary = CaptionBoundary::None;
+    }
   }
 
   #[cold]
@@ -612,8 +631,7 @@ impl ConvertState {
     // The opener reserves the first content line's list indent. With no body,
     // remove that reservation so the empty line stays blank, as in JS.
     if self.buffer.len() == fence.content_start && !fence.indent.is_empty() {
-      debug_assert!(self.buffer.ends_with(&fence.indent));
-      self.truncate_buffer(fence.content_start - fence.indent.len());
+      self.drop_empty_fence_reservation(&fence.indent);
     }
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;

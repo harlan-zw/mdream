@@ -2464,6 +2464,32 @@ fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
 }
 
 #[test]
+fn blockquote_parent_continuation_settles_at_a_wrapped_fence() {
+  // A fence opened inside the wrapper took the separator. Restoring it later
+  // would cut the fence's own bytes.
+  for (html, expected) in [
+    (
+      "<li><blockquote/><em><pre><blockquote>",
+      "- \n\n  *\n\n  ```\n  \n\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>",
+      "- \n\n  *\n\n  ```\n  \n\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>",
+      "- \n\n  *\n\n  ```\n  \n\n  ### h\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><b><pre><code>x</code></pre></b></li></ul>",
+      "- \n\n  **\n\n  ```\n  x\n  ```\n\n  **",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn inline_wrapper_around_blockquote_in_list_item() {
   for (html, expected) in [
     (
@@ -4952,6 +4978,22 @@ fn isolate_main_keeps_a_heading_inside_a_skipped_container() {
     html_to_html(html, isolate_main_options()),
     r#"<h1 id="title">Title</h1><p>Body <em>here</em></p>"#
   );
+}
+
+// The skipped `<pre>` leaves its fence to the `<code>` inside the quote, so
+// the quote's close trims the fence's indent before the fence closes.
+#[test]
+fn isolate_main_closes_an_empty_fence_opened_inside_a_quote() {
+  for html in [
+    "<pre><i><h3><li><blockquote><code>",
+    "<pre><i><h3><li><blockquote><code></code></blockquote></li></h3></i></pre>",
+  ] {
+    assert_eq!(
+      convert_with_isolate_main(html),
+      "### - \n  > ```\n```",
+      "{html}"
+    );
+  }
 }
 
 #[test]
