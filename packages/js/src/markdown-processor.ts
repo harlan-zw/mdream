@@ -1094,7 +1094,11 @@ function finalizeCodeFence(state: MarkdownState): string | undefined {
   const markerCode = marker.charCodeAt(0)
   const content = state.buffer.slice(fence.fragment + 1).join('')
   const delimiter = marker.repeat(Math.max(3, maxLineLeadingRun(content, markerCode, fence.indent) + 1))
-  const opening = state.buffer[fence.fragment]!
+  let opening = state.buffer[fence.fragment]!
+  // The opener reserves the first content line's list indent. With no body, drop
+  // that reservation so the empty line is blank, as for an empty `<pre><code>`.
+  if (content === '' && fence.indent && opening.endsWith(fence.indent))
+    opening = opening.slice(0, -fence.indent.length)
   const replacement = `${opening.slice(0, fence.markerOffset)}${delimiter}${opening.slice(fence.markerOffset + MARKDOWN_CODE_BLOCK.length)}`
   if (state.outputPositions && replacement !== opening) {
     state.outputPositions?.replace(fence.fragment, fence.fragment + 1, [replacement], offset => offset <= fence.markerOffset
