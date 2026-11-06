@@ -81,6 +81,26 @@ async function expectEverySplitParity(html: string, options: ParityOptions = {})
 
 describe('streaming parity with the Rust core', () => {
   it.each([
+    ['<ul><li><pre>Intro<span><h3>T</h3></span></pre></li></ul>', '- ```\n  Intro ### T\n  ```', { span: 'strong' }],
+    ['<ul><li><code><h6>\n</h6><h3></h3>x</code></li></ul>', '- `###### ### x`', { h3: { enter: '### ', exit: '' } }],
+  ] as const)('preserves heading overrides inside list code: %s', async (html, expected, tagOverrides) => {
+    expect(convertOnce(html, { tagOverrides })).toBe(expected)
+    await expectStreamingParity(html, { tagOverrides })
+    await expectEverySplitParity(html, { tagOverrides })
+  })
+
+  it.each([
+    ['<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>', '- *"### T"s*'],
+    ['<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>', '- *"### "s*'],
+    ['<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>', '- *[](/l)### T*'],
+    ['<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>', '- *~~### T~~*'],
+  ])('keeps a heading opening a list caption inline: %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  it.each([
     [
       String.raw`<a href="x\" onclick=alert(1)">link</a>`,
       String.raw`[link](<x\\>)`,
@@ -138,6 +158,99 @@ describe('streaming parity with the Rust core', () => {
     '<ul><li><blockquote><ul><li>x</li><li>y</li></ul></blockquote></li></ul>',
   ])('keeps blockquote structure across every split for %s', async (html) => {
     await expectStreamingParity(html)
+  })
+
+  it.each([
+    ['<ul><li><h3></h3><p>Partner description</p></li></ul>', '- ###\n\n  Partner description'],
+    ['<ol><li>a<ol><li>b<ol><li><h3></h3><p>c</p></li></ol></li></ol></li></ol>', '1. a\n   1. b\n      1. ###\n\n         c'],
+    ['<ul><li><pre>x</pre><h3></h3><p>b</p></li></ul>', '- ```\n  x\n  ```\n\n  ###\n\n  b'],
+    ['<ul><li><blockquote><h3></h3><p>b</p></blockquote></li></ul>', '- \n  > ###\n  >\n  > b'],
+    ['<ul><li><h3> # </h3><p>b</p></li></ul>', '- ### \\#\n\n  b'],
+  ])('ends a heading line in a list item across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+  })
+
+  it.each([
+    ['<ul><li><h3></h3><div>Next</div></li></ul>', '- ###\n\n  Next'],
+    ['<ul><li><h3></h3><h2>Next</h2></li></ul>', '- ###\n\n  ## Next'],
+    ['<ol start="10"><li><h3></h3><div>Next</div></li></ol>', '10. ###\n\n    Next'],
+    ['<ul><li>Parent<ul><li><h3></h3><div>Next</div></li></ul></li></ul>', '- Parent\n  - ###\n\n    Next'],
+    ['<blockquote><ul><li><h3></h3><div>Next</div></li></ul></blockquote>', '> - ###\n>\n>   Next'],
+    ['<ul><li><h3></h3></li><li>Next</li></ul>', '- ###\n- Next'],
+    ['<ul><li><h3></h3></li></ul>', '- ###'],
+    ['<h3></h3><div>Next</div>', '###\n\nNext'],
+    ['<li>q<br>t<div>X', '- q  \n  t X'],
+    ['<ul><li>Text #<div>Next</div></li></ul>', '- Text # Next'],
+    ['<ul><li><h3></h3><span></span><div>Next</div></li></ul>', '- ###\n\n  Next'],
+    ['<table><tr><td><ul><li><h3></h3><div>Next</div></li></ul></td></tr></table>', '| <ul><li><h3></h3>Next</li></ul> |\n| --- |'],
+  ])('separates a block after an empty list heading across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  // The break a heading in a list item owes the text after it is written when
+  // that text arrives, and taken back with an empty marker pair (#388).
+  it.each([
+    ['<ul><li>Intro <h3>Title</h3><p>Body</p></li></ul>', '- Intro\n\n  ### Title\n\n  Body'],
+    ['<ul><li>Intro\n    <h3>Title</h3><p>Body</p></li></ul>', '- Intro\n\n  ### Title\n\n  Body'],
+    ['<ol><li>a<ol><li>b<ol><li>Intro <h3>T</h3></li></ol></li></ol></li></ol>', '1. a\n   1. b\n      1. Intro\n\n         ### T'],
+    ['<ul><li><h3></h3>Text</li></ul>', '- ###\n\n  Text'],
+    ['<ol><li><h1>T</h1>\nx</li><li>y</li></ol>', '1. # T\n\n   x\n2. y'],
+    ['<ul><li>a<ul><li>b<ul><li><h3></h3>c</li></ul></li></ul></li></ul>', '- a\n  - b\n    - ###\n\n      c'],
+    ['<ul><li><h3>Title</h3><strong>Text</strong></li></ul>', '- ### Title\n\n  **Text**'],
+    ['<ul><li><h3></h3><code>x</code></li></ul>', '- ###\n\n  `x`'],
+    ['<ul><li><h3>T</h3><em></em>x</li></ul>', '- ### T\n\n  x'],
+    ['<ul><li><h3>T</h3><i class="icon"></i></li><li>b</li></ul>', '- ### T\n- b'],
+    ['<ul><li>x <h2></h2>  y</li></ul>', '- x\n\n  ##\n\n  y'],
+    ['<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>', '> - ### T\n>\n>   x'],
+    ['<ul><li><strong><h3>T</h3>more</strong></li></ul>', '- **### T more**'],
+  ])('keeps a heading in a list item on its own line across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  // A heading in a wrapper that writes no delimiters breaks out of it before
+  // and after, however deep the wrappers nest.
+  it.each([
+    ['<ul><li><u><h4>T</h4></u>more</li></ul>', '- <u>\n\n  #### T</u>\n\n  more'],
+    ['<ul><li><label>Intro<h3>T</h3>more</label></li></ul>', '- Intro\n\n  ### T\n\n  more'],
+    ['<ul><li><small><abbr><h3>A</h3><h3>B</h3></abbr></small></li></ul>', '- ### A\n\n  ### B'],
+    ['<ol><li><small><abbr><h2>Title</h2></abbr></small>Body text</li><li>b</li></ol>', '1. ## Title\n\n   Body text\n2. b'],
+    ['<ul><li><small><strong><h3>T</h3></strong>more</small></li></ul>', '- **### T**more'],
+  ])('breaks a heading in a list item out of a wrapper without delimiters across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  // A block marker at a list item's content column four or more spaces deep
+  // is escaped.
+  it.each([
+    ['<ol start="10"><li><h3>T</h3># x</li></ol>', '10. ### T\n\n    \\# x'],
+    ['<ul><li>a<ul><li>T<br>- x</li></ul></li></ul>', '- a\n  - T  \n    \\- x'],
+    ['<ol start="10"><li><p>a</p><p>&gt; x</p></li><li>b</li></ol>', '10. a\n\n    \\> x\n11. b'],
+  ])('escapes a block marker at a deep list content column across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
+  // A `<pre>` fence opened by its first child pays the break a heading in the
+  // list item owes, so that break never lands inside the code.
+  it.each([
+    ['<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>', '- ### T\n\n  ```\n  x\n  ```'],
+    ['<ol><li><h2>Install</h2><pre class="language-sh"><span class="token function">npm</span> install mdream</pre></li><li>b</li></ol>', '1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b'],
+    ['<blockquote><ul><li><h3>T</h3><pre>\n<span>x</span></pre></li></ul></blockquote>', '> - ### T\n>\n>   ```\n>   x\n>   ```'],
+    ['<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>', '- ### T\n\n  ```\n  \n  ```\n\n  x'],
+    ['<ul><li><h1></h1><pre><div>x</div></pre></li></ul>', '- #\n\n  ```\n  x\n  ```'],
+    ['<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>', '- a\n\n  ```\n  x\n\n  y\n  ```'],
+  ])('keeps the code after a heading in a list item across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
   })
 
   it.each([
