@@ -7050,6 +7050,20 @@ fn frontmatter_additional_fields_keep_yaml_typing() {
   );
 }
 
+// A long text run is converted in pieces. One ending right after `---` ends a
+// line that could be a setext underline, so its dashes were escaped even though
+// the rest of the line makes them plain text.
+#[test]
+fn a_long_text_run_is_not_cut_after_a_rule_run() {
+  for rule in ["---", "==="] {
+    let unit = format!("ab&#10 {rule} cd ");
+    let count = 70_000 / unit.len();
+    let html = format!("<p>w {}</p>", unit.repeat(count));
+    let expected = format!("w {}", format!("ab\n {rule} cd ").repeat(count).trim_end());
+    assert_eq!(convert(&html), expected);
+  }
+}
+
 #[test]
 fn text_runs_keep_unicode_entities_and_gfm_context_across_chunks() {
   for html in [
