@@ -1218,6 +1218,25 @@ impl ConvertState {
     )))
   }
 
+  /// A heading opens inside a list item: keep its block on its own line.
+  #[cold]
+  #[inline(never)]
+  fn enter_item_heading(
+    &mut self,
+    enter_is_literal: bool,
+    output: Option<Cow<'static, str>>,
+  ) -> Option<Cow<'static, str>> {
+    if !enter_is_literal
+      && output
+        .as_deref()
+        .is_some_and(|fragment| fragment.starts_with('\n'))
+      && !self.opens_block_line(self.buffer.as_bytes(), self.buffer.len())
+    {
+      self.trim_trailing_spaces();
+    }
+    self.open_item_heading_block(output)
+  }
+
   /// A heading entering a list item's pending caption. Materializing the caption
   /// already places its opening emphasis before the heading, so no separator
   /// goes inside that inline run.
@@ -1805,16 +1824,8 @@ impl ConvertState {
     } else {
       0
     };
-    if self.depth_map[TAG_LI as usize] > 0
-      && tag_id.is_some_and(|id| (TAG_H1..=TAG_H6).contains(&id))
-    {
-      if !enter_is_literal
-        && output.as_deref().is_some_and(|fragment| fragment.starts_with('\n'))
-        && !self.opens_block_line(self.buffer.as_bytes(), self.buffer.len())
-      {
-        self.trim_trailing_spaces();
-      }
-      output = self.open_item_heading_block(output);
+    if tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6) && self.depth_map[TAG_LI as usize] > 0 {
+      output = self.enter_item_heading(enter_is_literal, output);
     }
 
     // Whitespace immediately before <br> has no visual effect in HTML. Let the
