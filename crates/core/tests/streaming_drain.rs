@@ -2589,7 +2589,20 @@ fn raw_html_region_text_is_not_gfm_escaped() {
 // streaming alone got it right.
 #[test]
 fn raw_html_text_after_a_trimmed_block_break_matches_one_shot() {
-  for html in ["<dt><ul><dd><h6>a b<dd>*c", "<dt><ul><dd><h6>a ><dd>>><v>`"] {
+  for (html, expected) in [
+    (
+      "<dt><ul><dd><h6>a b<dd>*c",
+      "<dt><dd>###### a b</dd><dd>*c</dd></dt>",
+    ),
+    (
+      "<dt><ul><dd><h6>a ><dd>>><v>`",
+      "<dt><dd>###### a &gt;</dd><dd>&gt;&gt;`</dd></dt>",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected
+    );
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }

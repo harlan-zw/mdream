@@ -6465,6 +6465,23 @@ mod tests {
     assert_eq!(state.last_output_byte(), Some(b'z'));
   }
 
+  // A drain between a trim and the next line-start read shifts the trim's
+  // offset with the buffer, or the read keeps the start of the trimmed line.
+  #[test]
+  fn line_start_after_a_trim_survives_a_drain() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.buffer = format!("{}\nab\n", "x".repeat(100));
+    assert_eq!(state.current_line_start(), 104);
+    state.buffer.truncate(103);
+    state.note_buffer_rewrite(103);
+    state.last_yielded_length = 100;
+    state.drain_streamed_prefix();
+    let drained = 103 - state.buffer.len();
+    assert!(drained > 0);
+    state.buffer.push_str("cd");
+    assert_eq!(state.current_line_start(), 101 - drained);
+  }
+
   // A decoded `&#13;` ends a CommonMark line, so text after a drain that cut
   // right behind it may open a block just as it would after `\n`.
   #[test]
