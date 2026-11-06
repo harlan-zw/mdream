@@ -184,6 +184,32 @@ describe('div after a hash run in a list item', () => {
       expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
     expect(reads).toBeLessThanOrEqual(3 * text.length)
   })
+
+  it('reads a line split across entries once while divs leave it unchanged', () => {
+    let reads = 0
+    const spaces = {
+      length: 10_000,
+      charCodeAt: () => {
+        reads++
+        return 32
+      },
+    } as unknown as string
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- x', spaces, '#'], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    for (let i = 0; i < 100; i++)
+      expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
+    expect(reads).toBeLessThanOrEqual(3 * spaces.length)
+  })
+
+  it('separates a div after a list-item heading marker', () => {
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- ', '#'], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    expect(tagHandlers[TAG_DIV]!.enter!(context)).toBe('\n\n  ')
+  })
 })
 
 describe('empty captions after a heading in a list item', () => {

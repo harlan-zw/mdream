@@ -265,19 +265,34 @@ export function opensBlockLine(buffer: string[], fragment: number, cursor: numbe
 }
 
 // `opensBlockLine` before the trailing heading run in `buffer[index]`, which
-// every `<div>` that leaves the entry unchanged checks again. The walk stops at
-// the first character no block lead holds, so once that character lies in the
-// entry, the entry's text alone decides the answer.
+// every `<div>` that leaves the line unchanged checks again. The walk stops at
+// the first character no block lead holds, so the answer is kept with the
+// entries it ends and stops in. Like the caption check, this assumes the
+// entries between those two, all block-lead characters, are not rewritten.
 function markerOpensBlockLine(state: HandlerContext['state'], index: number, marker: number): boolean {
-  const entry = state.buffer[index]!
-  if (state.markerLine?.entry === entry)
-    return state.markerLine.opens
-  const opens = opensBlockLine(state.buffer, index, marker)
-  let stop = marker
-  while (stop > 0 && isLeadChar(entry.charCodeAt(stop - 1)))
-    stop--
-  if (stop > 0)
-    state.markerLine = { entry, opens }
+  const buffer = state.buffer
+  const memo = state.markerLine
+  if (memo && memo.index === index && memo.length === buffer.length
+    && buffer[index] === memo.entry && buffer[memo.stop] === memo.stopEntry) {
+    return memo.opens
+  }
+  const opens = opensBlockLine(buffer, index, marker)
+  let fragment = index
+  let cursor = marker
+  for (;;) {
+    if (cursor === 0) {
+      if (--fragment < 0)
+        return opens
+      cursor = buffer[fragment]!.length
+    }
+    else if (isLeadChar(buffer[fragment]!.charCodeAt(cursor - 1))) {
+      cursor--
+    }
+    else {
+      break
+    }
+  }
+  state.markerLine = { index, length: buffer.length, entry: buffer[index]!, stop: fragment, stopEntry: buffer[fragment]!, opens }
   return opens
 }
 
