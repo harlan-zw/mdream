@@ -2335,11 +2335,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && gfmLifecycle.openCodeSpans.at(-1)?.owner === element) {
       gfmLifecycle.openCodeSpans.pop()
     }
-    if (cleanPass && eventType === NodeEventExit) {
+    if (cleanPass && eventType === NodeEventExit)
       cleanPass.exit(element)
-      // The clean pass rewrites link brackets in place.
-      noteBufferRewrite(state)
-    }
     if (!output && !suppressedInPre && handler?.[eventFn]
       && (tagId !== TAG_DIV || state.depthMap[TAG_LI] || handler[eventFn] !== tagHandlers[TAG_DIV]!.enter)) {
       if (openLinkFragment >= 0
@@ -2365,6 +2362,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
       if (cleanPass && eventType === NodeEventExit && tagId === TAG_A && cleanPass.unwrap(element)) {
+        noteBufferRewrite(state)
         openLinkFragment = -1
         return
       }
@@ -2952,10 +2950,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       openLink(buff.length - 1, linkHeadingBreak)
     }
     if (cleanPass) {
-      if (eventType === NodeEventEnter)
+      if (eventType === NodeEventEnter) {
         cleanPass.enter(element, outputStart)
-      else if (handlerOutput)
+      }
+      else if (handlerOutput) {
         cleanPass.closed(element, outputStart, handlerOutput)
+        // Only a link's close rewrites its brackets in place.
+        if (tagId === TAG_A)
+          noteBufferRewrite(state)
+      }
     }
 
     // Track open inline markers for empty pair detection. Inline code in a

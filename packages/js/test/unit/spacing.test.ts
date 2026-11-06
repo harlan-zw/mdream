@@ -1,6 +1,7 @@
 import type { MarkdownState } from '../../src/markdown-processor'
 import type { HandlerContext } from '../../src/types'
 import { describe, expect, it, vi } from 'vitest'
+import { clean } from '../../src/clean'
 import { MAX_TAG_ID, TAG_DIV, TAG_LI } from '../../src/const'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { tagHandlers } from '../../src/tags'
@@ -222,14 +223,18 @@ describe('div after a hash run in a list item', () => {
     expect(reads).toBeLessThanOrEqual(3 * text.length)
   })
 
-  it('keeps divs after empty inline fragments linear', () => {
+  it.each([
+    ['without cleanup', undefined],
+    ['with cleanup', { clean: clean() }],
+  ])('keeps divs after empty inline fragments linear %s', (_, options) => {
     // Each `<span> </span>` leaves an empty fragment behind. Keying the check on
-    // the buffer length would miss every div and rescan the lead each time.
+    // the buffer length would miss every div and rescan the lead each time, and
+    // so would dropping the check at every element exit of the clean pass.
     const html = `<ul><li><pre>${'1'.repeat(2000)}#${'<span> </span><div></div>'.repeat(200)}</pre></li></ul>`
     const charCodeAt = vi.spyOn(String.prototype, 'charCodeAt')
     let reads = 0
     try {
-      htmlToMarkdown(html)
+      htmlToMarkdown(html, options)
       reads = charCodeAt.mock.calls.length
     }
     finally {
