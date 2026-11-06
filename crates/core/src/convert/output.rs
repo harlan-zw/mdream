@@ -1347,6 +1347,9 @@ impl ConvertState {
       node_spacing = node.spacing;
       output = self.get_enter_output(node, ancestors);
     }
+    if tag_id == Some(TAG_DIV) && output.is_some() && !plain_text!(self) {
+      self.confirm_div_marker_break(&mut output);
+    }
 
     if self.hard_break_end == self.buffer.len()
       && matches!(tag_id, Some(TAG_P | TAG_DIV))
@@ -1699,6 +1702,9 @@ impl ConvertState {
       };
     }
     // Phase 1 ends — self.stack borrow released
+    if tag_id == Some(TAG_DIV) && !enter_is_literal && output.is_some() && !plain_text!(self) {
+      self.confirm_div_marker_break(&mut output);
+    }
 
     if self.table_row_opener_pending
       && matches!(tag_id, Some(TAG_TH | TAG_TD))
@@ -3611,6 +3617,8 @@ impl ConvertState {
   /// instead: the heading is empty, and the marker's trailing space would read as
   /// a list item's open content column, joining the next block to the heading's
   /// line.
+  // Out of line: inlined into heading exits, it measured about 3% slower on real pages.
+  #[inline(never)]
   fn escape_trailing_heading_hashes(&mut self) {
     let bytes = self.buffer.as_bytes();
     // Cheap reject: almost no heading ends in `#`.
@@ -3625,31 +3633,17 @@ impl ConvertState {
     while marker > 0 && bytes[marker - 1] == b'#' {
       marker -= 1;
     }
-    if self.opens_block_line(bytes, marker) {
-      if bytes[bytes.len() - 1] == b' ' {
+    let trailing_space = bytes[bytes.len() - 1] == b' ';
+    if self.marker_opens_block_line(marker) {
+      if trailing_space {
         self.trim_trailing_spaces();
       }
       return;
     }
-    // Content begins past the opening `#` prefix, which this pass must not touch.
-    let line = bytes[..end]
-      .iter()
-      .rposition(|&byte| byte == b'\n')
-      .map_or(0, |i| i + 1);
-    let mut start = line;
-    while start < bytes.len() && bytes[start] == b'#' {
-      start += 1;
-    }
-    start += usize::from(bytes.get(start) == Some(&b' '));
-    if end < start {
-      return;
-    }
-    let mut run = end;
-    while run > start && bytes[run - 1] == b'#' {
-      run -= 1;
-    }
-    if run < end && (run == start || matches!(bytes[run - 1], b' ' | b'\t')) {
-      self.replace_code_span_content(run..run, "\\");
+    // Past the block lead, only a run after whitespace closes the heading. That
+    // includes a run right after the opening prefix and its space.
+    if marker > 0 && matches!(self.buffer.as_bytes()[marker - 1], b' ' | b'\t') {
+      self.replace_code_span_content(marker..marker, "\\");
     }
   }
 
@@ -3701,27 +3695,57 @@ impl ConvertState {
     bytes[index - 1] == b'\n'
   }
 
-  /// `opens_block_line` at the buffer end, for a dropped caption's exit. Past
-  /// its first space a gap only counts as present, so the answer holds while
-  /// the bytes before the space run stay put: a line that empty captions in a
-  /// row leave untouched is not read again at each exit.
-  fn caption_exit_opens_block_line(&mut self) -> bool {
-    let end = self.buffer.len();
-    let start = self
-      .caption_line_spaces
-      .start(self.buffer.as_bytes(), end, |byte| byte == b' ');
-    if start == end {
-      self.caption_line_opens = None;
-      return self.opens_block_line(self.buffer.as_bytes(), end);
+  /// `opens_block_line` at `at`, remembered in `memo` (see `BlockLineMemo`).
+  fn remembered_opens_block_line(&self, memo: &mut BlockLineMemo, at: usize) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let start = memo.spaces.start(bytes, at, |byte| byte == b' ');
+    if start == at {
+      memo.opens = None;
+      return self.opens_block_line(bytes, at);
     }
-    if let Some((known, opens)) = self.caption_line_opens
+    if let Some((known, opens)) = memo.opens
       && known == start
     {
       return opens;
     }
-    let opens = self.opens_block_line(self.buffer.as_bytes(), start + 1);
-    self.caption_line_opens = Some((start, opens));
+    let opens = self.opens_block_line(bytes, start + 1);
+    memo.opens = Some((start, opens));
     opens
+  }
+
+  /// `opens_block_line` at the buffer end, for a dropped caption's exit.
+  fn caption_exit_opens_block_line(&mut self) -> bool {
+    let mut memo = self.caption_line;
+    let opens = self.remembered_opens_block_line(&mut memo, self.buffer.len());
+    self.caption_line = memo;
+    opens
+  }
+
+  /// `opens_block_line` before a trailing heading run, which `<div>` enters and
+  /// heading exits check again on an unchanged line.
+  #[cold]
+  #[inline(never)]
+  fn marker_opens_block_line(&mut self, marker: usize) -> bool {
+    let mut memo = self.marker_line;
+    let opens = self.remembered_opens_block_line(&mut memo, marker);
+    self.marker_line = memo;
+    opens
+  }
+
+  /// `get_enter_output` gives a `<div>` its separator when the buffer ends in a
+  /// short hash run; it is only due if that run is a bare heading marker. Checked
+  /// here because remembering the answer needs `&mut self`.
+  #[cold]
+  #[inline(never)]
+  fn confirm_div_marker_break(&mut self, output: &mut Option<Cow<'static, str>>) {
+    let bytes = self.buffer.as_bytes();
+    let mut marker = bytes.len();
+    while marker > 0 && bytes.len() - marker < 7 && bytes[marker - 1] == b'#' {
+      marker -= 1;
+    }
+    if !self.marker_opens_block_line(marker) {
+      *output = None;
+    }
   }
 
   /// Deepest indent of a marker a block can share a line with. A list writes the
@@ -5210,7 +5234,8 @@ impl ConvertState {
             while marker > 0 && bytes.len() - marker < 7 && bytes[marker - 1] == b'#' {
               marker -= 1;
             }
-            if !(1..=6).contains(&(bytes.len() - marker)) || !self.opens_block_line(bytes, marker) {
+            // The caller confirms the run opens its line (`confirm_div_marker_break`).
+            if !(1..=6).contains(&(bytes.len() - marker)) {
               return None;
             }
           }

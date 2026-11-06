@@ -381,6 +381,32 @@ impl TailRun {
   }
 }
 
+/// A line's `opens_block_line` answer, keyed by the start of the space run before the
+/// checked position. Past its first space a gap only counts as present, so the answer holds
+/// while the bytes before the run stay put, and a check repeated on an unchanged line is
+/// not read again.
+#[derive(Clone, Copy, Debug, Default)]
+struct BlockLineMemo {
+  spaces: TailRun,
+  opens: Option<(usize, bool)>,
+}
+
+impl BlockLineMemo {
+  fn note_rewrite(&mut self, offset: usize) {
+    self.spaces.note_rewrite(offset);
+    if self.opens.is_some_and(|(start, _)| offset < start) {
+      self.opens = None;
+    }
+  }
+
+  fn note_drain(&mut self, removed: usize) {
+    self.spaces.note_drain(removed);
+    if removed != 0 {
+      self.opens = None;
+    }
+  }
+}
+
 /// In-place heap sort, O(n log n) with no extra memory. Rust's generic
 /// `sort_unstable` adds about 3 KB of WASM per element type; this compiles once
 /// per type at a fraction of that.
@@ -820,12 +846,12 @@ pub struct ConvertState {
   held_whitespace: TailRun,
   held_spaces: TailRun,
   held_heading_run: TailRun,
-  /// The space run ending the line a dropped caption hands its heading break
-  /// back to, and the start of that run with whether the line opens a block.
-  /// Empty captions in a row check the same line, so it is read once rather
-  /// than at every exit.
-  caption_line_spaces: TailRun,
-  caption_line_opens: Option<(usize, bool)>,
+  /// The line a dropped caption hands its heading break back to. Empty captions
+  /// in a row check the same line.
+  caption_line: BlockLineMemo,
+  /// The line before a trailing heading run, checked again at every `<div>`
+  /// and heading exit that leaves it unchanged.
+  marker_line: BlockLineMemo,
   /// Bytes at the buffer start known to be whitespace, for the leading trim.
   leading_whitespace: usize,
   #[cfg(test)]
@@ -1173,8 +1199,8 @@ impl ConvertState {
       held_whitespace: TailRun::default(),
       held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
-      caption_line_spaces: TailRun::default(),
-      caption_line_opens: None,
+      caption_line: BlockLineMemo::default(),
+      marker_line: BlockLineMemo::default(),
       leading_whitespace: 0,
       #[cfg(test)]
       leading_whitespace_read: 0,
@@ -2664,13 +2690,8 @@ impl ConvertState {
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
-    self.caption_line_spaces.note_rewrite(offset);
-    if self
-      .caption_line_opens
-      .is_some_and(|(start, _)| offset < start)
-    {
-      self.caption_line_opens = None;
-    }
+    self.caption_line.note_rewrite(offset);
+    self.marker_line.note_rewrite(offset);
     if offset < self.leading_whitespace {
       self.leading_whitespace = 0;
     }
@@ -2699,10 +2720,8 @@ impl ConvertState {
     self.held_whitespace.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
-    self.caption_line_spaces.note_drain(removed);
-    if removed != 0 {
-      self.caption_line_opens = None;
-    }
+    self.caption_line.note_drain(removed);
+    self.marker_line.note_drain(removed);
     self.leading_whitespace = 0;
     if self.hard_break_end != usize::MAX {
       self.hard_break_end = self
@@ -3501,10 +3520,40 @@ mod tests {
 
         assert!(markdown.ends_with("\n\n  x"), "{caption}: {markdown:?}");
         let state = &processor.state;
-        let read = state.block_line_bytes_read.get() + state.caption_line_spaces.read;
+        let read = state.block_line_bytes_read.get() + state.caption_line.spaces.read;
         assert!(
           read <= 2 * html.len(),
           "{caption}, chunks of {chunk_size}: read {read} bytes of a {}-byte input",
+          html.len()
+        );
+      }
+    }
+  }
+
+  // `<div>` enters and heading exits check the line before a trailing heading
+  // run again; the spaces before that run must not be read at every check.
+  #[test]
+  fn marker_checks_read_the_heading_line_once() {
+    for filler in ["<div></div>", "<h1></h1>"] {
+      let html = format!(
+        "<ul><li><pre>x{}#{}y</pre></li></ul>",
+        " ".repeat(2_000),
+        filler.repeat(200)
+      );
+      for chunk_size in [html.len(), 64] {
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut markdown = String::new();
+        for chunk in html.as_bytes().chunks(chunk_size) {
+          markdown.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        markdown.push_str(&processor.finish());
+
+        assert!(markdown.ends_with(" y\n  ```"), "{filler}: {markdown:?}");
+        let state = &processor.state;
+        let read = state.block_line_bytes_read.get() + state.marker_line.spaces.read;
+        assert!(
+          read <= 2 * html.len(),
+          "{filler}, chunks of {chunk_size}: read {read} bytes of a {}-byte input",
           html.len()
         );
       }

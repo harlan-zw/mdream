@@ -5809,6 +5809,13 @@ fn empty_caption_after_list_heading_streams_consistently() {
   );
 }
 
+// Callers may move a processor across threads or share it behind a lock.
+#[test]
+fn processor_is_send_and_sync() {
+  fn assert_send_sync<T: Send + Sync>() {}
+  assert_send_sync::<MarkdownStreamProcessor>();
+}
+
 #[test]
 fn a_drain_inside_a_line_lead_keeps_block_line_checks_like_one_shot() {
   let clean = HtmlToMarkdownOptions {
