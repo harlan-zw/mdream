@@ -264,6 +264,32 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
+fn a_fence_inside_a_quote_boundary_streams_like_one_shot() {
+  for html in [
+    "<li><blockquote/><em><pre><blockquote>",
+    "<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>",
+    "<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+  let isolate_main = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      isolate_main: Some(IsolateMainConfig),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<pre><i><h3><li><blockquote><code>",
+    "<pre><i><h3><li><blockquote><code></code></blockquote></li></h3></i></pre>",
+  ] {
+    assert_stream_matches(html, isolate_main.clone());
+    assert_stream_matches_every_split(html, isolate_main.clone());
+  }
+}
+
+#[test]
 fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
   // The item's tab ends a drained chunk, which settled the empty-item guard early.
   // The `</li>` trim then removed the continuation indent one-shot keeps.
@@ -2579,6 +2605,29 @@ fn raw_html_region_text_is_not_gfm_escaped() {
       html_to_markdown(html, HtmlToMarkdownOptions::default()),
       expected,
       "one-shot for {html:?}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// One-shot read a line start cached before a trim; a drain rebased it, so
+// streaming alone got it right.
+#[test]
+fn raw_html_text_after_a_trimmed_block_break_matches_one_shot() {
+  for (html, expected) in [
+    (
+      "<dt><ul><dd><h6>a b<dd>*c",
+      "<dt><dd>###### a b</dd><dd>*c</dd></dt>",
+    ),
+    (
+      "<dt><ul><dd><h6>a ><dd>>><v>`",
+      "<dt><dd>###### a &gt;</dd><dd>&gt;&gt;`</dd></dt>",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected
     );
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
@@ -5686,4 +5735,71 @@ fn empty_caption_after_list_heading_streams_consistently() {
 fn processor_is_send_and_sync() {
   fn assert_send_sync<T: Send + Sync>() {}
   assert_send_sync::<MarkdownStreamProcessor>();
+}
+
+#[test]
+fn a_drain_inside_a_line_lead_keeps_block_line_checks_like_one_shot() {
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      urls: false,
+      fragments: false,
+      empty_images: false,
+      ..CleanConfig::all()
+    }),
+    ..Default::default()
+  };
+  for (html, expected, opts) in [
+    // Cut inside the nested item's indent.
+    (
+      "<ul><li>o<ul><li><h3>&#32;&#32;&#32;&#32;<a href=\"/y\"><p></li></ul></li></ul>",
+      "- o\n  - ###",
+      clean,
+    ),
+    (
+      "<li><ul><li><ul><li><h3></h3><e><figcaption><code><em></figcaption><div><r></ul>>",
+      "-\n  -\n    - ###\n\n      \\>",
+      HtmlToMarkdownOptions::default(),
+    ),
+    // Cut just after the document's first list marker.
+    (
+      "<li><h3><strong><strong><strong><strong><strong><strong>",
+      "- ###",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "<li><h6><strong>&#32 <g>&#32 &#32 </",
+      "- ######",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "<ol start=\"10\"><li><h3><strong><strong><strong><strong><strong><strong>",
+      "10. ###",
+      HtmlToMarkdownOptions::default(),
+    ),
+    // Cut inside a nested item's marker line.
+    (
+      "<ul><li>o<ul><li><h3><strong><strong><strong><strong><strong><strong></h3></li></ul></li></ul>",
+      "- o\n  - ###",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "<ol start=\"7\"><li><ol start=\"42\"><li><h3><strong><strong><strong><strong><strong><strong>",
+      "7.\n   42. ###",
+      HtmlToMarkdownOptions::default(),
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+    let lead = "lead ".repeat(1000);
+    let long = format!("<p>{lead}</p>{html}");
+    let long_expected = html_to_markdown(&long, opts.clone());
+    for width in [1, 7, 4096] {
+      assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+    }
+  }
 }

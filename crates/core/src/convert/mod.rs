@@ -829,6 +829,9 @@ pub struct ConvertState {
   /// it. Recomputing walks the whole line, which is quadratic over a long one.
   line_start: usize,
   line_start_scanned_to: usize,
+  /// Lowest offset rewritten since the line start was last read. A trim and
+  /// regrowth in between leaves the buffer no shorter than the cache.
+  line_start_dirty_from: usize,
   /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
   /// escape, counted as text is written.
   heading_hash_run: usize,
@@ -1186,6 +1189,7 @@ impl ConvertState {
       raw_html_scanned_to: 0,
       line_start: 0,
       line_start_scanned_to: 0,
+      line_start_dirty_from: usize::MAX,
       heading_hash_run: 0,
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
@@ -2677,6 +2681,7 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -3042,6 +3047,10 @@ impl ConvertState {
     if self.empty_item_hazard {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    // Keep a lead-only line whole: `opens_block_line` reads back to its start.
+    if let Some(line_start) = self.uncut_block_lead_start(drain_end, marker_tail) {
+      drain_end = keep_two_before(&self.buffer, line_start);
+    }
     if drain_end == 0 {
       return;
     }
@@ -3119,10 +3128,74 @@ impl ConvertState {
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
     self.line_start = self.line_start.saturating_sub(drain_end);
     self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
+    self.line_start_dirty_from = self.line_start_dirty_from.saturating_sub(drain_end);
   }
 }
 
 impl ConvertState {
+  /// Start of the line `drain_end` cuts, if no later line was yielded and only a block lead of at
+  /// most `widest` bytes precedes the cut.
+  fn uncut_block_lead_start(&self, drain_end: usize, widest: usize) -> Option<usize> {
+    let bytes = self.buffer.as_bytes();
+    if drain_end == 0
+      || !matches!(
+        bytes[drain_end - 1],
+        b' ' | b'-' | b'*' | b'+' | b'.' | b')' | b'0'..=b'9'
+      )
+    {
+      return None;
+    }
+    // Yielded bytes are final, so a later yielded line keeps this one from ever being read again.
+    let mut yielded_end = self.last_yielded_length.clamp(drain_end, bytes.len());
+    while yielded_end > drain_end && bytes[yielded_end - 1].is_ascii_whitespace() {
+      yielded_end -= 1;
+    }
+    if bytes[drain_end..yielded_end].contains(&b'\n') {
+      return None;
+    }
+    let floor = drain_end.saturating_sub(widest);
+    let mut i = drain_end;
+    while i > floor && bytes[i - 1] == b' ' {
+      i -= 1;
+    }
+    if i > floor && bytes[i - 1] != b'\n' {
+      let marker = match bytes[i - 1] {
+        b'-' | b'*' | b'+' => i - 1,
+        // The cut may land between an ordered marker's digits and its delimiter.
+        b'.' | b')' | b'0'..=b'9' => {
+          let digits_end = i - usize::from(!bytes[i - 1].is_ascii_digit());
+          let mut at = digits_end;
+          while at > floor && digits_end - at < 9 && bytes[at - 1].is_ascii_digit() {
+            at -= 1;
+          }
+          if at == digits_end {
+            return None;
+          }
+          at
+        }
+        _ => return None,
+      };
+      i = marker;
+      while i > floor && bytes[i - 1] == b' ' {
+        i -= 1;
+      }
+    }
+    if i < floor {
+      return None;
+    }
+    let line_start = if i > 0 && bytes[i - 1] == b'\n' {
+      i
+    } else if i == 0
+      // `buffer[0]` opens a line before any cut or after one that ended a line.
+      && matches!(self.cut_line_lead, CutLineLead::Uncut | CutLineLead::Blank(0))
+    {
+      0
+    } else {
+      return None;
+    };
+    Some(line_start)
+  }
+
   /// What the line ending at `drain_end` leads with, given what an earlier cut
   /// of the same line already found. `previous` makes the indent additive: a
   /// line's leading spaces can be split across any number of drains, and the

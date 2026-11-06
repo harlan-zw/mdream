@@ -2464,6 +2464,32 @@ fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
 }
 
 #[test]
+fn blockquote_parent_continuation_settles_at_a_wrapped_fence() {
+  // A fence opened inside the wrapper took the separator. Restoring it later
+  // would cut the fence's own bytes.
+  for (html, expected) in [
+    (
+      "<li><blockquote/><em><pre><blockquote>",
+      "- \n\n  *\n\n  ```\n  \n\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>",
+      "- \n\n  *\n\n  ```\n  \n\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>",
+      "- \n\n  *\n\n  ```\n  \n\n  ### h\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><b><pre><code>x</code></pre></b></li></ul>",
+      "- \n\n  **\n\n  ```\n  x\n  ```\n\n  **",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn inline_wrapper_around_blockquote_in_list_item() {
   for (html, expected) in [
     (
@@ -4954,6 +4980,22 @@ fn isolate_main_keeps_a_heading_inside_a_skipped_container() {
   );
 }
 
+// The skipped `<pre>` leaves its fence to the `<code>` inside the quote, so
+// the quote's close trims the fence's indent before the fence closes.
+#[test]
+fn isolate_main_closes_an_empty_fence_opened_inside_a_quote() {
+  for html in [
+    "<pre><i><h3><li><blockquote><code>",
+    "<pre><i><h3><li><blockquote><code></code></blockquote></li></h3></i></pre>",
+  ] {
+    assert_eq!(
+      convert_with_isolate_main(html),
+      "### - \n  > ```\n```",
+      "{html}"
+    );
+  }
+}
+
 #[test]
 fn isolate_main_skipped_footer_emits_no_closers() {
   let html = "<h1>Title</h1><p>Body</p><footer><p><b>Foot</b></p></footer>";
@@ -6481,6 +6523,30 @@ fn raw_html_regions_escape_markdown_past_a_blank_line() {
   );
   assert!(md.contains("<code>C_D</code>"), "got: {md:?}");
   assert!(!md.contains("C\\_D"), "got: {md:?}");
+}
+
+// The heading's block break is trimmed and the next `<dd>` grows the buffer
+// back past it, so the cached line start must not survive the trim.
+#[test]
+fn raw_html_text_after_a_trimmed_block_break_is_not_escaped() {
+  assert_eq!(
+    convert("<dt><ul><dd><h6>a b<dd>*c"),
+    "<dt><dd>###### a b</dd><dd>*c</dd></dt>"
+  );
+  assert_eq!(
+    convert("<dt><ul><dd><h6>a ><dd>`c"),
+    "<dt><dd>###### a &gt;</dd><dd>`c</dd></dt>"
+  );
+}
+
+// The blank line is inserted behind the cached line start, and Markdown resumes
+// after it, so the backtick on the next line stays escaped.
+#[test]
+fn text_after_a_blank_line_inserted_in_a_raw_html_block_is_escaped() {
+  assert_eq!(
+    convert("<dl><ul>><code><blockquote></code>`"),
+    "<dl>\n\n&gt;<code>></code>\\`\n\n</dl>"
+  );
 }
 
 #[test]

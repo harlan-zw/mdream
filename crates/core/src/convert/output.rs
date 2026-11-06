@@ -589,6 +589,7 @@ impl ConvertState {
     let marker_offset = self.buffer[output_start..content_start]
       .rfind(MARKDOWN_CODE_BLOCK)
       .expect("code fence opener missing from output");
+    self.settle_quote_boundary_at_fence();
     self.code_fence = Some(CodeFenceState {
       output_start,
       marker_offset,
@@ -596,6 +597,24 @@ impl ConvertState {
       indent,
       language,
     });
+  }
+
+  // A quote that closed inside the fence may have trimmed the reservation already.
+  #[cold]
+  #[inline(never)]
+  fn drop_empty_fence_reservation(&mut self, indent: &str) {
+    if self.buffer.ends_with(indent) {
+      self.truncate_buffer(self.buffer.len() - indent.len());
+    }
+  }
+
+  // The fence took the tentative quote separator; restoring it would cut the fence.
+  #[cold]
+  #[inline(never)]
+  fn settle_quote_boundary_at_fence(&mut self) {
+    if matches!(self.caption_boundary, CaptionBoundary::QuoteTentative(_)) {
+      self.caption_boundary = CaptionBoundary::None;
+    }
   }
 
   #[cold]
@@ -612,8 +631,7 @@ impl ConvertState {
     // The opener reserves the first content line's list indent. With no body,
     // remove that reservation so the empty line stays blank, as in JS.
     if self.buffer.len() == fence.content_start && !fence.indent.is_empty() {
-      debug_assert!(self.buffer.ends_with(&fence.indent));
-      self.truncate_buffer(fence.content_start - fence.indent.len());
+      self.drop_empty_fence_reservation(&fence.indent);
     }
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;
@@ -4736,22 +4754,27 @@ impl ConvertState {
     self.line_start_scanned_to = usize::MAX;
   }
 
-  /// Offset just past the buffer's last `\n`.
+  /// Offset just past the buffer's last `\n`. Read only in raw HTML and the
+  /// quoted-line cap check, so kept out of line.
+  #[cold]
+  #[inline(never)]
   pub(super) fn current_line_start(&mut self) -> usize {
     let len = self.buffer.len();
     let bytes = self.buffer.as_bytes();
-    // Only bytes appended since the last call can move the line start; a buffer
-    // that shrank behind the cache (a trim, or a streaming drain) rebuilds it.
-    if self.line_start_scanned_to > len || self.line_start > len {
+    let scanned_to = self.line_start_scanned_to.min(self.line_start_dirty_from);
+    self.line_start_dirty_from = usize::MAX;
+    // Only bytes appended or rewritten since the last call can move the line
+    // start; an invalidation, a shrink or a rewrite behind it rebuilds it.
+    if self.line_start_scanned_to > len || self.line_start > len || scanned_to < self.line_start {
       self.line_start = bytes[..len]
         .iter()
         .rposition(|&byte| byte == b'\n')
         .map_or(0, |i| i + 1);
-    } else if let Some(i) = bytes[self.line_start_scanned_to..len]
+    } else if let Some(i) = bytes[scanned_to..len]
       .iter()
       .rposition(|&byte| byte == b'\n')
     {
-      self.line_start = self.line_start_scanned_to + i + 1;
+      self.line_start = scanned_to + i + 1;
     }
     self.line_start_scanned_to = len;
     self.line_start
@@ -6483,6 +6506,23 @@ mod tests {
 
     state.buffer.push('z');
     assert_eq!(state.last_output_byte(), Some(b'z'));
+  }
+
+  // A drain between a trim and the next line-start read shifts the trim's
+  // offset with the buffer, or the read keeps the start of the trimmed line.
+  #[test]
+  fn line_start_after_a_trim_survives_a_drain() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.buffer = format!("{}\nab\n", "x".repeat(100));
+    assert_eq!(state.current_line_start(), 104);
+    state.buffer.truncate(103);
+    state.note_buffer_rewrite(103);
+    state.last_yielded_length = 100;
+    state.drain_streamed_prefix();
+    let drained = 103 - state.buffer.len();
+    assert!(drained > 0);
+    state.buffer.push_str("cd");
+    assert_eq!(state.current_line_start(), 101 - drained);
   }
 
   // A decoded `&#13;` ends a CommonMark line, so text after a drain that cut
