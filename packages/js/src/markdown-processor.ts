@@ -2805,8 +2805,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             // Update the last content in buffer regions with trimmed content
             if (trimmedChars > 0) {
               if (buff?.length && buff.at(-1) === lastFragment) {
-                state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
-                buff[buff.length - 1] = trimmed
+                if (trimmed || buff.length < 2 || buff[buff.length - 2] !== '') {
+                  state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
+                  buff[buff.length - 1] = trimmed
+                }
+                else {
+                  // One trailing empty entry already says the whitespace went;
+                  // a run of them only lengthens every backward scan.
+                  state.outputPositions?.replace(buff.length - 1, buff.length, [])
+                  buff.length--
+                }
               }
               if (eventType === NodeEventExit && isInlineElement)
                 state.pendingInlineWhitespace = true

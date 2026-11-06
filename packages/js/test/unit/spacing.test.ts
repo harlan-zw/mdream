@@ -243,6 +243,28 @@ describe('div after a hash run in a list item', () => {
     expect(reads).toBeLessThan(4 * html.length)
   })
 
+  it('keeps one trailing empty fragment however many spaces a run trims', () => {
+    // Every backward scan steps over trailing empty fragments, so letting each
+    // trimmed `<span> </span>` keep one made a long run of them quadratic.
+    const html = `<ul><li><pre>1#${'<span> </span><div></div>'.repeat(50)}</pre></li></ul>`
+    let mostEmpty = 0
+    const options = {
+      plugins: [createPlugin({
+        onNodeExit(element, state) {
+          if (element.name !== 'div')
+            return
+          const { buffer } = state as MarkdownState
+          let empty = 0
+          while (empty < buffer.length && buffer[buffer.length - 1 - empty] === '')
+            empty++
+          mostEmpty = Math.max(mostEmpty, empty)
+        },
+      })],
+    }
+    expect(htmlToMarkdown(html, options)).toBe(htmlToMarkdown(html))
+    expect(mostEmpty).toBe(1)
+  })
+
   it('separates a div after a list-item heading marker', () => {
     const depthMap = new Uint16Array(MAX_TAG_ID)
     depthMap[TAG_LI] = 1
