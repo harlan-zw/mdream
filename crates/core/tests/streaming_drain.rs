@@ -5680,3 +5680,70 @@ fn empty_caption_after_list_heading_streams_consistently() {
     HtmlToMarkdownOptions::default(),
   );
 }
+
+#[test]
+fn a_drain_inside_a_line_lead_keeps_block_line_checks_like_one_shot() {
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      urls: false,
+      fragments: false,
+      empty_images: false,
+      ..CleanConfig::all()
+    }),
+    ..Default::default()
+  };
+  for (html, expected, opts) in [
+    // Cut inside the nested item's indent.
+    (
+      "<ul><li>o<ul><li><h3>&#32;&#32;&#32;&#32;<a href=\"/y\"><p></li></ul></li></ul>",
+      "- o\n  - ###",
+      clean,
+    ),
+    (
+      "<li><ul><li><ul><li><h3></h3><e><figcaption><code><em></figcaption><div><r></ul>>",
+      "-\n  -\n    - ###\n\n      \\>",
+      HtmlToMarkdownOptions::default(),
+    ),
+    // Cut just after the document's first list marker.
+    (
+      "<li><h3><strong><strong><strong><strong><strong><strong>",
+      "- ###",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "<li><h6><strong>&#32 <g>&#32 &#32 </",
+      "- ######",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "<ol start=\"10\"><li><h3><strong><strong><strong><strong><strong><strong>",
+      "10. ###",
+      HtmlToMarkdownOptions::default(),
+    ),
+    // Cut inside a nested item's marker line.
+    (
+      "<ul><li>o<ul><li><h3><strong><strong><strong><strong><strong><strong></h3></li></ul></li></ul>",
+      "- o\n  - ###",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "<ol start=\"7\"><li><ol start=\"42\"><li><h3><strong><strong><strong><strong><strong><strong>",
+      "7.\n   42. ###",
+      HtmlToMarkdownOptions::default(),
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+    let lead = "lead ".repeat(1000);
+    let long = format!("<p>{lead}</p>{html}");
+    let long_expected = html_to_markdown(&long, opts.clone());
+    for width in [1, 7, 4096] {
+      assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+    }
+  }
+}
