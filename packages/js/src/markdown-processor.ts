@@ -1,5 +1,5 @@
 import type { OutputPositions } from './output-positions'
-import type { Cleaner, CleanView, ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode } from './types'
+import type { Cleaner, CleanView, ElementNode, EngineOptions, GfmAction, MarkerLineMemo, Node, NodeEvent, PluginContext, TagHandler, TextNode } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -59,7 +59,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -120,6 +120,8 @@ export interface MarkdownState {
   preFenceOwnerDepth?: number
   /** Open fenced block whose delimiter is finalized after its content is known. */
   codeFence?: CodeFence
+  /** A `<div>`'s cached heading-marker check; see `noteBufferRewrite`. */
+  markerLine?: MarkerLineMemo
   /** Internal observer used by the splitter to track the fence actually opened. */
   onCodeFenceOpen?: (language: string) => void
   /** Open blockquotes buffered until every child line can receive its prefix. */
@@ -340,6 +342,7 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   const replacement = separator + buffer[fragment]
   state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + separator.length)
   buffer[fragment] = replacement
+  noteBufferRewrite(state)
 }
 
 /**
@@ -1123,6 +1126,7 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
     })
     state.buffer.length = span.fragment + 1
     state.buffer.push(content)
+    noteBufferRewrite(state)
   }
   const delimiter = '`'.repeat(Math.max(1, maxBacktickRun(content) + 1))
   const padded = content.startsWith('`') || content.endsWith('`')
@@ -1130,6 +1134,7 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
   if (state.outputPositions && opening !== state.buffer[span.fragment])
     state.outputPositions?.replace(span.fragment, span.fragment + 1, [opening])
   state.buffer[span.fragment] = opening
+  noteBufferRewrite(state)
   return `${padded ? ' ' : ''}${delimiter}`
 }
 
@@ -1161,6 +1166,7 @@ function finalizeCodeFence(state: MarkdownState): string | undefined {
       : offset + delimiter.length - MARKDOWN_CODE_BLOCK.length)
   }
   state.buffer[fence.fragment] = replacement
+  noteBufferRewrite(state)
   return delimiter
 }
 
@@ -1269,12 +1275,14 @@ function finalizeBlockquote(state: MarkdownState): void {
     if (end < quoted.length)
       buffer.push(quoted.slice(end))
     state.lastContentCache = buffer.at(-1)
+    noteBufferRewrite(state)
     return
   }
 
   state.outputPositions?.replace(frame.fragment, buffer.length, [quoted], mapPosition)
   buffer.splice(frame.fragment, buffer.length - frame.fragment, quoted)
   state.lastContentCache = quoted
+  noteBufferRewrite(state)
 }
 
 function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputPositions): void {
@@ -1408,6 +1416,7 @@ function commitGfmAction(
       if (state.blockquotes.length > 0 && !keepsQuoteSeparator
         && (!rawHtmlQuoteBoundary || newlineRunBefore(state.buffer, state.buffer.length) > 2)) {
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
+        noteBufferRewrite(state)
       }
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
@@ -1624,6 +1633,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (state.lastContentCache === last)
         state.lastContentCache = trimmed
       state.lastTextNode = undefined
+      noteBufferRewrite(state)
     }
     return prefix
   }
@@ -1646,6 +1656,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.buffer.pop()
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
+      noteBufferRewrite(state)
       captionBoundary = 3
       quoteTentativeSpacing = undefined
     }
@@ -1681,6 +1692,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             const replacement = opening + anchored
             state.outputPositions?.replace(beforeFragment, beforeFragment + 1, [replacement], offset => offset + opening.length)
             state.buffer[beforeFragment] = replacement
+            noteBufferRewrite(state)
             const codeSpan = gfmLifecycle.openCodeSpans.at(-1)
             if (codeSpan?.fragment === beforeFragment)
               codeSpan.prefix = opening + codeSpan.prefix
@@ -1774,10 +1786,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         state.outputPositions?.replace(index, state.buffer.length, [value.slice(0, end)])
         state.buffer[index] = value.slice(0, end)
         state.buffer.length = index + 1
+        noteBufferRewrite(state)
         break
       }
       state.outputPositions?.replace(index, state.buffer.length, [])
       state.buffer.length = index
+      noteBufferRewrite(state)
     }
     const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
     captionBreakRun = 0
@@ -1805,6 +1819,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.buffer.length = anchor
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
+      noteBufferRewrite(state)
       restoreQuoteParentBoundary()
     }
     else if (captionBreakRun !== 0 && captionFrameCount === 0 && captionBoundary < 3) {
@@ -2320,14 +2335,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && gfmLifecycle.openCodeSpans.at(-1)?.owner === element) {
       gfmLifecycle.openCodeSpans.pop()
     }
-    if (cleanPass && eventType === NodeEventExit)
+    if (cleanPass && eventType === NodeEventExit) {
       cleanPass.exit(element)
+      // The clean pass rewrites link brackets in place.
+      noteBufferRewrite(state)
+    }
     if (!output && !suppressedInPre && handler?.[eventFn]
       && (tagId !== TAG_DIV || state.depthMap[TAG_LI] || handler[eventFn] !== tagHandlers[TAG_DIV]!.enter)) {
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
         && tagId === TAG_A) {
         if (dropEmptyLinkText(buff, openLinkFragment, state.outputPositions)) {
+          noteBufferRewrite(state)
           if (openLinkHeadingBreak) {
             state.outputPositions?.replace(openLinkFragment - 1, openLinkFragment, [])
             buff.length--
@@ -2596,6 +2615,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const restoresHeadingBreak = buff[packed >> 3]?.includes('\n')
         const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
         if (idx >= 0) {
+          noteBufferRewrite(state)
           if (restoresHeadingBreak)
             state.headingBreakPending = true
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)

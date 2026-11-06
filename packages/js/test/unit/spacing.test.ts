@@ -222,12 +222,44 @@ describe('div after a hash run in a list item', () => {
     expect(reads).toBeLessThanOrEqual(3 * text.length)
   })
 
+  it('keeps divs after empty inline fragments linear', () => {
+    // Each `<span> </span>` leaves an empty fragment behind. Keying the check on
+    // the buffer length would miss every div and rescan the lead each time.
+    const html = `<ul><li><pre>${'1'.repeat(2000)}#${'<span> </span><div></div>'.repeat(200)}</pre></li></ul>`
+    const charCodeAt = vi.spyOn(String.prototype, 'charCodeAt')
+    let reads = 0
+    try {
+      htmlToMarkdown(html)
+      reads = charCodeAt.mock.calls.length
+    }
+    finally {
+      charCodeAt.mockRestore()
+    }
+    expect(reads).toBeLessThan(4 * html.length)
+  })
+
   it('separates a div after a list-item heading marker', () => {
     const depthMap = new Uint16Array(MAX_TAG_ID)
     depthMap[TAG_LI] = 1
     const state = { depthMap, buffer: ['- ', '#'], listIndent: '  ' } as unknown as MarkdownState
     const context = { node: {}, state } as unknown as HandlerContext
     expect(tagHandlers[TAG_DIV]!.enter!(context)).toBe('\n\n  ')
+  })
+})
+
+describe('div heading marker after buffer rewrites', () => {
+  it.each([
+    [
+      '<ul><li><dl><blockquote><ul><li><h1></h1><div></div></li></ul></blockquote><span>#</span><div>y</div></dl></li></ul>',
+      '- <dl>\n  > - ## y</dl>',
+    ],
+    [
+      '<ul><li><blockquote><ul><li><span>1</span><span>#</span><div></div></li></ul></blockquote><span><h1></h1><div></div><br>y</span></li></ul>',
+      '- \n  > - 1#\n\n  #\n\n    \n  y',
+    ],
+  ])('keeps one-shot and streamed spacing correct after rewriting a line', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    expect(await streamConvert(Array.from(html))).toBe(expected)
   })
 })
 
