@@ -2475,6 +2475,36 @@ fn streaming_memory_bounded_when_a_long_link_opens_the_first_item() {
   );
 }
 
+// The bound above means nothing if streaming loses the item, so check that the
+// output matches one-shot, including the marker and a hard break's indent.
+#[test]
+fn a_long_link_opening_the_first_item_streams_like_one_shot() {
+  for (inner, lead) in [
+    ("", "x  \n- [y**t** u"),
+    ("<br>z", "x  \n- [y  \n  z**t** u"),
+  ] {
+    let mut html = format!("x<br><li><a href=\"/u\">y{inner}");
+    while html.len() < 64 * 1024 {
+      html.push_str("<b>t</b> u ");
+    }
+    html.push_str("</a></li>");
+    let md = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+    assert!(md.starts_with(lead), "got {:?}", &md[..40]);
+    assert!(
+      md.ends_with("**t** u](/u)"),
+      "got {:?}",
+      &md[md.len() - 40..]
+    );
+    for chunk in [1, 7, 8 * 1024] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+        md,
+        "chunk={chunk}"
+      );
+    }
+  }
+}
+
 // The measurement must ignore other threads: tests run in parallel, and one
 // building a multi-megabyte fixture would otherwise land in another's peak.
 // Joining the allocating thread while this thread's window is still open is
