@@ -244,7 +244,7 @@ describe('streaming parity with the Rust core', () => {
     ['<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>', '- ### T\n\n  ```\n  x\n  ```'],
     ['<ol><li><h2>Install</h2><pre class="language-sh"><span class="token function">npm</span> install mdream</pre></li><li>b</li></ol>', '1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b'],
     ['<blockquote><ul><li><h3>T</h3><pre>\n<span>x</span></pre></li></ul></blockquote>', '> - ### T\n>\n>   ```\n>   x\n>   ```'],
-    ['<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>', '- ### T\n\n  ```\n  \n  ```\n\n  x'],
+    ['<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>', '- ### T\n\n  ```\n\n  ```\n\n  x'],
     ['<ul><li><h1></h1><pre><div>x</div></pre></li></ul>', '- #\n\n  ```\n  x\n  ```'],
     ['<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>', '- a\n\n  ```\n  x\n\n  y\n  ```'],
   ])('keeps the code after a heading in a list item across every split for %s', async (html, expected) => {
