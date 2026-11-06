@@ -106,7 +106,10 @@ const TEXT_RUN_SPLIT_SCAN: usize = 64;
 fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
   let bytes = text.as_bytes();
   let mut index = bytes.len().saturating_sub(1);
-  while index > floor {
+  let mut after_rule_run = None;
+  // Bounded so the piece stays close to the threshold and the carried tail short.
+  let reach = floor.saturating_sub(TEXT_RUN_SPLIT_SCAN * 16);
+  while index > floor || (after_rule_run.is_some() && index > reach) {
     index -= 1;
     if bytes[index] == SPACE_CHAR
       && !matches!(
@@ -114,8 +117,18 @@ fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
         b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
       )
     {
+      // A piece ending on a `-`/`=`/`*`/`_` run may end its line there, which the
+      // escaper must read as a setext underline or thematic break, so look
+      // up to 1 KiB further back for another cut before taking this one.
+      if index > 0 && matches!(bytes[index - 1], b'-' | b'=' | b'*' | b'_') {
+        after_rule_run = after_rule_run.or(Some(index + 1));
+        continue;
+      }
       return Some(index + 1);
     }
+  }
+  if after_rule_run.is_some() {
+    return after_rule_run;
   }
   // A tail of one space would be trimmed as the next piece's indentation.
   Some(text.floor_char_boundary(text.len() - 1)).filter(|&cut| hard_cut && bytes[cut] != SPACE_CHAR)
@@ -1504,6 +1517,8 @@ impl ConvertState {
     self.held_output_exceeded
   }
 
+  // Only runs past 64 KiB get here; kept cold so it does not move hot code.
+  #[cold]
   #[inline(never)]
   fn cut_text_run(&mut self, text_buffer: &mut String) {
     if !self.text_run_splittable() {

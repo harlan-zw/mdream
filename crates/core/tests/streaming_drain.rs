@@ -1355,6 +1355,27 @@ fn streaming_memory_is_bounded_for_one_long_text_run() {
   );
 }
 
+// Every word boundary here follows a `---` run. A cut there costs a redundant
+// escape, but refusing it would hold the whole run.
+#[test]
+fn streaming_memory_is_bounded_when_every_cut_follows_a_rule_run() {
+  const TARGET: usize = 2 * 1024 * 1024;
+  let unit = "ab&#10 --- ";
+  let html = format!("<p>{}</p>", unit.repeat(TARGET / unit.len()));
+
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HtmlToMarkdownOptions::default());
+
+  assert!(
+    total_out > TARGET as u64 / 2,
+    "expected the whole run in the output, got {total_out}"
+  );
+  assert!(
+    peak < TARGET as u64,
+    "peak {peak} should be a window, not the {} byte run",
+    html.len()
+  );
+}
+
 #[test]
 fn streaming_single_token_uses_a_bounded_window() {
   const TARGET: usize = 2 * 1024 * 1024;
