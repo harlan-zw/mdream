@@ -982,6 +982,9 @@ pub struct ConvertState {
   /// That line follows a decoded `\r`, which a single `\n` only turns into one
   /// `\r\n` line ending.
   empty_item_after_cr: bool,
+  /// A drain found content on the marker's line, so nothing will be inserted
+  /// there and the line may be freed; the guard itself stays armed.
+  empty_item_answered: bool,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
   /// A heading closed in a list item. Inside the item its block spacing is
@@ -1244,6 +1247,7 @@ impl ConvertState {
       empty_item_line_start: 0,
       empty_item_len: 0,
       empty_item_after_cr: false,
+      empty_item_answered: false,
       list_rule_pending: false,
       heading_break_pending: false,
       hard_break_end: usize::MAX,
@@ -2855,7 +2859,7 @@ impl ConvertState {
     }
     // A marker still alone on its line has its separating newline inserted at
     // the line start when the item resolves, so the line stays mutable.
-    if self.empty_item_hazard {
+    if self.item_marker_line_held() {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
@@ -3014,9 +3018,9 @@ impl ConvertState {
     if let Some(frame) = self.blockquotes.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, frame.content_start));
     }
-    // Settle a pending marker-line guard when the item's first content already
-    // answers it, so the hold below never outlives the marker's own line.
-    // Like `settle_item_marker`, only content ending in a non-blank byte settles it.
+    // Answer a pending marker-line guard when the item's first content already
+    // does, so the hold below never outlives the marker's own line.
+    // Like `settle_item_marker`, only content ending in a non-blank byte answers it.
     if self
       .buffer
       .as_bytes()
@@ -3025,7 +3029,7 @@ impl ConvertState {
     {
       self.resolve_item_marker(false);
     }
-    if self.empty_item_hazard {
+    if self.item_marker_line_held() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
     // Keep a lead-only line whole: `opens_block_line` reads back to its start.

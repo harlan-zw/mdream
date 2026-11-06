@@ -301,6 +301,30 @@ fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
   assert_stream_matches(html, HtmlToMarkdownOptions::default());
 }
 
+// A drain may free the marker's line once the item's first content is on it,
+// but the guard must settle where one-shot settles it: the `</li>` exit reads
+// it to decide whether a trailing hard break keeps its continuation indent.
+#[test]
+fn hard_break_item_indent_survives_a_drain_that_answers_the_marker_guard() {
+  for (html, expected) in [
+    ("><li>:&#32<br></><code><li>", "\\>\n- :   \n-"),
+    ("<i><br><a><li>><r><br>", "*  \n- \\>  \n  *"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected
+    );
+  }
+  for html in [
+    "><li>:&#32<br></><code><li>",
+    "<i><br><a><li>><r><br>",
+    "<br><a><li>x<br ><li>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 #[test]
 fn streaming_every_split_supports_multibyte_html() {
   assert_stream_matches_every_split("<p>café 😀</p>", HtmlToMarkdownOptions::default());
@@ -2450,6 +2474,61 @@ fn streaming_memory_bounded_with_empty_item_marker_holds() {
     "peak {peak} should be a bounded window, not ~{} input",
     html.len()
   );
+}
+
+// The first item's content sits inside one long link, so the guard cannot settle
+// until the link closes. The drain still frees the marker's line once that
+// content is on it, rather than holding the document behind it.
+#[test]
+fn streaming_memory_bounded_when_a_long_link_opens_the_first_item() {
+  let mut html = String::with_capacity(8 * 1024 * 1024 + 64);
+  html.push_str("x<br><li><a href=\"/u\">y");
+  while html.len() < 8 * 1024 * 1024 {
+    html.push_str("<b>t</b> u ");
+  }
+  html.push_str("</a></li>");
+
+  let (peak, total_out) = measure_peak(&html, 8 * 1024, HtmlToMarkdownOptions::default());
+
+  assert!(
+    total_out > 1024 * 1024,
+    "expected >1MB output, got {total_out}"
+  );
+  assert!(
+    peak < 1024 * 1024,
+    "peak {peak} should be a bounded window, not ~{} input",
+    html.len()
+  );
+}
+
+// The bound above means nothing if streaming loses the item, so check that the
+// output matches one-shot, including the marker and a hard break's indent.
+#[test]
+fn a_long_link_opening_the_first_item_streams_like_one_shot() {
+  for (inner, lead) in [
+    ("", "x  \n- [y**t** u"),
+    ("<br>z", "x  \n- [y  \n  z**t** u"),
+  ] {
+    let mut html = format!("x<br><li><a href=\"/u\">y{inner}");
+    while html.len() < 64 * 1024 {
+      html.push_str("<b>t</b> u ");
+    }
+    html.push_str("</a></li>");
+    let md = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+    assert!(md.starts_with(lead), "got {:?}", &md[..40]);
+    assert!(
+      md.ends_with("**t** u](/u)"),
+      "got {:?}",
+      &md[md.len() - 40..]
+    );
+    for chunk in [1, 7, 8 * 1024] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+        md,
+        "chunk={chunk}"
+      );
+    }
+  }
 }
 
 // The measurement must ignore other threads: tests run in parallel, and one

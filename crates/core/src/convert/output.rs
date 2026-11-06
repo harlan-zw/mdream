@@ -869,7 +869,9 @@ impl ConvertState {
       self.code_fence.as_ref().map(|fence| fence.output_start),
       self.code_spans.first().map(|span| span.output_start),
       link_start,
-      self.empty_item_hazard.then_some(self.empty_item_line_start),
+      self
+        .item_marker_line_held()
+        .then_some(self.empty_item_line_start),
     ]
     .into_iter()
     .flatten()
@@ -3802,6 +3804,7 @@ impl ConvertState {
       _ => true,
     };
     self.empty_item_hazard = !starts_document && !blank_above;
+    self.empty_item_answered = false;
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
@@ -3832,12 +3835,23 @@ impl ConvertState {
     }
   }
 
+  /// The marker's line may still get a newline inserted, so it must stay put.
+  #[inline]
+  pub(crate) fn item_marker_line_held(&self) -> bool {
+    self.empty_item_hazard && !self.empty_item_answered
+  }
+
   /// Give a marker that ended up alone on its line the blank line it needs: the
   /// item is empty, or opened with a block starting on the next line. While
   /// nothing has been written since the marker the answer is still open, so only
   /// the `<li>` exit forces one.
   pub(crate) fn resolve_item_marker(&mut self, at_exit: bool) {
     if !self.empty_item_hazard {
+      return;
+    }
+    // The drain may have freed the line since; the answer it saw is final.
+    if self.empty_item_answered {
+      self.empty_item_hazard = !at_exit;
       return;
     }
     // A rewrite behind the recorded length followed by multi-byte content can
@@ -3868,9 +3882,11 @@ impl ConvertState {
       return;
     }
 
-    // Content on the marker's own line settles it: no blank line is owed.
+    // Content on the marker's own line settles it: no blank line is owed. The
+    // drain only records that, since the `<li>` exit's hard-break trim reads it.
     if !tail.is_empty() && !tail.starts_with(['\n', '\r']) {
-      self.empty_item_hazard = false;
+      self.empty_item_answered = !at_exit;
+      self.empty_item_hazard = !at_exit;
       return;
     }
 
