@@ -3910,14 +3910,22 @@ impl ConvertState {
     // still open across it measures emptiness from `content_start`, so left
     // unshifted it stops looking empty and streaming leaks markers one-shot drops.
     //
-    // Not the blockquote frames. Their `content_start` marks where quote
-    // prefixing begins, which belongs *before* this newline; shifting it turns
-    // `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's sibling
-    // rather than its child. `link_bracket_pos` needs no shift either — a pending
-    // `[` is the tail this function has already returned on.
+    // Not a blockquote frame starting at the line. Its `content_start` marks where
+    // quote prefixing begins, which belongs *before* this newline; shifting it
+    // turns `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's
+    // sibling rather than its child. A frame the item opened starts past the line
+    // and moves with its content, or it quotes from the wrong byte.
+    // `link_bracket_pos` needs no shift either — a pending `[` is the tail this
+    // function has already returned on.
 
-    for _ in replaced..separator.len() {
+    let inserted = separator.len() - replaced;
+    for _ in 0..inserted {
       self.shift_offsets_at_or_after(at);
+    }
+    for frame in &mut self.blockquotes {
+      if frame.content_start > at {
+        frame.content_start += inserted;
+      }
     }
     if break_at_end {
       self.hard_break_end = self.buffer.len();
