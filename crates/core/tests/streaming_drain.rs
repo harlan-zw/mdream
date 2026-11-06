@@ -5680,3 +5680,10 @@ fn empty_caption_after_list_heading_streams_consistently() {
     HtmlToMarkdownOptions::default(),
   );
 }
+
+// Callers may move a processor across threads or share it behind a lock.
+#[test]
+fn processor_is_send_and_sync() {
+  fn assert_send_sync<T: Send + Sync>() {}
+  assert_send_sync::<MarkdownStreamProcessor>();
+}

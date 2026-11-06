@@ -847,9 +847,8 @@ pub struct ConvertState {
   /// in a row check the same line.
   caption_line: BlockLineMemo,
   /// The line before a trailing heading run, checked again at every `<div>`
-  /// and heading exit that leaves it unchanged. A `Cell` because the `<div>`
-  /// check runs from `get_enter_output`, which borrows the state shared.
-  marker_line: std::cell::Cell<BlockLineMemo>,
+  /// and heading exit that leaves it unchanged.
+  marker_line: BlockLineMemo,
   /// Bytes at the buffer start known to be whitespace, for the leading trim.
   leading_whitespace: usize,
   #[cfg(test)]
@@ -1194,7 +1193,7 @@ impl ConvertState {
       held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
       caption_line: BlockLineMemo::default(),
-      marker_line: std::cell::Cell::default(),
+      marker_line: BlockLineMemo::default(),
       leading_whitespace: 0,
       #[cfg(test)]
       leading_whitespace_read: 0,
@@ -2683,7 +2682,7 @@ impl ConvertState {
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
     self.caption_line.note_rewrite(offset);
-    self.marker_line.get_mut().note_rewrite(offset);
+    self.marker_line.note_rewrite(offset);
     if offset < self.leading_whitespace {
       self.leading_whitespace = 0;
     }
@@ -2713,7 +2712,7 @@ impl ConvertState {
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
     self.caption_line.note_drain(removed);
-    self.marker_line.get_mut().note_drain(removed);
+    self.marker_line.note_drain(removed);
     self.leading_whitespace = 0;
     if self.hard_break_end != usize::MAX {
       self.hard_break_end = self
@@ -3474,7 +3473,7 @@ mod tests {
 
         assert!(markdown.ends_with(" y\n  ```"), "{filler}: {markdown:?}");
         let state = &processor.state;
-        let read = state.block_line_bytes_read.get() + state.marker_line.get().spaces.read;
+        let read = state.block_line_bytes_read.get() + state.marker_line.spaces.read;
         assert!(
           read <= 2 * html.len(),
           "{filler}, chunks of {chunk_size}: read {read} bytes of a {}-byte input",

@@ -1327,6 +1327,9 @@ impl ConvertState {
       node_spacing = node.spacing;
       output = self.get_enter_output(node, ancestors);
     }
+    if tag_id == Some(TAG_DIV) && output.is_some() && !plain_text!(self) {
+      self.confirm_div_marker_break(&mut output);
+    }
 
     if self.hard_break_end == self.buffer.len()
       && matches!(tag_id, Some(TAG_P | TAG_DIV))
@@ -1679,6 +1682,9 @@ impl ConvertState {
       };
     }
     // Phase 1 ends — self.stack borrow released
+    if tag_id == Some(TAG_DIV) && !enter_is_literal && output.is_some() && !plain_text!(self) {
+      self.confirm_div_marker_break(&mut output);
+    }
 
     if self.table_row_opener_pending
       && matches!(tag_id, Some(TAG_TH | TAG_TD))
@@ -3699,11 +3705,27 @@ impl ConvertState {
   /// heading exits check again on an unchanged line.
   #[cold]
   #[inline(never)]
-  fn marker_opens_block_line(&self, marker: usize) -> bool {
-    let mut memo = self.marker_line.get();
+  fn marker_opens_block_line(&mut self, marker: usize) -> bool {
+    let mut memo = self.marker_line;
     let opens = self.remembered_opens_block_line(&mut memo, marker);
-    self.marker_line.set(memo);
+    self.marker_line = memo;
     opens
+  }
+
+  /// `get_enter_output` gives a `<div>` its separator when the buffer ends in a
+  /// short hash run; it is only due if that run is a bare heading marker. Checked
+  /// here because remembering the answer needs `&mut self`.
+  #[cold]
+  #[inline(never)]
+  fn confirm_div_marker_break(&mut self, output: &mut Option<Cow<'static, str>>) {
+    let bytes = self.buffer.as_bytes();
+    let mut marker = bytes.len();
+    while marker > 0 && bytes.len() - marker < 7 && bytes[marker - 1] == b'#' {
+      marker -= 1;
+    }
+    if !self.marker_opens_block_line(marker) {
+      *output = None;
+    }
   }
 
   /// Deepest indent of a marker a block can share a line with. A list writes the
@@ -5173,7 +5195,8 @@ impl ConvertState {
             while marker > 0 && bytes.len() - marker < 7 && bytes[marker - 1] == b'#' {
               marker -= 1;
             }
-            if !(1..=6).contains(&(bytes.len() - marker)) || !self.marker_opens_block_line(marker) {
+            // The caller confirms the run opens its line (`confirm_div_marker_break`).
+            if !(1..=6).contains(&(bytes.len() - marker)) {
               return None;
             }
           }
