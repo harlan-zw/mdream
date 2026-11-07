@@ -727,7 +727,7 @@ fn heading_closing_run_is_read_past_a_trimmed_form_feed_or_line_end() {
       "<ul><li><h2>a #&#12;</h2></li><li>b</li></ul>",
       "- ## a \\#\n- b",
     ),
-    ("<ul><li><h2>a #&#9;</h2>y</li></ul>", "- ## a \\# y"),
+    ("<ul><li><h2>a #&#9;</h2>y</li></ul>", "- ## a \\#\n\n  y"),
   ] {
     assert_every_chunking(html, &options, expected);
   }

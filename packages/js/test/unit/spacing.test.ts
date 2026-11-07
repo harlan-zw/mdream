@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import type { MarkdownState } from '../../src/markdown-processor'
+import type { HandlerContext } from '../../src/types'
+import { describe, expect, it, vi } from 'vitest'
+import { clean } from '../../src/clean'
+import { MAX_TAG_ID, TAG_DIV, TAG_LI } from '../../src/const'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { tagHandlers } from '../../src/tags'
 
 async function streamConvert(chunks: string[]): Promise<string> {
   const stream = new ReadableStream<string>({
@@ -117,6 +122,37 @@ describe('inline whitespace', () => {
     }
   })
 
+  it('restores a heading break when whitespace precedes an empty opener', async () => {
+    const html = '<ul><li><h3>T</h3><strong></strong>x</li></ul>'
+    const options = {
+      plugins: [createPlugin({
+        onNodeExit(element, state) {
+          if (element.name === 'strong') {
+            // Move whitespace before the opener, including its heading separator.
+            const { buffer } = state as MarkdownState
+            const index = buffer.length - 1
+            buffer[index] = ` ${buffer[index]}`
+          }
+        },
+      })],
+    }
+    const expected = '- ### T\n\n  x'
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `chunkSize=${width}`).toBe(expected)
+    }
+  })
+
   it('preserves whitespace between root-level inline siblings', () => {
     expect(htmlToMarkdown('<span>One</span> <span>Two</span>')).toBe('One Two')
     expect(htmlToMarkdown('<strong>One</strong>\n<strong>Two</strong>')).toBe('**One** **Two**')
@@ -208,5 +244,176 @@ describe('unknown tags', () => {
       expect(htmlToMarkdown(html), html).toBe(expected)
       expect(await streamConvert([html]), html).toBe(expected)
     }
+  })
+})
+
+describe('div after a hash run in a list item', () => {
+  it('reads at most seven hashes back from the end of the buffer', () => {
+    // Only one to six hashes can be a bare heading marker, so a long retained
+    // run must not be rescanned at every div.
+    let reads = 0
+    const run = {
+      length: 100_000,
+      charCodeAt: () => {
+        reads++
+        return 35
+      },
+    } as unknown as string
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- ', run], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
+    expect(reads).toBeLessThanOrEqual(7)
+  })
+
+  it('reads the line before the marker once while divs leave it unchanged', () => {
+    // The spaces before the marker must not be read again at every div.
+    let reads = 0
+    const text = `x${' '.repeat(10_000)}#`
+    const entry = {
+      length: text.length,
+      charCodeAt: (index: number) => {
+        reads++
+        return text.charCodeAt(index)
+      },
+    } as unknown as string
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- ', entry], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    for (let i = 0; i < 100; i++)
+      expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
+    expect(reads).toBeLessThanOrEqual(3 * text.length)
+  })
+
+  it('reads a line split across entries once while divs leave it unchanged', () => {
+    let reads = 0
+    const spaces = {
+      length: 10_000,
+      charCodeAt: () => {
+        reads++
+        return 32
+      },
+    } as unknown as string
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- x', spaces, '#'], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    for (let i = 0; i < 100; i++)
+      expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
+    expect(reads).toBeLessThanOrEqual(3 * spaces.length)
+  })
+
+  it('reads a lead that reaches the buffer start once while divs leave it unchanged', () => {
+    let reads = 0
+    const text = `${'1'.repeat(10_000)}#`
+    const entry = {
+      length: text.length,
+      charCodeAt: (index: number) => {
+        reads++
+        return text.charCodeAt(index)
+      },
+    } as unknown as string
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- ', entry], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    for (let i = 0; i < 100; i++)
+      expect(tagHandlers[TAG_DIV]!.enter!(context)).toBeUndefined()
+    expect(reads).toBeLessThanOrEqual(3 * text.length)
+  })
+
+  it.each([
+    ['without cleanup', undefined],
+    ['with cleanup', { clean: clean() }],
+  ])('keeps divs after empty inline fragments linear %s', (_, options) => {
+    // Each `<span> </span>` leaves an empty fragment behind. Keying the check on
+    // the buffer length would miss every div and rescan the lead each time, and
+    // so would dropping the check at every element exit of the clean pass.
+    const html = `<ul><li><pre>${'1'.repeat(2000)}#${'<span> </span><div></div>'.repeat(200)}</pre></li></ul>`
+    const charCodeAt = vi.spyOn(String.prototype, 'charCodeAt')
+    let reads = 0
+    try {
+      htmlToMarkdown(html, options)
+      reads = charCodeAt.mock.calls.length
+    }
+    finally {
+      charCodeAt.mockRestore()
+    }
+    expect(reads).toBeLessThan(4 * html.length)
+  })
+
+  it('keeps one trailing empty fragment however many spaces a run trims', () => {
+    // Every backward scan steps over trailing empty fragments, so letting each
+    // trimmed `<span> </span>` keep one made a long run of them quadratic.
+    const html = `<ul><li><pre>1#${'<span> </span><div></div>'.repeat(50)}</pre></li></ul>`
+    let mostEmpty = 0
+    const options = {
+      plugins: [createPlugin({
+        onNodeExit(element, state) {
+          if (element.name !== 'div')
+            return
+          const { buffer } = state as MarkdownState
+          let empty = 0
+          while (empty < buffer.length && buffer[buffer.length - 1 - empty] === '')
+            empty++
+          mostEmpty = Math.max(mostEmpty, empty)
+        },
+      })],
+    }
+    expect(htmlToMarkdown(html, options)).toBe(htmlToMarkdown(html))
+    expect(mostEmpty).toBe(1)
+  })
+
+  it('separates a div after a list-item heading marker', () => {
+    const depthMap = new Uint16Array(MAX_TAG_ID)
+    depthMap[TAG_LI] = 1
+    const state = { depthMap, buffer: ['- ', '#'], listIndent: '  ' } as unknown as MarkdownState
+    const context = { node: {}, state } as unknown as HandlerContext
+    expect(tagHandlers[TAG_DIV]!.enter!(context)).toBe('\n\n  ')
+  })
+})
+
+describe('div heading marker after buffer rewrites', () => {
+  it.each([
+    [
+      '<ul><li><dl><blockquote><ul><li><h1></h1><div></div></li></ul></blockquote><span>#</span><div>y</div></dl></li></ul>',
+      '- <dl>\n  > - ## y</dl>',
+    ],
+    [
+      '<ul><li><blockquote><ul><li><span>1</span><span>#</span><div></div></li></ul></blockquote><span><h1></h1><div></div><br>y</span></li></ul>',
+      '- \n  > - 1#\n\n  #\n\n    \n  y',
+    ],
+  ])('keeps one-shot and streamed spacing correct after rewriting a line', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    expect(await streamConvert(Array.from(html))).toBe(expected)
+  })
+})
+
+describe('empty captions after a heading in a list item', () => {
+  it.each([
+    ['<figcaption></figcaption>', ''],
+    ['<figure><figcaption></figcaption></figure>', ''],
+    // An empty inline splits the run across fragments.
+    ['<figcaption></figcaption>', '<b></b>&#32;'],
+    // A marker after the run sends the check through the spaces before it.
+    ['<figcaption></figcaption>', '-&#32;'],
+  ])('reads the heading line once past %s with %j after the run', (caption, tail) => {
+    // Each empty caption hands the heading break back and checks the heading's
+    // line again; the spaces ending that line must not be read at every exit.
+    const html = `<ul><li><h3>T${'&#32;'.repeat(2000)}${tail}</h3>${caption.repeat(200)}x</li></ul>`
+    const charCodeAt = vi.spyOn(String.prototype, 'charCodeAt')
+    let output = ''
+    let reads = 0
+    try {
+      output = htmlToMarkdown(html)
+      reads = charCodeAt.mock.calls.length
+    }
+    finally {
+      charCodeAt.mockRestore()
+    }
+    expect(output.endsWith('\n\n  x')).toBe(true)
+    expect(reads).toBeLessThan(html.length * 4)
   })
 })

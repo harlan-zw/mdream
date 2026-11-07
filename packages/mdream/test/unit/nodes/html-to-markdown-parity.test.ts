@@ -77,7 +77,7 @@ describe.each(engines)('html-to-markdown parity $name', (engineConfig) => {
     </blockquote>
     <span>by someone</span>
   </li>
-</ul>`, { engine })).toBe('- Simple List\n- Someone once said:\n  > My Famous quoteby someone')
+</ul>`, { engine })).toBe('- Simple List\n- Someone once said:\n  > My Famous quote\n\n  by someone')
     expect(htmlToMarkdown(`
 <ol start="9">
   <li>Nine</li>

@@ -373,6 +373,26 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   listRulePending?: string
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
+  /**
+   * A `<div>`'s heading-marker check, kept with the entries the walk ends and
+   * stops in so divs that leave the line unchanged don't redo it.
+   * @internal
+   */
+  markerLine?: MarkerLineMemo
+}
+
+/**
+ * A `<div>`'s heading-marker answer with the entries the check ended and
+ * stopped in. `noteBufferRewrite` drops it whenever output at or before
+ * `index` is rewritten.
+ * @internal
+ */
+export interface MarkerLineMemo {
+  index: number
+  entry: string
+  stop: number
+  stopEntry: string
+  opens: boolean
 }
 
 type NodeEventEnter = 0
@@ -439,6 +459,8 @@ export interface TagHandler {
    * strings so markers like `^`/`~` attach to adjacent content (issue #93).
    */
   literalEnter?: boolean
+  /** Whether a declarative literal enter starts with an ATX heading prefix. */
+  literalEnterHeading?: boolean
   /** When true, the `exit` string is a user-supplied tagOverride, exempt from empty-pair cleanup. */
   literalExit?: boolean
   /** Whether a declarative literal exit string writes output. */
