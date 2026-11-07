@@ -136,6 +136,8 @@ describe('streaming drain parity', () => {
     ['<ol start="10"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol>', '10. \n*x  \n    \n*  \n    -'],
     ['<blockquote><ol start="10"><li><br>&#13;<em>x&#10;</em><br><ul><li></li></ul></li></ol></blockquote>', '> 10.   \n>     \r*x\n> *  \n>     -'],
     ['<ul><li><ol start="10"><li><br><br><em>x&#10;klmnopqrstuvwxyz&#10;</em><br><ul><li></li></ul></li></ol></li></ul>', '-\n  10.   \n        \n      *x\nklmnopqrstuvwxyz\n*  \n      -'],
+    ['<ul><li>&#10;<br><br><em>x<br><br>&#10;</em><br><ul><li></li></ul></li></ul>', '- \n  \n    \n  *x  \n    \n  \n*  \n\n  -'],
+    ['<ol start="10"><li><em>x<br><br>&#10;</em><br><ul><li></li></ul></li></ol>', '10. *x  \n      \n    \n*  \n    -'],
   ])('reads a lone closer under an item a bare marker opens across compaction: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
     for (let chunkSize = 1; chunkSize <= 16; chunkSize++)

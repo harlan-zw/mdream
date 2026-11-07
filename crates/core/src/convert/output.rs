@@ -4047,6 +4047,13 @@ impl ConvertState {
           }
         })
       };
+    // The line under the next line of spaces: its indent, and whether it is
+    // a line of spaces too. A run of hard breaks writes its lowest line as
+    // that indent and two spaces more, and each line above it as long as the
+    // one under it or two spaces longer.
+    let mut under = (indent, false);
+    let break_run =
+      |spaces: usize, under: (usize, bool)| spaces == under.0 + 2 || under.1 && spaces == under.0;
     let column = loop {
       if quote.is_some() && line_end <= quote_start {
         break below;
@@ -4059,8 +4066,8 @@ impl ConvertState {
       if line_end == 0 || split_crlf {
         // Drains took the lines above whole: the paragraph they left answers.
         break match self.drained_paragraph {
-          Paragraph::Spaced { spaces, .. }
-            if hard_break && below.is_none() && spaces != indent + 2 =>
+          Paragraph::Spaced { spaces, chain, .. }
+            if hard_break && below.is_none() && !(chain && break_run(spaces, under)) =>
           {
             None
           }
@@ -4135,10 +4142,11 @@ impl ConvertState {
         // A line of spaces that a run of hard breaks did not write, such as
         // the indent of a hard break that a line feed of the text ends, is
         // blank. With a hard break after the `*`, it ends the paragraph.
-        LineKind::Spaces(spaces) if hard_break && below.is_none() && spaces != indent + 2 => {
+        LineKind::Spaces(spaces) if hard_break && below.is_none() && !break_run(spaces, under) => {
           break below;
         }
-        LineKind::Spaces(_) => {
+        LineKind::Spaces(spaces) => {
+          under = (spaces, true);
           first = None;
           line_end = line_start;
         }
@@ -7350,12 +7358,14 @@ mod tests {
     state.drained_paragraph = Paragraph::Spaced {
       column: 2,
       spaces: 2,
+      chain: true,
     };
     assert!(!state.lone_closer_reads_as_marker(b"  *", 2, 2, false));
     assert!(state.lone_closer_reads_as_marker(b"  *", 2, 2, true));
     state.drained_paragraph = Paragraph::Spaced {
       column: 2,
       spaces: 4,
+      chain: true,
     };
     assert!(!state.lone_closer_reads_as_marker(b"  *", 2, 2, true));
   }
