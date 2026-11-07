@@ -334,19 +334,33 @@ export function parseUnsignedInteger(raw: string | undefined): number | undefine
  */
 export function trimOutputStart(value: string): string {
   let start = 0
-  while (start < value.length) {
-    const code = value.charCodeAt(start)
-    if (code === 32 || (code >= 9 && code <= 13)) {
-      start++
-      continue
-    }
-    if (code < 0x85 || !(code === 0x85 || code === 0xA0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200A)
-      || code === 0x2028 || code === 0x2029 || code === 0x202F || code === 0x205F || code === 0x3000)) {
-      break
-    }
+  while (start < value.length && isOutputStartWhitespace(value.charCodeAt(start)))
     start++
-  }
   return start === 0 ? value : value.slice(start)
+}
+
+/** Whether `trimOutputStart` drops the UTF-16 unit `code`. */
+export function isOutputStartWhitespace(code: number): boolean {
+  return code === 32 || (code >= 9 && code <= 13)
+    || (code >= 0x85 && (code === 0x85 || code === 0xA0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200A)
+      || code === 0x2028 || code === 0x2029 || code === 0x202F || code === 0x205F || code === 0x3000))
+}
+
+/**
+ * Whether every buffered fragment is whitespace `trimOutputStart` drops, so
+ * the next visible text starts the document's first line at column zero.
+ * Scans only the buffer's trailing whitespace, so callers ask only for text
+ * with a visible character: appending it ends the run the next call would scan.
+ */
+export function bufferIsOutputLead(buffer: readonly string[]): boolean {
+  for (let fragmentIndex = buffer.length - 1; fragmentIndex >= 0; fragmentIndex--) {
+    const fragment = buffer[fragmentIndex]!
+    for (let index = fragment.length - 1; index >= 0; index--) {
+      if (!isOutputStartWhitespace(fragment.charCodeAt(index)))
+        return false
+    }
+  }
+  return true
 }
 
 /**

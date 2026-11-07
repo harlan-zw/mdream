@@ -885,9 +885,16 @@ pub struct ConvertState {
   // 0=none, 1=left, 2=center, 3=right
   table_column_alignments: Vec<u8>,
   last_text_node_contains_whitespace: bool,
+  last_text_node_in_pre: bool,
+  last_text_output_range: Option<(usize, usize)>,
+  /// Generated table-column separators are outside source whitespace.
+  text_cell_start: usize,
   last_text_node_depth: usize,
   last_text_node_index: usize,
   has_last_text_node: bool,
+  /// The last text node's state outlived a transparent inline exit, held only
+  /// for an enclosing delimiter to trim its tail.
+  last_text_node_held: bool,
   last_node_is_inline: bool,
   /// A collapsed trailing space trimmed from the end of an inline element.
   /// It stays deferred until later visible inline content appears so Markdown
@@ -1030,6 +1037,9 @@ pub struct ConvertState {
   /// collapsed, so the next visible content owes it the block break the root
   /// writes, or that content joins the heading's line.
   heading_break_pending: bool,
+  /// The latest heading wrote visible text, so a trailing `#` run after a list
+  /// marker on its last line is that text, not the heading's own prefix.
+  heading_has_text: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1228,9 +1238,13 @@ impl ConvertState {
       },
       table_column_alignments: Vec::new(),
       last_text_node_contains_whitespace: false,
+      last_text_node_in_pre: false,
+      last_text_output_range: None,
+      text_cell_start: 0,
       last_text_node_depth: 0,
       last_text_node_index: 0,
       has_last_text_node: false,
+      last_text_node_held: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
       caption_boundary: CaptionBoundary::None,
@@ -1289,6 +1303,7 @@ impl ConvertState {
       empty_item_answered: false,
       list_rule_pending: false,
       heading_break_pending: false,
+      heading_has_text: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -2700,6 +2715,13 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    self.text_cell_start = self.text_cell_start.min(offset);
+    if self
+      .last_text_output_range
+      .is_some_and(|(_, end)| offset < end)
+    {
+      self.last_text_output_range = None;
+    }
     self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
@@ -2723,6 +2745,10 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    self.text_cell_start = self.text_cell_start.saturating_sub(removed);
+    self.last_text_output_range = self.last_text_output_range.and_then(|(start, end)| {
+      (end > removed).then(|| (start.saturating_sub(removed), end - removed))
+    });
     if self.blockquote_line_scanned_to != 0 {
       self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
       self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);
@@ -2798,7 +2824,12 @@ impl ConvertState {
   /// so a document with no open quote does not pay for the limit.
   pub(crate) fn flush_settled_blockquote_lines(&mut self) {
     if self.streaming_flush_possible() {
-      let mut flush_limit = trim_ascii_whitespace_end(&self.buffer);
+      let mut flush_limit =
+        self
+          .held_whitespace
+          .start(self.buffer.as_bytes(), self.buffer.len(), |b| {
+            b.is_ascii_whitespace() || b == b'\x0B'
+          });
       if let Some(marker) = self.open_markers.first() {
         flush_limit = flush_limit.min(hold_before(&self.buffer, marker.output_start));
       }
@@ -2810,6 +2841,10 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
+    self.get_markdown_chunk_with_final(false)
+  }
+
+  fn get_markdown_chunk_with_final(&mut self, final_chunk: bool) -> String {
     if self.is_html() {
       if let Some(&last) = self.buffer.as_bytes().last() {
         self.flushed_tail[1] = last;
@@ -2840,9 +2875,16 @@ impl ConvertState {
     // a trailing tab that a later trim then removes from the buffer alone.
     // Inside <pre>, that holds for a trailing whitespace run in the current
     // text node: it stays mutable until its inline/code element closes.
-    let mut stable_end = self
-      .held_whitespace
-      .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
+    let hold_vertical_tab = !plain_text!(self);
+    let mut stable_end = if final_chunk {
+      trim_ascii_whitespace_end(&self.buffer)
+    } else {
+      self
+        .held_whitespace
+        .start(self.buffer.as_bytes(), buf_len, |b| {
+          b.is_ascii_whitespace() || (hold_vertical_tab && b == b'\x0B')
+        })
+    };
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
       // line-leading run is the exception: list continuation indentation is
@@ -2988,7 +3030,7 @@ impl ConvertState {
     if !plain_text!(self) && !self.is_html() && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       self.get_markdown()
     } else {
-      self.get_markdown_chunk()
+      self.get_markdown_chunk_with_final(true)
     }
   }
 
@@ -3488,6 +3530,13 @@ mod tests {
   fn a_growing_held_tail_is_read_once() {
     for (name, unit, prefix) in [
       ("trailing whitespace", "&#32;&#32;</b>", "<p>x"),
+      ("vertical tabs", "&#11;<i></i>", "<p>x"),
+      ("vertical tabs in emphasis", " &#11;", "<p><em>x"),
+      (
+        "vertical tabs and newlines in quoted emphasis",
+        " &#10;&#11;<span></span>",
+        "<blockquote><em>x",
+      ),
       ("leading whitespace", "&nbsp;</b>", ""),
       ("heading run", "#<span>#</span>", "<h2>x "),
       ("spaces in a code block", "&#32;&#32;</b>", "<pre><code>"),

@@ -36,6 +36,7 @@ export async function* streamHtmlToMarkdown(
     plainText: false,
     urlBaseTarget: processor.state,
     discardExcludedText: resolvedPlugins.length === 0,
+    carryText: true,
   }
   const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
     ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)

@@ -21,6 +21,98 @@ async function streamConvert(chunks: string[]): Promise<string> {
 }
 
 describe('inline whitespace', () => {
+  it.each([
+    ['<p><em>T&#11; </em>x</p>', '*T* x'],
+    ['<p><em>a &#11;</em>b</p>', '*a* b'],
+  ])('preserves emphasis when vertical tab is mixed with trailing space: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split at ${split}`)
+        .toBe(expected)
+    }
+  })
+
+  it.each([
+    ['<span><p><span>x </span></p></span>z', 'x\n\nz'],
+    ['<span><p><span>x\t</span></p></span>z', 'x\n\nz'],
+    ['<span><h3><span>x </span></h3></span>z', '### x\n\nz'],
+    ['<div><span><p><span>x </span></p></span>z</div>', 'x\n\nz'],
+    ['<span><p><span>x y</span></p></span>z', 'x y\n\nz'],
+    ['<span><p><span>x&nbsp;</span></p></span>z', 'x \n\nz'],
+  ])('keeps a block separator inside a wrapper after a held tail: %j', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let size = 1; size <= html.length; size++) {
+      const chunks: string[] = []
+      for (let index = 0; index < html.length; index += size)
+        chunks.push(html.slice(index, index + size))
+      expect(await streamConvert(chunks), `chunk size ${size}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++) {
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split at ${split}`)
+        .toBe(expected)
+    }
+  })
+
+  it('keeps literal source whitespace before visible plugin content ending in a break', async () => {
+    const html = '<p>a <br>b</p>'
+    const options = {
+      plugins: [createPlugin({
+        onNodeEnter(node) {
+          if (node.name === 'br')
+            return 'X\n'
+        },
+      })],
+    }
+    const expected = 'a X\nb'
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `split at ${split}`).toBe(expected)
+    }
+  })
+
+  it.each<[string[], string]>([
+    [['  \n', 'after'], 'a  \nafterb'],
+    [['  \nafter'], 'a  \nafterb'],
+    [['X\n', 'after'], 'a\tX\nafterb'],
+    [['X\nafter'], 'a\tX\nafterb'],
+    [['X', '\n', 'after'], 'a\tX\nafterb'],
+    [['', '  ', '\n', 'after'], 'a  \nafterb'],
+  ])('trims only before a leading plugin break: %j', async (fragments, expected) => {
+    const html = '<p>a&#9;<br>b</p>'
+    const options = {
+      plugins: fragments.map(fragment => createPlugin({
+        onNodeEnter(node) {
+          if (node.name === 'br')
+            return fragment
+        },
+      })),
+    }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `split at ${split}`).toBe(expected)
+    }
+  })
+
   it('restores a heading break when whitespace precedes an empty opener', async () => {
     const html = '<ul><li><h3>T</h3><strong></strong>x</li></ul>'
     const options = {
