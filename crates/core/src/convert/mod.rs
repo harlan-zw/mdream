@@ -106,7 +106,10 @@ const TEXT_RUN_SPLIT_SCAN: usize = 64;
 fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
   let bytes = text.as_bytes();
   let mut index = bytes.len().saturating_sub(1);
-  while index > floor {
+  let mut after_rule_run = None;
+  // Bounded so the piece stays close to the threshold and the carried tail short.
+  let reach = floor.saturating_sub(TEXT_RUN_SPLIT_SCAN * 16);
+  while index > floor || (after_rule_run.is_some() && index > reach) {
     index -= 1;
     if bytes[index] == SPACE_CHAR
       && !matches!(
@@ -114,8 +117,18 @@ fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
         b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
       )
     {
+      // A piece ending on a `-`/`=`/`*`/`_` run may end its line there, which the
+      // escaper must read as a setext underline or thematic break, so look
+      // up to 1 KiB further back for another cut before taking this one.
+      if index > 0 && matches!(bytes[index - 1], b'-' | b'=' | b'*' | b'_') {
+        after_rule_run = after_rule_run.or(Some(index + 1));
+        continue;
+      }
       return Some(index + 1);
     }
+  }
+  if after_rule_run.is_some() {
+    return after_rule_run;
   }
   // A tail of one space would be trimmed as the next piece's indentation.
   Some(text.floor_char_boundary(text.len() - 1)).filter(|&cut| hard_cut && bytes[cut] != SPACE_CHAR)
@@ -169,6 +182,9 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// The opener carries the block break a heading in a list item owed, so
+  /// dropping the empty pair owes it again.
+  restores_heading_break: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -206,12 +222,17 @@ struct CaptionFrame {
   spacing: [u8; 2],
   deferred_breaks: Option<DeferredBreakRun>,
   has_internal_break: bool,
+  /// The caption took a pending heading break at its enter. Dropped empty, it
+  /// writes no separation of its own, so its exit owes the break again.
+  restores_heading_break: bool,
 }
 
 #[derive(Clone, Copy, PartialEq)]
 enum CaptionBoundary {
   None,
   Pending(u8),
+  QuoteParent,
+  QuoteTentative(usize),
   ConsumeSpace,
 }
 
@@ -221,6 +242,10 @@ enum ListBoundary {
   Rule,
   NestedList,
 }
+
+/// `CaptionBoundary::QuoteTentative` past a closing delimiter: no separator to
+/// retract, and the next source space separates words.
+const QUOTE_CLOSED: usize = usize::MAX;
 
 struct CodeFenceState {
   output_start: usize,
@@ -260,6 +285,8 @@ struct LinkOutputState {
   /// The `[` starts where the latest hard break ends; see
   /// `OpenMarker::starts_at_hard_break`.
   starts_at_hard_break: bool,
+  /// Bytes before the link bracket owned by a pending heading break.
+  heading_break_prefix_len: usize,
 }
 
 struct FragmentLink {
@@ -371,6 +398,32 @@ impl TailRun {
   fn note_drain(&mut self, removed: usize) {
     self.start = self.start.saturating_sub(removed);
     self.end = self.end.saturating_sub(removed);
+  }
+}
+
+/// A line's `opens_block_line` answer, keyed by the start of the space run before the
+/// checked position. Past its first space a gap only counts as present, so the answer holds
+/// while the bytes before the run stay put, and a check repeated on an unchanged line is
+/// not read again.
+#[derive(Clone, Copy, Debug, Default)]
+struct BlockLineMemo {
+  spaces: TailRun,
+  opens: Option<(usize, bool)>,
+}
+
+impl BlockLineMemo {
+  fn note_rewrite(&mut self, offset: usize) {
+    self.spaces.note_rewrite(offset);
+    if self.opens.is_some_and(|(start, _)| offset < start) {
+      self.opens = None;
+    }
+  }
+
+  fn note_drain(&mut self, removed: usize) {
+    self.spaces.note_drain(removed);
+    if removed != 0 {
+      self.opens = None;
+    }
   }
 }
 
@@ -963,6 +1016,9 @@ pub struct ConvertState {
   /// it. Recomputing walks the whole line, which is quadratic over a long one.
   line_start: usize,
   line_start_scanned_to: usize,
+  /// Lowest offset rewritten since the line start was last read. A trim and
+  /// regrowth in between leaves the buffer no shorter than the cache.
+  line_start_dirty_from: usize,
   /// Upper bound on the `#`/space run a heading holds back for its closing-sequence
   /// escape, counted as text is written.
   heading_hash_run: usize,
@@ -977,6 +1033,12 @@ pub struct ConvertState {
   held_whitespace: TailRun,
   held_spaces: TailRun,
   held_heading_run: TailRun,
+  /// The line a dropped caption hands its heading break back to. Empty captions
+  /// in a row check the same line.
+  caption_line: BlockLineMemo,
+  /// The line before a trailing heading run, checked again at every `<div>`
+  /// and heading exit that leaves it unchanged.
+  marker_line: BlockLineMemo,
   /// Bytes at the buffer start known to be whitespace, for the leading trim.
   leading_whitespace: usize,
   #[cfg(test)]
@@ -1139,6 +1201,13 @@ pub struct ConvertState {
   list_rule_pending: ListBoundary,
   /// A tentative separator retractable while following wrappers are empty.
   list_tail_start: usize,
+  /// A drain found content on the marker's line, so nothing will be inserted
+  /// there and the line may be freed; the guard itself stays armed.
+  empty_item_answered: bool,
+  /// A heading closed in a list item. Inside the item its block spacing is
+  /// collapsed, so the next visible content owes it the block break the root
+  /// writes, or that content joins the heading's line.
+  heading_break_pending: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1177,6 +1246,9 @@ pub struct ConvertState {
   code_span_closed_bytes: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
+  /// Bytes `opens_block_line` reads through the space run before its end.
+  #[cfg(test)]
+  block_line_bytes_read: std::cell::Cell<usize>,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
   /// held inline it costs the override-free path more than the scan it replaces.
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
@@ -1315,12 +1387,15 @@ impl ConvertState {
       raw_html_scanned_to: 0,
       line_start: 0,
       line_start_scanned_to: 0,
+      line_start_dirty_from: usize::MAX,
       heading_hash_run: 0,
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
       held_whitespace: TailRun::default(),
       held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
+      caption_line: BlockLineMemo::default(),
+      marker_line: BlockLineMemo::default(),
       leading_whitespace: 0,
       #[cfg(test)]
       leading_whitespace_read: 0,
@@ -1400,6 +1475,8 @@ impl ConvertState {
       empty_item_after_cr: false,
       list_rule_pending: ListBoundary::None,
       list_tail_start: usize::MAX,
+      empty_item_answered: false,
+      heading_break_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
@@ -1415,6 +1492,8 @@ impl ConvertState {
       code_span_closed_bytes: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
+      #[cfg(test)]
+      block_line_bytes_read: std::cell::Cell::new(0),
     };
     // Resolve clean config into bitmask
     if let Some(ref clean) = s.options.clean {
@@ -1660,6 +1739,8 @@ impl ConvertState {
     self.held_output_exceeded
   }
 
+  // Only runs past 64 KiB get here; kept cold so it does not move hot code.
+  #[cold]
   #[inline(never)]
   fn cut_text_run(&mut self, text_buffer: &mut String) {
     if !self.text_run_splittable() {
@@ -2813,10 +2894,13 @@ impl ConvertState {
     if offset < self.list_tail_start {
       self.list_tail_start = usize::MAX;
     }
+    self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
+    self.caption_line.note_rewrite(offset);
+    self.marker_line.note_rewrite(offset);
     if offset < self.leading_whitespace {
       self.leading_whitespace = 0;
     }
@@ -2851,6 +2935,8 @@ impl ConvertState {
     self.held_whitespace.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
+    self.caption_line.note_drain(removed);
+    self.marker_line.note_drain(removed);
     self.leading_whitespace = 0;
     if self.hard_break_end != usize::MAX {
       self.hard_break_end = self
@@ -2887,7 +2973,7 @@ impl ConvertState {
     if let Some(bracket_pos) = std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| link.open && (link.pins_output || link.empty_text_pending))
-      .map(|link| link.bracket_pos)
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
     {
       floor = floor.min(bracket_pos);
@@ -3007,7 +3093,7 @@ impl ConvertState {
     }
     // A marker still alone on its line has its separating newline inserted at
     // the line start when the item resolves, so the line stays mutable.
-    if self.empty_item_hazard {
+    if self.item_marker_line_held() {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
     if self.list_tail_start != usize::MAX {
@@ -3114,7 +3200,7 @@ impl ConvertState {
     std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| self.link_hold_required(link))
-      .map(|link| link.bracket_pos)
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
   }
 
@@ -3169,9 +3255,9 @@ impl ConvertState {
     if let Some(frame) = self.blockquotes.first() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, frame.content_start));
     }
-    // Settle a pending marker-line guard when the item's first content already
-    // answers it, so the hold below never outlives the marker's own line.
-    // Like `settle_item_marker`, only content ending in a non-blank byte settles it.
+    // Answer a pending marker-line guard when the item's first content already
+    // does, so the hold below never outlives the marker's own line.
+    // Like `settle_item_marker`, only content ending in a non-blank byte answers it.
     if self
       .buffer
       .as_bytes()
@@ -3180,11 +3266,15 @@ impl ConvertState {
     {
       self.resolve_item_marker(false);
     }
-    if self.empty_item_hazard {
+    if self.item_marker_line_held() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
     if self.list_tail_start != usize::MAX {
       drain_end = drain_end.min(self.list_tail_start);
+    }
+    // Keep a lead-only line whole: `opens_block_line` reads back to its start.
+    if let Some(line_start) = self.uncut_block_lead_start(drain_end, marker_tail) {
+      drain_end = keep_two_before(&self.buffer, line_start);
     }
     if drain_end == 0 {
       return;
@@ -3275,10 +3365,74 @@ impl ConvertState {
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
     self.line_start = self.line_start.saturating_sub(drain_end);
     self.line_start_scanned_to = self.line_start_scanned_to.saturating_sub(drain_end);
+    self.line_start_dirty_from = self.line_start_dirty_from.saturating_sub(drain_end);
   }
 }
 
 impl ConvertState {
+  /// Start of the line `drain_end` cuts, if no later line was yielded and only a block lead of at
+  /// most `widest` bytes precedes the cut.
+  fn uncut_block_lead_start(&self, drain_end: usize, widest: usize) -> Option<usize> {
+    let bytes = self.buffer.as_bytes();
+    if drain_end == 0
+      || !matches!(
+        bytes[drain_end - 1],
+        b' ' | b'-' | b'*' | b'+' | b'.' | b')' | b'0'..=b'9'
+      )
+    {
+      return None;
+    }
+    // Yielded bytes are final, so a later yielded line keeps this one from ever being read again.
+    let mut yielded_end = self.last_yielded_length.clamp(drain_end, bytes.len());
+    while yielded_end > drain_end && bytes[yielded_end - 1].is_ascii_whitespace() {
+      yielded_end -= 1;
+    }
+    if bytes[drain_end..yielded_end].contains(&b'\n') {
+      return None;
+    }
+    let floor = drain_end.saturating_sub(widest);
+    let mut i = drain_end;
+    while i > floor && bytes[i - 1] == b' ' {
+      i -= 1;
+    }
+    if i > floor && bytes[i - 1] != b'\n' {
+      let marker = match bytes[i - 1] {
+        b'-' | b'*' | b'+' => i - 1,
+        // The cut may land between an ordered marker's digits and its delimiter.
+        b'.' | b')' | b'0'..=b'9' => {
+          let digits_end = i - usize::from(!bytes[i - 1].is_ascii_digit());
+          let mut at = digits_end;
+          while at > floor && digits_end - at < 9 && bytes[at - 1].is_ascii_digit() {
+            at -= 1;
+          }
+          if at == digits_end {
+            return None;
+          }
+          at
+        }
+        _ => return None,
+      };
+      i = marker;
+      while i > floor && bytes[i - 1] == b' ' {
+        i -= 1;
+      }
+    }
+    if i < floor {
+      return None;
+    }
+    let line_start = if i > 0 && bytes[i - 1] == b'\n' {
+      i
+    } else if i == 0
+      // `buffer[0]` opens a line before any cut or after one that ended a line.
+      && matches!(self.cut_line_lead, CutLineLead::Uncut | CutLineLead::Blank(0))
+    {
+      0
+    } else {
+      return None;
+    };
+    Some(line_start)
+  }
+
   /// What the line ending at `drain_end` leads with, given what an earlier cut
   /// of the same line already found. `previous` makes the indent additive: a
   /// line's leading spaces can be split across any number of drains, and the
@@ -3601,6 +3755,71 @@ mod tests {
         "{name}: read {read} bytes of a {}-byte input",
         html.len()
       );
+    }
+  }
+
+  // Each empty caption hands the heading break back and checks the heading's
+  // line again; the spaces ending that line must not be read at every exit.
+  #[test]
+  fn empty_captions_read_the_heading_line_once() {
+    for (caption, tail) in [
+      ("<figcaption></figcaption>", ""),
+      ("<figure><figcaption></figcaption></figure>", ""),
+      // A marker after the run sends the check through the spaces before it.
+      ("<figcaption></figcaption>", "-&#32;"),
+    ] {
+      let html = format!(
+        "<ul><li><h3>T{}{tail}</h3>{}x</li></ul>",
+        "&#32;".repeat(2_000),
+        caption.repeat(200)
+      );
+      for chunk_size in [html.len(), 64] {
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut markdown = String::new();
+        for chunk in html.as_bytes().chunks(chunk_size) {
+          markdown.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        markdown.push_str(&processor.finish());
+
+        assert!(markdown.ends_with("\n\n  x"), "{caption}: {markdown:?}");
+        let state = &processor.state;
+        let read = state.block_line_bytes_read.get() + state.caption_line.spaces.read;
+        assert!(
+          read <= 2 * html.len(),
+          "{caption}, chunks of {chunk_size}: read {read} bytes of a {}-byte input",
+          html.len()
+        );
+      }
+    }
+  }
+
+  // `<div>` enters and heading exits check the line before a trailing heading
+  // run again; the spaces before that run must not be read at every check.
+  #[test]
+  fn marker_checks_read_the_heading_line_once() {
+    for filler in ["<div></div>", "<h1></h1>"] {
+      let html = format!(
+        "<ul><li><pre>x{}#{}y</pre></li></ul>",
+        " ".repeat(2_000),
+        filler.repeat(200)
+      );
+      for chunk_size in [html.len(), 64] {
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut markdown = String::new();
+        for chunk in html.as_bytes().chunks(chunk_size) {
+          markdown.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        markdown.push_str(&processor.finish());
+
+        assert!(markdown.ends_with(" y\n  ```"), "{filler}: {markdown:?}");
+        let state = &processor.state;
+        let read = state.block_line_bytes_read.get() + state.marker_line.spaces.read;
+        assert!(
+          read <= 2 * html.len(),
+          "{filler}, chunks of {chunk_size}: read {read} bytes of a {}-byte input",
+          html.len()
+        );
+      }
     }
   }
 
