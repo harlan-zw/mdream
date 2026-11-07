@@ -3906,25 +3906,32 @@ impl ConvertState {
     // Walk up the paragraph above to the line it starts with.
     let mut line_end = start;
     let mut below = None;
-    // The indent of the paragraph's first line read so far, unless a line of
-    // spaces came right above it, and the least indent of its lines.
+    // The indent of the paragraph's first line read so far, that indent
+    // again unless a line of spaces came right above it, and the least indent
+    // of its lines.
+    let mut top = 0;
     let mut first = None;
     let mut shallow = usize::MAX;
     // Under a marker alone whose item's content starts at `column`: the
     // paragraph sits in that item when its first line comes right under the
-    // marker and reaches that column. Otherwise the item ended empty, and
-    // lines all indented to `code` past it are code, which no `*` continues.
-    let under_marker = |below: Option<usize>, first: Option<usize>, shallow, column, code| {
-      below.and_then(|text| {
-        if first.is_some_and(|first| first >= column) {
-          Some(column)
-        } else if shallow >= code {
-          None
-        } else {
-          Some(text)
-        }
-      })
-    };
+    // marker and reaches that column. Otherwise the item ended empty: lines
+    // all indented to `code` past it are code, which no `*` continues, and a
+    // first line four columns short of `code` reaches the marker's own list,
+    // so the paragraph goes on in the item that holds that list.
+    let under_marker =
+      |below: Option<usize>, top: usize, first: Option<usize>, shallow, column, code| {
+        below.and_then(|text| {
+          if first.is_some_and(|first| first >= column) {
+            Some(column)
+          } else if shallow >= code {
+            None
+          } else if top + 4 >= code {
+            Some(code - 4)
+          } else {
+            Some(text)
+          }
+        })
+      };
     let column = loop {
       if quote.is_some() && line_end <= quote_start {
         break below;
@@ -3939,8 +3946,10 @@ impl ConvertState {
         break match self.drained_paragraph {
           Paragraph::Spaced(_) if hard_break && below.is_none() => None,
           Paragraph::Open(column) | Paragraph::Spaced(column) => Some(column),
-          Paragraph::Bare { column, code } => under_marker(below, first, shallow, column, code),
-          Paragraph::Code(code) => under_marker(below, None, shallow, usize::MAX, code),
+          Paragraph::Bare { column, code } => {
+            under_marker(below, top, first, shallow, column, code)
+          }
+          Paragraph::Code(code) => under_marker(below, top, None, shallow, usize::MAX, code),
           Paragraph::Closed => below,
         };
       }
@@ -3978,6 +3987,7 @@ impl ConvertState {
           let first = first.filter(|_| !self.writes_break_lines(line_start, end));
           break under_marker(
             below,
+            top,
             first.map(|first| relative(first, first)),
             shallow,
             relative(column, indent),
@@ -3996,7 +4006,8 @@ impl ConvertState {
         LineKind::Text(indent) => {
           below = Some(0);
           first = Some(indent);
-          shallow = shallow.min(relative(indent, indent));
+          top = relative(indent, indent);
+          shallow = shallow.min(top);
           if first_quoted {
             break below;
           }

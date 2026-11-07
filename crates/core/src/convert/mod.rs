@@ -542,7 +542,7 @@ pub(super) enum Paragraph {
   Closed,
   /// None yet, right under a list marker alone on its line whose item's
   /// content starts at `column`. Lines short of it indented to `code` are
-  /// code.
+  /// code, and those four columns short of `code` reach the marker's list.
   Bare { column: usize, code: usize },
   /// None: the item a marker alone opened ended empty, and the lines since,
   /// all indented to this column, are code.
@@ -676,12 +676,16 @@ impl Paragraph {
       (_, LineKind::Item { column, .. }) => Self::Open(column),
       (Self::Closed, LineKind::Text(_)) => Self::Open(0),
       // Text reaching the item's content column goes on in that item. Past
-      // an empty item, text indented to the code column is code.
+      // an empty item, text indented to the code column is code, and text
+      // reaching the column of the marker's list goes on in the item that
+      // holds that list.
       (Self::Bare { column, .. }, LineKind::Text(indent)) if indent >= column => Self::Open(column),
       (Self::Bare { code, .. } | Self::Code(code), LineKind::Text(indent)) if indent >= code => {
         Self::Code(code)
       }
-      (Self::Bare { .. } | Self::Code(_), LineKind::Text(_)) => Self::Open(0),
+      (Self::Bare { code, .. } | Self::Code(code), LineKind::Text(indent)) => {
+        Self::Open(if indent + 4 >= code { code - 4 } else { 0 })
+      }
       (Self::Open(column) | Self::Spaced(column), LineKind::Text(_)) => Self::Open(column),
     }
   }
