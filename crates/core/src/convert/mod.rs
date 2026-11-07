@@ -3524,7 +3524,7 @@ impl ConvertState {
         paragraph = paragraph.then(line);
         // The lines of spaces a run of hard breaks writes only into the output.
         if matches!(line, LineKind::Marker { .. })
-          && break_lines.iter().any(|run| (start..at).contains(run))
+          && break_lines.iter().any(|run| (start..=at).contains(run))
         {
           paragraph = paragraph.then(LineKind::Spaces);
         }

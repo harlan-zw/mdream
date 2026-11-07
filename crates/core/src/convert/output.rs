@@ -4013,11 +4013,11 @@ impl ConvertState {
     self
       .streaming_break_runs
       .iter()
-      .any(|run| run.count > 1 && (start..end).contains(&run.output_start))
+      .any(|run| run.count > 1 && (start..=end).contains(&run.output_start))
       || self
         .released_break_lines
         .iter()
-        .any(|run| (start..end).contains(run))
+        .any(|run| (start..=end).contains(run))
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
