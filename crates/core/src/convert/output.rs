@@ -3858,7 +3858,9 @@ impl ConvertState {
   /// an emphasis closer. Right after a `\r` it starts a line of its own. Past
   /// a line feed it reads as a marker when no paragraph goes on above it, or
   /// when it sits short of that paragraph's column: the column of the item
-  /// content the paragraph starts with, or zero outside an item. Such a line falls
+  /// content the paragraph starts with, or zero outside an item. A paragraph
+  /// whose first line comes right under a marker alone and reaches the content
+  /// column of the item that marker opens starts in that item. Such a line falls
   /// out of the paragraph's container and opens a list of its own. Columns
   /// count inside the quote that holds the `*`. `hard_break` says a hard break
   /// follows the `*` on its line.
@@ -3904,6 +3906,25 @@ impl ConvertState {
     // Walk up the paragraph above to the line it starts with.
     let mut line_end = start;
     let mut below = None;
+    // The indent of the paragraph's first line read so far, unless a line of
+    // spaces came right above it, and the least indent of its lines.
+    let mut first = None;
+    let mut shallow = usize::MAX;
+    // Under a marker alone whose item's content starts at `column`: the
+    // paragraph sits in that item when its first line comes right under the
+    // marker and reaches that column. Otherwise the item ended empty, and
+    // lines all indented to `code` past it are code, which no `*` continues.
+    let under_marker = |below: Option<usize>, first: Option<usize>, shallow, column, code| {
+      below.and_then(|text| {
+        if first.is_some_and(|first| first >= column) {
+          Some(column)
+        } else if shallow >= code {
+          None
+        } else {
+          Some(text)
+        }
+      })
+    };
     let column = loop {
       if quote.is_some() && line_end <= quote_start {
         break below;
@@ -3918,6 +3939,8 @@ impl ConvertState {
         break match self.drained_paragraph {
           Paragraph::Spaced(_) if hard_break && below.is_none() => None,
           Paragraph::Open(column) | Paragraph::Spaced(column) => Some(column),
+          Paragraph::Bare { column, code } => under_marker(below, first, shallow, column, code),
+          Paragraph::Code(code) => under_marker(below, None, shallow, usize::MAX, code),
           Paragraph::Closed => below,
         };
       }
@@ -3945,14 +3968,35 @@ impl ConvertState {
       };
       match read.extend(&bytes[begin..end]).end() {
         LineKind::Blank => break below,
+        // A stream keeps the lines of spaces a run of hard breaks writes out
+        // of its buffer.
+        LineKind::Marker {
+          indent,
+          column,
+          code,
+        } => {
+          let first = first.filter(|_| !self.writes_break_lines(line_start, end));
+          break under_marker(
+            below,
+            first.map(|first| relative(first, first)),
+            shallow,
+            relative(column, indent),
+            relative(code, indent),
+          );
+        }
         LineKind::Spaces if first_quoted => break below,
         // Only a bare closer can precede the deferred break run. A hard break
         // after it settles the run, so the spaces above end the paragraph.
         LineKind::Spaces if hard_break && below.is_none() => break below,
-        LineKind::Spaces => line_end = line_start,
+        LineKind::Spaces => {
+          first = None;
+          line_end = line_start;
+        }
         LineKind::Item { indent, column } => break Some(relative(column, indent)),
-        LineKind::Text(_) => {
+        LineKind::Text(indent) => {
           below = Some(0);
+          first = Some(indent);
+          shallow = shallow.min(relative(indent, indent));
           if first_quoted {
             break below;
           }
@@ -3961,6 +4005,19 @@ impl ConvertState {
       }
     };
     column.is_none_or(|column| relative(indent, indent) < column)
+  }
+
+  /// Whether a run of hard breaks starting in `start..end` writes lines of
+  /// spaces only into the output, as a stream writes the copies of one.
+  fn writes_break_lines(&self, start: usize, end: usize) -> bool {
+    self
+      .streaming_break_runs
+      .iter()
+      .any(|run| run.count > 1 && (start..end).contains(&run.output_start))
+      || self
+        .released_break_lines
+        .iter()
+        .any(|run| (start..end).contains(run))
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -4231,6 +4288,11 @@ impl ConvertState {
       }
       if run.output_end >= at {
         run.output_end += 1;
+      }
+    }
+    for run in &mut self.released_break_lines {
+      if *run >= at {
+        *run += 1;
       }
     }
     for frame in &mut self.caption_frames {

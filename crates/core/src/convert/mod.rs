@@ -514,8 +514,17 @@ pub(super) enum LineRead {
 /// What a whole line holds for the lone `*` rule.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum LineKind {
-  /// Nothing, or a list marker alone: no paragraph goes on past it.
+  /// Nothing: no paragraph goes on past it.
   Blank,
+  /// A list marker alone, whose item's content starts at `column`, one past
+  /// the marker however many spaces follow it. No paragraph goes on past it,
+  /// and the one the next line opens sits in that item once it reaches
+  /// `column`. Once the item ends empty, lines indented to `code` are code.
+  Marker {
+    indent: usize,
+    column: usize,
+    code: usize,
+  },
   /// Only spaces, the line a run of hard breaks leaves. A stream can write it
   /// after the line below it, so the rule reads past it, unless a hard break
   /// follows the `*` right below it.
@@ -531,6 +540,13 @@ pub(super) enum LineKind {
 pub(super) enum Paragraph {
   /// None: the document starts, or a blank line ended the last one.
   Closed,
+  /// None yet, right under a list marker alone on its line whose item's
+  /// content starts at `column`. Lines short of it indented to `code` are
+  /// code.
+  Bare { column: usize, code: usize },
+  /// None: the item a marker alone opened ended empty, and the lines since,
+  /// all indented to this column, are code.
+  Code(usize),
   /// One inside an item at this column, or at column zero outside an item.
   Open(usize),
   /// One open at this column with a line of spaces only after it, which ends
@@ -624,7 +640,17 @@ impl LineRead {
   /// What the line holds once it ends.
   pub(super) fn end(self) -> LineKind {
     match self {
-      Self::Indent(0) | Self::Marker { .. } => LineKind::Blank,
+      Self::Indent(0) => LineKind::Blank,
+      Self::Marker {
+        indent,
+        column,
+        outer,
+        ..
+      } => LineKind::Marker {
+        indent,
+        column: column + 1,
+        code: outer.unwrap_or(indent) + 4,
+      },
       Self::Indent(_) => LineKind::Spaces,
       Self::Digits {
         indent,
@@ -642,10 +668,20 @@ impl Paragraph {
   pub(super) fn then(self, line: LineKind) -> Self {
     match (self, line) {
       (_, LineKind::Blank) => Self::Closed,
+      (_, LineKind::Marker { column, code, .. }) => Self::Bare { column, code },
+      // A line of spaces under a marker alone leaves its item empty.
+      (Self::Bare { code, .. } | Self::Code(code), LineKind::Spaces) => Self::Code(code),
       (Self::Closed, LineKind::Spaces) => Self::Closed,
       (Self::Open(column) | Self::Spaced(column), LineKind::Spaces) => Self::Spaced(column),
       (_, LineKind::Item { column, .. }) => Self::Open(column),
       (Self::Closed, LineKind::Text(_)) => Self::Open(0),
+      // Text reaching the item's content column goes on in that item. Past
+      // an empty item, text indented to the code column is code.
+      (Self::Bare { column, .. }, LineKind::Text(indent)) if indent >= column => Self::Open(column),
+      (Self::Bare { code, .. } | Self::Code(code), LineKind::Text(indent)) if indent >= code => {
+        Self::Code(code)
+      }
+      (Self::Bare { .. } | Self::Code(_), LineKind::Text(_)) => Self::Open(0),
       (Self::Open(column) | Self::Spaced(column), LineKind::Text(_)) => Self::Open(column),
     }
   }
@@ -1225,6 +1261,10 @@ pub struct ConvertState {
   cut_line: LineRead,
   /// The paragraph the lines drains took whole leave open.
   drained_paragraph: Paragraph,
+  /// Buffer offsets of released hard break runs whose copies write lines of
+  /// spaces only into the output, kept until a drain takes the line holding
+  /// the run. Such a line leaves the item a marker alone on it opens empty.
+  released_break_lines: Vec<usize>,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
   /// Test/fuzz switch: `false` routes everything through the general path.
@@ -1422,6 +1462,7 @@ impl ConvertState {
       cut_line_lead: CutLineLead::Uncut,
       cut_line: LineRead::START,
       drained_paragraph: Paragraph::Closed,
+      released_break_lines: Vec::new(),
       buffer_start_column: 0,
       #[cfg(any(test, fuzzing))]
       disable_drain: false,
@@ -3178,6 +3219,11 @@ impl ConvertState {
       output.push_str(&self.buffer[cursor..stable_end]);
       output
     };
+    for run in &self.streaming_break_runs {
+      if run.count > 1 && run.output_end <= stable_end {
+        self.released_break_lines.push(run.output_start);
+      }
+    }
     self
       .streaming_break_runs
       .retain(|run| run.output_end > stable_end);
@@ -3304,7 +3350,17 @@ impl ConvertState {
       after_cr,
       self.cut_line,
       self.drained_paragraph,
+      &self.released_break_lines,
     );
+    // A run on the line being cut still answers for the start the drain takes.
+    let cut_line_start = bytes[..drain_end]
+      .iter()
+      .rposition(|&byte| matches!(byte, b'\n' | b'\r'))
+      .map_or(0, |at| at + 1);
+    self.released_break_lines.retain(|&at| at >= cut_line_start);
+    for at in &mut self.released_break_lines {
+      *at = at.saturating_sub(drain_end);
+    }
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
     } else if self.cut_line_lead == CutLineLead::Uncut {
@@ -3443,12 +3499,14 @@ impl ConvertState {
   /// Fold the lines `drained` ends into the paragraph drains leave open, and
   /// carry the reading of the line it cuts. A line begun before an earlier cut
   /// goes on from that reading; the `\n` of a `\r\n` split across cuts, after
-  /// `after_cr`, ends nothing new.
+  /// `after_cr`, ends nothing new. A run of hard breaks at an offset in
+  /// `break_lines` follows its line with lines of spaces the bytes lack.
   fn read_drained_lines(
     drained: &[u8],
     after_cr: bool,
     mut read: LineRead,
     mut paragraph: Paragraph,
+    break_lines: &[usize],
   ) -> (LineRead, Paragraph) {
     let mut start = 0;
     for (at, &byte) in drained.iter().enumerate() {
@@ -3462,7 +3520,14 @@ impl ConvertState {
           drained[at - 1] == b'\r'
         };
       if !crlf {
-        paragraph = paragraph.then(read.extend(&drained[start..at]).end());
+        let line = read.extend(&drained[start..at]).end();
+        paragraph = paragraph.then(line);
+        // The lines of spaces a run of hard breaks writes only into the output.
+        if matches!(line, LineKind::Marker { .. })
+          && break_lines.iter().any(|run| (start..at).contains(run))
+        {
+          paragraph = paragraph.then(LineKind::Spaces);
+        }
       }
       read = LineRead::START;
       start = at + 1;
