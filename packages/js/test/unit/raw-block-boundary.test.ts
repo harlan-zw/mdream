@@ -4,6 +4,14 @@ import { createMarkdownProcessor } from '../../src/markdown-processor'
 import { createMarkdownDrain } from '../../src/markdown-stream'
 
 const cases: [string, string][] = [
+  [
+    '<ul><li><ul><li><ul><li><hr>tail</li></ul></li></ul></li></ul>',
+    '-\n  -\n    - ***\n\n      tail',
+  ],
+  [
+    '<ul><li><ul><li><ul><li><address>A</address><strong>B</strong></li></ul></li></ul></li></ul>',
+    '-\n  -\n    - <address>A</address>\n\n      **B**',
+  ],
   ['<dl><dd><details>X</details></dd></dl><strong>B</strong>', '<dl><dd>\n\n<details>X</details>\n\n\n\n</dd></dl>\n\n**B**'],
   [
     '<blockquote><address>A</address><blockquote><strong>B</strong></blockquote></blockquote>',
