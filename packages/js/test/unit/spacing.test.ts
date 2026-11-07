@@ -1,6 +1,7 @@
 import type { MarkdownState } from '../../src/markdown-processor'
 import type { HandlerContext, MdreamOptions } from '../../src/types'
 import { describe, expect, it, vi } from 'vitest'
+import { clean } from '../../src/clean'
 import { MAX_TAG_ID, TAG_DIV, TAG_LI } from '../../src/const'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { tagHandlers } from '../../src/tags'
@@ -318,12 +319,70 @@ describe('div after a hash run in a list item', () => {
     expect(reads).toBeLessThanOrEqual(3 * text.length)
   })
 
+  it.each([
+    ['without cleanup', undefined],
+    ['with cleanup', { clean: clean() }],
+  ])('keeps divs after empty inline fragments linear %s', (_, options) => {
+    // Each `<span> </span>` leaves an empty fragment behind. Keying the check on
+    // the buffer length would miss every div and rescan the lead each time, and
+    // so would dropping the check at every element exit of the clean pass.
+    const html = `<ul><li><pre>${'1'.repeat(2000)}#${'<span> </span><div></div>'.repeat(200)}</pre></li></ul>`
+    const charCodeAt = vi.spyOn(String.prototype, 'charCodeAt')
+    let reads = 0
+    try {
+      htmlToMarkdown(html, options)
+      reads = charCodeAt.mock.calls.length
+    }
+    finally {
+      charCodeAt.mockRestore()
+    }
+    expect(reads).toBeLessThan(4 * html.length)
+  })
+
+  it('keeps one trailing empty fragment however many spaces a run trims', () => {
+    // Every backward scan steps over trailing empty fragments, so letting each
+    // trimmed `<span> </span>` keep one made a long run of them quadratic.
+    const html = `<ul><li><pre>1#${'<span> </span><div></div>'.repeat(50)}</pre></li></ul>`
+    let mostEmpty = 0
+    const options = {
+      plugins: [createPlugin({
+        onNodeExit(element, state) {
+          if (element.name !== 'div')
+            return
+          const { buffer } = state as MarkdownState
+          let empty = 0
+          while (empty < buffer.length && buffer[buffer.length - 1 - empty] === '')
+            empty++
+          mostEmpty = Math.max(mostEmpty, empty)
+        },
+      })],
+    }
+    expect(htmlToMarkdown(html, options)).toBe(htmlToMarkdown(html))
+    expect(mostEmpty).toBe(1)
+  })
+
   it('separates a div after a list-item heading marker', () => {
     const depthMap = new Uint16Array(MAX_TAG_ID)
     depthMap[TAG_LI] = 1
     const state = { depthMap, buffer: ['- ', '#'], listIndent: '  ' } as unknown as MarkdownState
     const context = { node: {}, state } as unknown as HandlerContext
     expect(tagHandlers[TAG_DIV]!.enter!(context)).toBe('\n\n  ')
+  })
+})
+
+describe('div heading marker after buffer rewrites', () => {
+  it.each([
+    [
+      '<ul><li><dl><blockquote><ul><li><h1></h1><div></div></li></ul></blockquote><span>#</span><div>y</div></dl></li></ul>',
+      '- <dl>\n  > - #\n\n  \\# y</dl>',
+    ],
+    [
+      '<ul><li><blockquote><ul><li><span>1</span><span>#</span><div></div></li></ul></blockquote><span><h1></h1><div></div><br>y</span></li></ul>',
+      '- \n  > - 1#\n\n  #\n\n    \n  y',
+    ],
+  ])('keeps one-shot and streamed spacing correct after rewriting a line', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    expect(await streamConvert(Array.from(html))).toBe(expected)
   })
 })
 
