@@ -71,6 +71,11 @@ describe.each(engines)('lists $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 
+  it('reads nothing above a quote for the marker that opens it', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<ol><li>&#13;<em>a&#10;</em><blockquote><br><br><br></blockquote><blockquote><ul><li></li></ul></blockquote></li></ol>', { engine })).toBe('1. \r*a\n*\n  \n     \n     \n\n      > -')
+  })
+
   it.each([
     ['* ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n* \n    > q'],
     ['  * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n  * \n    > q'],

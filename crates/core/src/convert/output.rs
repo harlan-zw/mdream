@@ -4391,11 +4391,14 @@ impl ConvertState {
           && (across_lines || !self.bare_marker_gap_newline)
           && text_above(self.bare_marker_text)
       };
-      bare
-        && self
-          .blockquotes
-          .last()
-          .is_none_or(|frame| above_end > frame.content_start)
+      // A line above the innermost blockquote's content says nothing here,
+      // as in JS, which reads no further back.
+      let inside = self
+        .blockquotes
+        .last()
+        .is_none_or(|frame| above_end > frame.content_start);
+      past_paragraph &= inside;
+      bare && inside
     };
     self.empty_item_hazard = !starts_document
       && !blank_above
