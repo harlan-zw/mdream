@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamRuntimeState, Node, TextNode } from './types'
+import type { ElementNode, MarkerLineMemo, MdreamRuntimeState, Node, TextNode } from './types'
 import { NEWLINE_CHAR, SPACE_CHAR, TAG_A, TAG_ABBR, TAG_BDO, TAG_BLOCKQUOTE, TAG_FIGCAPTION, TAG_H1, TAG_H6, TAG_INS, TAG_KBD, TAG_LI, TAG_S, TAG_SMALL, TAG_SPAN, TAG_STRIKE, TAG_STRONG, TAG_TD, TAG_TH, TAG_U } from './const'
 import {
   HTML_ENTITIES,
@@ -8,6 +8,18 @@ import {
 
 function lowerAscii(code: number): number {
   return code >= 65 && code <= 90 ? code + 32 : code
+}
+
+/**
+ * Drops a `<div>`'s cached heading-marker check after the output it was taken
+ * from is rewritten in place. The memo keeps only the entries its walk ended
+ * and stopped in, so a rewrite between them would otherwise be missed and a
+ * later `<div>` would reuse the stale answer. Appends need no call: they land
+ * after every entry the memo reads.
+ */
+export function noteBufferRewrite(state: { markerLine?: MarkerLineMemo }): void {
+  if (state.markerLine !== undefined)
+    state.markerLine = undefined
 }
 
 export function isInsideHeading(depthMap: Uint16Array): boolean {
