@@ -46,7 +46,7 @@ function cut(html: string, size: number): string[] {
   return chunks
 }
 
-const plugins = () => ({ plugins: [createPlugin({ name: 'observer', onNodeEnter() {} })] })
+const plugins = () => ({ plugins: [createPlugin({ onNodeEnter() {} })] })
 const cdata = () => ({ tagOverrides: { '#cdata-section': { enter: '<', exit: '>' } } })
 
 describe('stream carry', () => {
