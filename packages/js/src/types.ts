@@ -379,6 +379,12 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
    * @internal
    */
   markerLine?: MarkerLineMemo
+  /**
+   * The latest heading wrote visible text, so a trailing `#` run after a list
+   * marker on its last line is that text, not the heading's own prefix.
+   * @internal
+   */
+  headingHasText?: boolean
 }
 
 /**

@@ -395,7 +395,7 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
   // `opensBlockLine` does not read, so the run of an empty heading stays its
   // own. Once the heading wrote text, that `\r` came from the text and so did
   // the run, which still needs its escape outside `<pre>`.
-  if (!state.headingHasText || state.depthMap[TAG_PRE]) {
+  if (!state.headingHasText || state.depthMap?.[TAG_PRE]) {
     let leadFragment = index
     let lead = run
     for (;;) {
