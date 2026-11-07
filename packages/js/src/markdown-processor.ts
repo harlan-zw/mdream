@@ -133,8 +133,10 @@ export interface MarkdownState {
   compactedRead?: LineRead
   /** Open paragraph column; -(column + 1) retains it across a space-only line. */
   compactedParagraph?: number
-  /** How many spaces that space-only line holds. */
+  /** How many spaces the last of those space-only lines holds. */
   compactedSpaces?: number
+  /** Whether the space-only lines above the last one allow a run of hard breaks to have written them all. */
+  compactedChain?: boolean
   /** Content column of the item a marker alone on the last dropped line opens, with no paragraph yet. */
   compactedItem?: number
   /** With no paragraph open after such a marker, the indent from which lines are code. */
@@ -450,8 +452,9 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
  * later compaction can carry the reading on. `kind` is 0 while only spaces
  * came, 1 inside an ordered marker's digits, 2 after a marker and `count`
  * spaces, 3 for an item whose content starts at `column`, 4 for other text.
- * A run of hard breaks leaves whole lines of spaces, each the indent of the
- * line under it and two spaces more: a stream can write them after the line
+ * A run of hard breaks leaves whole lines of spaces: the lowest holds the
+ * indent of the line under it and two spaces more, and each one above is as
+ * long as it or two spaces longer. A stream can write them after the line
  * below, so the rule reads past them.
  */
 export interface LineRead {
@@ -546,8 +549,10 @@ function endLineRead(read: LineRead): LineRead {
 interface ParagraphFold {
   /** Its column; -(column + 1) retains it across a space-only line. */
   paragraph?: number
-  /** How many spaces that space-only line holds. */
+  /** How many spaces the last of those space-only lines holds. */
   spaces?: number
+  /** Whether the space-only lines above the last one allow a run of hard breaks to have written them all. */
+  chain?: boolean
   /** Right under a marker alone, the content column of the item it opens. */
   item?: number
   /** With no paragraph open after such a marker, the indent from which lines are code. */
@@ -566,7 +571,7 @@ interface ParagraphFold {
  */
 function foldLine(fold: ParagraphFold, read: LineRead): void {
   const line = endLineRead(read)
-  const { paragraph, item, code, top } = fold
+  const { paragraph, item, code, top, spaces } = fold
   fold.item = undefined
   fold.code = undefined
   fold.top = undefined
@@ -577,6 +582,7 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
       fold.top = item === undefined ? top : undefined
     }
     else {
+      fold.chain = paragraph >= 0 || (fold.chain !== false && (spaces === line.indent || spaces === line.indent + 2))
       if (paragraph >= 0)
         fold.paragraph = -paragraph - 1
       fold.spaces = line.indent
@@ -618,7 +624,7 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
  */
 export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
   let read = state.compactedRead ?? LINE_START
-  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop }
+  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, chain: state.compactedChain, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop }
   let start = 0
   for (let at = 0; at < cut; at++) {
     const code = text.charCodeAt(at)
@@ -633,6 +639,7 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
   state.compactedRead = extendLineRead(read, text.slice(start, cut))
   state.compactedParagraph = fold.paragraph
   state.compactedSpaces = fold.spaces
+  state.compactedChain = fold.chain
   state.compactedItem = fold.item
   state.compactedCode = fold.code
   state.compactedTop = fold.top
@@ -724,15 +731,20 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
       : shallow >= code ? undefined : lead + 4 >= code ? code - 4 : below
   // A line of spaces that a run of hard breaks did not write, such as the
   // indent of a hard break that a line feed of the text ends, is blank. With a
-  // hard break after the `*`, it ends the paragraph.
-  const blank = (spaces: number | undefined) => hardBreak && below === undefined && spaces !== indent + 2
+  // hard break after the `*`, it ends the paragraph. A run writes its lowest
+  // line as the indent of the line under it and two spaces more, and each line
+  // above it as long as the one under it or two spaces longer.
+  let under = indent
+  let underSpaces = false
+  const blank = (spaces: number | undefined, chain = true) => hardBreak && below === undefined
+    && !(chain && (spaces === under + 2 || (underSpaces && spaces === under)))
   const compacted = () => {
     const paragraph = state.compactedParagraph
     // The paragraph starts at the first text line the compaction dropped.
     if (paragraph === undefined && state.compactedCode !== undefined)
       return underMarker(state.compactedItem ?? Infinity, state.compactedCode, state.compactedTop ?? top)
     return paragraph !== undefined && paragraph < 0
-      ? blank(state.compactedSpaces) ? undefined : -paragraph - 1
+      ? blank(state.compactedSpaces, state.compactedChain !== false) ? undefined : -paragraph - 1
       : paragraph ?? below
   }
   for (;;) {
@@ -767,6 +779,8 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
     // A compaction may have dropped the start of the buffer's first line.
     const read = endLineRead(extendLineRead(char === -1 && !firstQuoted ? state.compactedRead ?? LINE_START : LINE_START, line))
     if (read.kind === 0 && read.indent > 0 && !firstQuoted && !blank(read.indent)) {
+      under = read.indent
+      underSpaces = true
       first = undefined
       code = char
       continue
@@ -2066,6 +2080,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     compactedRead: undefined,
     compactedParagraph: undefined,
     compactedSpaces: undefined,
+    compactedChain: undefined,
     compactedItem: undefined,
     compactedCode: undefined,
     compactedTop: undefined,

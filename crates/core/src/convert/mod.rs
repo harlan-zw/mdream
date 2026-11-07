@@ -518,9 +518,10 @@ pub(super) enum LineKind {
     column: usize,
     code: usize,
   },
-  /// Only spaces, this many. A run of hard breaks leaves such lines, each the
-  /// indent of the line under it and two spaces more. A stream can write them
-  /// after the line below, so the rule reads past them. Any other line of
+  /// Only spaces, this many. A run of hard breaks leaves such lines: the
+  /// lowest holds the indent of the line under it and two spaces more, and
+  /// each one above is as long as it or two spaces longer. A stream can write
+  /// them after the line below, so the rule reads past them. Any other line of
   /// spaces ends the paragraph for a `*` that a hard break follows right below
   /// it.
   Spaces(usize),
@@ -545,10 +546,15 @@ pub(super) enum Paragraph {
   Code { code: usize, top: Option<usize> },
   /// One inside an item at this column, or at column zero outside an item.
   Open(usize),
-  /// One open at `column` with a line of `spaces` only after it, which ends
-  /// it for a `*` that a hard break follows unless a run of hard breaks wrote
-  /// that line.
-  Spaced { column: usize, spaces: usize },
+  /// One open at `column` with lines of spaces only after it, the last one
+  /// `spaces` long. They end it for a `*` that a hard break follows unless a
+  /// run of hard breaks wrote them all, which `chain` says the lines above the
+  /// last one allow.
+  Spaced {
+    column: usize,
+    spaces: usize,
+    chain: bool,
+  },
 }
 
 impl LineRead {
@@ -670,9 +676,23 @@ impl Paragraph {
       (Self::Bare { code, .. }, LineKind::Spaces(_)) => Self::Code { code, top: None },
       (Self::Code { code, top }, LineKind::Spaces(_)) => Self::Code { code, top },
       (Self::Closed, LineKind::Spaces(_)) => Self::Closed,
-      (Self::Open(column) | Self::Spaced { column, .. }, LineKind::Spaces(spaces)) => {
-        Self::Spaced { column, spaces }
-      }
+      (Self::Open(column), LineKind::Spaces(spaces)) => Self::Spaced {
+        column,
+        spaces,
+        chain: true,
+      },
+      (
+        Self::Spaced {
+          column,
+          spaces: above,
+          chain,
+        },
+        LineKind::Spaces(spaces),
+      ) => Self::Spaced {
+        column,
+        spaces,
+        chain: chain && (above == spaces || above == spaces + 2),
+      },
       (_, LineKind::Item { column, .. }) => Self::Open(column),
       (Self::Closed, LineKind::Text(_)) => Self::Open(0),
       // Text reaching the item's content column goes on in that item. Past

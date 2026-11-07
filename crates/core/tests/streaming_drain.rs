@@ -6690,6 +6690,18 @@ fn lone_closer_under_a_blank_line_of_the_text_streams() {
       "<ul><li><ol start=\"10\"><li><br><br><em>x&#10;klmnopqrstuvwxyz&#10;</em><br><ul><li></li></ul></li></ol></li></ul>",
       "-\n  10.   \n        \n      *x\nklmnopqrstuvwxyz\n*  \n      -",
     ),
+    // A stream holds the second line of a run of hard breaks back, so the rule
+    // reads each line of spaces against the line under it: the run's line is
+    // two spaces longer than the one a line feed of the text ends, and here
+    // that one has the `*`'s indent and two spaces more.
+    (
+      "<ul><li>&#10;<br><br><em>x<br><br>&#10;</em><br><ul><li></li></ul></li></ul>",
+      "- \n  \n    \n  *x  \n    \n  \n*  \n\n  -",
+    ),
+    (
+      "<ol start=\"10\"><li><em>x<br><br>&#10;</em><br><ul><li></li></ul></li></ol>",
+      "10. *x  \n      \n    \n*  \n    -",
+    ),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),
