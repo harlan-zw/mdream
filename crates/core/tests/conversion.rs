@@ -9704,6 +9704,16 @@ fn lone_closer_under_an_item_opened_by_a_bare_marker() {
       "<ol start=\"10\"><li><br><br><em>x&#10;</em><br><ol><li><br></li><li></li></ol></li></ol>",
       "10.   \n      \n    *x\n*  \n    1.   \n    2.",
     ),
+    // Text short of a nested item that ended empty but reaching its marker's
+    // list goes on in the item holding that list, which the `*` falls out of.
+    (
+      "<ul><li><ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>",
+      "-\n  -   \n      \n    *x\n*\n    - \n      > q",
+    ),
+    (
+      "<ul><li><ul><li><br><br><em>x<br>&#10;</em><ul><li>&#13;</li></ul></li></ul></li></ul>",
+      "-\n  -   \n      \n    *x  \n    \n*\n    -",
+    ),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),

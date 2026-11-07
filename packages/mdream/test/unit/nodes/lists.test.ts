@@ -90,6 +90,8 @@ describe.each(engines)('lists $name', (engineConfig) => {
     ['<ol start="10"><li><br><em>a&#10;b&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *a\nb\n*\n    - \n      > q'],
     ['a<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', 'a\n\n10.   \n    *x\n*\n    - \n      > q'],
     ['<ol start="10"><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n      \n    *x\n*\n    - \n      > q'],
+    ['<ul><li><ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>', '-\n  -   \n      \n    *x\n*\n    - \n      > q'],
+    ['<ul><li><ul><li><br><br><em>x<br>&#10;</em><ul><li>&#13;</li></ul></li></ul></li></ul>', '-\n  -   \n      \n    *x  \n    \n*\n    -'],
   ])('reads a lone closer short of the item a bare marker opens as a marker: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)

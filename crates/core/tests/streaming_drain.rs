@@ -6871,14 +6871,25 @@ fn lone_closer_under_an_item_opened_by_a_bare_marker_streams() {
       "-   \n    \n  *abcdefghijklmnopqrstuvwxyz0123456789\n*\n\n  - \n    > q",
     ),
     // A drain can cut the marker's line right before its line feed, so the
-    // next one takes nothing of that line but its end.
+    // next one takes nothing of that line but its end. The text past that
+    // empty item goes on in the item holding its list, four columns in. Here
+    // the hard break line above the marker keeps a blank line under it.
     (
       "a<ul><li>y<br>a<ul><li><em>a<br>b&#10;</em><i><b>x<br></b></i> <br><ul><li><br><br><em>x<br></em><em>a<br>b&#10;</em><ul><li>&#13;</li></ul><br>x</li></ul><b></b></li></ul><b></b></li></ul>",
-      "a\n\n- y  \n  a\n  - *a  \n    b\n****x  \n    ***   \n    -   \n        \n      *x  \n      **a  \n      b\n*\n\n      - \r\n\n        \n      x",
+      "a\n\n- y  \n  a\n  - *a  \n    b\n****x  \n    ***   \n\n    -   \n        \n      *x  \n      **a  \n      b\n*\n      - \r\n\n        \n      x",
     ),
     (
       "<ul><li><ul><li><br><br><em>a&#10;b&#10;</em><br><ul><li>&#13;</li></ul></li></ul></li></ul>",
       "-\n  -   \n      \n    *a\nb\n*  \n    -",
+    ),
+    // Past an empty nested item the text goes on in the item holding its list.
+    (
+      "<ul><li><ul><li><br><br><em>abcdefghijklmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>",
+      "-\n  -   \n      \n    *abcdefghijklmnopqrstuvwxyz\n*\n    - \n      > q",
+    ),
+    (
+      "<ul><li><ul><li><br><br><em>x<br>&#10;</em><ul><li>&#13;</li></ul></li></ul></li></ul>",
+      "-\n  -   \n      \n    *x  \n    \n*\n    -",
     ),
   ] {
     assert_eq!(
