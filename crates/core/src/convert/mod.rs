@@ -1280,8 +1280,8 @@ pub struct ConvertState {
   /// The whitespace a drain took after that marker held a line feed.
   bare_marker_gap_newline: bool,
   /// That marker is a lone `*` or `+` that reads as text continuing the line
-  /// above, so it is no marker line at all.
-  bare_marker_text: bool,
+  /// above, so it is no marker line at all: the column of that paragraph.
+  bare_marker_text: Option<usize>,
   /// Spaces the line holding `buffer[0]` lost to drains while spaces were all
   /// it lost, so the marker line readers still count its whole indent.
   /// `usize::MAX` once anything else left with them.
@@ -1583,7 +1583,7 @@ impl ConvertState {
       bare_marker_end: usize::MAX,
       bare_marker_indent: 0,
       bare_marker_gap_newline: false,
-      bare_marker_text: false,
+      bare_marker_text: None,
       drained_line_spaces: 0,
       #[cfg(test)]
       parent_marker_scans: 0,

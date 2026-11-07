@@ -134,6 +134,14 @@ describe('streaming drain parity', () => {
       expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
   it.each([
+    ['<strong><em><ul><li>x</li><li>-1<br><em><br><ul><li></li></ul>ab</em></li></ul></em></strong>', '***- x - -1  \n  *  \n    - ab****'],
+    ['<ol start="10"><li>&#10;<em>x&#10;</em><ul><li></li></ul></li></ol>', '10. \n*x\n*\n    -'],
+  ])('keeps a nested marker past the paragraph of a lone `*` as its text: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it.each([
     ['<ol start="10"><li><br><em>x&#10;</em><br><ul><li></li></ul><p>t</p></li></ol>', '10.   \n    *x\n*  \n    -\n\n    t'],
     ['<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *x\n*\n    - \n      > q'],
     ['<blockquote><ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>', '> 10.   \n>     *x\n> *\n>     - \n>       > q'],

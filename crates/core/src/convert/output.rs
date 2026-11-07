@@ -3910,7 +3910,7 @@ impl ConvertState {
   /// line feeds before it are skipped, read before a drain takes those bytes,
   /// whether a line feed was among them, and whether the marker is a lone `*`
   /// or `+` that reads as text.
-  pub(super) fn bare_marker_line_before(&self, end: usize) -> Option<(usize, bool, bool)> {
+  pub(super) fn bare_marker_line_before(&self, end: usize) -> Option<(usize, bool, Option<usize>)> {
     let bytes = self.buffer.as_bytes();
     let mut start = end;
     while start > 0 && matches!(bytes[start - 1], b' ' | b'\n') {
@@ -3923,13 +3923,16 @@ impl ConvertState {
       MarkerLine::Bare(indent) => Some((
         indent,
         bytes[start..end].contains(&b'\n'),
-        matches!(bytes[start - 1], b'*' | b'+')
-          && !self.lone_closer_reads_as_marker(
+        if matches!(bytes[start - 1], b'*' | b'+') {
+          self.lone_closer_paragraph(
             bytes,
             start - 1,
             indent,
             hard_break_follows(&bytes[start..end]),
-          ),
+          )
+        } else {
+          None
+        },
       )),
       MarkerLine::Other | MarkerLine::Cut => None,
     }
@@ -3951,7 +3954,7 @@ impl ConvertState {
     {
       self.bare_marker_end = end;
       self.bare_marker_indent = indent;
-      self.bare_marker_text = false;
+      self.bare_marker_text = None;
     }
   }
 
@@ -3973,6 +3976,21 @@ impl ConvertState {
     indent: usize,
     hard_break: bool,
   ) -> bool {
+    self
+      .lone_closer_paragraph(bytes, closer, indent, hard_break)
+      .is_none()
+  }
+
+  /// The column of the paragraph a lone `*` or `+` at `closer` goes on with,
+  /// read as `lone_closer_reads_as_marker` reads it, or `None` when it reads as
+  /// a marker. Columns count inside the quote that holds the `*`.
+  fn lone_closer_paragraph(
+    &self,
+    bytes: &[u8],
+    closer: usize,
+    indent: usize,
+    hard_break: bool,
+  ) -> Option<usize> {
     let mut start = closer;
     while start > 0 && bytes[start - 1] == b' ' {
       start -= 1;
@@ -3983,7 +4001,7 @@ impl ConvertState {
       self.has_flushed_tail() && self.flushed_tail[1] == b'\r'
     };
     if after_cr {
-      return true;
+      return None;
     }
     // The innermost quote holding the `*`: a stream can drain its line from
     // inside a quote opened later.
@@ -3995,7 +4013,7 @@ impl ConvertState {
       .map(|frame| (frame.content_start, frame.list_indent.len()));
     let (quote_start, quote_indent) = quote.unwrap_or((0, 0));
     if quote.is_some() && start <= quote_start || start == 0 && !self.has_flushed_tail() {
-      return false;
+      return Some(0);
     }
     // A quoted line keeps the indent the quote opened under ahead of its own.
     let relative = |column: usize, indent: usize| {
@@ -4171,7 +4189,7 @@ impl ConvertState {
       Some((marker, answer)) if column.is_none_or(|column| marker < column) => answer,
       _ => column,
     };
-    column.is_none_or(|column| relative(indent, indent) < column)
+    column.filter(|&column| relative(indent, indent) >= column)
   }
 
   /// Whether the line above the one starting at `line_start` holds paragraph
@@ -4294,6 +4312,30 @@ impl ConvertState {
     // innermost blockquote keeps the blank line it already had, which the
     // quote's prefix makes harmless.
     let above_end = line_start.saturating_sub(1);
+    // Four columns or more past the column of the paragraph a lone `*` above
+    // goes on with, this marker's line goes on with that paragraph too: it
+    // can neither underline it nor open an item, and a blank line would only
+    // turn it into an indented code block.
+    let marker_spaces = bytes[line_start..]
+      .iter()
+      .take_while(|&&byte| byte == b' ')
+      .count();
+    let quote_indent = self
+      .blockquotes
+      .iter()
+      .rev()
+      .find(|frame| frame.content_start <= line_start)
+      .map_or(0, |frame| frame.list_indent.len());
+    let marker_column = if marker_spaces >= quote_indent {
+      marker_spaces - quote_indent
+    } else {
+      marker_spaces
+    };
+    let mut past_paragraph = false;
+    let mut text_above = |column: Option<usize>| {
+      past_paragraph = column.is_some_and(|column| marker_column >= column + 4);
+      column.is_none()
+    };
     let follows_marker = if starts_document || blank_above {
       false
     } else if above_end > 0 && above_end == parent_marker_end {
@@ -4330,18 +4372,18 @@ impl ConvertState {
           MarkerLine::Bare(indent) => {
             !lone_closer
               || line_ending != b'\r'
-                && self.lone_closer_reads_as_marker(
+                && text_above(self.lone_closer_paragraph(
                   bytes,
                   above_end - 1,
                   indent,
                   hard_break_follows(&bytes[above_end..]),
-                )
+                ))
           }
           MarkerLine::Other => false,
           MarkerLine::Cut => {
             above_end == self.bare_marker_end
               && self.bare_marker_indent <= max_spaces
-              && !self.bare_marker_text
+              && text_above(self.bare_marker_text)
           }
         }
       } else {
@@ -4349,7 +4391,7 @@ impl ConvertState {
           && self.bare_marker_end == 0
           && self.bare_marker_indent <= max_spaces
           && (across_lines || !self.bare_marker_gap_newline)
-          && !self.bare_marker_text
+          && text_above(self.bare_marker_text)
       };
       bare
         && self
@@ -4357,8 +4399,11 @@ impl ConvertState {
           .last()
           .is_none_or(|frame| above_end > frame.content_start)
     };
-    self.empty_item_hazard =
-      !starts_document && !blank_above && !follows_marker && !past_content_column;
+    self.empty_item_hazard = !starts_document
+      && !blank_above
+      && !follows_marker
+      && !past_content_column
+      && !past_paragraph;
     self.empty_item_answered = false;
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
