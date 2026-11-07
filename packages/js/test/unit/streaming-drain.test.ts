@@ -43,6 +43,20 @@ const BLOCK_NEWLINE_HTML = [
 
 describe('streaming drain parity', () => {
   it.each([
+    ['<ul><li><ol><li>lead<br><em>x<br><br></em><em> </em><em>x&#10;</em><em></em><ul><li><br></li><li>z</li></ul><b></b></li></ol></li></ul>', '-\n  1. lead  \n     *x  \n       \n     **x\n*\n     -   \n     - z'],
+    ['<ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-   \n    \n  *x\n*\n\n  - \n    > q'],
+    ['<ul><li><br><br><em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  *x\n*\n\n  -'],
+    ['<ul><li>&#10;<br><em>x&#10;</em><ul><li></li></ul></li></ul>', '- \n  \n  *x\n*\n\n  -'],
+    ['<ul><li><br><br>a&#10;<em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  a\n*x\n*\n\n  -'],
+    ['<ul><li><br><br>a<br><em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  a  \n  *x\n*\n\n  -'],
+    ['<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>', '-\n  - y  \n    *x  \n      \n    *  \n\n    1.   \n    2.'],
+  ])('streams lone closers after closed items and hard breaks: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let width = 1; width <= 16; width++)
+      expect(await streamConvert(html, width), `width=${width}`).toBe(expected)
+  })
+
+  it.each([
     '<p>before</p><script>é漢🎉 &amp; if (a < b) x()</script><p>after</p>',
     '<p>before</p><script><!--<script>nested</script>--></script><p>after</p>',
     '<p>before</p><script>x</scriptx>y</SCRIPT ><p>after</p>',
@@ -97,6 +111,17 @@ describe('streaming drain parity', () => {
       for (const chunkSize of [1, 2, 3, 7, html.length])
         expect(await streamConvert(html, chunkSize, options), `chunkSize=${chunkSize}`).toBe(expected)
     }
+  })
+  it.each([
+    '<ol start="10"><li><em>abcdefghijklmnopqrstuvwxyz0123456789&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>',
+    '<ol start="10"><li><em>abcdefghij&#13;&#10;klmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>',
+    '<ol start="10"><li>abcdefghijklmnopqrstuvwxyz&#13;&#10;<em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>',
+    '<ol start="10"><li>a&#10;<em>b&#10;</em><br><ul><li><blockquote>q</blockquote></li></ul></li></ol>',
+    '<ol start="123456789"><li><em>x<br><br></em><blockquote></blockquote><ul><li><em></em></li><li></li></ul></li></ol>',
+  ])('reads a lone emphasis closer across compaction as one-shot does: %s', async (html) => {
+    const expected = htmlToMarkdown(html)
+    for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
   it.each(['<li><li><br><ol><li>', '_<li><br><ol><li>', '<dl><li><blockquote><ol><li>'])('preserves malformed list spacing after drained markers: %s', async (html) => {
     const expected = htmlToMarkdown(html)

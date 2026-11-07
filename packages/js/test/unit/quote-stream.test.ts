@@ -24,6 +24,40 @@ async function convertStream(html: string, chunkSize: number, options: MdreamOpt
 }
 
 describe('incremental quote streams', () => {
+  it('preserves plugin quote delimiters after a structural alias quote', async () => {
+    const html = '<ul><li><x-first>q</x-first><blockquote>r</blockquote>tail</li></ul>'
+    const options: MdreamOptions = {
+      tagOverrides: { 'x-first': 'blockquote' },
+      plugins: [createPlugin({
+        onNodeEnter(node) {
+          if (node.name === 'blockquote')
+            return '['
+        },
+        onNodeExit(node) {
+          if (node.name === 'blockquote')
+            return ']'
+        },
+      })],
+    }
+    const expected = '- \n  > q\n\n  [r] tail'
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await convertStream(html, width, options), `width ${width}`).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        actual += chunk
+      expect(actual, `split ${split}`).toBe(expected)
+    }
+  })
+
   it.each([1, 4])('emits settled lines before a depth %i quote closes', async (depth) => {
     const open = '<blockquote>'.repeat(depth)
     const close = '</blockquote>'.repeat(depth)

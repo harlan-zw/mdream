@@ -1,6 +1,6 @@
 import type { BlockquoteFrame, BufferScanState, MarkdownState, MarkdownStreamContext } from './markdown-processor'
 import { TAG_PRE } from './const'
-import { isAsciiWhitespace, lineOpensRawHtmlBlock, noteListTailRewrite, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
+import { isAsciiWhitespace, lineOpensRawHtmlBlock, noteBufferCompaction, noteListTailRewrite, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { isInsideHeading, trimOutputStart } from './utils'
 
 interface QuoteScan {
@@ -192,6 +192,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     }
     const retained = content.slice(start)
     noteListTailRewrite(state, 0)
+    noteBufferCompaction(state, content, start)
     state.buffer.splice(0, fragment, retained)
     for (const frame of state.blockquotes)
       frame.fragment -= fragment - 1
@@ -237,7 +238,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       // stays buffered even when that owner sits inside a preformatted block.
       while (stableLength > 0) {
         const code = currentContent.charCodeAt(stableLength - 1)
-        if (code !== 32 && code !== 10)
+        if (code !== 32 && code !== 10 && code !== 9)
           break
         stableLength--
       }
@@ -311,6 +312,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         const stableTailLength = Math.max(0, Math.min(stableLength, fragmentStart) - tailStart)
         const stableTail = emittedTail.slice(0, stableTailLength)
         const mutableTail = emittedTail.slice(stableTailLength)
+        noteBufferCompaction(state, currentContent, tailStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (stableTail)
@@ -325,6 +327,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         const tailStart = Math.max(0, contextStart)
         const emittedTail = currentContent.slice(tailStart, stableLength)
         noteListTailRewrite(state, 0)
+        noteBufferCompaction(state, currentContent, tailStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (emittedTail)
