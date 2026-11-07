@@ -3958,10 +3958,11 @@ impl ConvertState {
     }
   }
 
-  /// Whether a lone `*` or `+` at `closer`, after `indent` spaces, reads as a
-  /// list marker rather than as text continuing the paragraph above, such as
-  /// an emphasis closer. Right after a `\r` it starts a line of its own. Past
-  /// a line feed it reads as a marker when no paragraph goes on above it, or
+  /// How a lone `*` or `+` at `closer`, after `indent` spaces, reads: `None`
+  /// when it reads as a list marker, or the column of the paragraph it goes
+  /// on with when it reads as text continuing that paragraph, such as an
+  /// emphasis closer. Right after a `\r` it starts a line of its own. Past a
+  /// line feed it reads as a marker when no paragraph goes on above it, or
   /// when it sits short of that paragraph's column: the column of the item
   /// content the paragraph starts with, or zero outside an item. A paragraph
   /// whose first line comes right under a marker alone and reaches the content
@@ -3969,21 +3970,6 @@ impl ConvertState {
   /// out of the paragraph's container and opens a list of its own. Columns
   /// count inside the quote that holds the `*`. `hard_break` says a hard break
   /// follows the `*` on its line.
-  fn lone_closer_reads_as_marker(
-    &self,
-    bytes: &[u8],
-    closer: usize,
-    indent: usize,
-    hard_break: bool,
-  ) -> bool {
-    self
-      .lone_closer_paragraph(bytes, closer, indent, hard_break)
-      .is_none()
-  }
-
-  /// The column of the paragraph a lone `*` or `+` at `closer` goes on with,
-  /// read as `lone_closer_reads_as_marker` reads it, or `None` when it reads as
-  /// a marker. Columns count inside the quote that holds the `*`.
   fn lone_closer_paragraph(
     &self,
     bytes: &[u8],
@@ -7386,11 +7372,19 @@ mod tests {
     // A line feed of the text ends the hard break's indent line.
     let text = b"- y  \n  *x  \n  \n  *";
     let closer = text.len() - 1;
-    assert!(!state.lone_closer_reads_as_marker(text, closer, 2, false));
-    assert!(state.lone_closer_reads_as_marker(text, closer, 2, true));
+    assert!(
+      state
+        .lone_closer_paragraph(text, closer, 2, false)
+        .is_some()
+    );
+    assert!(state.lone_closer_paragraph(text, closer, 2, true).is_none());
     // A run of hard breaks wrote the line: the `*`'s indent and two spaces.
     let text = b"- y  \n  *x  \n    \n  *";
-    assert!(!state.lone_closer_reads_as_marker(text, closer + 2, 2, true));
+    assert!(
+      state
+        .lone_closer_paragraph(text, closer + 2, 2, true)
+        .is_some()
+    );
 
     state.has_streamed_output = true;
     state.cut_line_lead = CutLineLead::Blank(0);
@@ -7400,14 +7394,14 @@ mod tests {
       spaces: 2,
       chain: true,
     };
-    assert!(!state.lone_closer_reads_as_marker(b"  *", 2, 2, false));
-    assert!(state.lone_closer_reads_as_marker(b"  *", 2, 2, true));
+    assert!(state.lone_closer_paragraph(b"  *", 2, 2, false).is_some());
+    assert!(state.lone_closer_paragraph(b"  *", 2, 2, true).is_none());
     state.drained_paragraph = Paragraph::Spaced {
       column: 2,
       spaces: 4,
       chain: true,
     };
-    assert!(!state.lone_closer_reads_as_marker(b"  *", 2, 2, true));
+    assert!(state.lone_closer_paragraph(b"  *", 2, 2, true).is_some());
   }
 
   // A marker alone right under paragraph text cannot interrupt it. Reaching
@@ -7417,9 +7411,17 @@ mod tests {
   fn lone_closer_under_a_marker_line_in_a_paragraph() {
     let state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
     let text = b"y\n*\n*";
-    assert!(!state.lone_closer_reads_as_marker(text, text.len() - 1, 0, false));
+    assert!(
+      state
+        .lone_closer_paragraph(text, text.len() - 1, 0, false)
+        .is_some()
+    );
     let text = b"- y\n*\n*";
-    assert!(state.lone_closer_reads_as_marker(text, text.len() - 1, 0, false));
+    assert!(
+      state
+        .lone_closer_paragraph(text, text.len() - 1, 0, false)
+        .is_none()
+    );
     let marker = LineKind::Marker {
       indent: 0,
       column: 2,
