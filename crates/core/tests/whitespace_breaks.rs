@@ -606,6 +606,18 @@ fn heading_closing_run_is_read_past_a_trimmed_form_feed_or_line_end() {
       "<b>a&#13;<ul><li><h2>&#9;</h2>x</li></ul></b>",
       "**a\r - ## \tx**",
     ),
+    // Once the heading wrote text, a `\r` and a list marker before the run
+    // came from that text, so the run is still escaped, outside `<pre>`.
+    ("<code><h2>x&#13;- #</h2>y</code>", "`## x\r- \\# y`"),
+    ("<code><h2>x&#13;+ #&#13;</h2></code>", "`## x\r+ \\#`"),
+    (
+      "<code><ul><li><h2>x&#13;- #</h2>y</li></ul></code>",
+      "`- ## x\r- \\# y`",
+    ),
+    (
+      "<pre><h2>x&#13;- #</h2>y</pre>",
+      "```\n\n## x\r- #\n\ny\n```",
+    ),
     // A run on an earlier line than the heading's end keeps the spaces after
     // it, and a lead before it still leaves it bare.
     (

@@ -140,6 +140,11 @@ export interface MarkdownState {
    * writes, or that content joins the heading's line.
    */
   headingBreakPending?: boolean
+  /**
+   * The latest heading wrote visible text, so a trailing `#` run after a list
+   * marker on its last line is that text, not the heading's own prefix.
+   */
+  headingHasText?: boolean
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
 }
@@ -2116,6 +2121,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
+    if (!state.headingHasText && hasNonWhitespace(textNode.value))
+      state.headingHasText = true
     state.lastTextNode = textNode
     heldTextTail = false
   }
@@ -2982,6 +2989,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
+    if (eventType === NodeEventEnter && tagId >= TAG_H1 && tagId <= TAG_H6)
+      state.headingHasText = false
     if (eventType === NodeEventEnter && tagId >= TAG_H1 && tagId <= TAG_H6
       && state.depthMap[TAG_LI] && !handler?.literalEnter && !hasPluginOutput && output?.[0]?.startsWith('\n')
       && buff.length > 0 && !opensBlockLine(buff, buff.length - 1, buff.at(-1)!.length)) {

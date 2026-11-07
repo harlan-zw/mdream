@@ -2184,6 +2184,10 @@ impl ConvertState {
       self.caption_boundary = CaptionBoundary::None;
     }
 
+    if tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6) {
+      self.heading_has_text = false;
+    }
+
     // Clean: track heading start for slug collection
     if self.clean_flags & CLEAN_FRAGMENTS != 0
       && let Some(id) = tag_id
@@ -3097,6 +3101,9 @@ impl ConvertState {
     depth: usize,
     index: usize,
   ) {
+    if !self.heading_has_text && !text.bytes().all(|byte| byte.is_ascii_whitespace()) {
+      self.heading_has_text = true;
+    }
     if !self.open_markers.is_empty() || self.held_break_bytes != 0 {
       let visible = has_visible(text.as_bytes());
       if visible {
@@ -3735,12 +3742,17 @@ impl ConvertState {
       return;
     }
     // A list marker after a decoded `\r` also leads its line, which
-    // `opens_block_line` does not read, so the run stays the heading's own.
+    // `opens_block_line` does not read, so the run of an empty heading stays
+    // its own. Once the heading wrote text, that `\r` came from the text and
+    // so did the run, which still needs its escape outside `<pre>`.
     let mut lead = marker;
     while lead > 0 && bytes[lead - 1] == b' ' {
       lead -= 1;
     }
-    if lead > 0 && self.list_marker_line_start(bytes, lead, self.pending_marker_indent()) {
+    if (!self.heading_has_text || self.depth_map[TAG_PRE as usize] != 0)
+      && lead > 0
+      && self.list_marker_line_start(bytes, lead, self.pending_marker_indent())
+    {
       return;
     }
     self.replace_code_span_content(marker..marker, "\\");

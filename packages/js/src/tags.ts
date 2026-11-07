@@ -392,22 +392,26 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
     return
 
   // A list marker after a decoded `\r` also leads its line, which
-  // `opensBlockLine` does not read, so the run stays the heading's own.
-  let leadFragment = index
-  let lead = run
-  for (;;) {
-    if (lead === 0) {
-      if (--leadFragment < 0)
+  // `opensBlockLine` does not read, so the run of an empty heading stays its
+  // own. Once the heading wrote text, that `\r` came from the text and so did
+  // the run, which still needs its escape outside `<pre>`.
+  if (!state.headingHasText || state.depthMap[TAG_PRE]) {
+    let leadFragment = index
+    let lead = run
+    for (;;) {
+      if (lead === 0) {
+        if (--leadFragment < 0)
+          break
+        lead = buffer[leadFragment]!.length
+        continue
+      }
+      if (buffer[leadFragment]!.charCodeAt(lead - 1) !== 32)
         break
-      lead = buffer[leadFragment]!.length
-      continue
+      lead--
     }
-    if (buffer[leadFragment]!.charCodeAt(lead - 1) !== 32)
-      break
-    lead--
+    if (leadFragment >= 0 && listMarkerLineStart(buffer, leadFragment, lead - 1, pendingMarkerIndent(state)))
+      return
   }
-  if (leadFragment >= 0 && listMarkerLineStart(buffer, leadFragment, lead - 1, pendingMarkerIndent(state)))
-    return
 
   const entry = buffer[index]!
   const replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`

@@ -1037,6 +1037,9 @@ pub struct ConvertState {
   /// collapsed, so the next visible content owes it the block break the root
   /// writes, or that content joins the heading's line.
   heading_break_pending: bool,
+  /// The latest heading wrote visible text, so a trailing `#` run after a list
+  /// marker on its last line is that text, not the heading's own prefix.
+  heading_has_text: bool,
   /// Buffer offset where the latest `<br>` hard break ends, or `usize::MAX`.
   /// The output ends with that break exactly while the buffer length equals
   /// it, so no writer has to clear it: any later output moves the end past it,
@@ -1300,6 +1303,7 @@ impl ConvertState {
       empty_item_answered: false,
       list_rule_pending: false,
       heading_break_pending: false,
+      heading_has_text: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,

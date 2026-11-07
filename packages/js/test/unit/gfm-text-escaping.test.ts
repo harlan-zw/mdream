@@ -215,6 +215,23 @@ describe('gfm text escaping', () => {
       expect(await streamConvert(html, chunkSize, options), `chunk size ${chunkSize}`).toBe(expected)
   })
 
+  // A list marker after a decoded `\r` leads its line, so an empty heading's
+  // own run stays bare there. Once the heading wrote text, that `\r` and the
+  // run came from the text, which still needs the escape outside `<pre>`.
+  it.each([
+    ['<code><h2>x&#13;- #</h2>y</code>', '`## x\r- \\# y`'],
+    ['<code><h2>x&#13;+ #&#13;</h2></code>', '`## x\r+ \\#`'],
+    ['<code><ul><li><h2>x&#13;- #</h2>y</li></ul></code>', '`- ## x\r- \\# y`'],
+    ['<kbd><h2>x&#13;1. #</h2></kbd>', '`## x\r1\\. \\#`'],
+    ['<pre><h2>x&#13;- #</h2>y</pre>', '```\n\n## x\r- #\n\ny\n```'],
+    ['<code>a&#13;<ol><li><h2></h2></li></ol></code>', '`a\r 1. ## `'],
+    ['<b>a&#13;<ul><li><h2>&#13;</h2>x</li></ul></b>', '**a\r - ## \r x**'],
+  ])('keeps a heading\'s text run after a decoded `\\r` and a marker: %j', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
   it('widens code delimiters across every stream boundary', async () => {
     for (const html of [
       '<p>before <code>a `b` c</code> after</p>',

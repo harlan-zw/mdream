@@ -316,6 +316,12 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   // A list marker after a decoded `\r` leads its line too.
   ['<b>a&#13;<ul><li><h2></h2>x</li></ul></b>', '**a\r - ## x**'],
   ['<b>a&#13;<ul><li><h2>&#9;</h2>x</li></ul></b>', '**a\r - ## \tx**'],
+  // Once the heading wrote text, a `\r` and a list marker before the run came
+  // from that text, so the run is still escaped, outside `<pre>`.
+  ['<code><h2>x&#13;- #</h2>y</code>', '`## x\r- \\# y`'],
+  ['<code><h2>x&#13;+ #&#13;</h2></code>', '`## x\r+ \\#`'],
+  ['<code><ul><li><h2>x&#13;- #</h2>y</li></ul></code>', '`- ## x\r- \\# y`'],
+  ['<pre><h2>x&#13;- #</h2>y</pre>', '```\n\n## x\r- #\n\ny\n```'],
   // A run on an earlier line than the heading's end keeps the spaces after
   // it, and a lead before it still leaves it bare.
   ['<pre><s><h1>a\n##\n </h1>x</s></pre>', '```\n# a\n##\n x\n```'],
