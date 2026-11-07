@@ -347,6 +347,46 @@ describe('streaming drain parity', () => {
     expect(joinedLength).toBeLessThan(1024 * 1024)
   })
 
+  // A text run longer than a chunk came back raw and was scanned again from
+  // its start with every chunk, so a long one was quadratic. The stream keeps
+  // the scanned run in the parser state instead, so count what it feeds back.
+  it.each([
+    ['spaces in a heading', '<h2>x', ' ', '#</h2>'],
+    ['spaces in a heading in an item', '<ul><li><h2>x', ' ', '#</h2>y</li></ul>'],
+    ['decoded spaces in a heading', '<h2>x<i></i>', '&#32;', '#&#12;</h2>'],
+    ['hash runs in a heading', '<h2>', '# ', '</h2>'],
+    ['no-break spaces in emphasis', '<p><b>x', '&nbsp; ', '</b>y</p>'],
+    ['whitespace in a block inside an inline', '<span><p><span>x', ' \t', '</span></p></span>z'],
+    ['vertical tabs', '<p>', 'a &#11; ', '</p>'],
+    ['plain prose', '<p>', 'ordinary words ', '</p>'],
+  ])('does not rescan a long text run on every chunk: %s', async (_, open, unit, close) => {
+    const html = `${open}${unit.repeat(16 * 1024)}${close}`
+    const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
+    const parseState: ParseState = {
+      depthMap: processor.state.depthMap,
+      depth: 0,
+      resolvedPlugins: [],
+      tagHandlers,
+      plainText: false,
+      carryText: true,
+    }
+    let remainingHtml = ''
+    let markdown = ''
+    let carriedLength = 0
+    for (let offset = 0; offset < html.length; offset += 64) {
+      carriedLength += remainingHtml.length
+      remainingHtml = parseHtmlStream(remainingHtml + html.slice(offset, offset + 64), parseState, processor.processEvent)
+      markdown += processor.getMarkdownChunk()
+    }
+    finalizeParse(remainingHtml, parseState, processor.processEvent)
+    markdown += processor.getMarkdownChunk(true)
+
+    const expected = htmlToMarkdown(html)
+    expect(markdown).toBe(expected)
+    expect(carriedLength).toBeLessThan(html.length)
+    expect(await streamConvert(html, 64)).toBe(expected)
+  })
+
   it('emits emphasis content before its long whitespace tail closes', async () => {
     const prefix = `<p><em>a${EMPHASIS_WHITESPACE_UNIT.repeat(16 * 1024)}`
     const close = '</em>x</p>'
