@@ -591,6 +591,9 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
   else if (line.kind === 0) {
     fold.paragraph = undefined
   }
+  else if (line.kind === 2 && paragraph !== undefined && paragraph >= 0 && line.indent >= paragraph) {
+    // An empty item cannot interrupt a paragraph it reaches the column of.
+  }
   else if (line.kind === 2) {
     fold.paragraph = undefined
     fold.item = line.column + 1
@@ -623,6 +626,10 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
  * across cuts ends nothing new.
  */
 export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
+  // Nothing leaves the buffer: the lines above stay readable, and the start of
+  // the document still reads as one, as in Rust before a drain takes a byte.
+  if (cut === 0)
+    return
   let read = state.compactedRead ?? LINE_START
   const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, chain: state.compactedChain, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop }
   let start = 0
@@ -709,7 +716,38 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
     return true
   if ((quote && (code === -1 || at < quoteFragment)) || (code === -1 && !state.compactedRead) || (code !== 10 && code !== -1))
     return false
-  const decide = (column: number | undefined) => column === undefined || relative(indent, indent) < column
+  // A marker alone right under paragraph text cannot interrupt it: an empty
+  // item never does. The line goes on with the paragraph when it reaches the
+  // paragraph's column, and opens a list of its own otherwise; its indent and
+  // its answer as a marker wait for that column.
+  let pending: { indent: number, answer: number | undefined } | undefined
+  const decide = (found: number | undefined) => {
+    const column = pending && (found === undefined || pending.indent < found) ? pending.answer : found
+    return column === undefined || relative(indent, indent) < column
+  }
+  // Whether the line above the one just read, which `ending` ends, holds
+  // paragraph text, read within the quote. Past the buffer start the
+  // paragraph a compaction left answers.
+  const textAbove = (ending: number): boolean => {
+    if (ending === -1)
+      return state.compactedRead !== undefined && (state.compactedParagraph ?? -1) >= 0
+    const savedAt = at
+    const savedOffset = offset
+    let char = back()
+    if (ending === 10 && char === 13)
+      char = back()
+    let line = ''
+    while (char !== -1 && char !== 10 && char !== 13) {
+      line = String.fromCharCode(char) + line
+      if (quote && at === quoteFragment && offset === 0)
+        break
+      char = back()
+    }
+    at = savedAt
+    offset = savedOffset
+    const kind = endLineRead(extendLineRead(char === -1 ? state.compactedRead ?? LINE_START : LINE_START, line)).kind
+    return kind === 3 || kind === 4
+  }
   // Walk up the paragraph above to the line it starts with.
   let below: number | undefined
   // The indent of the paragraph's first line read so far, that indent again
@@ -786,9 +824,20 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
       continue
     }
     if (read.kind === 2) {
-      if (first !== undefined)
-        first = relative(first, first)
-      return decide(underMarker(relative(read.column + 1, read.indent), relative((read.outer >= 0 ? read.outer : read.indent) + 4, read.indent)))
+      const markerFirst = first === undefined ? undefined : relative(first, first)
+      const saved = first
+      first = markerFirst
+      const answer = underMarker(relative(read.column + 1, read.indent), relative((read.outer >= 0 ? read.outer : read.indent) + 4, read.indent))
+      first = saved
+      if (pending || firstQuoted || (quote && at < quoteFragment) || !textAbove(char))
+        return decide(answer)
+      pending = { indent: relative(read.indent, read.indent), answer }
+      below = 0
+      first = read.indent
+      top = relative(read.indent, read.indent)
+      shallow = Math.min(shallow, top)
+      code = char
+      continue
     }
     if (read.kind === 0)
       return decide(below)
