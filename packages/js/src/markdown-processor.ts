@@ -339,6 +339,27 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
   }
 }
 
+/** The spaces before the first character of `buffer[fragment]` other than a space or a line feed, back to its line's start. */
+function lineSpacesBefore(buffer: string[], fragment: number): number {
+  const value = buffer[fragment]!
+  let at = 0
+  while (at < value.length && (value.charCodeAt(at) === 32 || value.charCodeAt(at) === 10))
+    at++
+  let spaces = 0
+  let f = fragment
+  let offset = at
+  for (;;) {
+    while (offset === 0) {
+      if (f === 0)
+        return spaces
+      offset = buffer[--f]!.length
+    }
+    if (buffer[f]!.charCodeAt(--offset) !== 32)
+      return spaces
+    spaces++
+  }
+}
+
 /**
  * Arm the empty-item guard for the `<li>` whose marker was just written. A marker
  * line continuing the paragraph above turns a lone marker into a setext
@@ -404,6 +425,14 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // own line, which Rust reads past, and before the LF of a CRLF it ends the
   // line above. Either way that line is read alone, as in Rust: past a blank
   // line the CR let the drain take the marker, and the stream would disagree.
+  // Four columns or more past the column of the paragraph a lone `*` above
+  // goes on with, this marker's line goes on with that paragraph too: it can
+  // neither underline it nor open an item, and a blank line would only turn it
+  // into an indented code block.
+  const markerQuoteIndent = state.blockquotes.at(-1)?.listIndent.length ?? 0
+  const markerSpaces = lineSpacesBefore(buffer, marker)
+  const markerColumn = markerSpaces >= markerQuoteIndent ? markerSpaces - markerQuoteIndent : markerSpaces
+  let pastParagraph = false
   let lineFeeds = 0
   let previous = 0
   let lineAboveOnly = false
@@ -463,9 +492,11 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
           indent--
         // After a lone CR this marker sits past a space only the blank line
         // takes away, which leaves it short of the lines indented under it.
-        readsAsMarker = !afterCr && loneCloserReadsAsMarker(state, fragment, cursor, indent, trailingSpaces >= 2)
+        const column = afterCr ? undefined : loneCloserParagraph(state, fragment, cursor, indent, trailingSpaces >= 2)
+        readsAsMarker = !afterCr && column === undefined
+        pastParagraph = column !== undefined && markerColumn >= column + 4
       }
-      state.emptyItemFragment = (recordedParent || (readsAsMarker && listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3)))
+      state.emptyItemFragment = (recordedParent || pastParagraph || (readsAsMarker && listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3)))
         ? undefined
         : state.buffer.length - 1
       return
@@ -618,6 +649,9 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
   else if (line.kind === 0) {
     fold.paragraph = undefined
   }
+  else if (line.kind === 2 && paragraph !== undefined && paragraph >= 0 && line.indent >= paragraph) {
+    // An empty item cannot interrupt a paragraph it reaches the column of.
+  }
   else if (line.kind === 2) {
     fold.paragraph = undefined
     fold.item = line.column + 1
@@ -650,6 +684,10 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
  * across cuts ends nothing new.
  */
 export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
+  // Nothing leaves the buffer: the lines above stay readable, and the start of
+  // the document still reads as one, as in Rust before a drain takes a byte.
+  if (cut === 0)
+    return
   let read = state.compactedRead ?? LINE_START
   const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, chain: state.compactedChain, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop }
   let start = 0
@@ -682,9 +720,11 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
  * when it sits short of that paragraph's column: the column of the item
  * content the paragraph starts with, or zero outside an item. Such a line falls
  * out of the paragraph's container and opens a list of its own. Columns count
- * inside the quote that holds the `*`.
+ * inside the quote that holds the `*`. Returns the column of the paragraph it
+ * goes on with as text, infinity when text before it on its line leaves no
+ * column to pass, or `undefined` when it reads as a marker.
  */
-function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor: number, indent: number, hardBreak: boolean): boolean {
+function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: number, indent: number, hardBreak: boolean): number | undefined {
   const buffer = state.buffer
   // The innermost quote holding the `*`.
   let quote: BlockquoteFrame | undefined
@@ -733,10 +773,45 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
   while (code === 32)
     code = back()
   if (code === 13 || (code === -1 && state.compactedCr === true))
-    return true
-  if ((quote && (code === -1 || at < quoteFragment)) || (code === -1 && !state.compactedRead) || (code !== 10 && code !== -1))
-    return false
-  const decide = (column: number | undefined) => column === undefined || relative(indent, indent) < column
+    return undefined
+  if ((quote && (code === -1 || at < quoteFragment)) || (code === -1 && !state.compactedRead))
+    return 0
+  // Text before the `*` on its line makes it no marker line, as in Rust, which
+  // never reads one: no marker under it goes past a paragraph's column.
+  if (code !== 10 && code !== -1)
+    return Number.POSITIVE_INFINITY
+  // A marker alone right under paragraph text cannot interrupt it: an empty
+  // item never does. The line goes on with the paragraph when it reaches the
+  // paragraph's column, and opens a list of its own otherwise; its indent and
+  // its answer as a marker wait for that column.
+  let pending: { indent: number, answer: number | undefined } | undefined
+  const decide = (found: number | undefined) => {
+    const column = pending && (found === undefined || pending.indent < found) ? pending.answer : found
+    return column === undefined || relative(indent, indent) < column ? undefined : column
+  }
+  // Whether the line above the one just read, which `ending` ends, holds
+  // paragraph text, read within the quote. Past the buffer start the
+  // paragraph a compaction left answers.
+  const textAbove = (ending: number): boolean => {
+    if (ending === -1)
+      return state.compactedRead !== undefined && (state.compactedParagraph ?? -1) >= 0
+    const savedAt = at
+    const savedOffset = offset
+    let char = back()
+    if (ending === 10 && char === 13)
+      char = back()
+    let line = ''
+    while (char !== -1 && char !== 10 && char !== 13) {
+      line = String.fromCharCode(char) + line
+      if (quote && at === quoteFragment && offset === 0)
+        break
+      char = back()
+    }
+    at = savedAt
+    offset = savedOffset
+    const kind = endLineRead(extendLineRead(char === -1 ? state.compactedRead ?? LINE_START : LINE_START, line)).kind
+    return kind === 3 || kind === 4
+  }
   // Walk up the paragraph above to the line it starts with.
   let below: number | undefined
   // The indent of the paragraph's first line read so far, that indent again
@@ -813,9 +888,20 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
       continue
     }
     if (read.kind === 2) {
-      if (first !== undefined)
-        first = relative(first, first)
-      return decide(underMarker(relative(read.column + 1, read.indent), relative((read.outer >= 0 ? read.outer : read.indent) + 4, read.indent)))
+      const markerFirst = first === undefined ? undefined : relative(first, first)
+      const saved = first
+      first = markerFirst
+      const answer = underMarker(relative(read.column + 1, read.indent), relative((read.outer >= 0 ? read.outer : read.indent) + 4, read.indent))
+      first = saved
+      if (pending || firstQuoted || (quote && at < quoteFragment) || !textAbove(char))
+        return decide(answer)
+      pending = { indent: relative(read.indent, read.indent), answer }
+      below = 0
+      first = read.indent
+      top = relative(read.indent, read.indent)
+      shallow = Math.min(shallow, top)
+      code = char
+      continue
     }
     if (read.kind === 0)
       return decide(below)

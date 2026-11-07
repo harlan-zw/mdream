@@ -9656,6 +9656,9 @@ fn lone_closer_under_a_blank_line_of_the_text() {
       "<ol start=\"10\"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol>",
       "10. \n*x  \n    \n*  \n    -",
     ),
+    // One list deeper, the nested marker sits four columns past the content
+    // of the item the `*` opens, so it reads as code in that item. A blank
+    // line above it would not avoid that.
     (
       "<ul><li><ol start=\"10\"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol></li></ul>",
       "-\n  10. \n*x  \n      \n*  \n      -",
@@ -9669,6 +9672,29 @@ fn lone_closer_under_a_blank_line_of_the_text() {
     (
       "<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>",
       "-\n  - y  \n    *x  \n      \n    *  \n\n    1.   \n    2.",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+// A marker four columns or more past the paragraph a lone `*` continues is
+// text of that paragraph, so the nested item under the `*` needs no blank
+// line. One there would end the paragraph and open code.
+#[test]
+fn lone_closer_with_a_nested_marker_past_its_paragraph() {
+  for (html, expected) in [
+    (
+      "<strong><em><ul><li>x</li><li>-1<br><em><br><ul><li></li></ul>ab</em></li></ul></em></strong>",
+      "***- x - -1  \n  *  \n    - ab****",
+    ),
+    (
+      "<ol start=\"10\"><li>&#10;<em>x&#10;</em><ul><li></li></ul></li></ol>",
+      "10. \n*x\n*\n    -",
     ),
   ] {
     assert_eq!(

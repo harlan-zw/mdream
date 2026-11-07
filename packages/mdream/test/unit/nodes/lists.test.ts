@@ -107,6 +107,14 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<strong><em><ul><li>x</li><li>-1<br><em><br><ul><li></li></ul>ab</em></li></ul></em></strong>', '***- x - -1  \n  *  \n    - ab****'],
+    ['<ol start="10"><li>&#10;<em>x&#10;</em><ul><li></li></ul></li></ol>', '10. \n*x\n*\n    -'],
+  ])('keeps a nested marker past the paragraph of a lone closer as its text: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['* ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n* \n    > q'],
     ['  * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n  * \n    > q'],
     ['    * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n    * \n    > q'],

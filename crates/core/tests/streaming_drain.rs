@@ -6943,3 +6943,45 @@ fn lone_closer_under_a_blank_line_of_the_text_streams() {
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
+
+// A lone `*` that opens the document has no line above it, in one-shot and in
+// every cut, so the nested item under it keeps its blank line.
+#[test]
+fn lone_closer_opening_the_document_streams() {
+  for (html, expected) in [
+    ("<em><br><ul><li></li></ul></em>", "*  \n\n- *"),
+    ("<em>&#10;<ul><li></li></ul>&#10;&#10;</em>", "*\n\n- \n\n*"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// A nested marker four columns or more past the paragraph a lone `*`
+// continues reads as that text in every cut, so no cut adds a blank line.
+#[test]
+fn lone_closer_with_a_nested_marker_past_its_paragraph_streams() {
+  for (html, expected) in [
+    (
+      "<strong><em><ul><li>x</li><li>-1<br><em><br><ul><li></li></ul>ab</em></li></ul></em></strong>",
+      "***- x - -1  \n  *  \n    - ab****",
+    ),
+    (
+      "<ol start=\"10\"><li>&#10;<em>x&#10;</em><ul><li></li></ul></li></ol>",
+      "10. \n*x\n*\n    -",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
