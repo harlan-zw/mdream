@@ -9712,6 +9712,17 @@ fn lone_closer_with_a_nested_marker_past_its_paragraph() {
   }
 }
 
+// A marker that opens a blockquote reads nothing above the quote's content,
+// as in JS: a lone `*` there neither ends its blank line nor lets it go.
+#[test]
+fn lone_closer_above_a_quote_says_nothing_about_its_marker() {
+  let html = "<ol><li>&#13;<em>a&#10;</em><blockquote><br><br><br></blockquote><blockquote><ul><li></li></ul></blockquote></li></ol>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "1. \r*a\n*\n  \n     \n     \n\n      > -"
+  );
+}
+
 // A list marker alone on its line opens an item whose content starts one
 // column past the marker, however many spaces follow it. A paragraph whose
 // first line reaches that column sits in the item, so a lone `*` short of
