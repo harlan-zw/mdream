@@ -392,7 +392,21 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
    * stops in so divs that leave the line unchanged don't redo it.
    * @internal
    */
-  markerLine?: { index: number, length: number, entry: string, stop: number, stopEntry: string, opens: boolean }
+  markerLine?: MarkerLineMemo
+}
+
+/**
+ * A `<div>`'s heading-marker answer with the entries the check ended and
+ * stopped in. `noteBufferRewrite` drops it whenever output at or before
+ * `index` is rewritten.
+ * @internal
+ */
+export interface MarkerLineMemo {
+  index: number
+  entry: string
+  stop: number
+  stopEntry: string
+  opens: boolean
 }
 
 type NodeEventEnter = 0
