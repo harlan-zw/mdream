@@ -123,6 +123,20 @@ describe('streaming drain parity', () => {
     for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
       expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
+  it.each([
+    ['<ol start="10"><li><br><em>x&#10;</em><br><ul><li></li></ul><p>t</p></li></ol>', '10.   \n    *x\n*  \n    -\n\n    t'],
+    ['<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *x\n*\n    - \n      > q'],
+    ['<blockquote><ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>', '> 10.   \n>     *x\n> *\n>     - \n>       > q'],
+    ['<ol start="10"><li><br><em>abcdefghijklmnopqrstuvwxyz0123456789&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *abcdefghijklmnopqrstuvwxyz0123456789\n*\n    - \n      > q'],
+    ['<ol start="10"><li><br><em>abcdefghij&#10;klmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *abcdefghij\nklmnopqrstuvwxyz\n*\n    - \n      > q'],
+    ['<ol start="123456789"><li><br><em>abcdefghijklmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '123456789.   \n           *abcdefghijklmnopqrstuvwxyz\n*\n           - \n             > q'],
+    ['<ol start="10"><li><br><br><em>x&#10;</em><br><ol><li><br></li><li></li></ol></li></ol>', '10.   \n      \n    *x\n*  \n    1.   \n    2.'],
+    ['<ol start="10"><li><br><br><em>abcdefghijklmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n      \n    *abcdefghijklmnopqrstuvwxyz\n*\n    - \n      > q'],
+  ])('reads a lone closer under an item a bare marker opens across compaction: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
   it.each(['<li><li><br><ol><li>', '_<li><br><ol><li>', '<dl><li><blockquote><ol><li>'])('preserves malformed list spacing after drained markers: %s', async (html) => {
     const expected = htmlToMarkdown(html)
     for (const chunkSize of [1, 3, 7])

@@ -81,6 +81,21 @@ describe.each(engines)('lists $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ol start="10"><li><br><em>x&#10;</em><ul><li></li></ul><p>t</p></li></ol>', '10.   \n    *x\n*\n    -\n\n    t'],
+    ['<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *x\n*\n    - \n      > q'],
+    ['<ol start="123456789"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '123456789.   \n           *x\n*\n           - \n             > q'],
+    ['<blockquote><ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>', '> 10.   \n>     *x\n> *\n>     - \n>       > q'],
+    ['<ul><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-   \n  *x\n*\n  - \n    > q'],
+    ['<ul><li><br><em>x&#10;</em><ol><li><br></li></ol></li></ul>', '-   \n  *x\n*\n  1.'],
+    ['<ol start="10"><li><br><em>a&#10;b&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *a\nb\n*\n    - \n      > q'],
+    ['a<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', 'a\n\n10.   \n    *x\n*\n    - \n      > q'],
+    ['<ol start="10"><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n      \n    *x\n*\n    - \n      > q'],
+  ])('reads a lone closer short of the item a bare marker opens as a marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
     ['* ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n* \n    > q'],
     ['  * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n  * \n    > q'],
     ['    * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n    * \n    > q'],
@@ -562,6 +577,10 @@ describe.each(engines)('open fence in a quoted item $name', (engineConfig) => {
   })
 })
 
+// Main opens the quote on the indent a hard break left. The guard's blank line
+// goes before that indent, out of the quote, and a parent marker that indent
+// pushes past the list's reach is no parent marker, so its nested item keeps
+// the blank line, in both engines.
 describe.each(engines)('quote opened on a hard break indent $name', (engineConfig) => {
   it.each([
     ['<ul><li>a<blockquote><br></blockquote><blockquote><ul><li><blockquote>q</blockquote></li></ul></blockquote></li></ul>', '- a\n  \n\n    > - \n  >   > q'],

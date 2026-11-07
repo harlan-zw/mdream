@@ -6824,3 +6824,59 @@ fn block_on_a_nested_pending_marker_streams_like_one_shot() {
     }
   }
 }
+
+// A drain can take the bare marker line, or it and the paragraph under it,
+// before the lone `*` comes: the paragraph it leaves open must still sit in
+// that item, as one-shot reads it.
+#[test]
+fn lone_closer_under_an_item_opened_by_a_bare_marker_streams() {
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><br><em>x&#10;</em><br><ul><li></li></ul><p>t</p></li></ol>",
+      "10.   \n    *x\n*  \n    -\n\n    t",
+    ),
+    (
+      "<ol start=\"10\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n    *x\n*\n    - \n      > q",
+    ),
+    (
+      "<blockquote><ol start=\"10\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>",
+      "> 10.   \n>     *x\n> *\n>     - \n>       > q",
+    ),
+    (
+      "<ol start=\"10\"><li><br><em>abcdefghijklmnopqrstuvwxyz0123456789&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n    *abcdefghijklmnopqrstuvwxyz0123456789\n*\n    - \n      > q",
+    ),
+    (
+      "<ol start=\"10\"><li><br><em>abcdefghij&#10;klmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n    *abcdefghij\nklmnopqrstuvwxyz\n*\n    - \n      > q",
+    ),
+    (
+      "<ol start=\"123456789\"><li><br><em>abcdefghijklmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "123456789.   \n           *abcdefghijklmnopqrstuvwxyz\n*\n           - \n             > q",
+    ),
+    (
+      "<ul><li>&#10;<em>abcdefghijklmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "- \n*abcdefghijklmnopqrstuvwxyz\n*\n\n  - \n    > q",
+    ),
+    // A second hard break writes a line of spaces under the marker, which a
+    // stream holds back from its buffer, and that leaves the item empty. Text
+    // four columns in past it is code, which the `*` cannot continue.
+    (
+      "<ol start=\"10\"><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n      \n    *x\n*\n    - \n      > q",
+    ),
+    (
+      "<ul><li><br><br><em>abcdefghijklmnopqrstuvwxyz0123456789&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-   \n    \n  *abcdefghijklmnopqrstuvwxyz0123456789\n*\n\n  - \n    > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}

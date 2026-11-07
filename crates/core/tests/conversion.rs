@@ -9642,3 +9642,73 @@ fn nonempty_quote_enter_preserves_literal_spacing() {
     assert_eq!(actual, expected, "split={split}");
   }
 }
+
+// A list marker alone on its line opens an item whose content starts one
+// column past the marker, however many spaces follow it. A paragraph whose
+// first line reaches that column sits in the item, so a lone `*` short of
+// it opens a list of its own and the nested marker needs no blank line.
+#[test]
+fn lone_closer_under_an_item_opened_by_a_bare_marker() {
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><br><em>x&#10;</em><br><ul><li></li></ul><p>t</p></li></ol>",
+      "10.   \n    *x\n*  \n    -\n\n    t",
+    ),
+    (
+      "<ol start=\"10\"><li><br><em>x&#10;</em><ul><li></li></ul><p>t</p></li></ol>",
+      "10.   \n    *x\n*\n    -\n\n    t",
+    ),
+    (
+      "<ol start=\"10\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n    *x\n*\n    - \n      > q",
+    ),
+    (
+      "<ol start=\"123456789\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "123456789.   \n           *x\n*\n           - \n             > q",
+    ),
+    (
+      "<blockquote><ol start=\"10\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>",
+      "> 10.   \n>     *x\n> *\n>     - \n>       > q",
+    ),
+    (
+      "<ul><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-   \n  *x\n*\n  - \n    > q",
+    ),
+    (
+      "<ul><li><br><em>x&#10;</em><ol><li><br></li></ol></li></ul>",
+      "-   \n  *x\n*\n  1.",
+    ),
+    // A lazy line keeps the paragraph in the item, and text before the list
+    // ends at the blank line above its marker.
+    (
+      "<ol start=\"10\"><li><br><em>a&#10;b&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n    *a\nb\n*\n    - \n      > q",
+    ),
+    (
+      "a<ol start=\"10\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "a\n\n10.   \n    *x\n*\n    - \n      > q",
+    ),
+    // A first line short of the item's content column leaves the item, and
+    // the `*` continues the paragraph it opens outside.
+    (
+      "<ul><li>&#10;<em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "- \n*x\n*\n\n  - \n    > q",
+    ),
+    // A line of spaces under the marker leaves the item empty, and text four
+    // columns in past it is code, which the `*` cannot continue.
+    (
+      "<ol start=\"10\"><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n      \n    *x\n*\n    - \n      > q",
+    ),
+    (
+      "<ol start=\"10\"><li><br><br><em>x&#10;</em><br><ol><li><br></li><li></li></ol></li></ol>",
+      "10.   \n      \n    *x\n*  \n    1.   \n    2.",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
