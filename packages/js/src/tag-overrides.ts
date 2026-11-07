@@ -29,6 +29,11 @@ export function buildTagOverrideHandlers(
       handler.enter = () => output
       handler.literalEnter = true
       handler.literalEnterHasOutput = output.length > 0
+      let hashes = 0
+      while (hashes < 7 && output.charCodeAt(hashes) === 35)
+        hashes++
+      handler.literalEnterHeading = hashes > 0 && hashes <= 6
+        && (output.charCodeAt(hashes) === 32 || output.charCodeAt(hashes) === 9)
     }
     if (override.exit !== undefined) {
       const output = override.exit
