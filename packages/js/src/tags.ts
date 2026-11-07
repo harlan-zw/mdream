@@ -1,4 +1,3 @@
-import type { OutputPositions } from './output-positions'
 import type { ElementNode, HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
@@ -125,7 +124,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
+import { blockOpenPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, noteBufferRewrite, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -209,9 +208,105 @@ export const breakHandler: TagHandler = {
   isInline: true,
 }
 
+const LEAD_GAP = 0 // spaces between the run and a list marker or the line start
+const LEAD_DIGITS = 1 // an ordered list marker's number
+const LEAD_INDENT = 2 // indentation before a list marker
+
+// Whether only a block lead precedes `buffer[fragment]` at `cursor` on its line:
+// indentation, then optionally a list marker and its space. Nested items indent
+// past the three spaces `listMarkerLineStart` accepts. Parity with the Rust
+// engine's `opens_block_line`.
+export function opensBlockLine(buffer: string[], fragment: number, cursor: number): boolean {
+  let phase = LEAD_GAP
+  let count = 0
+  for (;;) {
+    if (cursor === 0) {
+      if (--fragment < 0)
+        return phase !== LEAD_DIGITS || count > 0
+      cursor = buffer[fragment]!.length
+      continue
+    }
+    const code = buffer[fragment]!.charCodeAt(--cursor)
+    if (code === 10) // \n
+      return phase !== LEAD_DIGITS || count > 0
+    if (phase === LEAD_DIGITS) {
+      if (code >= 48 && code <= 57) {
+        if (++count > 9)
+          return false
+        continue
+      }
+      if (count === 0)
+        return false
+      phase = LEAD_INDENT
+    }
+    if (code === 32) {
+      if (phase === LEAD_GAP)
+        count++
+      continue
+    }
+    if (phase !== LEAD_GAP || count === 0)
+      return false
+    if (code === 45 || code === 42 || code === 43) { // - * +
+      phase = LEAD_INDENT
+    }
+    else if (code === 46 || code === 41) { // . )
+      phase = LEAD_DIGITS
+      count = 0
+    }
+    else {
+      return false
+    }
+  }
+}
+
+// `opensBlockLine` before the trailing heading run in `buffer[index]`, which
+// every `<div>` that leaves the line unchanged checks again. The walk stops at
+// the first character no block lead holds, or at the buffer start, so the
+// answer is kept with the entries it ends and stops in. Like the caption check, this assumes the
+// entries between those two, all block-lead characters, are not rewritten.
+function markerOpensBlockLine(state: HandlerContext['state'], index: number, marker: number): boolean {
+  const buffer = state.buffer
+  const memo = state.markerLine
+  // Fragments after `index` cannot change the answer, and a rewrite at or
+  // before it drops the memo, so the entries alone decide a hit. Keying on the
+  // buffer length would miss whenever an empty inline leaves a fragment behind.
+  if (memo && memo.index === index
+    && buffer[index] === memo.entry && buffer[memo.stop] === memo.stopEntry) {
+    return memo.opens
+  }
+  const opens = opensBlockLine(buffer, index, marker)
+  let fragment = index
+  let cursor = marker
+  for (;;) {
+    if (cursor === 0) {
+      if (fragment === 0)
+        break
+      cursor = buffer[--fragment]!.length
+    }
+    else if (isLeadChar(buffer[fragment]!.charCodeAt(cursor - 1))) {
+      cursor--
+    }
+    else {
+      break
+    }
+  }
+  state.markerLine = { index, entry: buffer[index]!, stop: fragment, stopEntry: buffer[fragment]!, opens }
+  return opens
+}
+
+// A space, digit or list-marker character a block lead can hold.
+function isLeadChar(code: number): boolean {
+  return code === 32 || (code >= 48 && code <= 57) || code === 45 || code === 42 || code === 43
+    || code === 46 || code === 41
+}
+
 // A `#` run closing a heading is an ATX closing sequence and is dropped by the
-// renderer, so the last one is escaped back into content.
-function escapeTrailingHeadingHashes(buffer: string[], positions?: OutputPositions): void {
+// renderer, so the last one is escaped back into content. A run that only the
+// line's block lead precedes is the heading's own marker instead: the heading
+// is empty, and the marker's trailing space would read as a list item's open
+// content column, joining the next block to the heading's line.
+export function escapeTrailingHeadingHashes(state: HandlerContext['state']): void {
+  const buffer = state.buffer
   let index = buffer.length - 1
   while (index >= 0 && buffer[index] === '')
     index--
@@ -228,16 +323,30 @@ function escapeTrailingHeadingHashes(buffer: string[], positions?: OutputPositio
   if (run === end)
     return
 
-  // Only a run opening the heading content or preceded by whitespace closes it.
-  // Requiring a space also rejects the `## ` prefix entry of an empty heading.
-  const previous = buffer[index - 1]
-  const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
-  if (before !== ' ' && before !== '\t')
-    return
-
-  const replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
-  positions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
+  let replacement: string
+  if (opensBlockLine(buffer, index, run)) {
+    let trimmed = entry.length
+    while (trimmed > end && entry.charCodeAt(trimmed - 1) === 32)
+      trimmed--
+    if (trimmed === entry.length)
+      return
+    replacement = entry.slice(0, trimmed)
+    state.outputPositions?.replace(index, index + 1, [replacement])
+  }
+  else {
+    // Only a run opening the heading content or preceded by whitespace closes it.
+    const previous = buffer[index - 1]
+    const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
+    if (before !== ' ' && before !== '\t')
+      return
+    replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
+    state.outputPositions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
+  }
   buffer[index] = replacement
+  noteBufferRewrite(state)
+  // The processor's trailing-whitespace trim finds the last entry by reference.
+  if (state.lastContentCache === entry)
+    state.lastContentCache = replacement
 }
 
 // What the current output line holds where a table row is about to be written.
@@ -365,7 +474,7 @@ function handleHeading(depth: number): TagHandler {
       if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
         return `</h${depth}>`
       }
-      escapeTrailingHeadingHashes(state.buffer, state.outputPositions)
+      escapeTrailingHeadingHashes(state)
     },
     collapsesInnerWhiteSpace: true,
   }
@@ -531,8 +640,9 @@ export const tagHandlers: Record<number, TagHandler> = {
   [TAG_BLOCKQUOTE]: {
     enter: ({ state }) => {
       // The processor prefixes the completed subtree once every structural
-      // newline is known. Preserve the list marker's trailing space here.
-      const output = (state.depthMap?.[TAG_LI] || 0) > 0 ? '\n' : undefined
+      // newline is known. Preserve the list marker's trailing space here. A
+      // table cell renders its list as raw HTML on the row's own line.
+      const output = (state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state) ? '\n' : undefined
       return { _tag: 'BlockquoteEnter', output }
     },
     exit: () => ({ _tag: 'BlockquoteExit' }),
@@ -877,7 +987,10 @@ export const tagHandlers: Record<number, TagHandler> = {
   },
   [TAG_P]: {
     enter: ({ node, state }) => {
-      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
+      // The fence pays the opening separator. A paragraph inside the code
+      // still needs its separator after the fence has already opened.
+      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)
+        && !state.preFencePending && state.preFenceOpener !== node) {
         const lastEntry = state.buffer[enterOutputEnd(node, state) - 1]
         const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
         if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
@@ -886,7 +999,25 @@ export const tagHandlers: Record<number, TagHandler> = {
       }
     },
   },
-  [TAG_DIV]: {},
+  [TAG_DIV]: {
+    enter: ({ state }) => {
+      if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)) {
+        let index = state.buffer.length - 1
+        while (index >= 0 && state.buffer[index] === '')
+          index--
+        const entry = state.buffer[index] || ''
+        let marker = entry.length
+        // Seven hashes already rule out a marker, so a long retained run is
+        // not rescanned at every div.
+        while (marker > 0 && entry.length - marker < 7 && entry.charCodeAt(marker - 1) === 35)
+          marker--
+        const hashes = entry.length - marker
+        if (hashes > 0 && hashes <= 6 && markerOpensBlockLine(state, index, marker)) {
+          return `\n\n${state.listIndent}`
+        }
+      }
+    },
+  },
   [TAG_SPAN]: {
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
