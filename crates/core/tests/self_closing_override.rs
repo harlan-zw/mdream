@@ -273,6 +273,46 @@ fn open_void_inline_wrapper_still_keeps_block_child_inline() {
 }
 
 #[test]
+fn list_item_heading_under_open_void_keeps_its_block() {
+  // The list keeps its block spacing under the open void, so the void's own
+  // output sits outside the list and pairs nothing across the heading.
+  let html = "<br><ul><li>a<h3>x</h3></li></ul>";
+  assert_converts(html, &[("br", marked(false))], "[\n\n- a\n\n  ### x\n\n]");
+  let enter = TagOverrideConfig {
+    enter: Some("[".to_string()),
+    ..flag(false)
+  };
+  assert_converts(html, &[("br", enter)], "[\n\n- a\n\n  ### x");
+  let exit = TagOverrideConfig {
+    exit: Some("]".to_string()),
+    ..flag(false)
+  };
+  assert_converts(html, &[("br", exit)], "- a\n\n  ### x\n\n]");
+  let strong = TagOverrideConfig {
+    enter: Some("**".to_string()),
+    exit: Some("**".to_string()),
+    ..flag(false)
+  };
+  assert_converts(html, &[("br", strong)], "**\n\n- a\n\n  ### x\n\n**");
+  let image = TagOverrideConfig {
+    enter: Some("<".to_string()),
+    exit: Some(">".to_string()),
+    ..flag(false)
+  };
+  assert_converts(
+    r#"<img src="/i"><ul><li>a<h3>x</h3></li></ul>"#,
+    &[("img", image)],
+    "<\n\n- a\n\n  ### x\n\n>",
+  );
+  // A heading the open void wraps directly still stays inline.
+  assert_converts(
+    "<ul><li>a<br><h3>x</h3></br>b</li></ul>",
+    &[("br", marked(false))],
+    "- a[### x]b",
+  );
+}
+
+#[test]
 fn custom_exit_keeps_spacing_after_its_output() {
   let marked = [(
     "hr",

@@ -6271,22 +6271,32 @@ impl ConvertState {
   /// `emit_exit_element` keeps the flag (the only exit path with overrides).
   #[inline]
   fn block_child_of_open_void(&self, tag_id: Option<u8>, is_enter: bool) -> bool {
-    let Some(id) = tag_id else {
-      return false;
-    };
     let node = if is_enter {
       self.stack.last()
     } else {
       Some(self.stack.retired())
     };
-    if node.is_none_or(|node| node.is_inline) {
+    // On enter the node is the stack top, and it is not one of its own ancestors.
+    let ancestors = self.stack.len().saturating_sub(usize::from(is_enter));
+    node
+      .is_some_and(|node| Self::open_voids_keep_block_child(tag_id, node, &self.stack[..ancestors]))
+  }
+
+  /// [`Self::block_child_of_open_void`] for any open node, given its ancestors.
+  fn open_voids_keep_block_child(
+    tag_id: Option<u8>,
+    node: &ElementNode,
+    ancestors: &[ElementNode],
+  ) -> bool {
+    let Some(id) = tag_id else {
+      return false;
+    };
+    if node.is_inline {
       return false;
     }
     // A span keeps only the block children its own exemption keeps.
     let span_exempt = matches!(id, TAG_P | TAG_DIV | TAG_LI);
-    // On enter the node is the stack top, and it is not one of its own ancestors.
-    let ancestors = self.stack.len().saturating_sub(usize::from(is_enter));
-    self.stack[..ancestors].iter().all(|node| {
+    ancestors.iter().all(|node| {
       if !node.collapses_inner_white_space || node.excluded_from_markdown {
         return true;
       }
@@ -6372,13 +6382,33 @@ impl ConvertState {
   /// around it writes delimiters that pair across its content, which a block
   /// break would split. A raw tag (`<u>`, `<sup>`) or a wrapper that writes
   /// nothing (`<label>`, `<small>`) reads the same either side of it.
+  ///
+  /// The search stops at an open void with a block below it, between it and
+  /// the heading, that kept its block spacing: the void's output, and that of
+  /// any wrapper the block's spacing passed, sits outside that block.
   fn heading_kept_inline_in_item(&self, is_enter: bool) -> bool {
     if !self.caption_frames.is_empty() {
       return true;
     }
-    self.stack[..self.stack.len() - usize::from(is_enter)]
-      .iter()
-      .any(|node| node.collapses_inner_white_space && self.wrapper_writes_delimiters(node))
+    let ancestors = &self.stack[..self.stack.len() - usize::from(is_enter)];
+    let mut block_kept = false;
+    for (depth, node) in ancestors.iter().enumerate().rev() {
+      if block_kept
+        && node
+          .tag_id
+          .and_then(get_tag_handler)
+          .is_some_and(|handler| handler.is_self_closing)
+      {
+        return false;
+      }
+      if node.collapses_inner_white_space && self.wrapper_writes_delimiters(node) {
+        return true;
+      }
+      block_kept = block_kept
+        || (self.has_tag_overrides
+          && Self::open_voids_keep_block_child(node.tag_id, node, &ancestors[..depth]));
+    }
+    false
   }
 
   /// Emphasis, code, strikethrough and quote wrappers, and an override with

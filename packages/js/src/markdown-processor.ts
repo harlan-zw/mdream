@@ -58,7 +58,7 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
-import { isOpenVoidTag } from './parser-tags'
+import { isOpenVoidTag, parserTagHandlers } from './parser-tags'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isBlockChildOfOpenVoid, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
@@ -956,13 +956,20 @@ function collapsedByAncestor(node: ElementNode, state: MarkdownState, eventType:
 // writes delimiters that pair across its content, which a block break would
 // split. A raw tag (`<u>`, `<sup>`) or a wrapper that writes nothing
 // (`<label>`, `<small>`) reads the same either side of it. The caller checks
-// the caption, whose emphasis wraps the heading too. Parity with the Rust
-// engine's `heading_kept_inline_in_item`.
+// the caption, whose emphasis wraps the heading too. The search stops at an
+// open void with a block below it, between it and the heading, that kept its
+// block spacing: the void's output, and that of any wrapper the block's
+// spacing passed, sits outside that block. Parity with the Rust engine's
+// `heading_kept_inline_in_item`.
 function headingKeptInlineInItem(heading: ElementNode): boolean {
+  let blockKept = false
   let parent = heading.parent
   while (parent) {
+    if (blockKept && parent.tagId !== undefined && parserTagHandlers[parent.tagId]?.isSelfClosing)
+      return false
     if (parent.tagId !== TAG_SPAN && parent.tagHandler?.collapsesInnerWhiteSpace && wrapperWritesDelimiters(parent))
       return true
+    blockKept ||= isBlockChildOfOpenVoid(parent)
     parent = parent.parent
   }
   return false
