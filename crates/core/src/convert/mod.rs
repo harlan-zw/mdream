@@ -830,6 +830,9 @@ pub struct ConvertState {
   last_text_node_depth: usize,
   last_text_node_index: usize,
   has_last_text_node: bool,
+  /// The last text node's state outlived a transparent inline exit, held only
+  /// for an enclosing delimiter to trim its tail.
+  last_text_node_held: bool,
   last_node_is_inline: bool,
   /// A collapsed trailing space trimmed from the end of an inline element.
   /// It stays deferred until later visible inline content appears so Markdown
@@ -1163,6 +1166,7 @@ impl ConvertState {
       last_text_node_depth: 0,
       last_text_node_index: 0,
       has_last_text_node: false,
+      last_text_node_held: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
       caption_boundary: CaptionBoundary::None,

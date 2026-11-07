@@ -1528,6 +1528,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let rawHtmlLink: ElementNode | undefined
 
   let hasYieldedContent = false
+  // `state.lastTextNode` outlived a transparent inline exit, held only for an
+  // enclosing delimiter to trim its tail.
+  let heldTextTail = false
 
   function captionNeedsPreparation(): boolean {
     return captionBoundary !== 0
@@ -1954,6 +1957,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
     state.lastTextNode = textNode
+    heldTextTail = false
   }
 
   /**
@@ -2534,6 +2538,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (newLines > 0) {
+      // A tail held past a transparent exit ends here: kept, a later trim
+      // would take this boundary's output for that tail.
+      if (heldTextTail) {
+        state.lastTextNode = undefined
+        heldTextTail = false
+      }
       if (!buff.length && !captionEvent && !captionTransition) {
         if (output) {
           for (const fragment of output) {
@@ -2636,6 +2646,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // spent: kept, it would trim the next output, such as a break's.
           if (eventType !== NodeEventExit || !isInlineElement || handler?.literalExit || output || !state.lastContentCache)
             state.lastTextNode = undefined
+          else
+            heldTextTail = true
         }
       }
     }

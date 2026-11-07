@@ -307,6 +307,23 @@ fn transparent_wrappers_preserve_the_formatting_whitespace_tail() {
 }
 
 #[test]
+fn a_block_in_a_wrapper_keeps_its_separator_after_a_held_tail() {
+  // The tail a transparent exit holds ends at the block's boundary, so the
+  // outer wrapper's exit leaves the separator the boundary wrote.
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<span><p><span>x </span></p></span>z", "x\n\nz"),
+    ("<span><p><span>x\t</span></p></span>z", "x\n\nz"),
+    ("<span><h3><span>x </span></h3></span>z", "### x\n\nz"),
+    ("<div><span><p><span>x </span></p></span>z</div>", "x\n\nz"),
+    ("<span><p><span>x y</span></p></span>z", "x y\n\nz"),
+    ("<span><p><span>x&nbsp;</span></p></span>z", "x\u{a0}\n\nz"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
 fn a_break_after_a_whitespace_only_wrapper_keeps_its_line_end() {
   let markdown = HtmlToMarkdownOptions::default();
   for (html, expected_markdown, expected_text) in [

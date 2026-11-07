@@ -27,6 +27,27 @@ describe('inline whitespace', () => {
     }
   })
 
+  it.each([
+    ['<span><p><span>x </span></p></span>z', 'x\n\nz'],
+    ['<span><p><span>x\t</span></p></span>z', 'x\n\nz'],
+    ['<span><h3><span>x </span></h3></span>z', '### x\n\nz'],
+    ['<div><span><p><span>x </span></p></span>z</div>', 'x\n\nz'],
+    ['<span><p><span>x y</span></p></span>z', 'x y\n\nz'],
+    ['<span><p><span>x&nbsp;</span></p></span>z', 'x \n\nz'],
+  ])('keeps a block separator inside a wrapper after a held tail: %j', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let size = 1; size <= html.length; size++) {
+      const chunks: string[] = []
+      for (let index = 0; index < html.length; index += size)
+        chunks.push(html.slice(index, index + size))
+      expect(await streamConvert(chunks), `chunk size ${size}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++) {
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split at ${split}`)
+        .toBe(expected)
+    }
+  })
+
   it('keeps literal source whitespace before visible plugin content ending in a break', async () => {
     const html = '<p>a <br>b</p>'
     const options = {

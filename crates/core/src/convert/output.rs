@@ -2796,6 +2796,7 @@ impl ConvertState {
     self.last_text_node_in_pre = self.depth_map[TAG_PRE as usize] > 0;
     self.last_text_output_range = start.map(|start| (start, self.buffer.len()));
     self.has_last_text_node = true;
+    self.last_text_node_held = false;
     self.last_text_node_depth = depth;
     self.last_text_node_index = index;
     self.last_node_is_inline = false;
@@ -5435,6 +5436,13 @@ impl ConvertState {
     let mut new_lines = configured_new_lines.saturating_sub(last_new_lines);
 
     if new_lines > 0 {
+      // A tail held past a transparent exit ends here: kept, a later trim
+      // would take this boundary's output for that tail.
+      if self.last_text_node_held {
+        self.last_text_node_contains_whitespace = false;
+        self.has_last_text_node = false;
+        self.last_text_node_held = false;
+      }
       // An empty buffer at true document start has no preceding block to
       // separate from, so the leading block newlines are suppressed. Mid-stream
       // the buffer can be empty only because earlier output was already yielded
@@ -5565,6 +5573,8 @@ impl ConvertState {
         if plain_text!(self) || is_enter || !is_inline || literal || !output_str.is_empty() {
           self.last_text_node_contains_whitespace = false;
           self.has_last_text_node = false;
+        } else {
+          self.last_text_node_held = true;
         }
       }
 
