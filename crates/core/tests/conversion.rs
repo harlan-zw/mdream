@@ -9488,6 +9488,13 @@ fn lone_closer_with_a_nested_marker_past_its_paragraph() {
       "<ol start=\"10\"><li>&#10;<em>x&#10;</em><ul><li></li></ul></li></ol>",
       "10. \n*x\n*\n    -",
     ),
+    // Past a blank line a paragraph's column is no deeper than where its
+    // first line starts, here inside the item: a marker there can still
+    // underline it, so it keeps the blank line.
+    (
+      "<ol start=\"10\"><li><ol><li>a</li></ol><em>k<br></em><ul><li><br>x</li></ul></li></ol>",
+      "10.\n    1. a\n\n    *k  \n    *\n\n    -   \n      x",
+    ),
   ] {
     assert_eq!(
       html_to_markdown(html, HtmlToMarkdownOptions::default()),

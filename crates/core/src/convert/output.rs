@@ -3959,9 +3959,10 @@ impl ConvertState {
   }
 
   /// How a lone `*` or `+` at `closer`, after `indent` spaces, reads: `None`
-  /// when it reads as a list marker, or the column of the paragraph it goes
-  /// on with when it reads as text continuing that paragraph, such as an
-  /// emphasis closer. Right after a `\r` it starts a line of its own. Past a
+  /// when it reads as a list marker, or, when it reads as text continuing the
+  /// paragraph above, such as an emphasis closer, where that paragraph's first
+  /// line starts its content: no column of the item the paragraph goes on in
+  /// is past that one. Right after a `\r` it starts a line of its own. Past a
   /// line feed it reads as a marker when no paragraph goes on above it, or
   /// when it sits short of that paragraph's column: the column of the item
   /// content the paragraph starts with, or zero outside an item. A paragraph
@@ -4049,10 +4050,12 @@ impl ConvertState {
     // empty item never does. The line goes on with the paragraph when it
     // reaches the paragraph's column, and opens a list of its own otherwise;
     // its indent and its answer as a marker wait for that column.
-    let mut pending: Option<(usize, Option<usize>)> = None;
-    let column = loop {
+    let mut pending: Option<(usize, Option<usize>, usize)> = None;
+    // Each answer comes with where the paragraph's first line starts its
+    // content.
+    let (column, first_content) = loop {
       if quote.is_some() && line_end <= quote_start {
-        break below;
+        break (below, top);
       }
       // The `\n` of a `\r\n` split across cuts ends a line a drain took.
       let split_crlf = line_end == 1
@@ -4065,22 +4068,27 @@ impl ConvertState {
           Paragraph::Spaced { spaces, chain, .. }
             if hard_break && below.is_none() && !(chain && break_run(spaces, under)) =>
           {
-            None
+            (None, top)
           }
-          Paragraph::Open(column) | Paragraph::Spaced { column, .. } => Some(column),
+          Paragraph::Open { column, first } | Paragraph::Spaced { column, first, .. } => {
+            (Some(column), first)
+          }
           Paragraph::Bare { column, code } => {
-            under_marker(below, top, first, shallow, column, code)
+            (under_marker(below, top, first, shallow, column, code), top)
           }
           // The paragraph starts at the first text line the drain took.
-          Paragraph::Code { code, top: drained } => under_marker(
-            below,
+          Paragraph::Code { code, top: drained } => (
+            under_marker(
+              below,
+              drained.unwrap_or(top),
+              None,
+              shallow,
+              usize::MAX,
+              code,
+            ),
             drained.unwrap_or(top),
-            None,
-            shallow,
-            usize::MAX,
-            code,
           ),
-          Paragraph::Closed => below,
+          Paragraph::Closed => (below, top),
         };
       }
       // `\r\n` is a single line ending.
@@ -4100,7 +4108,7 @@ impl ConvertState {
         && bytes[line_start - 1] == b'\r'
         && !paragraph_line_ends_at(bytes, quote_start, line_start - 1)
       {
-        break below;
+        break (below, top);
       }
       // The quote's first line counts from where its content starts.
       let first_quoted = quote.is_some() && line_start < quote_start;
@@ -4116,7 +4124,7 @@ impl ConvertState {
         LineRead::START
       };
       match read.extend(&bytes[begin..end]).end() {
-        LineKind::Blank => break below,
+        LineKind::Blank => break (below, top),
         // A stream keeps the lines of spaces a run of hard breaks writes out
         // of its buffer.
         LineKind::Marker {
@@ -4137,45 +4145,49 @@ impl ConvertState {
             || first_quoted
             || !self.paragraph_text_above(bytes, line_start, quote.map(|(start, _)| start))
           {
-            break answer;
+            break (answer, top);
           }
-          pending = Some((relative(indent, indent), answer));
+          pending = Some((relative(indent, indent), answer, top));
           below = Some(0);
           first = Some(indent);
           top = relative(indent, indent);
           shallow = shallow.min(top);
           line_end = line_start;
         }
-        LineKind::Spaces(_) if first_quoted => break below,
+        LineKind::Spaces(_) if first_quoted => break (below, top),
         // A line of spaces that a run of hard breaks did not write, such as
         // the indent of a hard break that a line feed of the text ends, is
         // blank. With a hard break after the `*`, it ends the paragraph.
         LineKind::Spaces(spaces) if hard_break && below.is_none() && !break_run(spaces, under) => {
-          break below;
+          break (below, top);
         }
         LineKind::Spaces(spaces) => {
           under = (spaces, true);
           first = None;
           line_end = line_start;
         }
-        LineKind::Item { indent, column } => break Some(relative(column, indent)),
+        LineKind::Item { indent, column } => {
+          break (Some(relative(column, indent)), relative(column, indent));
+        }
         LineKind::Text(indent) => {
           below = Some(0);
           first = Some(indent);
           top = relative(indent, indent);
           shallow = shallow.min(top);
           if first_quoted {
-            break below;
+            break (below, top);
           }
           line_end = line_start;
         }
       }
     };
-    let column = match pending {
-      Some((marker, answer)) if column.is_none_or(|column| marker < column) => answer,
-      _ => column,
+    let (column, first_content) = match pending {
+      Some((marker, answer, top)) if column.is_none_or(|column| marker < column) => (answer, top),
+      _ => (column, first_content),
     };
-    column.filter(|&column| relative(indent, indent) >= column)
+    column
+      .filter(|&column| relative(indent, indent) >= column)
+      .map(|_| first_content)
   }
 
   /// Whether the line above the one starting at `line_start` holds paragraph
@@ -4191,7 +4203,7 @@ impl ConvertState {
       return false;
     }
     if line_start == 0 {
-      return self.has_flushed_tail() && matches!(self.drained_paragraph, Paragraph::Open(_));
+      return self.has_flushed_tail() && matches!(self.drained_paragraph, Paragraph::Open { .. });
     }
     let mut end = line_start - 1;
     if bytes[end] == b'\n' && end > 0 && bytes[end - 1] == b'\r' {
@@ -7391,6 +7403,7 @@ mod tests {
     state.flushed_tail = *b" \n";
     state.drained_paragraph = Paragraph::Spaced {
       column: 2,
+      first: 2,
       spaces: 2,
       chain: true,
     };
@@ -7398,6 +7411,7 @@ mod tests {
     assert!(state.lone_closer_paragraph(b"  *", 2, 2, true).is_none());
     state.drained_paragraph = Paragraph::Spaced {
       column: 2,
+      first: 2,
       spaces: 4,
       chain: true,
     };
@@ -7427,11 +7441,9 @@ mod tests {
       column: 2,
       code: 4,
     };
-    assert_eq!(Paragraph::Open(0).then(marker), Paragraph::Open(0));
-    assert_eq!(
-      Paragraph::Open(2).then(marker),
-      Paragraph::Bare { column: 2, code: 4 }
-    );
+    let open = |column| Paragraph::Open { column, first: 0 };
+    assert_eq!(open(0).then(marker), open(0));
+    assert_eq!(open(2).then(marker), Paragraph::Bare { column: 2, code: 4 });
   }
 
   /// An open list item whose buffer a drain emptied: the item's content line

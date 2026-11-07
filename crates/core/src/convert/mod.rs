@@ -544,14 +544,17 @@ pub(super) enum Paragraph {
   /// all indented to `code`, are code. `top` is the indent of the first text
   /// line among them, where a paragraph that goes on below would start.
   Code { code: usize, top: Option<usize> },
-  /// One inside an item at this column, or at column zero outside an item.
-  Open(usize),
-  /// One open at `column` with lines of spaces only after it, the last one
-  /// `spaces` long. They end it for a `*` that a hard break follows unless a
-  /// run of hard breaks wrote them all, which `chain` says the lines above the
-  /// last one allow.
+  /// One inside an item at this column, or at column zero outside an item
+  /// or past a blank line, whose first line's content starts at `first`: no
+  /// column of the item it goes on in is past that.
+  Open { column: usize, first: usize },
+  /// One open at `column` from `first` with lines of spaces only after it,
+  /// the last one `spaces` long. They end it for a `*` that a hard break
+  /// follows unless a run of hard breaks wrote them all, which `chain` says
+  /// the lines above the last one allow.
   Spaced {
     column: usize,
+    first: usize,
     spaces: usize,
     chain: bool,
   },
@@ -672,38 +675,50 @@ impl Paragraph {
     match (self, line) {
       (_, LineKind::Blank) => Self::Closed,
       // An empty item cannot interrupt a paragraph it reaches the column of.
-      (Self::Open(column), LineKind::Marker { indent, .. }) if indent >= column => {
-        Self::Open(column)
+      (Self::Open { column, first }, LineKind::Marker { indent, .. }) if indent >= column => {
+        Self::Open { column, first }
       }
       (_, LineKind::Marker { column, code, .. }) => Self::Bare { column, code },
       // A line of spaces under a marker alone leaves its item empty.
       (Self::Bare { code, .. }, LineKind::Spaces(_)) => Self::Code { code, top: None },
       (Self::Code { code, top }, LineKind::Spaces(_)) => Self::Code { code, top },
       (Self::Closed, LineKind::Spaces(_)) => Self::Closed,
-      (Self::Open(column), LineKind::Spaces(spaces)) => Self::Spaced {
+      (Self::Open { column, first }, LineKind::Spaces(spaces)) => Self::Spaced {
         column,
+        first,
         spaces,
         chain: true,
       },
       (
         Self::Spaced {
           column,
+          first,
           spaces: above,
           chain,
         },
         LineKind::Spaces(spaces),
       ) => Self::Spaced {
         column,
+        first,
         spaces,
         chain: chain && (above == spaces || above == spaces + 2),
       },
-      (_, LineKind::Item { column, .. }) => Self::Open(column),
-      (Self::Closed, LineKind::Text(_)) => Self::Open(0),
+      (_, LineKind::Item { column, .. }) => Self::Open {
+        column,
+        first: column,
+      },
+      (Self::Closed, LineKind::Text(indent)) => Self::Open {
+        column: 0,
+        first: indent,
+      },
       // Text reaching the item's content column goes on in that item. Past
       // an empty item, text indented to the code column is code, and text
       // reaching the column of the marker's list goes on in the item that
       // holds that list.
-      (Self::Bare { column, .. }, LineKind::Text(indent)) if indent >= column => Self::Open(column),
+      (Self::Bare { column, .. }, LineKind::Text(indent)) if indent >= column => Self::Open {
+        column,
+        first: indent,
+      },
       (Self::Bare { code, .. }, LineKind::Text(indent)) if indent >= code => Self::Code {
         code,
         top: Some(indent),
@@ -712,10 +727,18 @@ impl Paragraph {
         code,
         top: top.or(Some(indent)),
       },
-      (Self::Bare { code, .. } | Self::Code { code, .. }, LineKind::Text(indent)) => {
-        Self::Open(if indent + 4 >= code { code - 4 } else { 0 })
+      // The paragraph starts at the first text line under the marker.
+      (Self::Bare { code, .. }, LineKind::Text(indent)) => Self::Open {
+        column: if indent + 4 >= code { code - 4 } else { 0 },
+        first: indent,
+      },
+      (Self::Code { code, top }, LineKind::Text(indent)) => Self::Open {
+        column: if indent + 4 >= code { code - 4 } else { 0 },
+        first: top.unwrap_or(indent),
+      },
+      (Self::Open { column, first } | Self::Spaced { column, first, .. }, LineKind::Text(_)) => {
+        Self::Open { column, first }
       }
-      (Self::Open(column) | Self::Spaced { column, .. }, LineKind::Text(_)) => Self::Open(column),
     }
   }
 }
