@@ -136,6 +136,7 @@ describe('streaming drain parity', () => {
   it.each([
     ['<strong><em><ul><li>x</li><li>-1<br><em><br><ul><li></li></ul>ab</em></li></ul></em></strong>', '***- x - -1  \n  *  \n    - ab****'],
     ['<ol start="10"><li>&#10;<em>x&#10;</em><ul><li></li></ul></li></ol>', '10. \n*x\n*\n    -'],
+    ['<ol start="10"><li><ol><li>a</li></ol><em>k<br></em><ul><li><br>x</li></ul></li></ol>', '10.\n    1. a\n\n    *k  \n    *\n\n    -   \n      x'],
   ])('keeps a nested marker past the paragraph of a lone `*` as its text: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
     for (let chunkSize = 1; chunkSize <= 16; chunkSize++)

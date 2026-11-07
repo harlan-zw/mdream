@@ -143,6 +143,8 @@ export interface MarkdownState {
   compactedCode?: number
   /** The indent of the first text line among those code lines. */
   compactedTop?: number
+  /** Where the first line of the paragraph left open starts its content. */
+  compactedFirst?: number
   /** The dropped bytes end in a CR, whose LF may follow in the buffer. */
   compactedCr?: boolean
   /** Fragment for a marker line at risk of becoming a setext underline. */
@@ -617,6 +619,8 @@ interface ParagraphFold {
   code?: number
   /** The indent of the first text line among those code lines. */
   top?: number
+  /** Where the open paragraph's first line starts its content: no column of the item it goes on in is past that. */
+  first?: number
 }
 
 /**
@@ -659,12 +663,14 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
   }
   else if (line.kind === 3) {
     fold.paragraph = line.column
+    fold.first = line.column
   }
   else if (paragraph !== undefined) {
     fold.paragraph = paragraph < 0 ? -paragraph - 1 : paragraph
   }
   else if (item !== undefined && line.indent >= item) {
     fold.paragraph = item
+    fold.first = line.indent
   }
   else if (code !== undefined && line.indent >= code) {
     fold.code = code
@@ -672,8 +678,10 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
   }
   else {
     // Text reaching the column of the marker's list goes on in the item that
-    // holds that list.
+    // holds that list. The paragraph starts at the first text line under the
+    // marker.
     fold.paragraph = code !== undefined && line.indent + 4 >= code ? code - 4 : 0
+    fold.first = item === undefined && top !== undefined ? top : line.indent
   }
 }
 
@@ -689,7 +697,7 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
   if (cut === 0)
     return
   let read = state.compactedRead ?? LINE_START
-  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, chain: state.compactedChain, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop }
+  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, chain: state.compactedChain, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop, first: state.compactedFirst }
   let start = 0
   for (let at = 0; at < cut; at++) {
     const code = text.charCodeAt(at)
@@ -708,6 +716,7 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
   state.compactedItem = fold.item
   state.compactedCode = fold.code
   state.compactedTop = fold.top
+  state.compactedFirst = fold.first
   if (cut > 0)
     state.compactedCr = text.charCodeAt(cut - 1) === 13
 }
@@ -720,9 +729,11 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
  * when it sits short of that paragraph's column: the column of the item
  * content the paragraph starts with, or zero outside an item. Such a line falls
  * out of the paragraph's container and opens a list of its own. Columns count
- * inside the quote that holds the `*`. Returns the column of the paragraph it
- * goes on with as text, infinity when text before it on its line leaves no
- * column to pass, or `undefined` when it reads as a marker.
+ * inside the quote that holds the `*`. Returns, when it reads as text, where
+ * the first line of the paragraph it goes on with starts its content: no
+ * column of the item that paragraph goes on in is past that one. Infinity
+ * when text before it on its line leaves no column to pass, and `undefined`
+ * when it reads as a marker.
  */
 function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: number, indent: number, hardBreak: boolean): number | undefined {
   const buffer = state.buffer
@@ -784,10 +795,12 @@ function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: num
   // item never does. The line goes on with the paragraph when it reaches the
   // paragraph's column, and opens a list of its own otherwise; its indent and
   // its answer as a marker wait for that column.
-  let pending: { indent: number, answer: number | undefined } | undefined
-  const decide = (found: number | undefined) => {
-    const column = pending && (found === undefined || pending.indent < found) ? pending.answer : found
-    return column === undefined || relative(indent, indent) < column ? undefined : column
+  let pending: { indent: number, answer: number | undefined, top: number } | undefined
+  // Each answer comes with where the paragraph's first line starts its content.
+  const decide = (found: number | undefined, start: number) => {
+    const marker = pending && (found === undefined || pending.indent < found) ? pending : undefined
+    const column = marker ? marker.answer : found
+    return column === undefined || relative(indent, indent) < column ? undefined : marker ? marker.top : start
   }
   // Whether the line above the one just read, which `ending` ends, holds
   // paragraph text, read within the quote. Past the buffer start the
@@ -840,26 +853,28 @@ function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: num
   let underSpaces = false
   const blank = (spaces: number | undefined, chain = true) => hardBreak && below === undefined
     && !(chain && (spaces === under + 2 || (underSpaces && spaces === under)))
-  const compacted = () => {
+  const compacted = (): number | undefined => {
     const paragraph = state.compactedParagraph
     // The paragraph starts at the first text line the compaction dropped.
     if (paragraph === undefined && state.compactedCode !== undefined)
-      return underMarker(state.compactedItem ?? Infinity, state.compactedCode, state.compactedTop ?? top)
-    return paragraph !== undefined && paragraph < 0
+      return decide(underMarker(state.compactedItem ?? Infinity, state.compactedCode, state.compactedTop ?? top), state.compactedTop ?? top)
+    if (paragraph === undefined)
+      return decide(below, top)
+    return decide(paragraph < 0
       ? blank(state.compactedSpaces, state.compactedChain !== false) ? undefined : -paragraph - 1
-      : paragraph ?? below
+      : paragraph, state.compactedFirst ?? 0)
   }
   for (;;) {
     if (quote && (code === -1 || at < quoteFragment))
-      return decide(below)
+      return decide(below, top)
     // A compaction dropped the lines above whole: the paragraph they left answers.
     if (code === -1)
-      return decide(compacted())
+      return compacted()
     // CRLF is a single line ending; the LF of one split across compactions
     // ends a line a compaction dropped.
     let char = back()
     if (code === 10 && char === -1 && state.compactedCr === true)
-      return decide(compacted())
+      return compacted()
     if (code === 10 && char === 13)
       char = back()
     let line = ''
@@ -877,7 +892,7 @@ function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: num
     // on with a paragraph of the quote, the quote ends there and the `*` sits
     // in one that opens below it.
     if (quote && char === 13 && !firstQuoted && !paragraphLineAbove())
-      return decide(below)
+      return decide(below, top)
     // A compaction may have dropped the start of the buffer's first line.
     const read = endLineRead(extendLineRead(char === -1 && !firstQuoted ? state.compactedRead ?? LINE_START : LINE_START, line))
     if (read.kind === 0 && read.indent > 0 && !firstQuoted && !blank(read.indent)) {
@@ -894,8 +909,8 @@ function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: num
       const answer = underMarker(relative(read.column + 1, read.indent), relative((read.outer >= 0 ? read.outer : read.indent) + 4, read.indent))
       first = saved
       if (pending || firstQuoted || (quote && at < quoteFragment) || !textAbove(char))
-        return decide(answer)
-      pending = { indent: relative(read.indent, read.indent), answer }
+        return decide(answer, top)
+      pending = { indent: relative(read.indent, read.indent), answer, top }
       below = 0
       first = read.indent
       top = relative(read.indent, read.indent)
@@ -904,15 +919,15 @@ function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: num
       continue
     }
     if (read.kind === 0)
-      return decide(below)
+      return decide(below, top)
     if (read.kind === 3)
-      return decide(relative(read.column, read.indent))
+      return decide(relative(read.column, read.indent), relative(read.column, read.indent))
     below = 0
     first = read.indent
     top = relative(read.indent, read.indent)
     shallow = Math.min(shallow, top)
     if (firstQuoted)
-      return decide(below)
+      return decide(below, top)
     code = char
   }
 }
@@ -2205,6 +2220,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     compactedItem: undefined,
     compactedCode: undefined,
     compactedTop: undefined,
+    compactedFirst: undefined,
     compactedCr: undefined,
     lastItemMarkerOwner: undefined,
     collapseNonSpanDepth: 0,
