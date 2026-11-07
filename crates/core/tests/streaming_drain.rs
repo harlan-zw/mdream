@@ -6901,3 +6901,33 @@ fn lone_closer_under_an_item_opened_by_a_bare_marker_streams() {
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
+
+// The blank line a line feed of the text leaves under a hard break's indent
+// reads the same in every cut. A drain that takes the first text line under
+// an empty item, indented to its code column, still reads the paragraph from
+// that line, as one-shot does.
+#[test]
+fn lone_closer_under_a_blank_line_of_the_text_streams() {
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol>",
+      "10. \n*x  \n    \n*  \n    -",
+    ),
+    (
+      "<blockquote><ol start=\"10\"><li><br>&#13;<em>x&#10;</em><br><ul><li></li></ul></li></ol></blockquote>",
+      "> 10.   \n>     \r*x\n> *  \n>     -",
+    ),
+    (
+      "<ul><li><ol start=\"10\"><li><br><br><em>x&#10;klmnopqrstuvwxyz&#10;</em><br><ul><li></li></ul></li></ol></li></ul>",
+      "-\n  10.   \n        \n      *x\nklmnopqrstuvwxyz\n*  \n      -",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}

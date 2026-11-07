@@ -1,5 +1,5 @@
 import type { OutputPositions } from './output-positions'
-import type { Cleaner, CleanView, ElementNode, EngineOptions, GfmAction, Node, NodeEvent, PluginContext, TagHandler, TextNode } from './types'
+import type { Cleaner, CleanView, ElementNode, EngineOptions, GfmAction, MarkerLineMemo, Node, NodeEvent, PluginContext, TagHandler, TextNode } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -60,7 +60,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -121,6 +121,8 @@ export interface MarkdownState {
   preFenceOwnerDepth?: number
   /** Open fenced block whose delimiter is finalized after its content is known. */
   codeFence?: CodeFence
+  /** A `<div>`'s cached heading-marker check; see `noteBufferRewrite`. */
+  markerLine?: MarkerLineMemo
   /** Internal observer used by the splitter to track the fence actually opened. */
   onCodeFenceOpen?: (language: string) => void
   /** Open blockquotes buffered until every child line can receive its prefix. */
@@ -131,10 +133,14 @@ export interface MarkdownState {
   compactedRead?: LineRead
   /** Open paragraph column; -(column + 1) retains it across a space-only line. */
   compactedParagraph?: number
+  /** How many spaces that space-only line holds. */
+  compactedSpaces?: number
   /** Content column of the item a marker alone on the last dropped line opens, with no paragraph yet. */
   compactedItem?: number
   /** With no paragraph open after such a marker, the indent from which lines are code. */
   compactedCode?: number
+  /** The indent of the first text line among those code lines. */
+  compactedTop?: number
   /** The dropped bytes end in a CR, whose LF may follow in the buffer. */
   compactedCr?: boolean
   /** Fragment for a marker line at risk of becoming a setext underline. */
@@ -399,18 +405,25 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   let lineFeeds = 0
   let previous = 0
   let lineAboveOnly = false
+  let trailingSpaces = 0
   for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
     const value = state.buffer[fragment]!
     for (let cursor = value.length - 1; cursor >= 0; cursor--) {
       const code = value.charCodeAt(cursor)
       if (code === 32 || (code === 10 && !lineAboveOnly)) {
-        if (code === 10)
+        if (code === 10) {
           lineFeeds++
+          trailingSpaces = 0
+        }
+        else {
+          trailingSpaces++
+        }
         previous = code
         continue
       }
       if (code === 13 && !lineAboveOnly && (lineFeeds === 0 ? afterCr : lineFeeds === 1 && previous === 10)) {
         lineAboveOnly = true
+        trailingSpaces = 0
         continue
       }
       // A direct first-child list cannot have inserted content before its
@@ -447,10 +460,8 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
         if (before === 13 && indent > 0)
           indent--
         // After a lone CR this marker sits past a space only the blank line
-        // takes away, which leaves it short of the lines indented under it. A
-        // hard break after the `*` changes nothing here: its line keeps the
-        // blank line under it like any hard break line does.
-        readsAsMarker = !afterCr && loneCloserReadsAsMarker(state, fragment, cursor, indent, false)
+        // takes away, which leaves it short of the lines indented under it.
+        readsAsMarker = !afterCr && loneCloserReadsAsMarker(state, fragment, cursor, indent, trailingSpaces >= 2)
       }
       state.emptyItemFragment = (recordedParent || (readsAsMarker && listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3)))
         ? undefined
@@ -466,8 +477,9 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
  * later compaction can carry the reading on. `kind` is 0 while only spaces
  * came, 1 inside an ordered marker's digits, 2 after a marker and `count`
  * spaces, 3 for an item whose content starts at `column`, 4 for other text.
- * A whole line of spaces is the one a run of hard breaks leaves: a stream can
- * write it after the line below it, so the rule reads past it.
+ * A run of hard breaks leaves whole lines of spaces, each the indent of the
+ * line under it and two spaces more: a stream can write them after the line
+ * below, so the rule reads past them.
  */
 export interface LineRead {
   kind: number
@@ -561,10 +573,14 @@ function endLineRead(read: LineRead): LineRead {
 interface ParagraphFold {
   /** Its column; -(column + 1) retains it across a space-only line. */
   paragraph?: number
+  /** How many spaces that space-only line holds. */
+  spaces?: number
   /** Right under a marker alone, the content column of the item it opens. */
   item?: number
   /** With no paragraph open after such a marker, the indent from which lines are code. */
   code?: number
+  /** The indent of the first text line among those code lines. */
+  top?: number
 }
 
 /**
@@ -577,15 +593,21 @@ interface ParagraphFold {
  */
 function foldLine(fold: ParagraphFold, read: LineRead): void {
   const line = endLineRead(read)
-  const { paragraph, item, code } = fold
+  const { paragraph, item, code, top } = fold
   fold.item = undefined
   fold.code = undefined
+  fold.top = undefined
   // A negative column remembers spaces above a possible hard-break closer.
   if (line.kind === 0 && line.indent > 0) {
-    if (paragraph === undefined)
+    if (paragraph === undefined) {
       fold.code = code
-    else if (paragraph >= 0)
-      fold.paragraph = -paragraph - 1
+      fold.top = item === undefined ? top : undefined
+    }
+    else {
+      if (paragraph >= 0)
+        fold.paragraph = -paragraph - 1
+      fold.spaces = line.indent
+    }
   }
   else if (line.kind === 0) {
     fold.paragraph = undefined
@@ -606,6 +628,7 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
   }
   else if (code !== undefined && line.indent >= code) {
     fold.code = code
+    fold.top = item === undefined && top !== undefined ? top : line.indent
   }
   else {
     // Text reaching the column of the marker's list goes on in the item that
@@ -622,7 +645,7 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
  */
 export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
   let read = state.compactedRead ?? LINE_START
-  const fold: ParagraphFold = { paragraph: state.compactedParagraph, item: state.compactedItem, code: state.compactedCode }
+  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop }
   let start = 0
   for (let at = 0; at < cut; at++) {
     const code = text.charCodeAt(at)
@@ -636,8 +659,10 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
   }
   state.compactedRead = extendLineRead(read, text.slice(start, cut))
   state.compactedParagraph = fold.paragraph
+  state.compactedSpaces = fold.spaces
   state.compactedItem = fold.item
   state.compactedCode = fold.code
+  state.compactedTop = fold.top
   if (cut > 0)
     state.compactedCr = text.charCodeAt(cut - 1) === 13
 }
@@ -675,6 +700,28 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
     }
     return buffer[at]!.charCodeAt(--offset)
   }
+  // Whether the line ending at the CR just read holds paragraph text, read
+  // within the quote. Past the buffer start it counts as text, as before.
+  const paragraphLineAbove = (): boolean => {
+    const savedAt = at
+    const savedOffset = offset
+    let text = ''
+    let char = -2
+    for (;;) {
+      if (at === quoteFragment && offset === 0)
+        break
+      char = back()
+      if (char === -1 || char === 10 || char === 13)
+        break
+      text = String.fromCharCode(char) + text
+    }
+    at = savedAt
+    offset = savedOffset
+    if (char === -1)
+      return true
+    const kind = endLineRead(extendLineRead(LINE_START, text)).kind
+    return kind === 3 || kind === 4
+  }
   let code = back()
   while (code === 32)
     code = back()
@@ -697,17 +744,22 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
   // indented to `code` past it are code, which no `*` continues, and a first
   // line four columns short of `code` reaches the marker's own list, so the
   // paragraph goes on in the item that holds that list.
-  const underMarker = (column: number, code: number) => below === undefined
+  const underMarker = (column: number, code: number, lead = top) => below === undefined
     ? undefined
     : first !== undefined && first >= column
       ? column
-      : shallow >= code ? undefined : top + 4 >= code ? code - 4 : below
+      : shallow >= code ? undefined : lead + 4 >= code ? code - 4 : below
+  // A line of spaces that a run of hard breaks did not write, such as the
+  // indent of a hard break that a line feed of the text ends, is blank. With a
+  // hard break after the `*`, it ends the paragraph.
+  const blank = (spaces: number | undefined) => hardBreak && below === undefined && spaces !== indent + 2
   const compacted = () => {
     const paragraph = state.compactedParagraph
+    // The paragraph starts at the first text line the compaction dropped.
     if (paragraph === undefined && state.compactedCode !== undefined)
-      return underMarker(state.compactedItem ?? Infinity, state.compactedCode)
+      return underMarker(state.compactedItem ?? Infinity, state.compactedCode, state.compactedTop ?? top)
     return paragraph !== undefined && paragraph < 0
-      ? hardBreak && below === undefined ? undefined : -paragraph - 1
+      ? blank(state.compactedSpaces) ? undefined : -paragraph - 1
       : paragraph ?? below
   }
   for (;;) {
@@ -734,11 +786,14 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
       }
       char = back()
     }
+    // A lone CR starts a line the quote's prefix skips. Unless that line goes
+    // on with a paragraph of the quote, the quote ends there and the `*` sits
+    // in one that opens below it.
+    if (quote && char === 13 && !firstQuoted && !paragraphLineAbove())
+      return decide(below)
     // A compaction may have dropped the start of the buffer's first line.
     const read = endLineRead(extendLineRead(char === -1 && !firstQuoted ? state.compactedRead ?? LINE_START : LINE_START, line))
-    // Only a bare closer can precede the deferred break run. A hard break
-    // after it settles the run, so the spaces above end the paragraph.
-    if (read.kind === 0 && read.indent > 0 && !firstQuoted && (below !== undefined || !hardBreak)) {
+    if (read.kind === 0 && read.indent > 0 && !firstQuoted && !blank(read.indent)) {
       first = undefined
       code = char
       continue
@@ -822,12 +877,14 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
       const split = `${head}\n${previous.slice(head.length)}`
       state.outputPositions?.replace(fragment - 1, fragment, [split], offset => offset >= head.length ? offset + 1 : offset)
       buffer[fragment - 1] = split
+      noteBufferRewrite(state)
       return
     }
     const moved = `\n${previous.slice(head.length)}${buffer[fragment]}`
     state.outputPositions?.replace(fragment - 1, fragment + 1, [head, moved], offset => offset >= head.length ? offset + 1 : offset)
     buffer[fragment - 1] = head
     buffer[fragment] = moved
+    noteBufferRewrite(state)
     return
   }
   // An LF after a decoded CR only completes one CRLF line ending, so the blank
@@ -842,6 +899,7 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   const replacement = separator + buffer[fragment]
   state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + separator.length)
   buffer[fragment] = replacement
+  noteBufferRewrite(state)
 }
 
 /** Invalidate tail records when their source fragments are replaced or removed. */
@@ -1645,6 +1703,7 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
     noteListTailRewrite(state, span.fragment + 1)
     state.buffer.length = span.fragment + 1
     state.buffer.push(content)
+    noteBufferRewrite(state)
   }
   const delimiter = '`'.repeat(Math.max(1, maxBacktickRun(content) + 1))
   const padded = content.startsWith('`') || content.endsWith('`')
@@ -1652,6 +1711,7 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
   if (state.outputPositions && opening !== state.buffer[span.fragment])
     state.outputPositions?.replace(span.fragment, span.fragment + 1, [opening])
   state.buffer[span.fragment] = opening
+  noteBufferRewrite(state)
   return `${padded ? ' ' : ''}${delimiter}`
 }
 
@@ -1683,6 +1743,7 @@ function finalizeCodeFence(state: MarkdownState): string | undefined {
       : offset + delimiter.length - MARKDOWN_CODE_BLOCK.length)
   }
   state.buffer[fence.fragment] = replacement
+  noteBufferRewrite(state)
   return delimiter
 }
 
@@ -1797,6 +1858,7 @@ function finalizeBlockquote(state: MarkdownState): void {
     if (end < quoted.length)
       buffer.push(quoted.slice(end))
     state.lastContentCache = buffer.at(-1)
+    noteBufferRewrite(state)
     return
   }
 
@@ -1804,6 +1866,7 @@ function finalizeBlockquote(state: MarkdownState): void {
   noteListTailRewrite(state, frame.fragment)
   buffer.splice(frame.fragment, buffer.length - frame.fragment, quoted)
   state.lastContentCache = quoted
+  noteBufferRewrite(state)
 }
 
 function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputPositions): void {
@@ -1937,6 +2000,7 @@ function commitGfmAction(
       if (state.blockquotes.length > 0 && !keepsQuoteSeparator
         && (!rawHtmlQuoteBoundary || newlineRunBefore(state.buffer, state.buffer.length) > 2)) {
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
+        noteBufferRewrite(state)
       }
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
@@ -2036,8 +2100,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     lastItemMarkerFragment: undefined,
     compactedRead: undefined,
     compactedParagraph: undefined,
+    compactedSpaces: undefined,
     compactedItem: undefined,
     compactedCode: undefined,
+    compactedTop: undefined,
     compactedCr: undefined,
     lastItemMarkerOwner: undefined,
     collapseNonSpanDepth: 0,
@@ -2189,6 +2255,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (state.lastContentCache === last)
         state.lastContentCache = trimmed
       state.lastTextNode = undefined
+      noteBufferRewrite(state)
     }
     return prefix
   }
@@ -2211,6 +2278,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.buffer.pop()
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
+      noteBufferRewrite(state)
       captionBoundary = 3
       quoteTentativeSpacing = undefined
     }
@@ -2246,6 +2314,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             const replacement = opening + anchored
             state.outputPositions?.replace(beforeFragment, beforeFragment + 1, [replacement], offset => offset + opening.length)
             state.buffer[beforeFragment] = replacement
+            noteBufferRewrite(state)
             const codeSpan = gfmLifecycle.openCodeSpans.at(-1)
             if (codeSpan?.fragment === beforeFragment)
               codeSpan.prefix = opening + codeSpan.prefix
@@ -2340,11 +2409,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         state.buffer[index] = value.slice(0, end)
         noteListTailRewrite(state, index + 1)
         state.buffer.length = index + 1
+        noteBufferRewrite(state)
         break
       }
       state.outputPositions?.replace(index, state.buffer.length, [])
       noteListTailRewrite(state, index)
       state.buffer.length = index
+      noteBufferRewrite(state)
     }
     const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
     captionBreakRun = 0
@@ -2373,6 +2444,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.buffer.length = anchor
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
+      noteBufferRewrite(state)
       restoreQuoteParentBoundary()
     }
     else if (captionBreakRun !== 0 && captionFrameCount === 0 && captionBoundary < 3) {
@@ -3014,6 +3086,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventExit
         && tagId === TAG_A) {
         if (dropEmptyLinkText(buff, openLinkFragment, state.outputPositions)) {
+          noteBufferRewrite(state)
           if (openLinkHeadingBreak) {
             state.outputPositions?.replace(openLinkFragment - 1, openLinkFragment, [])
             buff.length--
@@ -3033,6 +3106,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
       if (cleanPass && eventType === NodeEventExit && tagId === TAG_A && cleanPass.unwrap(element)) {
+        noteBufferRewrite(state)
         openLinkFragment = -1
         return
       }
@@ -3284,6 +3358,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
         if (idx >= 0) {
           noteListTailRewrite(state, idx)
+          noteBufferRewrite(state)
           if (restoresHeadingBreak)
             state.headingBreakPending = true
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
@@ -3475,8 +3550,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             // Update the last content in buffer regions with trimmed content
             if (trimmedChars > 0) {
               if (buff?.length && buff.at(-1) === lastFragment) {
-                state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
-                buff[buff.length - 1] = trimmed
+                if (trimmed || buff.length < 2 || buff[buff.length - 2] !== '') {
+                  state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
+                  buff[buff.length - 1] = trimmed
+                }
+                else {
+                  // One trailing empty entry already says the whitespace went;
+                  // a run of them only lengthens every backward scan.
+                  state.outputPositions?.replace(buff.length - 1, buff.length, [])
+                  buff.length--
+                }
               }
               if (eventType === NodeEventExit && isInlineElement)
                 state.pendingInlineWhitespace = true
@@ -3629,10 +3712,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       openLink(buff.length - 1, linkHeadingBreak)
     }
     if (cleanPass) {
-      if (eventType === NodeEventEnter)
+      if (eventType === NodeEventEnter) {
         cleanPass.enter(element, outputStart)
-      else if (handlerOutput)
+      }
+      else if (handlerOutput) {
         cleanPass.closed(element, outputStart, handlerOutput)
+        // Only a link's close rewrites its brackets in place.
+        if (tagId === TAG_A)
+          noteBufferRewrite(state)
+      }
     }
 
     // Track open inline markers for empty pair detection. Inline code in a
