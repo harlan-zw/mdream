@@ -545,7 +545,8 @@ interface ParagraphFold {
  * after a blank line or a marker alone, the item's content column after an
  * item, and zero for text outside an item. Text right under a marker alone
  * goes on in its item once it reaches the item's content column. Otherwise
- * that item ended empty, and text indented to the code column is code.
+ * that item ended empty: text indented to the code column is code, and text
+ * four columns short of it goes on in the item that holds the marker's list.
  */
 function foldLine(fold: ParagraphFold, read: LineRead): void {
   const line = endLineRead(read)
@@ -580,7 +581,9 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
     fold.code = code
   }
   else {
-    fold.paragraph = 0
+    // Text reaching the column of the marker's list goes on in the item that
+    // holds that list.
+    fold.paragraph = code !== undefined && line.indent + 4 >= code ? code - 4 : 0
   }
 }
 
@@ -655,17 +658,23 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
   const decide = (column: number | undefined) => column === undefined || relative(indent, indent) < column
   // Walk up the paragraph above to the line it starts with.
   let below: number | undefined
-  // The indent of the paragraph's first line read so far, unless a line of
-  // spaces came right above it, and the least indent of its lines.
+  // The indent of the paragraph's first line read so far, that indent again
+  // unless a line of spaces came right above it, and the least indent of its
+  // lines.
+  let top = 0
   let first: number | undefined
   let shallow = Infinity
   // Under a marker alone whose item's content starts at `column`: the
   // paragraph sits in that item when its first line comes right under the
-  // marker and reaches that column. Otherwise the item ended empty, and lines
-  // all indented to `code` past it are code, which no `*` continues.
-  const underMarker = (column: number, code: number) => below === undefined || (first !== undefined && first >= column)
-    ? (below === undefined ? undefined : column)
-    : shallow >= code ? undefined : below
+  // marker and reaches that column. Otherwise the item ended empty: lines all
+  // indented to `code` past it are code, which no `*` continues, and a first
+  // line four columns short of `code` reaches the marker's own list, so the
+  // paragraph goes on in the item that holds that list.
+  const underMarker = (column: number, code: number) => below === undefined
+    ? undefined
+    : first !== undefined && first >= column
+      ? column
+      : shallow >= code ? undefined : top + 4 >= code ? code - 4 : below
   const compacted = () => {
     const paragraph = state.compactedParagraph
     if (paragraph === undefined && state.compactedCode !== undefined)
@@ -718,7 +727,8 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
       return decide(relative(read.column, read.indent))
     below = 0
     first = read.indent
-    shallow = Math.min(shallow, relative(read.indent, read.indent))
+    top = relative(read.indent, read.indent)
+    shallow = Math.min(shallow, top)
     if (firstQuoted)
       return decide(below)
     code = char
