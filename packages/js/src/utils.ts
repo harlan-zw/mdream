@@ -266,7 +266,6 @@ export function getLanguageFromClass(className: string | undefined): string {
 
 // One `data-*` language token: HTML whitespace is trimmed; an interior space or
 // a byte unsafe in a fence info string (see `isUnsafeFenceInfoCode`) rejects it.
-// eslint-disable-next-line no-control-regex
 const DATA_LANGUAGE_RE = /^[\t\n\f\r ]*([^\0-\x20"&'<>`~\x7F]+)[\t\n\f\r ]*$/
 
 function getLanguageFromDataAttribute(value: string | undefined): string {

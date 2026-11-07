@@ -597,6 +597,25 @@ fn heading_closing_run_is_read_past_a_trimmed_form_feed_or_line_end() {
       "> - ##",
     ),
     ("<ul><li><h2>#</h2></li></ul>", "- ## \\#"),
+    // A list marker after a decoded `\r` leads its line too.
+    (
+      "<b>a&#13;<ul><li><h2></h2>x</li></ul></b>",
+      "**a\r - ## x**",
+    ),
+    (
+      "<b>a&#13;<ul><li><h2>&#9;</h2>x</li></ul></b>",
+      "**a\r - ## \tx**",
+    ),
+    // A run on an earlier line than the heading's end keeps the spaces after
+    // it, and a lead before it still leaves it bare.
+    (
+      "<pre><s><h1>a\n##\n </h1>x</s></pre>",
+      "```\n# a\n##\n x\n```",
+    ),
+    (
+      "<pre><ul><li><h2>+  \n##\n</h2><h1>a b</h1></li></ul></pre>",
+      "```\n\n- ## +  \n  ##\n\n  # a b\n\n\n```",
+    ),
     // Drained output can leave the buffer starting mid-line inside the spaces.
     (
       "<h2>x<i></i>&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;&#32;#&#12;</h2>",
@@ -606,7 +625,7 @@ fn heading_closing_run_is_read_past_a_trimmed_form_feed_or_line_end() {
       "<ul><li><h2>a #&#12;</h2></li><li>b</li></ul>",
       "- ## a \\#\n- b",
     ),
-    ("<ul><li><h2>a #&#9;</h2>y</li></ul>", "- ## a \\# y"),
+    ("<ul><li><h2>a #&#9;</h2>y</li></ul>", "- ## a \\#\n\n  y"),
   ] {
     assert_every_chunking(html, &options, expected);
   }
