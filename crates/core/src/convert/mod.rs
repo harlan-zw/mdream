@@ -668,6 +668,10 @@ impl Paragraph {
   pub(super) fn then(self, line: LineKind) -> Self {
     match (self, line) {
       (_, LineKind::Blank) => Self::Closed,
+      // An empty item cannot interrupt a paragraph it reaches the column of.
+      (Self::Open(column), LineKind::Marker { indent, .. }) if indent >= column => {
+        Self::Open(column)
+      }
       (_, LineKind::Marker { column, code, .. }) => Self::Bare { column, code },
       // A line of spaces under a marker alone leaves its item empty.
       (Self::Bare { code, .. } | Self::Code(code), LineKind::Spaces) => Self::Code(code),
