@@ -2303,6 +2303,390 @@ fn blockquote_keeps_block_children_inside_the_quote() {
 }
 
 #[test]
+fn blockquote_parent_continuation() {
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em>tail</em></li></ul>",
+      "- \n  > q\n\n  *tail*",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote> <span></span><em></em><script>hidden</script>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ol start='10'><li><blockquote>q</blockquote>tail</li></ol>",
+      "10. \n    > q\n\n    tail",
+    ),
+    (
+      "<ul><li><blockquote>outer<blockquote>q</blockquote>tail</blockquote>after</li></ul>",
+      "- \n  > outer\n  > > q\n  >\n  > tail\n\n  after",
+    ),
+    ("<blockquote>q</blockquote>tail", "> q\n\ntail"),
+    (
+      "<ul><li><blockquote>q</blockquote><span> </span><em> </em><script>hidden</script>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><blockquote></blockquote>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote></li><li>next</li></ul>",
+      "- \n  > q\n- next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><blockquote>r</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  > r\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><code>tail</code></li></ul>",
+      "- \n  > q\n\n  `tail`",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"x\">tail</a></li></ul>",
+      "- \n  > q\n\n  [tail](x)",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><img src=\"x\" alt=\"tail\"></li></ul>",
+      "- \n  > q\n\n  ![tail](x)",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><ul><li>next</li></ul></li></ul>",
+      "- \n  > q\n  - next",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn blockquote_parent_continuation_keeps_sibling_quotes_inside_a_quote() {
+  // A nested quote's enter folds a preceding blank line. After a closed quote
+  // that blank is the only separator, and without it the siblings merge.
+  for (html, expected) in [
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote>tail</li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q\n>\n>   tail",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x</blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>\n>   > q",
+    ),
+    (
+      "<ul><li><blockquote><blockquote>x</blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > > x\n  >\n  > > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > q",
+    ),
+    (
+      "<blockquote><ul><li>a<blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - a\n>   > q",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
+  // A wrapper that stays in the output took the separator, so the next block
+  // spaces itself. One that writes nothing leaves the boundary pending.
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><blockquote>next</blockquote>tail</li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"><em></em></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><a href=\"/x\"></a></em><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  *[](/x)*\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em></em><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><div>d</div></li></ul>",
+      "- \n  > q\n\n  [](/x) d",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><br><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  [](/x)  \n  \n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a href=\"/x\"></a><br></li><li>b</li></ul>",
+      "- \n  > q\n\n  [](/x)  \n- b",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><div>d</div></em></li></ul>",
+      "- \n  > q\n\n  *d*",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><em><blockquote>next</blockquote></em></li></ul>",
+      "- \n  > q\n\n  *\n  > next\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a><blockquote>next</blockquote></li></ul>",
+      "- \n  > q\n\n  > next",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a>tail</a></li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><a></a><h2>h</h2></li></ul>",
+      "- \n  > q\n\n  ## h",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn blockquote_parent_continuation_settles_at_a_wrapped_fence() {
+  // A fence opened inside the wrapper took the separator. Restoring it later
+  // would cut the fence's own bytes.
+  for (html, expected) in [
+    (
+      "<li><blockquote/><em><pre><blockquote>",
+      "- \n\n  *\n\n  ```\n  \n\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>",
+      "- \n\n  *\n\n  ```\n  \n\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>",
+      "- \n\n  *\n\n  ```\n  \n\n  ### h\n  ```\n\n  *",
+    ),
+    (
+      "<ul><li><blockquote></blockquote><b><pre><code>x</code></pre></b></li></ul>",
+      "- \n\n  **\n\n  ```\n  x\n  ```\n\n  **",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
+fn inline_wrapper_around_blockquote_in_list_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ol><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ol>",
+      "1. [\n   > next](/x)",
+    ),
+    (
+      "<ul><li>pre <a href=\"/x\"><blockquote>next</blockquote></a></li></ul>",
+      "- pre [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\">pre <blockquote>next</blockquote></a></li></ul>",
+      "- [pre \n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><span><blockquote>next</blockquote></span></a></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><span><a href=\"/x\"><blockquote>next</blockquote></a></span></li></ul>",
+      "- [\n  > next](/x)",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a> tail</li></ul>",
+      "- [\n  > next](/x)\n\n  tail",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><blockquote>b</blockquote></li></ul>",
+      "- [\n  > next](/x)\n\n  > b",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><p>para</p></li></ul>",
+      "- [\n  > next](/x)\n\n  para",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a><ul><li>x</li></ul></li></ul>",
+      "- [\n  > next](/x)\n  - x",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li><li>x</li></ul>",
+      "- [\n  > next](/x)\n- x",
+    ),
+    (
+      "<ul><li><strong><a href=\"/x\"><blockquote>next</blockquote></a></strong></li></ul>",
+      "- **[\n  > next](/x)\n\n  **",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><strong><blockquote>next</blockquote></strong></a> tail</li></ul>",
+      "- [**\n  > next\n\n  **](/x) tail",
+    ),
+    (
+      "<table><tr><td><ul><li><span><blockquote>next</blockquote></span></li></ul></td></tr></table>",
+      "| <ul><li>> next</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><a href=\"/x\"><blockquote>next</blockquote></a></li></ul></td></tr></table>",
+      "| <ul><li>[> next](/x)</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><blockquote>q</blockquote>tail</li></ul></td></tr></table>",
+      "| <ul><li>> q tail</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><blockquote>q</blockquote><blockquote>r</blockquote></li></ul></td></tr></table>",
+      "| <ul><li>> q>  r</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><strong><blockquote>next</blockquote></strong></li></ul></td></tr></table>",
+      "| <ul><li>**>  next**</li></ul> |\n| --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><blockquote>next</blockquote></td></tr></table></li></ul>",
+      "- | > next |\n  | --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><blockquote>q</blockquote>tail</td></tr></table></li></ul>",
+      "- | > q tail |\n  | --- |",
+    ),
+    (
+      "<ul><li><table><tr><td><ul><li><blockquote>next</blockquote></li></ul></td></tr></table></li></ul>",
+      "- | <ul><li>> next</li></ul> |\n  | --- |",
+    ),
+    (
+      "<blockquote><table><tr><td><ul><li><blockquote>next</blockquote></li></ul></td></tr></table></blockquote>",
+      "> | <ul><li>> next</li></ul> |\n> | --- |",
+    ),
+    (
+      "<ul><li><blockquote><table><tr><td><blockquote>n</blockquote></td></tr></table></blockquote>tail</li></ul>",
+      "- \n  > | > n |\n  > | --- |\n\n  tail",
+    ),
+    (
+      "<table><tr><td><ul><li><code><blockquote>q</blockquote></code></li></ul></td></tr></table>",
+      "| <ul><li>`>  q`</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li>pre <code><blockquote>q</blockquote> mid</code></li></ul></td></tr></table>",
+      "| <ul><li>pre `>  q mid`</li></ul> |\n| --- |",
+    ),
+    (
+      "<table><tr><td><ul><li><code><blockquote>q`x</blockquote></code></li></ul></td></tr></table>",
+      "| <ul><li>``>  q`x``</li></ul> |\n| --- |",
+    ),
+    ("<code><blockquote>q</blockquote></code>", "`>  q`"),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong></li><li>x</li></ul>",
+      "- **\n  > next\n\n  **\n- x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><ul><li>x</li></ul></li></ul>",
+      "- **\n  > next\n\n  **\n  - x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><br></li><li>x</li></ul>",
+      "- **\n  > next\n\n  **  \n- x",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><div>d</div></li></ul>",
+      "- **\n  > next\n\n  ** d",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub></li><li>x</li></ul>",
+      "- <sub>\n  > next\n\n  </sub>\n- x",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub><ul><li>x</li></ul></li></ul>",
+      "- <sub>\n  > next\n\n  </sub>\n  - x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><sub></sub></li><li>x</li></ul>",
+      "- \n  > q\n\n  <sub></sub>\n- x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><sub></sub><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n\n  <sub></sub>\n  - x",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><p><blockquote>r</blockquote></p></li></ul>",
+      "- \n  > q\n\n  \n  > r",
+    ),
+    (
+      "<ul><li><p><span><blockquote>q</blockquote></span></p><p><span><blockquote>r</blockquote></span></p></li></ul>",
+      "- \n  > q\n\n  \n  > r",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong> tail</li></ul>",
+      "- **\n  > next\n\n  ** tail",
+    ),
+    (
+      "<ul><li>pre <strong><blockquote>next</blockquote></strong> tail</li></ul>",
+      "- pre **\n  > next\n\n  ** tail",
+    ),
+    (
+      "<ul><li><strong><a href=\"/x\"><blockquote>next</blockquote></a></strong> tail</li></ul>",
+      "- **[\n  > next](/x)\n\n  ** tail",
+    ),
+    (
+      "<ul><li><sub><blockquote>next</blockquote></sub> tail</li></ul>",
+      "- <sub>\n  > next\n\n  </sub> tail",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><strong><blockquote>next</blockquote></strong> tail</a></li></ul>",
+      "- [**\n  > next\n\n  ** tail](/x)",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong>tail</li></ul>",
+      "- **\n  > next\n\n  **tail",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong> <p>para</p></li></ul>",
+      "- **\n  > next\n\n  **\n\n  para",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><br> tail</li></ul>",
+      "- **\n  > next\n\n  **  \n  tail",
+    ),
+    (
+      "<ul><li><strong><blockquote>next</blockquote></strong><em> tail</em></li></ul>",
+      "- **\n  > next\n\n  ***tail*",
+    ),
+    (
+      "<ul><li>pre<blockquote>q</blockquote><strong> tail</strong></li></ul>",
+      "- pre\n  > q\n\n  **tail**",
+    ),
+    (
+      "<ul><li><blockquote>q</blockquote><strong></strong> tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn sibling_blockquotes_separated_by_blank_line() {
   for (name, html, expected) in [
     (
@@ -2915,16 +3299,8 @@ fn a_rule_around_a_deferred_fence_resumes_the_item() {
       "- p\n\n  ```\n  \n\n  ---\n  ```",
     ),
     (
-      "<ul><li>p<pre><p>x</p></pre></li></ul>",
-      "- p\n\n  ```\n  \n\n  x\n  ```",
-    ),
-    (
       "<ul><li>p<pre><caption>x</caption></pre></li></ul>",
       "- p\n\n  ```\n  \n\n  x\n  ```",
-    ),
-    (
-      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
-      "- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)",
     ),
   ] {
     assert_eq!(convert(html), expected, "{html}");
@@ -4604,6 +4980,22 @@ fn isolate_main_keeps_a_heading_inside_a_skipped_container() {
   );
 }
 
+// The skipped `<pre>` leaves its fence to the `<code>` inside the quote, so
+// the quote's close trims the fence's indent before the fence closes.
+#[test]
+fn isolate_main_closes_an_empty_fence_opened_inside_a_quote() {
+  for html in [
+    "<pre><i><h3><li><blockquote><code>",
+    "<pre><i><h3><li><blockquote><code></code></blockquote></li></h3></i></pre>",
+  ] {
+    assert_eq!(
+      convert_with_isolate_main(html),
+      "### - \n  > ```\n```",
+      "{html}"
+    );
+  }
+}
+
 #[test]
 fn isolate_main_skipped_footer_emits_no_closers() {
   let html = "<h1>Title</h1><p>Body</p><footer><p><b>Foot</b></p></footer>";
@@ -5512,6 +5904,54 @@ fn block_markers_are_escaped_after_a_list_marker() {
 }
 
 #[test]
+fn block_markers_are_escaped_at_a_deep_list_content_column() {
+  // A line indented to the item's content column opens a block there, even
+  // when the column is four or more spaces deep: a wide ordered marker, or a
+  // nested item. A heading's break, a hard break and a paragraph all start one.
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><h3>T</h3># x</li></ol>",
+      "10. ### T\n\n    \\# x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>- x</li></ol>",
+      "10. ### T\n\n    \\- x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>&gt; x</li></ol>",
+      "10. ### T\n\n    \\> x",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>1. x</li></ol>",
+      "10. ### T\n\n    1\\. x",
+    ),
+    (
+      "<ul><li>a<ul><li><h3>T</h3># x</li></ul></li></ul>",
+      "- a\n  - ### T\n\n    \\# x",
+    ),
+    (
+      "<ul><li>a<ul><li>T<br>- x</li></ul></li></ul>",
+      "- a\n  - T  \n    \\- x",
+    ),
+    (
+      "<ol start=\"10\"><li><p>a</p><p># x</p></li></ol>",
+      "10. a\n\n    \\# x",
+    ),
+    // Only a block start is escaped, and code keeps its text.
+    (
+      "<ol start=\"10\"><li><p>a</p><p>x # y</p></li></ol>",
+      "10. a\n\n    x # y",
+    ),
+    (
+      "<ol start=\"10\"><li><pre>x\n# y</pre></li></ol>",
+      "10. ```\n    x\n    # y\n    ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
 fn heading_keeps_a_trailing_hash() {
   assert_eq!(convert("<h2>Ends with #</h2>"), "## Ends with \\#");
   assert_eq!(convert("<h3>#</h3>"), "### \\#");
@@ -5519,6 +5959,325 @@ fn heading_keeps_a_trailing_hash() {
   // Not a closing sequence without whitespace before it, so nothing to escape.
   assert_eq!(convert("<h2>C#</h2>"), "## C#");
   assert_eq!(convert("<h2>plain</h2>"), "## plain");
+}
+
+#[test]
+fn an_empty_heading_in_a_list_item_ends_its_line() {
+  // The heading's own `#` marker follows the item marker or the continuation
+  // indent: it is no closing sequence to escape, and its trailing space must not
+  // leave the line open for the next block to join.
+  for (html, expected) in [
+    (
+      "<main><ul><li><h3></h3><p>Partner description</p></li></ul></main>",
+      "- ###\n\n  Partner description",
+    ),
+    (
+      "<ol><li><h3></h3><p>Partner description</p></li></ol>",
+      "1. ###\n\n   Partner description",
+    ),
+    (
+      "<ol start=\"10\"><li><h1></h1><p>b</p></li></ol>",
+      "10. #\n\n    b",
+    ),
+    ("<ul><li><h3></h3></li><li>b</li></ul>", "- ###\n- b"),
+    (
+      "<ul><li>a<ul><li>b<ul><li><h3></h3><p>c</p></li></ul></li></ul></li></ul>",
+      "- a\n  - b\n    - ###\n\n      c",
+    ),
+    (
+      "<ul><li><pre>x</pre><h3></h3><p>b</p></li></ul>",
+      "- ```\n  x\n  ```\n\n  ###\n\n  b",
+    ),
+    (
+      "<ul><li><h2></h2><table><tr><td>x</td></tr></table></li></ul>",
+      "- ##\n\n  | x |\n  | --- |",
+    ),
+    (
+      "<blockquote><ol><li><h3></h3><p>b</p></li></ol></blockquote>",
+      "> 1. ###\n>\n>    b",
+    ),
+    (
+      "<ul><li><blockquote><h3></h3><p>b</p></blockquote></li></ul>",
+      "- \n  > ###\n  >\n  > b",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // A `#` run of the heading's content still closes it.
+  assert_eq!(
+    convert("<ul><li><h3>#</h3><p>b</p></li></ul>"),
+    "- ### \\#\n\n  b"
+  );
+  assert_eq!(
+    convert("<ul><li><pre>x</pre><h3>#</h3></li></ul>"),
+    "- ```\n  x\n  ```\n\n  ### \\#"
+  );
+}
+
+#[test]
+fn a_heading_in_a_list_item_keeps_its_own_line() {
+  // Text before the heading on the item's line, past a space too, and text
+  // after it each get a block of their own, as at the root (#388).
+  for (html, expected) in [
+    (
+      "<ul><li>Intro <h3>Title</h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ### Title\n\n  Body",
+    ),
+    (
+      "<ul><li>Intro\n    <h3>Title</h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ### Title\n\n  Body",
+    ),
+    (
+      "<ul><li><strong>Intro</strong> <h3>Title</h3></li></ul>",
+      "- **Intro**\n\n  ### Title",
+    ),
+    (
+      "<ol><li>a<ol><li>b<ol><li>Intro <h3>T</h3></li></ol></li></ol></li></ol>",
+      "1. a\n   1. b\n      1. Intro\n\n         ### T",
+    ),
+    (
+      "<ul><li>Intro <h3></h3><p>Body</p></li></ul>",
+      "- Intro\n\n  ###\n\n  Body",
+    ),
+    ("<ul><li><h3></h3>Text</li></ul>", "- ###\n\n  Text"),
+    (
+      "<ol><li><h1>T</h1>\nx</li><li>y</li></ol>",
+      "1. # T\n\n   x\n2. y",
+    ),
+    (
+      "<ul><li>a<ul><li>b<ul><li><h3></h3>c</li></ul></li></ul></li></ul>",
+      "- a\n  - b\n    - ###\n\n      c",
+    ),
+    (
+      "<ol start=\"10\"><li><h3>T</h3>x</li></ol>",
+      "10. ### T\n\n    x",
+    ),
+    (
+      "<ul><li><h3>Title</h3><strong>Text</strong></li></ul>",
+      "- ### Title\n\n  **Text**",
+    ),
+    (
+      "<ul><li><h3></h3><code>x</code></li></ul>",
+      "- ###\n\n  `x`",
+    ),
+    ("<ul><li><h3>T</h3><em></em>x</li></ul>", "- ### T\n\n  x"),
+    ("<ul><li><h3>T</h3># x</li></ul>", "- ### T\n\n  \\# x"),
+    ("<ul><li>x <h2></h2>  y</li></ul>", "- x\n\n  ##\n\n  y"),
+    (
+      "<ul><li><span><h3>T</h3>more</span></li></ul>",
+      "- ### T\n\n  more",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3>x</li></ul></blockquote>",
+      "> - ### T\n>\n>   x",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  for (html, expected) in [
+    // The marker's own line, a line break, a nested list or the item's end
+    // already leave the heading its line.
+    ("<ul><li> <h3>Title</h3></li></ul>", "- ### Title"),
+    (
+      "<ul><li>Intro<br> <h3>Title</h3></li></ul>",
+      "- Intro  \n  ### Title",
+    ),
+    ("<ul><li><h3>T</h3><br>more</li></ul>", "- ### T  \n  more"),
+    (
+      "<ul><li><h3>T</h3><ul><li>x</li></ul></li></ul>",
+      "- ### T\n  - x",
+    ),
+    ("<ul><li><h3>T</h3> </li><li>b</li></ul>", "- ### T\n- b"),
+    // An empty marker pair takes no block of its own.
+    (
+      "<ul><li><h3>T</h3><i class=\"icon\"></i></li><li>b</li></ul>",
+      "- ### T\n- b",
+    ),
+    // An inline wrapper keeps the heading inline, as at the root.
+    (
+      "<ul><li><strong><h3>T</h3>more</strong></li></ul>",
+      "- **### T more**",
+    ),
+    (
+      "<ul><li><strong>Intro <h3>T</h3></strong></li></ul>",
+      "- **Intro ### T**",
+    ),
+    // Code and caption emphasis would be split.
+    (
+      "<ul><li><pre><h3>T</h3>b</pre></li></ul>",
+      "- ```\n  ### T b\n  ```",
+    ),
+    (
+      "<ul><li><figure><figcaption><h3>T</h3>b</figcaption></figure></li></ul>",
+      "- *### T b*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_heading_in_a_list_item_breaks_out_of_a_wrapper_without_delimiters() {
+  // A raw tag or a wrapper that writes nothing reads the same on either side of
+  // a block break, so the heading still gets its own block, with text after it
+  // in the next one, however deep the wrappers nest.
+  for (html, expected) in [
+    (
+      "<ul><li>Intro <u><h4>T</h4></u></li></ul>",
+      "- Intro <u>\n\n  #### T</u>",
+    ),
+    (
+      "<ul><li><sup><h4>T</h4></sup>more</li></ul>",
+      "- <sup>\n\n  #### T</sup>\n\n  more",
+    ),
+    (
+      "<ul><li><em>E</em><label><h6>T</h6></label></li></ul>",
+      "- *E*\n\n  ###### T",
+    ),
+    (
+      "<ul><li><button>Intro<h3>T</h3></button></li></ul>",
+      "- Intro\n\n  ### T",
+    ),
+    (
+      "<ul><li>Intro <label><h3>T</h3></label></li></ul>",
+      "- Intro\n\n  ### T",
+    ),
+    (
+      "<ul><li><label>Intro<h3>T</h3>more</label></li></ul>",
+      "- Intro\n\n  ### T\n\n  more",
+    ),
+    (
+      "<ul><li><small><abbr><h3>A</h3><h3>B</h3></abbr></small></li></ul>",
+      "- ### A\n\n  ### B",
+    ),
+    (
+      "<ul><li><label><label><h2>A</h2></label><h2>B</h2></label></li></ul>",
+      "- ## A\n\n  ## B",
+    ),
+    (
+      "<ul><li><small><abbr><h3>T</h3></abbr></small>x</li></ul>",
+      "- ### T\n\n  x",
+    ),
+    (
+      "<ol><li><small><abbr><h2>Title</h2></abbr></small>Body text</li><li>b</li></ol>",
+      "1. ## Title\n\n   Body text\n2. b",
+    ),
+    (
+      "<ul><li>x <address><h4>T</h4></address>more</li></ul>",
+      "- x <address>\n\n  #### T</address>\n\n  more",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Delimiters that pair across the wrapper's content, or a caption's
+  // emphasis, keep the heading inline.
+  for (html, expected) in [
+    (
+      "<ul><li><q><h3>T</h3>more</q></li></ul>",
+      "- \" ### T more\"",
+    ),
+    (
+      "<ul><li><small><strong><h3>T</h3></strong>more</small></li></ul>",
+      "- **### T**more",
+    ),
+    (
+      "<strong><ul><li>Intro <h3>T</h3>more</li></ul></strong>",
+      "**- Intro ### T more**",
+    ),
+    (
+      "<ul><li><figure><figcaption>a <label><h3>T</h3></label>s</figcaption></figure></li></ul>",
+      "- *a ### Ts*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_code_block_after_a_heading_in_a_list_item_keeps_its_content() {
+  // The fence pays the break the heading owes. A `<pre>` whose first child
+  // opens the fence, as highlighted code does, used to get that break again
+  // inside the code.
+  for (html, expected) in [
+    (
+      "<ul><li><h3>T</h3><pre><span>x</span></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre>\n<span>x</span></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ol><li><h2>Install</h2><pre class=\"language-sh\"><span class=\"token function\">npm</span> install mdream</pre></li><li>b</li></ol>",
+      "1. ## Install\n\n   ```sh\n   npm install mdream\n   ```\n\n2. b",
+    ),
+    (
+      "<ul><li><h3>T</h3><div class=\"highlight\"><pre><span></span><span class=\"n\">x</span></pre></div></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li><h3>T</h3><pre><div>x</div></pre>y</li></ul></li></ul>",
+      "- a\n  - ### T\n\n    ```\n    x\n    ```\n\n    y",
+    ),
+    (
+      "<blockquote><ul><li><h3>T</h3><pre><img src=\"a.png\" alt=\"i\">x</pre></li></ul></blockquote>",
+      "> - ### T\n>\n>   ```\n>   ![i](a.png)x\n>   ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre><span></span></pre>x</li></ul>",
+      "- ### T\n\n  ```\n\n  ```\n\n  x",
+    ),
+    // A `<code>` child or a direct text node already opened the fence first.
+    (
+      "<ul><li><h3>T</h3><pre><code>x</code></pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h3>T</h3><pre>x</pre></li></ul>",
+      "- ### T\n\n  ```\n  x\n  ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_block_that_opens_a_code_block_in_a_list_item_stays_out_of_the_code() {
+  // The fence a `<p>` or `<div>` child opens is written after that child's own
+  // separator, which then landed inside the code.
+  for (html, expected) in [
+    (
+      "<ul><li><h1></h1><pre><div>x</div></pre></li></ul>",
+      "- #\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><h1></h1><pre> <p>x</p></pre></li></ul>",
+      "- #\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>a<pre><p>x</p></pre></li></ul>",
+      "- a\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>p<pre><p>x</p></pre></li></ul>",
+      "- p\n\n  ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
+      "- [\n\n  ```\n  x\n  ```\n\n  W](/w)",
+    ),
+    (
+      "<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>",
+      "- a\n\n  ```\n  x\n\n  y\n  ```",
+    ),
+    // Text already opened the fence.
+    (
+      "<ul><li>a<pre>b<p>x</p></pre></li></ul>",
+      "- a\n\n  ```\n  b\n\n  x\n  ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
 }
 
 #[test]
@@ -5766,6 +6525,30 @@ fn raw_html_regions_escape_markdown_past_a_blank_line() {
   assert!(!md.contains("C\\_D"), "got: {md:?}");
 }
 
+// The heading's block break is trimmed and the next `<dd>` grows the buffer
+// back past it, so the cached line start must not survive the trim.
+#[test]
+fn raw_html_text_after_a_trimmed_block_break_is_not_escaped() {
+  assert_eq!(
+    convert("<dt><ul><dd><h6>a b<dd>*c"),
+    "<dt><dd>###### a b</dd><dd>*c</dd></dt>"
+  );
+  assert_eq!(
+    convert("<dt><ul><dd><h6>a ><dd>`c"),
+    "<dt><dd>###### a &gt;</dd><dd>`c</dd></dt>"
+  );
+}
+
+// The blank line is inserted behind the cached line start, and Markdown resumes
+// after it, so the backtick on the next line stays escaped.
+#[test]
+fn text_after_a_blank_line_inserted_in_a_raw_html_block_is_escaped() {
+  assert_eq!(
+    convert("<dl><ul>><code><blockquote></code>`"),
+    "<dl>\n\n&gt;<code>></code>\\`\n\n</dl>"
+  );
+}
+
 #[test]
 fn a_row_closes_through_content_left_open_in_a_cell() {
   // `<tr>` must close an unclosed `<p>` inside the previous cell; otherwise the
@@ -5925,6 +6708,49 @@ fn code_span_offsets_follow_an_empty_item_blank_line() {
     "<li><br><code><pre>a</pre></code>",
   ] {
     let expected = convert(html);
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut streamed = String::new();
+      let mut start = 0;
+      while start < html.len() {
+        let mut end = (start + width).min(html.len());
+        while end < html.len() && !html.is_char_boundary(end) {
+          end += 1;
+        }
+        streamed.push_str(&processor.process_chunk(&html[start..end]));
+        start = end;
+      }
+      streamed.push_str(&processor.finish());
+      assert_eq!(streamed, expected, "{html:?} width={width}");
+    }
+  }
+}
+
+// The same blank line, inserted while a quote the item opened is still open: a
+// literal `<li>` in a cell exits first and settles the outer item's guard. The
+// quote frames past the line were not shifted, so each quoted from a byte early
+// (`> a> b`), and inside a multi-byte character `html_to_markdown` panicked.
+#[test]
+fn blockquote_frames_follow_an_empty_item_blank_line() {
+  for (html, expected) in [
+    (
+      "a<li><blockquote><td>ab<blockquote><li>",
+      "a\n\n- \n  > ab> <li></li>",
+    ),
+    (
+      "a<li><blockquote><td>\u{e9}<blockquote><li>",
+      "a\n\n- \n  > \u{e9}> <li></li>",
+    ),
+    (
+      "\u{fffd}<li><e><blockquote><td>\u{fffd}<f><blockquote><li>",
+      "\u{fffd}\n\n- \n  > \u{fffd}> <li></li>",
+    ),
+    (
+      "><li><blockquote><td>\u{fffd}<blockquote><li>",
+      "\\>\n\n- \n  > \u{fffd}> <li></li>",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html:?}");
     for width in 1..=html.len() {
       let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
       let mut streamed = String::new();
@@ -6267,6 +7093,20 @@ fn frontmatter_additional_fields_keep_yaml_typing() {
   );
 }
 
+// A long text run is converted in pieces. One ending right after `---` ends a
+// line that could be a setext underline, so its dashes were escaped even though
+// the rest of the line makes them plain text.
+#[test]
+fn a_long_text_run_is_not_cut_after_a_rule_run() {
+  for rule in ["---", "==="] {
+    let unit = format!("ab&#10 {rule} cd ");
+    let count = 70_000 / unit.len();
+    let html = format!("<p>w {}</p>", unit.repeat(count));
+    let expected = format!("w {}", format!("ab\n {rule} cd ").repeat(count).trim_end());
+    assert_eq!(convert(&html), expected);
+  }
+}
+
 #[test]
 fn text_runs_keep_unicode_entities_and_gfm_context_across_chunks() {
   for html in [
@@ -6361,8 +7201,32 @@ fn code_span_restores_an_opener_moved_by_a_blockquote() {
   );
   assert_eq!(
     convert_with_origin(html, "https://example.com/docs/page"),
-    "A & B  \n\n| [`>` &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
+    "A & B  \n\n| [`>  &copy; &nLt; €&bogus;<table><tr><td></td></tr></table>`](https://example.com/x?utm_source=a&名=值&#章) |\n| --- |",
   );
+}
+
+#[test]
+fn a_heading_materializing_a_list_caption_keeps_its_prefix_inline() {
+  for (html, expected) in [
+    (
+      r#"<ul><li><figure><figcaption><q><h3>T</h3></q>s</figcaption></figure></li></ul>"#,
+      "- *\"### T\"s*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><q><h3></h3></q>s</figcaption></figure></li></ul>"#,
+      "- *\"### \"s*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><a href="/l"></a><h3>T</h3></figcaption></figure></li></ul>"#,
+      "- *[](/l)### T*",
+    ),
+    (
+      r#"<ul><li><figure><figcaption><del><h3>T</h3></del></figcaption></figure></li></ul>"#,
+      "- *~~### T~~*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
 }
 
 #[test]
@@ -6391,235 +7255,46 @@ fn builtin_blockquote_alias_uses_div_semantics() {
 }
 
 #[test]
-fn setext_equals_text_preserves_paragraphs() {
-  for (html, expected) in [
+fn blockquote_parent_continuation_respects_overrides() {
+  for (html, override_name, config, expected) in [
     (
-      "<ul><li>x<ul><li>a<br># b</li></ul></li></ul>",
-      "- x\n  - a  \n    \\# b",
+      "<ul><li><x-q>q</x-q>tail</li></ul>",
+      "x-q",
+      TagOverrideConfig {
+        alias_tag_id: mdream::get_tag_id("blockquote"),
+        ..Default::default()
+      },
+      "- \n  > q\n\n  tail",
     ),
     (
-      "<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>",
-      "- x\n  - a  \n    \\- b",
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "blockquote",
+      TagOverrideConfig {
+        enter: Some("[".into()),
+        exit: Some("]".into()),
+        spacing: Some([0, 0]),
+        ..Default::default()
+      },
+      "- [q] tail",
     ),
     (
-      "<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>",
-      "- x\n  - a  \n    \\+ b",
-    ),
-    (
-      "<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>",
-      "- x\n  - a  \n    1\\. b",
-    ),
-    (
-      "<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>",
-      "- x\n  - a  \n    \\> b",
-    ),
-    ("<p>aaaaa<br>===</p>", "aaaaa  \n\\==="),
-    (
-      "<p>aaaaa<br><span>=</span><span>==</span></p>",
-      "aaaaa  \n\\===",
-    ),
-    ("<p>aaaaa<br> <span></span>===</p>", "aaaaa  \n\\==="),
-    ("<p>aaaaa<br>=</p>", "aaaaa  \n\\="),
-    ("<p>aaaaa<br>==</p>", "aaaaa  \n\\=="),
-    ("<p>=SUM(A1:A3)</p>", "=SUM(A1:A3)"),
-    ("<p>aaaaa<br>= b</p>", "aaaaa  \n= b"),
-    ("<p>aaaaa<br>=b</p>", "aaaaa  \n=b"),
-    ("<p>aaaaa<br>== =</p>", "aaaaa  \n== ="),
-    ("<p>aaaaa<br>=== x</p>", "aaaaa  \n=== x"),
-    ("<p>aaaaa<br>=== </p>", "aaaaa  \n\\==="),
-    (
-      "<ul><li>x<ul><li>a<br>= b</li></ul></li></ul>",
-      "- x\n  - a  \n    = b",
-    ),
-    ("<blockquote><p>x<br>= b</p></blockquote>", "> x  \n> = b"),
-    ("<blockquote><p>x<br>==</p></blockquote>", "> x  \n> \\=="),
-    ("<p>aaaaa<br><span></span></p>", "aaaaa"),
-    ("<p>a = b and x===y</p>", "a = b and x===y"),
-    ("<p>a<span>=</span><span>==</span>b</p>", "a===b"),
-    ("<p><code>===</code></p>", "`===`"),
-    ("<p></p>", ""),
-    (
-      "<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>",
-      "- aaaaa  \n  \\===",
-    ),
-    (
-      "<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>",
-      "- x\n  - aaaaa  \n    \\===",
-    ),
-    (
-      "<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>",
-      "- x\n  - x\n    - aaaaa  \n      \\===",
-    ),
-    (
-      "<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>",
-      "- x\n  - x\n    - x\n      - aaaaa  \n        \\===",
-    ),
-    (
-      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>",
-      "- x\n  - x\n    - x\n      - x\n        - aaaaa  \n          \\===",
-    ),
-    (
-      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>",
-      "- x\n  - x\n    - x\n      - x\n        - x\n          - aaaaa  \n            \\===",
+      "<ul><li><blockquote>q</blockquote>tail</li></ul>",
+      "blockquote",
+      TagOverrideConfig {
+        spacing: Some([0, 0]),
+        ..Default::default()
+      },
+      "- \n  > q\n\n  tail",
     ),
   ] {
-    assert_eq!(convert(html), expected, "html={html:?}");
-  }
-}
-
-#[test]
-fn setext_dash_text_preserves_paragraphs() {
-  for (html, expected) in [
-    ("<p>aaaaa<br>--</p>", "aaaaa  \n\\--"),
-    ("<p>aaaaa<br>-- </p>", "aaaaa  \n\\--"),
-    ("<p>aaaaa<br>--\t</p>", "aaaaa  \n\\--"),
-    ("<p>aaaaa<br>--<br>b</p>", "aaaaa  \n\\--  \nb"),
-    ("<p>aaaaa<br>-<span>-</span></p>", "aaaaa  \n\\--"),
-    ("<p>aaaaa<br>- -</p>", "aaaaa  \n\\- -"),
-    ("<p>aaaaa<br>-- -</p>", "aaaaa  \n\\-- -"),
-    ("<p>aaaaa<br>---</p>", "aaaaa  \n\\---"),
-    ("<ul><li>x<br>--</li></ul>", "- x  \n  \\--"),
-    (
-      "<ul><li>x<ul><li>y<br>--</li></ul></li></ul>",
-      "- x\n  - y  \n    \\--",
-    ),
-    ("<blockquote><p>x<br>--</p></blockquote>", "> x  \n> \\--"),
-    ("<p>aaaaa<br>-- a</p>", "aaaaa  \n-- a"),
-    ("<p>aaaaa<br>--a</p>", "aaaaa  \n--a"),
-    ("<p>aaaaa --</p>", "aaaaa --"),
-    ("<p>x<br><b>--</b></p>", "x  \n**--**"),
-  ] {
-    assert_eq!(convert(html), expected, "html={html:?}");
-  }
-}
-
-#[test]
-fn raw_text_aliases_use_source_closing_names() {
-  for (html, source, target, expected) in [
-    (
-      "<script><b>x</b></script><p>tail</p>",
-      "script",
-      "div",
-      "**x**\n\ntail",
-    ),
-    (
-      "<script>a</div>b</script><p>tail</p>",
-      "script",
-      "div",
-      "ab\n\ntail",
-    ),
-    (
-      "<style><b>x</b></style><p>tail</p>",
-      "style",
-      "div",
-      "**x**\n\ntail",
-    ),
-    (
-      "<style>a</div>b</style><p>tail</p>",
-      "style",
-      "div",
-      "ab\n\ntail",
-    ),
-    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
-    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
-    (
-      "<x>before <!--unfinished</x><p>tail</p>",
-      "x",
-      "script",
-      "tail",
-    ),
-    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
-    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
-    (
-      "<x>before <!--unfinished</x><p>tail</p>",
-      "x",
-      "style",
-      "tail",
-    ),
-    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
-    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
-    (
-      "<div>before <!--unfinished</div><p>tail</p>",
-      "div",
-      "script",
-      "tail",
-    ),
-    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
-    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
-    (
-      "<div>before <!--unfinished</div><p>tail</p>",
-      "div",
-      "style",
-      "tail",
-    ),
-    (
-      "<script><b>x</b></script><p>tail</p>",
-      "script",
-      "style",
-      "tail",
-    ),
-    (
-      "<script>a</style>b</script><p>tail</p>",
-      "script",
-      "style",
-      "tail",
-    ),
-    (
-      "<script>before <!--unfinished</script><p>tail</p>",
-      "script",
-      "style",
-      "tail",
-    ),
-    (
-      "<style><b>x</b></style><p>tail</p>",
-      "style",
-      "script",
-      "tail",
-    ),
-    (
-      "<style>a</script>b</style><p>tail</p>",
-      "style",
-      "script",
-      "tail",
-    ),
-    (
-      "<style>before <!--unfinished</style><p>tail</p>",
-      "style",
-      "script",
-      "tail",
-    ),
-    (
-      "<script><b>x</b></script><p>tail</p>",
-      "script",
-      "textarea",
-      "\\<b>x\\</b>\n\ntail",
-    ),
-    (
-      "<style><b>x</b></style><p>tail</p>",
-      "style",
-      "textarea",
-      "\\<b>x\\</b>\n\ntail",
-    ),
-    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
-    (
-      "<script><!--<script></script>--></script><p>tail</p>",
-      "script",
-      "script",
-      "tail",
-    ),
-  ] {
-    let opts = HtmlToMarkdownOptions {
+    let options = HtmlToMarkdownOptions {
       plugins: Some(PluginConfig {
-        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        tag_overrides: Some(vec![(override_name.to_string(), config)]),
         ..Default::default()
       }),
       ..Default::default()
     };
-    assert_eq!(
-      html_to_markdown(html, opts.clone()),
-      expected,
-      "{html} {source}:{target}"
-    );
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
   }
 }
 
@@ -6648,6 +7323,38 @@ fn scout9_wrap_setext_boundary() {
       expected,
       "html={html}"
     );
+  }
+}
+
+#[test]
+fn heading_overrides_inside_list_code_keep_their_output() {
+  for (html, expected, tag, config) in [
+    (
+      r#"<ul><li><pre>Intro<span><h3>T</h3></span></pre></li></ul>"#,
+      "- ```\n  Intro ### T\n  ```",
+      "span",
+      TagOverrideConfig::alias("strong"),
+    ),
+    (
+      r#"<ul><li><code><h6>
+</h6><h3></h3>x</code></li></ul>"#,
+      "- `###### ### x`",
+      "h3",
+      TagOverrideConfig {
+        enter: Some("### ".into()),
+        exit: Some(String::new()),
+        ..Default::default()
+      },
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(tag.into(), config)]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
   }
 }
 
@@ -7360,6 +8067,436 @@ fn pending_rule_quote_review_boundaries() {
       expected,
       "{html}"
     );
+  }
+}
+
+#[test]
+fn quote_boundary_review_regressions() {
+  for (id, html, expected) in [
+    (
+      "Q1-em-sibling",
+      "<ul><li><blockquote>q</blockquote><em></em></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-em-nested",
+      "<ul><li><blockquote>q</blockquote><em></em><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-strong-sibling",
+      "<ul><li><blockquote>q</blockquote><strong></strong></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-strong-nested",
+      "<ul><li><blockquote>q</blockquote><strong></strong><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-code-sibling",
+      "<ul><li><blockquote>q</blockquote><code></code></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-code-nested",
+      "<ul><li><blockquote>q</blockquote><code></code><ul><li>x</li></ul></li></ul>",
+      "- \n  > q\n  - x",
+    ),
+    (
+      "Q1-nested-empty",
+      "<ul><li><blockquote>q</blockquote><em><strong> </strong></em></li><li>x</li></ul>",
+      "- \n  > q\n- x",
+    ),
+    (
+      "Q1-nested-tail",
+      "<ul><li><blockquote>q</blockquote><em><strong> </strong></em>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "Q3-ul-br1",
+      "<ul><li><blockquote>q</blockquote><br>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "Q3-ul-br2",
+      "<ul><li><blockquote>q</blockquote><br><br>tail</li></ul>",
+      "- \n  > q  \n    \n  \n  tail",
+    ),
+    (
+      "Q3-ul-br3",
+      "<ul><li><blockquote>q</blockquote><br><br><br>tail</li></ul>",
+      "- \n  > q  \n    \n    \n  \n  tail",
+    ),
+    (
+      "Q3-ol-br1",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br>tail</li></ol>",
+      "10. \n    > q  \n    \n    tail",
+    ),
+    (
+      "Q3-ol-br2",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br><br>tail</li></ol>",
+      "10. \n    > q  \n      \n    \n    tail",
+    ),
+    (
+      "Q3-ol-br3",
+      "<ol start=\"10\"><li><blockquote>q</blockquote><br><br><br>tail</li></ol>",
+      "10. \n    > q  \n      \n      \n    \n    tail",
+    ),
+    (
+      "R1-empty-ul",
+      "<ul><li><blockquote>q</blockquote><ul></ul>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R1-empty-ol",
+      "<ul><li><blockquote>q</blockquote><ol></ol>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R1-empty-chain",
+      "<ul><li><blockquote>q</blockquote><ul></ul><ol></ol><span> </span>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R2-empty-caption",
+      "<ul><li><blockquote>q</blockquote><figcaption></figcaption>tail</li></ul>",
+      "- \n  > q\n\n  tail",
+    ),
+    (
+      "R2-caption-br1",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-caption-br2",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n    \n  \n  tail",
+    ),
+    (
+      "R2-caption-br3",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><br><br></figcaption>tail</li></ul>",
+      "- \n  > q  \n    \n    \n  \n  tail",
+    ),
+    (
+      "R2-caption-empty-em",
+      "<ul><li><blockquote>q</blockquote><figcaption><br><em></em></figcaption>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-figure-caption",
+      "<ul><li><blockquote>q</blockquote><figure><figcaption><br></figcaption></figure>tail</li></ul>",
+      "- \n  > q  \n  \n  tail",
+    ),
+    (
+      "R2-caption-sibling",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption></li><li>x</li></ul>",
+      "- \n  > q  \n- x",
+    ),
+    (
+      "R2-caption-nested",
+      "<ul><li><blockquote>q</blockquote><figcaption><br></figcaption><ul><li>x</li></ul></li></ul>",
+      "- \n  > q  \n  - x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{id}");
+  }
+}
+
+#[test]
+fn quote_boundary_literal_after_alias_review_regression() {
+  let html = "<ul><li><x-first>q</x-first><blockquote>r</blockquote>tail</li></ul>";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![
+        (
+          "x-first".to_string(),
+          TagOverrideConfig {
+            alias_tag_id: mdream::get_tag_id("blockquote"),
+            ..Default::default()
+          },
+        ),
+        (
+          "blockquote".to_string(),
+          TagOverrideConfig {
+            enter: Some("[".to_string()),
+            exit: Some("]".to_string()),
+            spacing: Some([0, 0]),
+            ..Default::default()
+          },
+        ),
+      ]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown(html, options.clone()),
+    "- \n  > q\n\n  [r] tail"
+  );
+}
+
+#[test]
+fn empty_fenced_code_in_list_has_a_blank_body_line() {
+  // A whitespace-only line is just as blank in CommonMark. The opening fence
+  // already started the item, so this blank is fence content and the item,
+  // with anything after the fence, continues.
+  for (html, expected) in [
+    (
+      "<ul><li><pre><code></code></pre></li></ul>",
+      "- ```\n\n  ```",
+    ),
+    (
+      "<ol start=\"10\"><li><pre><code></code></pre></li></ol>",
+      "10. ```\n\n    ```",
+    ),
+    (
+      "<blockquote><ul><li><pre><code></code></pre></li></ul></blockquote>",
+      "> - ```\n>\n>   ```",
+    ),
+    (
+      "<ul><li><pre><code></code></pre>after</li><li>b</li></ul>",
+      "- ```\n\n  ```\n\n  after\n- b",
+    ),
+    (
+      "<ol start=\"10\"><li><pre><code></code></pre>after</li><li>b</li></ol>",
+      "10. ```\n\n    ```\n\n    after\n11. b",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn raw_text_aliases_use_source_closing_names() {
+  for (html, source, target, expected) in [
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<script>a</div>b</script><p>tail</p>",
+      "script",
+      "div",
+      "ab\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "div",
+      "**x**\n\ntail",
+    ),
+    (
+      "<style>a</div>b</style><p>tail</p>",
+      "style",
+      "div",
+      "ab\n\ntail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "script", "tail"),
+    ("<x>a</script>b</x><p>tail</p>", "x", "script", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "script",
+      "tail",
+    ),
+    ("<x><b>x</b></x><p>tail</p>", "x", "style", "tail"),
+    ("<x>a</style>b</x><p>tail</p>", "x", "style", "tail"),
+    (
+      "<x>before <!--unfinished</x><p>tail</p>",
+      "x",
+      "style",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "script", "tail"),
+    ("<div>a</script>b</div><p>tail</p>", "div", "script", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "script",
+      "tail",
+    ),
+    ("<div><b>x</b></div><p>tail</p>", "div", "style", "tail"),
+    ("<div>a</style>b</div><p>tail</p>", "div", "style", "tail"),
+    (
+      "<div>before <!--unfinished</div><p>tail</p>",
+      "div",
+      "style",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>a</style>b</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<script>before <!--unfinished</script><p>tail</p>",
+      "script",
+      "style",
+      "tail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>a</script>b</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<style>before <!--unfinished</style><p>tail</p>",
+      "style",
+      "script",
+      "tail",
+    ),
+    (
+      "<script><b>x</b></script><p>tail</p>",
+      "script",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    (
+      "<style><b>x</b></style><p>tail</p>",
+      "style",
+      "textarea",
+      "\\<b>x\\</b>\n\ntail",
+    ),
+    ("<X>hidden</X><p>tail</p>", "x", "script", "tail"),
+    (
+      "<script><!--<script></script>--></script><p>tail</p>",
+      "script",
+      "script",
+      "tail",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(source.into(), TagOverrideConfig::alias(target))]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "{html} {source}:{target}"
+    );
+  }
+}
+#[test]
+fn setext_equals_text_preserves_paragraphs() {
+  for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a<br># b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\# b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>- b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\- b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>+ b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\+ b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>1. b</li></ul></li></ul>",
+      "- x\n  - a  \n    1\\. b",
+    ),
+    (
+      "<ul><li>x<ul><li>a<br>&gt; b</li></ul></li></ul>",
+      "- x\n  - a  \n    \\> b",
+    ),
+    ("<p>aaaaa<br>===</p>", "aaaaa  \n\\==="),
+    (
+      "<p>aaaaa<br><span>=</span><span>==</span></p>",
+      "aaaaa  \n\\===",
+    ),
+    ("<p>aaaaa<br> <span></span>===</p>", "aaaaa  \n\\==="),
+    ("<p>aaaaa<br>=</p>", "aaaaa  \n\\="),
+    ("<p>aaaaa<br>==</p>", "aaaaa  \n\\=="),
+    ("<p>=SUM(A1:A3)</p>", "=SUM(A1:A3)"),
+    ("<p>aaaaa<br>= b</p>", "aaaaa  \n= b"),
+    ("<p>aaaaa<br>=b</p>", "aaaaa  \n=b"),
+    ("<p>aaaaa<br>== =</p>", "aaaaa  \n== ="),
+    ("<p>aaaaa<br>=== x</p>", "aaaaa  \n=== x"),
+    ("<p>aaaaa<br>=== </p>", "aaaaa  \n\\==="),
+    (
+      "<ul><li>x<ul><li>a<br>= b</li></ul></li></ul>",
+      "- x\n  - a  \n    = b",
+    ),
+    ("<blockquote><p>x<br>= b</p></blockquote>", "> x  \n> = b"),
+    ("<blockquote><p>x<br>==</p></blockquote>", "> x  \n> \\=="),
+    ("<p>aaaaa<br><span></span></p>", "aaaaa"),
+    ("<p>a = b and x===y</p>", "a = b and x===y"),
+    ("<p>a<span>=</span><span>==</span>b</p>", "a===b"),
+    ("<p><code>===</code></p>", "`===`"),
+    ("<p></p>", ""),
+    (
+      "<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul>",
+      "- aaaaa  \n  \\===",
+    ),
+    (
+      "<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul>",
+      "- x\n  - aaaaa  \n    \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - aaaaa  \n      \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - aaaaa  \n        \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - aaaaa  \n          \\===",
+    ),
+    (
+      "<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li>x<ul><li><p>aaaaa<br><span>=</span><span>==</span></p></li></ul></li></ul></li></ul></li></ul></li></ul></li></ul>",
+      "- x\n  - x\n    - x\n      - x\n        - x\n          - aaaaa  \n            \\===",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn setext_dash_text_preserves_paragraphs() {
+  for (html, expected) in [
+    ("<p>aaaaa<br>--</p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>-- </p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>--\t</p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>--<br>b</p>", "aaaaa  \n\\--  \nb"),
+    ("<p>aaaaa<br>-<span>-</span></p>", "aaaaa  \n\\--"),
+    ("<p>aaaaa<br>- -</p>", "aaaaa  \n\\- -"),
+    ("<p>aaaaa<br>-- -</p>", "aaaaa  \n\\-- -"),
+    ("<p>aaaaa<br>---</p>", "aaaaa  \n\\---"),
+    ("<ul><li>x<br>--</li></ul>", "- x  \n  \\--"),
+    (
+      "<ul><li>x<ul><li>y<br>--</li></ul></li></ul>",
+      "- x\n  - y  \n    \\--",
+    ),
+    ("<blockquote><p>x<br>--</p></blockquote>", "> x  \n> \\--"),
+    ("<p>aaaaa<br>-- a</p>", "aaaaa  \n-- a"),
+    ("<p>aaaaa<br>--a</p>", "aaaaa  \n--a"),
+    ("<p>aaaaa --</p>", "aaaaa --"),
+    ("<p>x<br><b>--</b></p>", "x  \n**--**"),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
   }
 }
 
