@@ -2,6 +2,15 @@
 
 use super::*;
 
+fn starts_with_heading_prefix(value: &str) -> bool {
+  let bytes = value.as_bytes();
+  let mut hashes = 0;
+  while hashes < 7 && bytes.get(hashes) == Some(&b'#') {
+    hashes += 1;
+  }
+  hashes > 0 && hashes <= 6 && matches!(bytes.get(hashes), Some(b' ' | b'\t'))
+}
+
 /// Bytes rejected from a fenced-code info string.
 ///
 /// Two classes, for two different reasons:
@@ -643,6 +652,7 @@ impl ConvertState {
     let marker_offset = self.buffer[output_start..content_start]
       .rfind(MARKDOWN_CODE_BLOCK)
       .expect("code fence opener missing from output");
+    self.settle_quote_boundary_at_fence();
     self.code_fence = Some(CodeFenceState {
       output_start,
       marker_offset,
@@ -650,6 +660,24 @@ impl ConvertState {
       indent,
       language,
     });
+  }
+
+  // A quote that closed inside the fence may have trimmed the reservation already.
+  #[cold]
+  #[inline(never)]
+  fn drop_empty_fence_reservation(&mut self, indent: &str) {
+    if self.buffer.ends_with(indent) {
+      self.truncate_buffer(self.buffer.len() - indent.len());
+    }
+  }
+
+  // The fence took the tentative quote separator; restoring it would cut the fence.
+  #[cold]
+  #[inline(never)]
+  fn settle_quote_boundary_at_fence(&mut self) {
+    if matches!(self.caption_boundary, CaptionBoundary::QuoteTentative(_)) {
+      self.caption_boundary = CaptionBoundary::None;
+    }
   }
 
   #[cold]
@@ -663,6 +691,11 @@ impl ConvertState {
     };
     let max_run =
       Self::max_line_leading_run(&self.buffer[fence.content_start..], marker, &fence.indent);
+    // The opener reserves the first content line's list indent. With no body,
+    // remove that reservation so the empty line stays blank, as in JS.
+    if self.buffer.len() == fence.content_start && !fence.indent.is_empty() {
+      self.drop_empty_fence_reservation(&fence.indent);
+    }
     let delimiter = (marker as char).to_string().repeat((max_run + 1).max(3));
     let marker_start = fence.output_start + fence.marker_offset;
     if self.replace_code_span_content(
@@ -813,6 +846,11 @@ impl ConvertState {
       }
     };
     for span in &mut self.code_spans {
+      // A span opened before the quote holds the prefix written at its content
+      // start, as in JS, so `<code><blockquote>` keeps its opener in place.
+      if span.output_start < frame.content_start && span.content_start == frame.content_start {
+        continue;
+      }
       for offset in [&mut span.output_start, &mut span.content_start] {
         *offset = remap(*offset);
       }
@@ -897,7 +935,9 @@ impl ConvertState {
       self.code_fence.as_ref().map(|fence| fence.output_start),
       self.code_spans.first().map(|span| span.output_start),
       link_start,
-      self.empty_item_hazard.then_some(self.empty_item_line_start),
+      self
+        .item_marker_line_held()
+        .then_some(self.empty_item_line_start),
     ]
     .into_iter()
     .flatten()
@@ -1189,6 +1229,8 @@ impl ConvertState {
         content_start: self.buffer.len(),
         kind: inline_marker_type,
         starts_at_hard_break: self.hard_break_end == marker_start,
+        // No marker opens with a newline; only a prefixed heading break does.
+        restores_heading_break: emitted.starts_with('\n'),
       });
     } else if !keeps_markers
       && !self.open_markers.is_empty()
@@ -1215,6 +1257,157 @@ impl ConvertState {
       Some(fragment) => Cow::Owned(format!("{separator}{fragment}")),
       None => Cow::Owned(separator),
     });
+  }
+
+  /// Resolve a pending heading break at an element's enter. Output that starts
+  /// its own line already ends the heading's, and an item or a caption writes
+  /// its own separation. Visible output takes the break as a prefix, so an
+  /// empty marker pair dropped later takes it back; a leading space meant to
+  /// separate it from text on the same line goes. Output with nothing visible
+  /// leaves the break to whatever follows. Returns the output and the length
+  /// of the break it took as a prefix.
+  #[cold]
+  #[inline(never)]
+  fn settle_heading_break(
+    &mut self,
+    tag_id: Option<u8>,
+    output: Option<Cow<'static, str>>,
+  ) -> (Option<Cow<'static, str>>, usize) {
+    let fragment = output.as_deref().unwrap_or("");
+    if matches!(tag_id, Some(TAG_LI | TAG_FIGCAPTION))
+      || fragment.trim_start_matches(' ').starts_with('\n')
+    {
+      self.heading_break_pending = false;
+      // The caption's frame is already pushed; an empty caption hands it back.
+      if tag_id == Some(TAG_FIGCAPTION)
+        && self.depth_map[TAG_PRE as usize] == 0
+        && let Some(frame) = self.caption_frames.last_mut()
+      {
+        frame.restores_heading_break = true;
+      }
+    } else if has_visible(fragment.as_bytes()) {
+      self.heading_break_pending = false;
+      let fragment = fragment.trim_start_matches(' ');
+      let prefixed = format!("\n\n{}{fragment}", self.list_indent);
+      return (Some(Cow::Owned(prefixed)), 2 + self.list_indent.len());
+    }
+    (output, 0)
+  }
+
+  /// Write a pending heading break before a text node. Returns the text that
+  /// follows it, or `None` when the node is only whitespace and keeps waiting.
+  #[cold]
+  #[inline(never)]
+  fn flush_heading_break_before_text<'t>(&mut self, text: &'t str) -> Option<&'t str> {
+    if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
+      return None;
+    }
+    self.flush_heading_break();
+    // The text opens the item's next block, where a leading space indents it.
+    Some(if self.depth_map[TAG_PRE as usize] == 0 {
+      text.trim_start_matches(|c: char| c.is_ascii() && is_whitespace(c as u8))
+    } else {
+      text
+    })
+  }
+
+  fn flush_heading_break(&mut self) {
+    self.heading_break_pending = false;
+    let separator = format!("\n\n{}", self.list_indent);
+    self.last_content_cache_len = self.push_code_span_content(&separator, true);
+  }
+
+  /// Inside a list item a heading opens its own block unless a wrapper keeps it
+  /// inline: after text on the item's line, even past a space, its `#` prefix
+  /// would stay text. The space that ended the text goes too, which the
+  /// reach-back trim keeps before a whitespace-collapsing element.
+  #[cold]
+  #[inline(never)]
+  fn open_item_heading_block(
+    &mut self,
+    output: Option<Cow<'static, str>>,
+  ) -> Option<Cow<'static, str>> {
+    if plain_text!(self)
+      || self.depth_map[TAG_PRE as usize] != 0
+      || self.in_table_cell()
+      || !output.as_deref().is_some_and(starts_with_heading_prefix)
+      || self.heading_kept_inline_in_item(true)
+      || self.opens_block_line(self.buffer.as_bytes(), self.buffer.len())
+    {
+      return output;
+    }
+    self.trim_trailing_spaces();
+    Some(Cow::Owned(format!(
+      "\n\n{}{}",
+      self.list_indent,
+      output.as_deref().unwrap_or_default()
+    )))
+  }
+
+  /// A heading opens inside a list item: keep its block on its own line.
+  #[cold]
+  #[inline(never)]
+  fn enter_item_heading(
+    &mut self,
+    enter_is_literal: bool,
+    output: Option<Cow<'static, str>>,
+  ) -> Option<Cow<'static, str>> {
+    if !enter_is_literal
+      && output
+        .as_deref()
+        .is_some_and(|fragment| fragment.starts_with('\n'))
+      && !self.opens_block_line(self.buffer.as_bytes(), self.buffer.len())
+    {
+      self.trim_trailing_spaces();
+    }
+    self.open_item_heading_block(output)
+  }
+
+  /// A heading entering a list item's pending caption. Materializing the caption
+  /// already places its opening emphasis before the heading, so no separator
+  /// goes inside that inline run.
+  #[cold]
+  #[inline(never)]
+  fn caption_heading_enter(&self, tag_id: Option<u8>) -> bool {
+    self.depth_map[TAG_LI as usize] > 0
+      && tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6)
+      && self
+        .caption_frames
+        .iter()
+        .any(|frame| !matches!(frame.state, CaptionState::Committed))
+  }
+
+  /// At a heading's exit in a list item: only an ATX prefix can take in the
+  /// text after it. Inside `<pre>` that text is code, and inside a caption the
+  /// emphasis wrapping it, either of which a break would split.
+  #[cold]
+  #[inline(never)]
+  fn owe_item_heading_break(&mut self, node: &ElementNode) {
+    if self.depth_map[TAG_PRE as usize] != 0 {
+      return;
+    }
+    // The same override the exit resolved: none for a skipped node.
+    let (enter_is_overridden, enter_is_heading) = if node.enter_skipped || !self.has_tag_overrides {
+      (false, false)
+    } else {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      let enter = Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+        .and_then(|ov| ov.enter.as_deref());
+      (
+        enter.is_some(),
+        enter.is_some_and(starts_with_heading_prefix),
+      )
+    };
+    if (!enter_is_overridden || enter_is_heading) && !self.heading_kept_inline_in_item(false) {
+      if enter_is_heading {
+        self.trim_trailing_spaces();
+      }
+      self.heading_break_pending = true;
+    }
   }
 
   /// Simple-tag enter; `link` selects the `<a>` variant.
@@ -1248,6 +1441,9 @@ impl ConvertState {
       is_inline = node.is_inline;
       node_spacing = node.spacing;
       output = self.get_enter_output(node, ancestors);
+    }
+    if tag_id == Some(TAG_DIV) && output.is_some() && !plain_text!(self) {
+      self.confirm_div_marker_break(&mut output);
     }
 
     if self.hard_break_end == self.buffer.len()
@@ -1285,6 +1481,14 @@ impl ConvertState {
       return;
     }
 
+    let heading_break_prefix_len = if self.heading_break_pending {
+      let (settled, prefix_len) = self.settle_heading_break(tag_id, output);
+      output = settled;
+      prefix_len
+    } else {
+      0
+    };
+
     let output_start = self.buffer.len();
     self.write_output(
       true,
@@ -1309,6 +1513,11 @@ impl ConvertState {
       self.link.bracket_emitted = emitted_bracket;
       self.link.empty_text_pending =
         emitted_bracket && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+      if emitted_bracket && heading_break_prefix_len != 0 {
+        self.link.heading_break_prefix_len = heading_break_prefix_len;
+        self.link.starts_at_hard_break =
+          self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
+      }
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
@@ -1377,8 +1586,12 @@ impl ConvertState {
       if open_marker.starts_at_hard_break {
         self.hard_break_end = open_marker.output_start;
       }
+      if open_marker.restores_heading_break {
+        self.heading_break_pending = true;
+      }
       self.last_content_cache_len = 0;
       self.reset_empty_tentative_caption_frames();
+      self.restore_quote_parent_boundary();
       self.last_node_is_inline = is_inline;
       return true;
     }
@@ -1584,6 +1797,9 @@ impl ConvertState {
       };
     }
     // Phase 1 ends — self.stack borrow released
+    if tag_id == Some(TAG_DIV) && !enter_is_literal && output.is_some() && !plain_text!(self) {
+      self.confirm_div_marker_break(&mut output);
+    }
 
     if self.table_row_opener_pending
       && matches!(tag_id, Some(TAG_TH | TAG_TD))
@@ -1669,35 +1885,64 @@ impl ConvertState {
         },
         deferred_breaks: None,
         has_internal_break: false,
+        restores_heading_break: false,
       });
     }
 
-    let caption_active =
-      self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
-    let visible_output = caption_active
-      && output
-        .as_deref()
-        .is_some_and(|value| value.bytes().any(|byte| !is_whitespace(byte)));
-    let default_inline_marker =
-      !enter_is_literal && visible_output && tag_id.and_then(Self::inline_marker_type).is_some();
-    let tentative_caption_output =
-      default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
-    if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
-      self.expand_deferred_caption_breaks();
+    // Empty list containers emit nothing. Only an actual item replaces the
+    // quote's pending continuation with list structure.
+    if self.quote_boundary_pending() {
+      self.settle_quote_boundary_at_enter(tag_id, is_inline, enter_is_literal, &mut output);
     }
-    let consumes_caption_boundary = if visible_output || tag_id == Some(TAG_BLOCKQUOTE) {
-      self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)))
-    } else {
-      false
-    };
-    if visible_output && (tag_id != Some(TAG_BLOCKQUOTE) || enter_is_literal) {
-      self.materialize_caption_frames(if caption_enter && enter_is_literal {
-        CaptionMaterialization::ExplicitCommit
-      } else if tentative_caption_output {
-        CaptionMaterialization::Tentative
+    // With no caption or quote state pending, and no blockquote entering, none of
+    // the caption handling below can write or change state, so it is skipped.
+    let caption_fast = self.caption_boundary == CaptionBoundary::None
+      && self.caption_frames.is_empty()
+      && tag_id != Some(TAG_BLOCKQUOTE);
+    let structural_quote = tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal;
+    let mut quote_sibling_separator = false;
+    let mut caption_heading_enter = false;
+    let mut consumes_caption_boundary = false;
+    if !caption_fast {
+      let caption_active =
+        self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
+      let visible_output = caption_active
+        && output
+          .as_deref()
+          .is_some_and(|value| value.bytes().any(|byte| !is_whitespace(byte)));
+      let default_inline_marker =
+        !enter_is_literal && visible_output && tag_id.and_then(Self::inline_marker_type).is_some();
+      let tentative_caption_output =
+        default_inline_marker || (!enter_is_literal && tag_id == Some(TAG_A));
+      let quote_parent = self.caption_boundary == CaptionBoundary::QuoteParent;
+      // A sibling quote keeps the separator after a closed quote's content. An
+      // empty quote left the item's opening line, where a blank would end it.
+      quote_sibling_separator = quote_parent
+        && structural_quote
+        && self.last_output_byte().is_some_and(|byte| byte != b'\n');
+      caption_heading_enter = visible_output && self.caption_heading_enter(tag_id);
+      if visible_output || structural_quote {
+        self.expand_deferred_caption_breaks();
+      }
+      consumes_caption_boundary = if visible_output || structural_quote {
+        // An anchor without an href writes nothing, so it cannot carry the boundary.
+        if visible_output && is_inline && self.quote_boundary_pending() {
+          self.prepare_inline_quote_boundary(enter_is_literal)
+        } else {
+          self.prepare_caption_boundary(tag_id != Some(TAG_LI) && !structural_quote)
+        }
       } else {
-        CaptionMaterialization::Commit
-      });
+        false
+      };
+      if visible_output && (tag_id != Some(TAG_BLOCKQUOTE) || enter_is_literal) {
+        self.materialize_caption_frames(if caption_enter && enter_is_literal {
+          CaptionMaterialization::ExplicitCommit
+        } else if tentative_caption_output {
+          CaptionMaterialization::Tentative
+        } else {
+          CaptionMaterialization::Commit
+        });
+      }
     }
     let new_line_config = self.calculate_new_line_config(tag_id, node_spacing, true);
     let quote_at_start = self
@@ -1730,6 +1975,17 @@ impl ConvertState {
           return;
         }
       }
+    }
+
+    let heading_break_prefix_len = if self.heading_break_pending {
+      let (settled, prefix_len) = self.settle_heading_break(tag_id, output);
+      output = settled;
+      prefix_len
+    } else {
+      0
+    };
+    if tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6) && self.depth_map[TAG_LI as usize] > 0 {
+      output = self.enter_item_heading(enter_is_literal, output);
     }
 
     // Whitespace immediately before <br> has no visual effect in HTML. Let the
@@ -1824,7 +2080,7 @@ impl ConvertState {
       is_inline,
       configured_new_lines,
       output.as_deref(),
-      enter_is_literal,
+      enter_is_literal || caption_heading_enter,
     );
 
     if tag_id == Some(TAG_IMG)
@@ -1875,6 +2131,7 @@ impl ConvertState {
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE) {
       if !self.blockquotes.is_empty()
+        && !quote_sibling_separator
         && self.buffer.ends_with("\n\n")
         && (!raw_html_quote_boundary || self.buffer.ends_with("\n\n\n"))
       {
@@ -1890,7 +2147,12 @@ impl ConvertState {
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
-        list_indent: self.list_indent.clone(),
+        // A quote in a table cell starts mid-row, past any list indent.
+        list_indent: if self.in_table_cell() {
+          String::new()
+        } else {
+          self.list_indent.clone()
+        },
       });
     }
 
@@ -1958,6 +2220,11 @@ impl ConvertState {
       self.link.bracket_emitted = emitted_bracket;
       self.link.empty_text_pending =
         emitted_bracket && !exit_is_overridden && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+      if emitted_bracket && heading_break_prefix_len != 0 {
+        self.link.heading_break_prefix_len = heading_break_prefix_len;
+        self.link.starts_at_hard_break =
+          self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
+      }
       // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
       // `max_node_bytes` has to charge what the link holds back.
       if self.streaming || self.options.max_node_bytes != 0 {
@@ -2084,9 +2351,14 @@ impl ConvertState {
 
   /// Clean-mode empty link: drop the whole `[](url)`, restoring the caption state it changed.
   fn drop_empty_link_text(&mut self, bracket_pos: usize, is_inline: bool) {
-    self.truncate_buffer(bracket_pos);
+    let prefix_len = self.link.heading_break_prefix_len;
+    let start = bracket_pos - prefix_len;
+    self.truncate_buffer(start);
     if self.link.starts_at_hard_break {
-      self.hard_break_end = self.link.bracket_pos;
+      self.hard_break_end = start;
+    }
+    if prefix_len != 0 {
+      self.heading_break_pending = true;
     }
     for (frame, &(count, has_internal_break)) in self
       .caption_frames
@@ -2101,6 +2373,7 @@ impl ConvertState {
       }
     }
     self.reset_empty_tentative_caption_frames();
+    self.restore_quote_parent_boundary();
     self.link_caption_break_snapshot_active = false;
     self.link_caption_break_snapshot.clear();
     self.end_link();
@@ -2246,12 +2519,20 @@ impl ConvertState {
         && (node.tag_id != Some(TAG_PRE)
           || self.pre_fence_owner_depth != self.depth_map[TAG_PRE as usize]))
     {
+      // A heading's break is owed only inside its item, even one whose markers
+      // a plugin skipped. An excluded item is no part of the output at all.
+      if node.tag_id == Some(TAG_LI) && !node.excluded_from_markdown {
+        self.heading_break_pending = false;
+      }
       self.last_node_is_inline = node.is_inline;
       return;
     }
 
     #[cfg(feature = "html")]
     if self.is_html() {
+      if node.tag_id == Some(TAG_LI) {
+        self.heading_break_pending = false;
+      }
       self.emit_html_exit(node);
       return;
     }
@@ -2259,6 +2540,14 @@ impl ConvertState {
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
+      if matches!(
+        self.caption_boundary,
+        CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+      ) {
+        self.restore_quote_parent_boundary();
+        self.caption_boundary = CaptionBoundary::None;
+      }
+      self.heading_break_pending = false;
     }
     let owns_pre_fence = tag_id == Some(TAG_PRE);
     // Only the <pre> owning the open fence may close it; a nested one closing
@@ -2393,8 +2682,11 @@ impl ConvertState {
     if !caption_exit {
       if visible_output {
         self.expand_deferred_caption_breaks();
-        consumes_caption_boundary =
-          self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)));
+        consumes_caption_boundary = if is_inline && self.quote_boundary_pending() {
+          self.prepare_inline_quote_boundary(has_override)
+        } else {
+          self.prepare_caption_boundary(!matches!(tag_id, Some(TAG_BLOCKQUOTE | TAG_LI)))
+        };
         self.materialize_caption_frames(if default_inline_marker {
           CaptionMaterialization::Tentative
         } else {
@@ -2414,10 +2706,12 @@ impl ConvertState {
     }
     if caption_exit && let Some(frame) = self.caption_frames.pop() {
       let deferred_breaks = frame.deferred_breaks;
+      let mut restores_heading_break = false;
       match frame.state {
         CaptionState::Pending => {
           if !has_override {
             output = None;
+            restores_heading_break = frame.restores_heading_break;
           }
         }
         CaptionState::Tentative {
@@ -2446,6 +2740,7 @@ impl ConvertState {
             }
             if !has_override {
               output = None;
+              restores_heading_break = frame.restores_heading_break;
             }
           }
         }
@@ -2454,6 +2749,10 @@ impl ConvertState {
         }
       }
       self.write_deferred_break_run(deferred_breaks);
+      // A break the dropped caption left behind already ends the heading's line.
+      if restores_heading_break && !self.caption_exit_opens_block_line() {
+        self.heading_break_pending = true;
+      }
     }
 
     if !has_override
@@ -2465,10 +2764,12 @@ impl ConvertState {
       self.list_rule_pending = true;
     }
 
+    let closes_quote =
+      !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty();
+    if closes_quote {
+      self.finalize_blockquote();
+    }
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) {
-      if !self.blockquotes.is_empty() {
-        self.finalize_blockquote();
-      }
       // The quote's close separates a raw HTML region that ended inside it,
       // including a literal-enter quote, which pushed no frame.
       self.pending_raw_html_boundary = false;
@@ -2531,7 +2832,14 @@ impl ConvertState {
       // Raw `<hN>` in a table cell and plain text both write no ATX prefix, so
       // there is no closing sequence to protect.
       if !plain_text!(self) && !self.in_table_cell() {
-        self.escape_trailing_heading_hashes();
+        // An overridden exit inside a code span has no ATX closing sequence.
+        // Keep its literal hashes, as the override's own handler does in JS.
+        if !has_override || self.code_spans.is_empty() {
+          self.escape_trailing_heading_hashes();
+        }
+        if self.depth_map[TAG_LI as usize] > 0 {
+          self.owe_item_heading_break(node);
+        }
       }
     }
 
@@ -2645,11 +2953,28 @@ impl ConvertState {
       marker.written = written;
       self.sibling_list_marker = 0;
     }
-    if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
-      self.caption_boundary = CaptionBoundary::None;
+    if consumes_caption_boundary {
+      if !is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR)) {
+        self.caption_boundary = CaptionBoundary::None;
+      } else if !caption_exit && self.quote_boundary_pending() {
+        self.close_quote_wrapper();
+      }
     }
     if caption_exit_spacing > 0 {
       self.caption_boundary = CaptionBoundary::Pending(caption_exit_spacing);
+    }
+    // Reuse the deferred block boundary: it already ignores invisible output
+    // and supplies list continuation indentation, without taxing plain text.
+    if closes_quote
+      && !has_override
+      && self.depth_map[TAG_LI as usize] > 0
+      && self.depth_map[TAG_PRE as usize] == 0
+      && !self.in_raw_html_block()
+      && !self.in_table_cell()
+    {
+      self.caption_boundary = CaptionBoundary::QuoteParent;
+      // An HR inside this quote cannot own the parent's deferred separator.
+      self.list_rule_pending = false;
     }
     self.settle_empty_text_pending(output_start, || false);
     // Reset <pre> fence deferral once the element closes (issue #97).
@@ -2695,6 +3020,9 @@ impl ConvertState {
     self.flush_streaming_blockquote_lines();
 
     self.pre_fence_pending = false;
+    // The fence opens its own block, which is the break a heading before it
+    // owed; written later, that break would land inside the code.
+    self.heading_break_pending = false;
     self.pre_fence_owner_depth = self.pre_fence_pending_depth;
     let li_depth = self.depth_map[TAG_LI as usize];
     let fence = if li_depth > 0 {
@@ -2764,6 +3092,7 @@ impl ConvertState {
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
       && !self.list_rule_pending
+      && !self.heading_break_pending
       && !self.pending_inline_whitespace
       && !self.pending_raw_html_boundary
       && !self.pre_fence_pending
@@ -2965,6 +3294,16 @@ impl ConvertState {
       return;
     }
 
+    // Before a caption opens on this text, so its marker follows the break.
+    let text = if self.heading_break_pending {
+      let Some(text) = self.flush_heading_break_before_text(text) else {
+        return;
+      };
+      text
+    } else {
+      text
+    };
+
     // An open fence pins the buffer until its delimiter is known, so a code block
     // is capped by everything it has buffered, not by each text node separately.
     // Clamped to the room left rather than rejected whole, or a node arriving just
@@ -2979,7 +3318,10 @@ impl ConvertState {
           .caption_frames
           .iter()
           .any(|frame| !matches!(frame.state, CaptionState::Committed));
-      if owns_leading_space && text.as_bytes().first() == Some(&b' ') {
+      if owns_leading_space
+        && self.caption_boundary != CaptionBoundary::QuoteTentative(QUOTE_CLOSED)
+        && text.as_bytes().first() == Some(&b' ')
+      {
         text = &text[1..];
         if text.is_empty() {
           return;
@@ -3239,9 +3581,16 @@ impl ConvertState {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
     let in_link = self.depth_map[TAG_A as usize] > 0;
     let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
-    let mut line_indent = self.markdown_line_indent();
-    let mut ordered_digits = 0u8;
     let bytes = text.as_bytes();
+    // Only a leading active byte reads the line's indent: an inactive first run
+    // resets it before any use, so most text nodes skip the buffer scan.
+    let mut line_indent = match bytes.first() {
+      Some(&byte) if GFM_BYTE_FLAGS[byte as usize] & GFM_TEXT_ACTIVE_BIT != 0 => {
+        self.markdown_line_indent()
+      }
+      _ => None,
+    };
+    let mut ordered_digits = 0u8;
     let mut escaped = false;
     let mut copied_until = 0usize;
     let mut index = 0usize;
@@ -3385,7 +3734,13 @@ impl ConvertState {
 
   /// GFM reads a heading's trailing `#` run as an ATX closing sequence and drops
   /// it along with the text it was meant to be, so the run is escaped. Only a run
-  /// preceded by whitespace (or forming the whole heading) closes a heading.
+  /// preceded by whitespace (or forming the whole heading) closes a heading. A
+  /// run that only the line's block lead precedes is the heading's own marker
+  /// instead: the heading is empty, and the marker's trailing space would read as
+  /// a list item's open content column, joining the next block to the heading's
+  /// line.
+  // Out of line: inlined into heading exits, it measured about 3% slower on real pages.
+  #[inline(never)]
   fn escape_trailing_heading_hashes(&mut self) {
     let bytes = self.buffer.as_bytes();
     // Cheap reject: almost no heading ends in `#`.
@@ -3396,25 +3751,122 @@ impl ConvertState {
     if end == 0 || bytes[end - 1] != b'#' {
       return;
     }
-    // Content begins past the opening `#` prefix, which this pass must not touch.
-    let line = bytes[..end]
-      .iter()
-      .rposition(|&byte| byte == b'\n')
-      .map_or(0, |i| i + 1);
-    let mut start = line;
-    while start < bytes.len() && bytes[start] == b'#' {
-      start += 1;
+    let mut marker = end - 1;
+    while marker > 0 && bytes[marker - 1] == b'#' {
+      marker -= 1;
     }
-    start += usize::from(bytes.get(start) == Some(&b' '));
-    if end < start {
+    let trailing_space = bytes[bytes.len() - 1] == b' ';
+    if self.marker_opens_block_line(marker) {
+      if trailing_space {
+        self.trim_trailing_spaces();
+      }
       return;
     }
-    let mut run = end;
-    while run > start && bytes[run - 1] == b'#' {
-      run -= 1;
+    // Past the block lead, only a run after whitespace closes the heading. That
+    // includes a run right after the opening prefix and its space.
+    if marker > 0 && matches!(self.buffer.as_bytes()[marker - 1], b' ' | b'\t') {
+      self.replace_code_span_content(marker..marker, "\\");
     }
-    if run < end && (run == start || matches!(bytes[run - 1], b' ' | b'\t')) {
-      self.replace_code_span_content(run..run, "\\");
+  }
+
+  /// Whether only a block lead precedes `at` on its line: indentation, then
+  /// optionally a list marker and its space. Nested items indent past the three
+  /// spaces `list_marker_line_start` accepts.
+  fn opens_block_line(&self, bytes: &[u8], at: usize) -> bool {
+    let mut index = at;
+    let mut gap = 0;
+    while index > 0 && bytes[index - 1] == b' ' {
+      index -= 1;
+      gap += 1;
+    }
+    #[cfg(test)]
+    self
+      .block_line_bytes_read
+      .set(self.block_line_bytes_read.get() + gap + 1);
+    if index > 0 && bytes[index - 1] != b'\n' {
+      if gap == 0 {
+        return false;
+      }
+      match bytes[index - 1] {
+        b'-' | b'*' | b'+' => index -= 1,
+        b'.' | b')' => {
+          let digits = index - 1;
+          index = digits;
+          while index > 0 && bytes[index - 1].is_ascii_digit() {
+            index -= 1;
+          }
+          if index == digits || digits - index > 9 {
+            return false;
+          }
+        }
+        _ => return false,
+      }
+      #[cfg(test)]
+      let marker = index;
+      while index > 0 && bytes[index - 1] == b' ' {
+        index -= 1;
+      }
+      #[cfg(test)]
+      self
+        .block_line_bytes_read
+        .set(self.block_line_bytes_read.get() + marker - index);
+    }
+    if index == 0 {
+      return !self.has_flushed_tail() || self.flushed_tail[1] == b'\n';
+    }
+    bytes[index - 1] == b'\n'
+  }
+
+  /// `opens_block_line` at `at`, remembered in `memo` (see `BlockLineMemo`).
+  fn remembered_opens_block_line(&self, memo: &mut BlockLineMemo, at: usize) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let start = memo.spaces.start(bytes, at, |byte| byte == b' ');
+    if start == at {
+      memo.opens = None;
+      return self.opens_block_line(bytes, at);
+    }
+    if let Some((known, opens)) = memo.opens
+      && known == start
+    {
+      return opens;
+    }
+    let opens = self.opens_block_line(bytes, start + 1);
+    memo.opens = Some((start, opens));
+    opens
+  }
+
+  /// `opens_block_line` at the buffer end, for a dropped caption's exit.
+  fn caption_exit_opens_block_line(&mut self) -> bool {
+    let mut memo = self.caption_line;
+    let opens = self.remembered_opens_block_line(&mut memo, self.buffer.len());
+    self.caption_line = memo;
+    opens
+  }
+
+  /// `opens_block_line` before a trailing heading run, which `<div>` enters and
+  /// heading exits check again on an unchanged line.
+  #[cold]
+  #[inline(never)]
+  fn marker_opens_block_line(&mut self, marker: usize) -> bool {
+    let mut memo = self.marker_line;
+    let opens = self.remembered_opens_block_line(&mut memo, marker);
+    self.marker_line = memo;
+    opens
+  }
+
+  /// `get_enter_output` gives a `<div>` its separator when the buffer ends in a
+  /// short hash run; it is only due if that run is a bare heading marker. Checked
+  /// here because remembering the answer needs `&mut self`.
+  #[cold]
+  #[inline(never)]
+  fn confirm_div_marker_break(&mut self, output: &mut Option<Cow<'static, str>>) {
+    let bytes = self.buffer.as_bytes();
+    let mut marker = bytes.len();
+    while marker > 0 && bytes.len() - marker < 7 && bytes[marker - 1] == b'#' {
+      marker -= 1;
+    }
+    if !self.marker_opens_block_line(marker) {
+      *output = None;
     }
   }
 
@@ -3595,6 +4047,7 @@ impl ConvertState {
       _ => true,
     };
     self.empty_item_hazard = !starts_document && !blank_above;
+    self.empty_item_answered = false;
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
@@ -3625,12 +4078,23 @@ impl ConvertState {
     }
   }
 
+  /// The marker's line may still get a newline inserted, so it must stay put.
+  #[inline]
+  pub(crate) fn item_marker_line_held(&self) -> bool {
+    self.empty_item_hazard && !self.empty_item_answered
+  }
+
   /// Give a marker that ended up alone on its line the blank line it needs: the
   /// item is empty, or opened with a block starting on the next line. While
   /// nothing has been written since the marker the answer is still open, so only
   /// the `<li>` exit forces one.
   pub(crate) fn resolve_item_marker(&mut self, at_exit: bool) {
     if !self.empty_item_hazard {
+      return;
+    }
+    // The drain may have freed the line since; the answer it saw is final.
+    if self.empty_item_answered {
+      self.empty_item_hazard = !at_exit;
       return;
     }
     // A rewrite behind the recorded length followed by multi-byte content can
@@ -3661,9 +4125,11 @@ impl ConvertState {
       return;
     }
 
-    // Content on the marker's own line settles it: no blank line is owed.
+    // Content on the marker's own line settles it: no blank line is owed. The
+    // drain only records that, since the `<li>` exit's hard-break trim reads it.
     if !tail.is_empty() && !tail.starts_with(['\n', '\r']) {
-      self.empty_item_hazard = false;
+      self.empty_item_answered = !at_exit;
+      self.empty_item_hazard = !at_exit;
       return;
     }
 
@@ -3703,14 +4169,22 @@ impl ConvertState {
     // still open across it measures emptiness from `content_start`, so left
     // unshifted it stops looking empty and streaming leaks markers one-shot drops.
     //
-    // Not the blockquote frames. Their `content_start` marks where quote
-    // prefixing begins, which belongs *before* this newline; shifting it turns
-    // `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's sibling
-    // rather than its child. `link_bracket_pos` needs no shift either — a pending
-    // `[` is the tail this function has already returned on.
+    // Not a blockquote frame starting at the line. Its `content_start` marks where
+    // quote prefixing begins, which belongs *before* this newline; shifting it
+    // turns `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's
+    // sibling rather than its child. A frame the item opened starts past the line
+    // and moves with its content, or it quotes from the wrong byte.
+    // `link_bracket_pos` needs no shift either — a pending `[` is the tail this
+    // function has already returned on.
 
-    for _ in replaced..separator.len() {
+    let inserted = separator.len() - replaced;
+    for _ in 0..inserted {
       self.shift_offsets_at_or_after(at);
+    }
+    for frame in &mut self.blockquotes {
+      if frame.content_start > at {
+        frame.content_start += inserted;
+      }
     }
     if break_at_end {
       self.hard_break_end = self.buffer.len();
@@ -4199,11 +4673,109 @@ impl ConvertState {
     }
   }
 
+  /// A quote's pending continuation meets the next element's enter. Out of line:
+  /// `emit_enter_element` runs for every element in the text and HTML formats.
+  #[cold]
+  #[inline(never)]
+  fn settle_quote_boundary_at_enter(
+    &mut self,
+    tag_id: Option<u8>,
+    is_inline: bool,
+    enter_is_literal: bool,
+    output: &mut Option<Cow<'static, str>>,
+  ) {
+    if tag_id == Some(TAG_LI) {
+      self.restore_quote_parent_boundary();
+      self.caption_boundary = CaptionBoundary::None;
+    } else if !is_inline && self.open_markers.is_empty() {
+      // Once its wrappers closed, a block settles the tentative spacing. One
+      // that survived took the separator, so the block spaces itself; if all
+      // dropped, the boundary is pending again and writes the quote's break.
+      self.restore_quote_parent_boundary();
+      if matches!(self.caption_boundary, CaptionBoundary::QuoteTentative(_)) {
+        self.caption_boundary = CaptionBoundary::None;
+      } else if tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal {
+        *output = None;
+      }
+    } else if tag_id == Some(TAG_BR) && self.caption_boundary != CaptionBoundary::QuoteParent {
+      // The break's whitespace would pass for the spacing at the buffer tail.
+      self.caption_boundary = CaptionBoundary::QuoteTentative(0);
+    }
+    // Paragraph, HR and fence fragments can already carry their block separator.
+    if self.caption_boundary == CaptionBoundary::QuoteParent
+      && output
+        .as_deref()
+        .is_some_and(|fragment| fragment.starts_with("\n\n"))
+    {
+      self.caption_boundary = CaptionBoundary::ConsumeSpace;
+    }
+  }
+
+  fn quote_boundary_pending(&self) -> bool {
+    matches!(
+      self.caption_boundary,
+      CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
+    )
+  }
+
+  // Default inline output takes the separator without settling it, so the next
+  // list or block transition still spaces itself. Literal output settles it.
+  #[cold]
+  fn prepare_inline_quote_boundary(&mut self, literal: bool) -> bool {
+    let separator_start = self.buffer.len();
+    let consumes_boundary = self.prepare_caption_boundary(true);
+    if literal {
+      self.caption_boundary = CaptionBoundary::None;
+    } else if matches!(
+      self.caption_boundary,
+      CaptionBoundary::ConsumeSpace | CaptionBoundary::QuoteTentative(QUOTE_CLOSED)
+    ) {
+      self.caption_boundary = CaptionBoundary::QuoteTentative(self.buffer.len() - separator_start);
+    }
+    consumes_boundary
+  }
+
+  // Text after a closing delimiter continues its line, so its first space
+  // separates words. It is not the block's first text, which the parser trims.
+  #[cold]
+  fn close_quote_wrapper(&mut self) {
+    self.caption_boundary = CaptionBoundary::QuoteTentative(QUOTE_CLOSED);
+    if let Some(block) = self.first_block_parent_index {
+      self.stack[block].child_text_node_index += 1;
+    }
+  }
+
+  // Marker streaming holds already retain the preceding whitespace. Only a
+  // fully dropped wrapper exposes this tentative separator at the buffer tail.
+  #[cold]
+  fn restore_quote_parent_boundary(&mut self) {
+    let CaptionBoundary::QuoteTentative(length) = self.caption_boundary else {
+      return;
+    };
+    if length > 0
+      && length <= self.buffer.len()
+      && self.buffer.as_bytes()[self.buffer.len() - length..]
+        .iter()
+        .all(|&byte| is_whitespace(byte))
+    {
+      self.truncate_buffer(self.buffer.len() - length);
+      self.last_content_cache_len = 0;
+      self.last_text_node_contains_whitespace = false;
+      self.has_last_text_node = false;
+      self.caption_boundary = CaptionBoundary::QuoteParent;
+    }
+  }
+
   #[inline]
   fn prepare_caption_boundary(&mut self, include_list_indent: bool) -> bool {
     let consumes_boundary = self.caption_boundary != CaptionBoundary::None;
-    if let CaptionBoundary::Pending(configured_new_lines) = self.caption_boundary {
-      self.write_caption_boundary(configured_new_lines, include_list_indent);
+    let spacing = match self.caption_boundary {
+      CaptionBoundary::Pending(spacing) => Some(spacing),
+      CaptionBoundary::QuoteParent => Some(2),
+      _ => None,
+    };
+    if let Some(spacing) = spacing {
+      self.write_caption_boundary(spacing, include_list_indent);
       self.caption_boundary = CaptionBoundary::ConsumeSpace;
     }
     consumes_boundary
@@ -4425,22 +4997,27 @@ impl ConvertState {
     self.line_start_scanned_to = usize::MAX;
   }
 
-  /// Offset just past the buffer's last `\n`.
+  /// Offset just past the buffer's last `\n`. Read only in raw HTML and the
+  /// quoted-line cap check, so kept out of line.
+  #[cold]
+  #[inline(never)]
   pub(super) fn current_line_start(&mut self) -> usize {
     let len = self.buffer.len();
     let bytes = self.buffer.as_bytes();
-    // Only bytes appended since the last call can move the line start; a buffer
-    // that shrank behind the cache (a trim, or a streaming drain) rebuilds it.
-    if self.line_start_scanned_to > len || self.line_start > len {
+    let scanned_to = self.line_start_scanned_to.min(self.line_start_dirty_from);
+    self.line_start_dirty_from = usize::MAX;
+    // Only bytes appended or rewritten since the last call can move the line
+    // start; an invalidation, a shrink or a rewrite behind it rebuilds it.
+    if self.line_start_scanned_to > len || self.line_start > len || scanned_to < self.line_start {
       self.line_start = bytes[..len]
         .iter()
         .rposition(|&byte| byte == b'\n')
         .map_or(0, |i| i + 1);
-    } else if let Some(i) = bytes[self.line_start_scanned_to..len]
+    } else if let Some(i) = bytes[scanned_to..len]
       .iter()
       .rposition(|&byte| byte == b'\n')
     {
-      self.line_start = self.line_start_scanned_to + i + 1;
+      self.line_start = scanned_to + i + 1;
     }
     self.line_start_scanned_to = len;
     self.line_start
@@ -4809,6 +5386,7 @@ impl ConvertState {
           let prefix = self.continuation_prefix();
           Some(Cow::Owned(format!("\n{prefix}{}", HEADING_PREFIXES[depth])))
         } else if !self.list_indent.is_empty()
+          && !self.heading_kept_inline_in_item(true)
           && _ancestors
             .last()
             .is_some_and(|parent| parent.tag_id == Some(TAG_LI))
@@ -4863,15 +5441,33 @@ impl ConvertState {
       TAG_SUB => Some(Cow::Borrowed("<sub>")),
       TAG_SUP => Some(Cow::Borrowed("<sup>")),
       TAG_INS => Some(Cow::Borrowed("<ins>")),
-      TAG_P => {
+      TAG_P | TAG_DIV => {
         // A drain can empty the buffer mid-document, so the check reads the
-        // flushed tail like the close-side twin below, not just the buffer.
+        // flushed tail like the close-side twin below, not just the buffer. A
+        // pending `<pre>` fence is written after this output and opens the
+        // block itself, so a separator here would land inside the code.
         if self.depth_map[TAG_LI as usize] > 0
           && !self.in_table_cell()
+          && !self.pre_fence_pending
           && self
             .last_output_byte()
             .is_some_and(|last_char| last_char != b' ' && last_char != b'\n')
         {
+          // Divs otherwise keep their existing list spacing. Only a bare
+          // heading marker needs a boundary before the div's first text.
+          if tag_id == TAG_DIV {
+            let bytes = self.buffer.as_bytes();
+            // Seven hashes already rule out a marker, so a long retained run
+            // is not rescanned at every div.
+            let mut marker = bytes.len();
+            while marker > 0 && bytes.len() - marker < 7 && bytes[marker - 1] == b'#' {
+              marker -= 1;
+            }
+            // The caller confirms the run opens its line (`confirm_div_marker_break`).
+            if !(1..=6).contains(&(bytes.len() - marker)) {
+              return None;
+            }
+          }
           let indent = self.list_indent.as_str();
           let mut s = String::with_capacity(2 + indent.len());
           s.push_str("\n\n");
@@ -4888,9 +5484,14 @@ impl ConvertState {
       }
       TAG_BLOCKQUOTE => {
         // The completed subtree receives quote prefixes once every structural
-        // newline is known. Preserve the list marker's trailing space here.
+        // newline is known. Preserve the list marker's trailing space here. A
+        // table cell renders its list as raw HTML on the row's own line.
         (self.depth_map[TAG_LI as usize] > 0
-          && !matches!(self.caption_boundary, CaptionBoundary::Pending(_)))
+          && !self.in_table_cell()
+          && !matches!(
+            self.caption_boundary,
+            CaptionBoundary::Pending(_) | CaptionBoundary::QuoteParent
+          ))
         .then_some(Cow::Borrowed("\n"))
       }
       TAG_CODE => {
@@ -4951,12 +5552,14 @@ impl ConvertState {
           // separated with a space so CommonMark parses them as two
           // code spans rather than merging into one (` `a``b` ` →
           // single span with literal content ``a``b``).
-          if self.last_output_byte().is_some_and(|last_char| {
-            !matches!(
-              last_char,
-              b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
-            )
-          }) {
+          if self.caption_boundary != CaptionBoundary::QuoteParent
+            && self.last_output_byte().is_some_and(|last_char| {
+              !matches!(
+                last_char,
+                b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
+              )
+            })
+          {
             Some(Cow::Borrowed(" `"))
           } else {
             Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
@@ -5877,6 +6480,45 @@ impl ConvertState {
       .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
   }
 
+  /// Whether the heading at the top of the stack (`is_enter`) or just popped
+  /// stays inline in its list item: a caption's emphasis wraps it, or a wrapper
+  /// around it writes delimiters that pair across its content, which a block
+  /// break would split. A raw tag (`<u>`, `<sup>`) or a wrapper that writes
+  /// nothing (`<label>`, `<small>`) reads the same either side of it.
+  fn heading_kept_inline_in_item(&self, is_enter: bool) -> bool {
+    if !self.caption_frames.is_empty() {
+      return true;
+    }
+    self.stack[..self.stack.len() - usize::from(is_enter)]
+      .iter()
+      .any(|node| node.collapses_inner_white_space && self.wrapper_writes_delimiters(node))
+  }
+
+  /// Emphasis, code, strikethrough and quote wrappers, and an override with
+  /// output of its own, whose markers are taken as a pair.
+  fn wrapper_writes_delimiters(&self, node: &ElementNode) -> bool {
+    if self.has_tag_overrides {
+      let ovs = self
+        .options
+        .plugins
+        .as_ref()
+        .and_then(|p| p.tag_overrides.as_ref());
+      if let Some(ov) = Self::override_for_node(ovs, self.override_idx.as_deref(), node) {
+        if ov.enter.as_deref() == Some("") && ov.exit.as_deref() == Some("") {
+          return false;
+        }
+        if (node.tag_id != Some(TAG_SPAN)
+          && (ov.enter.as_ref().is_some_and(|s| !s.is_empty())
+            || ov.exit.as_ref().is_some_and(|s| !s.is_empty())))
+          || ov.alias_tag_id.and_then(Self::inline_marker_type).is_some()
+        {
+          return true;
+        }
+      }
+    }
+    node.tag_id.and_then(Self::inline_marker_type).is_some()
+  }
+
   /// Whether an ancestor of the node just entered left a Markdown delimiter
   /// open, which has to close in the same paragraph. Raw tags survive a blank
   /// line and a marker-less wrapper has nothing to close, so neither counts.
@@ -6116,6 +6758,23 @@ mod tests {
 
     state.buffer.push('z');
     assert_eq!(state.last_output_byte(), Some(b'z'));
+  }
+
+  // A drain between a trim and the next line-start read shifts the trim's
+  // offset with the buffer, or the read keeps the start of the trimmed line.
+  #[test]
+  fn line_start_after_a_trim_survives_a_drain() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.buffer = format!("{}\nab\n", "x".repeat(100));
+    assert_eq!(state.current_line_start(), 104);
+    state.buffer.truncate(103);
+    state.note_buffer_rewrite(103);
+    state.last_yielded_length = 100;
+    state.drain_streamed_prefix();
+    let drained = 103 - state.buffer.len();
+    assert!(drained > 0);
+    state.buffer.push_str("cd");
+    assert_eq!(state.current_line_start(), 101 - drained);
   }
 
   // A decoded `&#13;` ends a CommonMark line, so text after a drain that cut

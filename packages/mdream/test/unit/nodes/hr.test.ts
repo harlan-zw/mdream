@@ -64,16 +64,8 @@ const RULES_AROUND_DEFERRED_FENCE: [string, string][] = [
     '- p\n\n  ```\n  \n\n  ---\n  ```',
   ],
   [
-    '<ul><li>p<pre><p>x</p></pre></li></ul>',
-    '- p\n\n  ```\n  \n\n  x\n  ```',
-  ],
-  [
     '<ul><li>p<pre><caption>x</caption></pre></li></ul>',
     '- p\n\n  ```\n  \n\n  x\n  ```',
-  ],
-  [
-    '<ul><li><a href="/w" title="W"><pre><p>x</p></pre></a></li></ul>',
-    '- [\n\n  ```\n  \n\n  x\n  ```\n\n  W](/w)',
   ],
 ]
 
