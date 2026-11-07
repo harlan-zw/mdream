@@ -1,7 +1,7 @@
 import type { BlockquoteFrame, BufferScanState, MarkdownState, MarkdownStreamContext } from './markdown-processor'
 import { TAG_B, TAG_CITE, TAG_DEL, TAG_DFN, TAG_EM, TAG_I, TAG_PRE, TAG_S, TAG_STRIKE, TAG_STRONG } from './const'
 import { isAsciiWhitespace, lineOpensRawHtmlBlock, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
-import { isInsideHeading, trimOutputStart } from './utils'
+import { isInsideHeading, noteBufferRewrite, trimOutputStart } from './utils'
 
 interface QuoteScan {
   owner: BlockquoteFrame
@@ -93,6 +93,7 @@ function flushBlockquoteLines(state: MarkdownState): boolean {
     frame.fragment = start + 1
     frame.followsWhitespace = true
   }
+  noteBufferRewrite(state)
   return true
 }
 
@@ -192,6 +193,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     }
     const retained = content.slice(start)
     state.buffer.splice(0, fragment, retained)
+    noteBufferRewrite(state)
     for (const frame of state.blockquotes)
       frame.fragment -= fragment - 1
     quoteScan = undefined
@@ -326,6 +328,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         if (mutableTail)
           state.buffer.push(mutableTail)
         state.buffer.push(lastFragment)
+        noteBufferRewrite(state)
         lastYieldedLength = stableLength - tailStart
       }
       else if (!retainMutableFragments) {
@@ -335,6 +338,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         resetBufferScanCursors(bufferScan)
         if (emittedTail)
           state.buffer.push(emittedTail)
+        noteBufferRewrite(state)
         lastYieldedLength = emittedTail.length
       }
       // The emitted prefix was observed above; only the mutable tail can
