@@ -6178,3 +6178,21 @@ fn lone_closer_under_an_item_opened_by_a_bare_marker_streams() {
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
+
+// A lone `*` that opens the document has no line above it, in one-shot and in
+// every cut, so the nested item under it keeps its blank line.
+#[test]
+fn lone_closer_opening_the_document_streams() {
+  for (html, expected) in [
+    ("<em><br><ul><li></li></ul></em>", "*  \n\n- *"),
+    ("<em>&#10;<ul><li></li></ul>&#10;&#10;</em>", "*\n\n- \n\n*"),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}

@@ -124,6 +124,14 @@ describe('streaming drain parity', () => {
       expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
   it.each([
+    ['<em><br><ul><li></li></ul></em>', '*  \n\n- *'],
+    ['<em>&#10;<ul><li></li></ul>&#10;&#10;</em>', '*\n\n- \n\n*'],
+  ])('reads a lone `*` that opens the document before any compaction: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it.each([
     ['<ol start="10"><li><br><em>x&#10;</em><br><ul><li></li></ul><p>t</p></li></ol>', '10.   \n    *x\n*  \n    -\n\n    t'],
     ['<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *x\n*\n    - \n      > q'],
     ['<blockquote><ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>', '> 10.   \n>     *x\n> *\n>     - \n>       > q'],

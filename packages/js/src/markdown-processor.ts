@@ -529,6 +529,10 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
  * across cuts ends nothing new.
  */
 export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
+  // Nothing leaves the buffer: the lines above stay readable, and the start of
+  // the document still reads as one, as in Rust before a drain takes a byte.
+  if (cut === 0)
+    return
   let read = state.compactedRead ?? LINE_START
   const fold: ParagraphFold = { paragraph: state.compactedParagraph, item: state.compactedItem, code: state.compactedCode }
   let start = 0
