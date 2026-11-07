@@ -217,9 +217,18 @@ describe('gfm text escaping', () => {
 
   // A list marker after a decoded `\r` leads its line, so an empty heading's
   // own run stays bare there. Once the heading wrote text, that `\r` and the
-  // run came from the text, which still needs the escape outside `<pre>`.
+  // run came from the text, which still needs the escape where the marker
+  // opens an item: as a bullet or a 1 after a paragraph line, as any marker
+  // after a blank line or out of a list item or a quote. A top-level `<pre>`
+  // keeps the line in its fence.
   it.each([
     ['<code><h2>x&#13;- #</h2>y</code>', '`## x\r- \\# y`'],
+    ['<code><h2>x&#13;1) #</h2>y</code>', '`## x\r1) \\# y`'],
+    ['<code><h2>x&#13;10. #</h2>y</code>', '`## x\r10. # y`'],
+    ['<code><h2>x&#13;&#13;9) #</h2>y</code>', '`## x\r\r9) \\# y`'],
+    ['<ul><li><code><h2>x&#13;9) #</h2>y</code></li></ul>', '- `## x\r9) \\# y`'],
+    ['<blockquote><code><h2>x&#13;9) #</h2>y</code></blockquote>', '> `## x\r9) \\# y`'],
+    ['<ul><li><pre><h2>x&#13;- #</h2>y</pre></li></ul>', '- ```\n  ## x\r- \\# y\n  ```'],
     ['<code><h2>x&#13;+ #&#13;</h2></code>', '`## x\r+ \\#`'],
     ['<code><ul><li><h2>x&#13;- #</h2>y</li></ul></code>', '`- ## x\r- \\# y`'],
     ['<kbd><h2>x&#13;1. #</h2></kbd>', '`## x\r1\\. \\#`'],

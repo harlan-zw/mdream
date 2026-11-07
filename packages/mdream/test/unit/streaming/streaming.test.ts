@@ -317,8 +317,17 @@ const TRAILING_WHITESPACE_CASES: [html: string, markdown: string, text?: string]
   ['<b>a&#13;<ul><li><h2></h2>x</li></ul></b>', '**a\r - ## x**'],
   ['<b>a&#13;<ul><li><h2>&#9;</h2>x</li></ul></b>', '**a\r - ## \tx**'],
   // Once the heading wrote text, a `\r` and a list marker before the run came
-  // from that text, so the run is still escaped, outside `<pre>`.
+  // from that text, so the run is still escaped where the marker opens an
+  // item: as a bullet or a 1 after a paragraph line, as any marker after a
+  // blank line or out of a list item or a quote. A top-level `<pre>` keeps the
+  // line in its fence.
   ['<code><h2>x&#13;- #</h2>y</code>', '`## x\r- \\# y`'],
+  ['<code><h2>x&#13;1) #</h2>y</code>', '`## x\r1) \\# y`'],
+  ['<code><h2>x&#13;10. #</h2>y</code>', '`## x\r10. # y`'],
+  ['<code><h2>x&#13;&#13;9) #</h2>y</code>', '`## x\r\r9) \\# y`'],
+  ['<ul><li><code><h2>x&#13;9) #</h2>y</code></li></ul>', '- `## x\r9) \\# y`'],
+  ['<blockquote><code><h2>x&#13;9) #</h2>y</code></blockquote>', '> `## x\r9) \\# y`'],
+  ['<ul><li><pre><h2>x&#13;- #</h2>y</pre></li></ul>', '- ```\n  ## x\r- \\# y\n  ```'],
   ['<code><h2>x&#13;+ #&#13;</h2></code>', '`## x\r+ \\#`'],
   ['<code><ul><li><h2>x&#13;- #</h2>y</li></ul></code>', '`- ## x\r- \\# y`'],
   ['<pre><h2>x&#13;- #</h2>y</pre>', '```\n\n## x\r- #\n\ny\n```'],

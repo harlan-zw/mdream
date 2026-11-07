@@ -11,6 +11,23 @@ fn starts_with_heading_prefix(value: &str) -> bool {
   hashes > 0 && hashes <= 6 && matches!(bytes.get(hashes), Some(b' ' | b'\t'))
 }
 
+/// Whether the list marker ending at `end` may open an item on a paragraph's
+/// next line: a bullet, or an ordered marker numbered 1.
+fn marker_interrupts_paragraph(bytes: &[u8], end: usize) -> bool {
+  if matches!(bytes[end - 1], b'-' | b'+' | b'*') {
+    return true;
+  }
+  let digits_end = end - 1;
+  let mut index = digits_end;
+  while index > 0 && bytes[index - 1].is_ascii_digit() {
+    index -= 1;
+  }
+  bytes[digits_end - 1] == b'1'
+    && bytes[index..digits_end - 1]
+      .iter()
+      .all(|&byte| byte == b'0')
+}
+
 /// Bytes rejected from a fenced-code info string.
 ///
 /// Two classes, for two different reasons:
@@ -3744,18 +3761,57 @@ impl ConvertState {
     // A list marker after a decoded `\r` also leads its line, which
     // `opens_block_line` does not read, so the run of an empty heading stays
     // its own. Once the heading wrote text, that `\r` came from the text and
-    // so did the run, which still needs its escape outside `<pre>`.
+    // so did the run. In a list item or a quote the unindented line leaves
+    // the container, a `<pre>` fence included, so the marker opens an item and
+    // the run needs its escape. At the top level a fence keeps the line, and a
+    // marker that cannot open an item after the paragraph line leaves it text.
     let mut lead = marker;
     while lead > 0 && bytes[lead - 1] == b' ' {
       lead -= 1;
     }
-    if (!self.heading_has_text || self.depth_map[TAG_PRE as usize] != 0)
-      && lead > 0
+    let in_container =
+      self.depth_map[TAG_LI as usize] != 0 || self.depth_map[TAG_BLOCKQUOTE as usize] != 0;
+    if lead > 0
       && self.list_marker_line_start(bytes, lead, self.pending_marker_indent())
+      && (!self.heading_has_text
+        || (!in_container
+          && (self.depth_map[TAG_PRE as usize] != 0 || !self.marker_opens_item(bytes, lead))))
     {
       return;
     }
     self.replace_code_span_content(marker..marker, "\\");
+  }
+
+  /// Whether the list marker ending at `end`, which leads its line, opens an
+  /// item there. After a paragraph line only a bullet or an ordered marker
+  /// numbered 1 does; after a blank line any marker does.
+  fn marker_opens_item(&self, bytes: &[u8], end: usize) -> bool {
+    if marker_interrupts_paragraph(bytes, end) {
+      return true;
+    }
+    let mut index = end - 1;
+    while index > 0 && bytes[index - 1].is_ascii_digit() {
+      index -= 1;
+    }
+    while index > 0 && bytes[index - 1] == b' ' {
+      index -= 1;
+    }
+    // Step over the line end before the marker, a `\r\n` as one.
+    if index > 0 && bytes[index - 1] == b'\n' {
+      index -= 1;
+      if index > 0 && bytes[index - 1] == b'\r' {
+        index -= 1;
+      }
+    } else if index > 0 && bytes[index - 1] == b'\r' {
+      index -= 1;
+    }
+    while index > 0 && matches!(bytes[index - 1], b' ' | b'\t') {
+      index -= 1;
+    }
+    if index == 0 {
+      return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
+    }
+    matches!(bytes[index - 1], b'\n' | b'\r')
   }
 
   /// Whether only a block lead precedes `at` on its line: indentation, then

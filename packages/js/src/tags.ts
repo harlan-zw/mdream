@@ -299,6 +299,57 @@ function markerOpensBlockLine(state: HandlerContext['state'], index: number, mar
   return opens
 }
 
+// Whether the list marker at `buffer[fragment][index]`, which leads its line,
+// opens an item there. After a paragraph line only a bullet or an ordered
+// marker numbered 1 does; after a blank line any marker does. Parity with the
+// Rust engine's `marker_opens_item`.
+function markerOpensItem(buffer: readonly string[], fragment: number, index: number): boolean {
+  const code = buffer[fragment]!.charCodeAt(index)
+  if (code === 45 || code === 43 || code === 42) // - + *
+    return true
+  let phase = LEAD_DIGITS
+  let digits = 0
+  let one = false
+  let lineFeed = false
+  for (;;) {
+    if (index === 0) {
+      if (--fragment < 0)
+        return true
+      index = buffer[fragment]!.length
+      continue
+    }
+    const char = buffer[fragment]!.charCodeAt(--index)
+    if (phase === LEAD_DIGITS) {
+      if (char >= 48 && char <= 57) {
+        if (digits++ === 0)
+          one = char === 49
+        else if (char !== 48)
+          one = false
+        continue
+      }
+      if (one)
+        return true
+      phase = LEAD_INDENT
+    }
+    if (phase === LEAD_INDENT) {
+      if (char === 32)
+        continue
+      // The line end before the marker, a `\r\n` as one.
+      lineFeed = char === 10
+      phase = LEAD_GAP
+      continue
+    }
+    if (lineFeed && char === 13) {
+      lineFeed = false
+      continue
+    }
+    lineFeed = false
+    if (char === 32 || char === 9)
+      continue
+    return char === 10 || char === 13
+  }
+}
+
 // A space, digit or list-marker character a block lead can hold.
 function isLeadChar(code: number): boolean {
   return code === 32 || (code >= 48 && code <= 57) || code === 45 || code === 42 || code === 43
@@ -394,23 +445,27 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
   // A list marker after a decoded `\r` also leads its line, which
   // `opensBlockLine` does not read, so the run of an empty heading stays its
   // own. Once the heading wrote text, that `\r` came from the text and so did
-  // the run, which still needs its escape outside `<pre>`.
-  if (!state.headingHasText || state.depthMap?.[TAG_PRE]) {
-    let leadFragment = index
-    let lead = run
-    for (;;) {
-      if (lead === 0) {
-        if (--leadFragment < 0)
-          break
-        lead = buffer[leadFragment]!.length
-        continue
-      }
-      if (buffer[leadFragment]!.charCodeAt(lead - 1) !== 32)
+  // the run. In a list item or a quote the unindented line leaves the
+  // container, a `<pre>` fence included, so the marker opens an item and the
+  // run needs its escape. At the top level a fence keeps the line, and a
+  // marker that cannot open an item after the paragraph line leaves it text.
+  let leadFragment = index
+  let lead = run
+  for (;;) {
+    if (lead === 0) {
+      if (--leadFragment < 0)
         break
-      lead--
+      lead = buffer[leadFragment]!.length
+      continue
     }
-    if (leadFragment >= 0 && listMarkerLineStart(buffer, leadFragment, lead - 1, pendingMarkerIndent(state)))
-      return
+    if (buffer[leadFragment]!.charCodeAt(lead - 1) !== 32)
+      break
+    lead--
+  }
+  if (leadFragment >= 0 && listMarkerLineStart(buffer, leadFragment, lead - 1, pendingMarkerIndent(state))
+    && (!state.headingHasText || (!state.depthMap?.[TAG_LI] && !state.depthMap?.[TAG_BLOCKQUOTE]
+      && (state.depthMap?.[TAG_PRE] || !markerOpensItem(buffer, leadFragment, lead - 1))))) {
+    return
   }
 
   const entry = buffer[index]!
