@@ -579,6 +579,12 @@ describe.each(engines)('open fence in a quoted item $name', (engineConfig) => {
   })
 })
 
+// Main opens the quote on the indent a hard break left. The guard's blank line
+// goes before that indent, out of the quote, and a parent marker on such a line
+// still reads as bare, so its nested marker follows it with no blank line. In
+// the second case that line carries the item's indent twice, as main writes it,
+// so CommonMark reads `> -` as an indented code block and the parent item is
+// lost there: the case pins what both engines write, not an item kept.
 describe.each(engines)('quote opened on a hard break indent $name', (engineConfig) => {
   it.each([
     ['<ul><li>a<blockquote><br></blockquote><blockquote><ul><li><blockquote>q</blockquote></li></ul></blockquote></li></ul>', '- a\n  \n\n    > - \n  >   > q'],

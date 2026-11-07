@@ -8561,8 +8561,12 @@ fn open_fence_leaves_a_quoted_empty_item_guard_open() {
 #[test]
 fn quote_opened_on_a_hard_break_indent_keeps_the_guard_out() {
   // Main opens the quote on the indent a hard break left. The guard's blank
-  // line goes before that indent, out of the quote, and a parent marker past
-  // it still takes its nested item without one, in both engines.
+  // line goes before that indent, out of the quote, and a parent marker on
+  // such a line still reads as bare, so its nested marker follows it with no
+  // blank line, in both engines. In the second case that line carries the
+  // item's indent twice, as main writes it, so CommonMark reads `> -` as an
+  // indented code block and the parent item is lost there: the case pins
+  // what both engines write, not an item kept.
   for (html, expected) in [
     (
       "<ul><li>a<blockquote><br></blockquote><blockquote><ul><li><blockquote>q</blockquote></li></ul></blockquote></li></ul>",
