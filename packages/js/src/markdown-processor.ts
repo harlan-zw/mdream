@@ -139,6 +139,8 @@ export interface MarkdownState {
   compactedItem?: number
   /** With no paragraph open after such a marker, the indent from which lines are code. */
   compactedCode?: number
+  /** The indent of the first text line among those code lines. */
+  compactedTop?: number
   /** The dropped bytes end in a CR, whose LF may follow in the buffer. */
   compactedCr?: boolean
   /** Fragment for a marker line at risk of becoming a setext underline. */
@@ -550,6 +552,8 @@ interface ParagraphFold {
   item?: number
   /** With no paragraph open after such a marker, the indent from which lines are code. */
   code?: number
+  /** The indent of the first text line among those code lines. */
+  top?: number
 }
 
 /**
@@ -562,13 +566,15 @@ interface ParagraphFold {
  */
 function foldLine(fold: ParagraphFold, read: LineRead): void {
   const line = endLineRead(read)
-  const { paragraph, item, code } = fold
+  const { paragraph, item, code, top } = fold
   fold.item = undefined
   fold.code = undefined
+  fold.top = undefined
   // A negative column remembers spaces above a possible hard-break closer.
   if (line.kind === 0 && line.indent > 0) {
     if (paragraph === undefined) {
       fold.code = code
+      fold.top = item === undefined ? top : undefined
     }
     else {
       if (paragraph >= 0)
@@ -595,6 +601,7 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
   }
   else if (code !== undefined && line.indent >= code) {
     fold.code = code
+    fold.top = item === undefined && top !== undefined ? top : line.indent
   }
   else {
     // Text reaching the column of the marker's list goes on in the item that
@@ -611,7 +618,7 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
  */
 export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
   let read = state.compactedRead ?? LINE_START
-  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, item: state.compactedItem, code: state.compactedCode }
+  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop }
   let start = 0
   for (let at = 0; at < cut; at++) {
     const code = text.charCodeAt(at)
@@ -628,6 +635,7 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
   state.compactedSpaces = fold.spaces
   state.compactedItem = fold.item
   state.compactedCode = fold.code
+  state.compactedTop = fold.top
   if (cut > 0)
     state.compactedCr = text.charCodeAt(cut - 1) === 13
 }
@@ -709,19 +717,20 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
   // indented to `code` past it are code, which no `*` continues, and a first
   // line four columns short of `code` reaches the marker's own list, so the
   // paragraph goes on in the item that holds that list.
-  const underMarker = (column: number, code: number) => below === undefined
+  const underMarker = (column: number, code: number, lead = top) => below === undefined
     ? undefined
     : first !== undefined && first >= column
       ? column
-      : shallow >= code ? undefined : top + 4 >= code ? code - 4 : below
+      : shallow >= code ? undefined : lead + 4 >= code ? code - 4 : below
   // A line of spaces that a run of hard breaks did not write, such as the
   // indent of a hard break that a line feed of the text ends, is blank. With a
   // hard break after the `*`, it ends the paragraph.
   const blank = (spaces: number | undefined) => hardBreak && below === undefined && spaces !== indent + 2
   const compacted = () => {
     const paragraph = state.compactedParagraph
+    // The paragraph starts at the first text line the compaction dropped.
     if (paragraph === undefined && state.compactedCode !== undefined)
-      return underMarker(state.compactedItem ?? Infinity, state.compactedCode)
+      return underMarker(state.compactedItem ?? Infinity, state.compactedCode, state.compactedTop ?? top)
     return paragraph !== undefined && paragraph < 0
       ? blank(state.compactedSpaces) ? undefined : -paragraph - 1
       : paragraph ?? below

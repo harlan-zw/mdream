@@ -4055,7 +4055,15 @@ impl ConvertState {
           Paragraph::Bare { column, code } => {
             under_marker(below, top, first, shallow, column, code)
           }
-          Paragraph::Code(code) => under_marker(below, top, None, shallow, usize::MAX, code),
+          // The paragraph starts at the first text line the drain took.
+          Paragraph::Code { code, top: drained } => under_marker(
+            below,
+            drained.unwrap_or(top),
+            None,
+            shallow,
+            usize::MAX,
+            code,
+          ),
           Paragraph::Closed => below,
         };
       }
