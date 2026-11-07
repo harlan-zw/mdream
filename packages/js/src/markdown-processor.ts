@@ -131,6 +131,10 @@ export interface MarkdownState {
   compactedRead?: LineRead
   /** Open paragraph column; -(column + 1) retains it across a space-only line. */
   compactedParagraph?: number
+  /** Content column of the item a marker alone on the last dropped line opens, with no paragraph yet. */
+  compactedItem?: number
+  /** With no paragraph open after such a marker, the indent from which lines are code. */
+  compactedCode?: number
   /** The dropped bytes end in a CR, whose LF may follow in the buffer. */
   compactedCr?: boolean
   /** Fragment for a marker line at risk of becoming a setext underline. */
@@ -526,21 +530,58 @@ function endLineRead(read: LineRead): LineRead {
   return read.kind === 1 && read.outer >= 0 ? { ...read, kind: 3, column: read.outer } : read
 }
 
+/** The paragraph the lines a compaction dropped leave open, for the lone `*` rule. */
+interface ParagraphFold {
+  /** Its column; -(column + 1) retains it across a space-only line. */
+  paragraph?: number
+  /** Right under a marker alone, the content column of the item it opens. */
+  item?: number
+  /** With no paragraph open after such a marker, the indent from which lines are code. */
+  code?: number
+}
+
 /**
- * The paragraph open once a whole line reading as `read` follows one open at
- * `paragraph`: none after a blank line or a marker alone, the item's content
- * column after an item, and zero for text outside an item.
+ * Fold a whole line reading as `read` into the paragraph open above it: none
+ * after a blank line or a marker alone, the item's content column after an
+ * item, and zero for text outside an item. Text right under a marker alone
+ * goes on in its item once it reaches the item's content column. Otherwise
+ * that item ended empty, and text indented to the code column is code.
  */
-function nextParagraph(paragraph: number | undefined, read: LineRead): number | undefined {
+function foldLine(fold: ParagraphFold, read: LineRead): void {
   const line = endLineRead(read)
+  const { paragraph, item, code } = fold
+  fold.item = undefined
+  fold.code = undefined
   // A negative column remembers spaces above a possible hard-break closer.
-  if (line.kind === 0 && line.indent > 0)
-    return paragraph === undefined || paragraph < 0 ? paragraph : -paragraph - 1
-  if (line.kind === 0 || line.kind === 2)
-    return undefined
-  if (line.kind === 3)
-    return line.column
-  return paragraph === undefined ? 0 : paragraph < 0 ? -paragraph - 1 : paragraph
+  if (line.kind === 0 && line.indent > 0) {
+    if (paragraph === undefined)
+      fold.code = code
+    else if (paragraph >= 0)
+      fold.paragraph = -paragraph - 1
+  }
+  else if (line.kind === 0) {
+    fold.paragraph = undefined
+  }
+  else if (line.kind === 2) {
+    fold.paragraph = undefined
+    fold.item = line.column + 1
+    fold.code = (line.outer >= 0 ? line.outer : line.indent) + 4
+  }
+  else if (line.kind === 3) {
+    fold.paragraph = line.column
+  }
+  else if (paragraph !== undefined) {
+    fold.paragraph = paragraph < 0 ? -paragraph - 1 : paragraph
+  }
+  else if (item !== undefined && line.indent >= item) {
+    fold.paragraph = item
+  }
+  else if (code !== undefined && line.indent >= code) {
+    fold.code = code
+  }
+  else {
+    fold.paragraph = 0
+  }
 }
 
 /**
@@ -551,7 +592,7 @@ function nextParagraph(paragraph: number | undefined, read: LineRead): number | 
  */
 export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
   let read = state.compactedRead ?? LINE_START
-  let paragraph = state.compactedParagraph
+  const fold: ParagraphFold = { paragraph: state.compactedParagraph, item: state.compactedItem, code: state.compactedCode }
   let start = 0
   for (let at = 0; at < cut; at++) {
     const code = text.charCodeAt(at)
@@ -559,12 +600,14 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
       continue
     const crlf = code === 10 && (at === 0 ? state.compactedCr === true : text.charCodeAt(at - 1) === 13)
     if (!crlf)
-      paragraph = nextParagraph(paragraph, extendLineRead(read, text.slice(start, at)))
+      foldLine(fold, extendLineRead(read, text.slice(start, at)))
     read = LINE_START
     start = at + 1
   }
   state.compactedRead = extendLineRead(read, text.slice(start, cut))
-  state.compactedParagraph = paragraph
+  state.compactedParagraph = fold.paragraph
+  state.compactedItem = fold.item
+  state.compactedCode = fold.code
   if (cut > 0)
     state.compactedCr = text.charCodeAt(cut - 1) === 13
 }
@@ -612,8 +655,21 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
   const decide = (column: number | undefined) => column === undefined || relative(indent, indent) < column
   // Walk up the paragraph above to the line it starts with.
   let below: number | undefined
+  // The indent of the paragraph's first line read so far, unless a line of
+  // spaces came right above it, and the least indent of its lines.
+  let first: number | undefined
+  let shallow = Infinity
+  // Under a marker alone whose item's content starts at `column`: the
+  // paragraph sits in that item when its first line comes right under the
+  // marker and reaches that column. Otherwise the item ended empty, and lines
+  // all indented to `code` past it are code, which no `*` continues.
+  const underMarker = (column: number, code: number) => below === undefined || (first !== undefined && first >= column)
+    ? (below === undefined ? undefined : column)
+    : shallow >= code ? undefined : below
   const compacted = () => {
     const paragraph = state.compactedParagraph
+    if (paragraph === undefined && state.compactedCode !== undefined)
+      return underMarker(state.compactedItem ?? Infinity, state.compactedCode)
     return paragraph !== undefined && paragraph < 0
       ? hardBreak && below === undefined ? undefined : -paragraph - 1
       : paragraph ?? below
@@ -647,14 +703,22 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
     // Only a bare closer can precede the deferred break run. A hard break
     // after it settles the run, so the spaces above end the paragraph.
     if (read.kind === 0 && read.indent > 0 && !firstQuoted && (below !== undefined || !hardBreak)) {
+      first = undefined
       code = char
       continue
     }
-    if (read.kind === 0 || read.kind === 2)
+    if (read.kind === 2) {
+      if (first !== undefined)
+        first = relative(first, first)
+      return decide(underMarker(relative(read.column + 1, read.indent), relative((read.outer >= 0 ? read.outer : read.indent) + 4, read.indent)))
+    }
+    if (read.kind === 0)
       return decide(below)
     if (read.kind === 3)
       return decide(relative(read.column, read.indent))
     below = 0
+    first = read.indent
+    shallow = Math.min(shallow, relative(read.indent, read.indent))
     if (firstQuoted)
       return decide(below)
     code = char
@@ -1927,6 +1991,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     lastItemMarkerFragment: undefined,
     compactedRead: undefined,
     compactedParagraph: undefined,
+    compactedItem: undefined,
+    compactedCode: undefined,
     compactedCr: undefined,
     lastItemMarkerOwner: undefined,
     collapseNonSpanDepth: 0,
