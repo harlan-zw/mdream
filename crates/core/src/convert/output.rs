@@ -2522,8 +2522,7 @@ impl ConvertState {
         .unwrap_or_else(|| resolve_url(href, self.options.origin.as_deref(), self.clean_urls));
       let resolved = resolved.as_ref();
       let mut title = attributes.get_bit(ATTR_TITLE).unwrap_or("");
-      if !title.is_empty() && self.last_content_cache_len > 0 && !self.cache_follows_separator
-      {
+      if !title.is_empty() && self.last_content_cache_len > 0 && !self.cache_follows_separator {
         let buf_len = self.buffer.len();
         let start = buf_len.saturating_sub(self.last_content_cache_len);
         if self.buffer.is_char_boundary(start) {

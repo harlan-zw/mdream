@@ -1282,7 +1282,10 @@ fn raw_html_blocks_end_before_following_markdown() {
 #[test]
 fn redundant_link_title_ignores_a_standalone_separator() {
   let cases = [
-    ("<a href=\"/x\" title=\"Q\"><div>x</div> ", "[x Q](/x \"Q\")"),
+    (
+      "<a href=\"/x\" title=\"Q\"><div>x</div> ",
+      "[x Q](/x \"Q\")",
+    ),
     ("<i><<a title=e href=/\"><p>U</p> ", "*< [U e](/\" \"e\")*"),
     ("<a href=\"/x\" title=\"Q\">Q</a>", "[Q](/x)"),
     ("<a title=\"T\" href=\"/x\">T </a>", "[T](/x)"),
