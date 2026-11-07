@@ -124,7 +124,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
+import { blockOpenPrefix, continuationPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, noteBufferRewrite, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -272,7 +272,10 @@ export function opensBlockLine(buffer: string[], fragment: number, cursor: numbe
 function markerOpensBlockLine(state: HandlerContext['state'], index: number, marker: number): boolean {
   const buffer = state.buffer
   const memo = state.markerLine
-  if (memo && memo.index === index && memo.length === buffer.length
+  // Fragments after `index` cannot change the answer, and a rewrite at or
+  // before it drops the memo, so the entries alone decide a hit. Keying on the
+  // buffer length would miss whenever an empty inline leaves a fragment behind.
+  if (memo && memo.index === index
     && buffer[index] === memo.entry && buffer[memo.stop] === memo.stopEntry) {
     return memo.opens
   }
@@ -292,7 +295,7 @@ function markerOpensBlockLine(state: HandlerContext['state'], index: number, mar
       break
     }
   }
-  state.markerLine = { index, length: buffer.length, entry: buffer[index]!, stop: fragment, stopEntry: buffer[fragment]!, opens }
+  state.markerLine = { index, entry: buffer[index]!, stop: fragment, stopEntry: buffer[fragment]!, opens }
   return opens
 }
 
@@ -345,6 +348,7 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
     state.outputPositions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
   }
   buffer[index] = replacement
+  noteBufferRewrite(state)
   // The processor's trailing-whitespace trim finds the last entry by reference.
   if (state.lastContentCache === entry)
     state.lastContentCache = replacement
