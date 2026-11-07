@@ -9435,6 +9435,42 @@ fn lone_closer_after_closed_item_and_hard_break() {
   }
 }
 
+// A hard break's indent that a line feed of the text ends is a blank line,
+// unlike the lines of spaces a run of hard breaks writes. With a hard break
+// after the `*` right below it, that line ends the paragraph above: the `*`
+// opens a list, and the nested item goes in it with no blank line. A lone
+// `\r` in a quote starts a line the quote's prefix skips, so a `*` under that
+// line opens a quote and a list of its own.
+#[test]
+fn lone_closer_under_a_blank_line_of_the_text() {
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol>",
+      "10. \n*x  \n    \n*  \n    -",
+    ),
+    (
+      "<ul><li><ol start=\"10\"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol></li></ul>",
+      "-\n  10. \n*x  \n      \n*  \n      -",
+    ),
+    (
+      "<blockquote><ol start=\"10\"><li><br>&#13;<em>x&#10;</em><br><ul><li></li></ul></li></ol></blockquote>",
+      "> 10.   \n>     \r*x\n> *  \n>     -",
+    ),
+    // A run of hard breaks wrote the line above the `*`, which keeps the blank
+    // line under it.
+    (
+      "<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>",
+      "-\n  - y  \n    *x  \n      \n    *  \n\n    1.   \n    2.",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
 // A list marker alone on its line opens an item whose content starts one
 // column past the marker, however many spaces follow it. A paragraph whose
 // first line reaches that column sits in the item, so a lone `*` short of

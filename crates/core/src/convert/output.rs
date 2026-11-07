@@ -106,6 +106,28 @@ const TITLE_ESCAPE_BIT: u8 = 2;
 const IMAGE_DESCRIPTION_ESCAPE_BIT: u8 = 4;
 const DESTINATION_NEEDS_ANGLE_BIT: u8 = 8;
 
+/// Whether `after`, the bytes after a lone `*` on its line, open with a hard
+/// break: two spaces or more.
+fn hard_break_follows(after: &[u8]) -> bool {
+  after.iter().take_while(|&&byte| byte == b' ').count() >= 2
+}
+
+/// Whether the line ending at `end` holds paragraph text, reading no further
+/// back than `floor`.
+fn paragraph_line_ends_at(bytes: &[u8], floor: usize, end: usize) -> bool {
+  if end <= floor {
+    return false;
+  }
+  let start = bytes[floor..end]
+    .iter()
+    .rposition(|&byte| matches!(byte, b'\n' | b'\r'))
+    .map_or(floor, |at| floor + at + 1);
+  matches!(
+    LineRead::START.extend(&bytes[start..end]).end(),
+    LineKind::Text(_) | LineKind::Item { .. }
+  )
+}
+
 /// Whether `bytes` holds anything other than whitespace.
 #[inline]
 fn has_visible(bytes: &[u8]) -> bool {
@@ -3902,7 +3924,12 @@ impl ConvertState {
         indent,
         bytes[start..end].contains(&b'\n'),
         matches!(bytes[start - 1], b'*' | b'+')
-          && !self.lone_closer_reads_as_marker(bytes, start - 1, indent, false),
+          && !self.lone_closer_reads_as_marker(
+            bytes,
+            start - 1,
+            indent,
+            hard_break_follows(&bytes[start..end]),
+          ),
       )),
       MarkerLine::Other | MarkerLine::Cut => None,
     }
@@ -4019,8 +4046,12 @@ impl ConvertState {
       if line_end == 0 || split_crlf {
         // Drains took the lines above whole: the paragraph they left answers.
         break match self.drained_paragraph {
-          Paragraph::Spaced(_) if hard_break && below.is_none() => None,
-          Paragraph::Open(column) | Paragraph::Spaced(column) => Some(column),
+          Paragraph::Spaced { spaces, .. }
+            if hard_break && below.is_none() && spaces != indent + 2 =>
+          {
+            None
+          }
+          Paragraph::Open(column) | Paragraph::Spaced { column, .. } => Some(column),
           Paragraph::Bare { column, code } => {
             under_marker(below, top, first, shallow, column, code)
           }
@@ -4037,6 +4068,16 @@ impl ConvertState {
         .iter()
         .rposition(|&byte| matches!(byte, b'\n' | b'\r'))
         .map_or(0, |at| at + 1);
+      // A lone `\r` starts a line the quote's prefix skips. Unless that line
+      // goes on with a paragraph of the quote, the quote ends there and the
+      // `*` sits in one that opens below it.
+      if quote.is_some()
+        && line_start > quote_start
+        && bytes[line_start - 1] == b'\r'
+        && !paragraph_line_ends_at(bytes, quote_start, line_start - 1)
+      {
+        break below;
+      }
       // The quote's first line counts from where its content starts.
       let first_quoted = quote.is_some() && line_start < quote_start;
       let begin = if first_quoted {
@@ -4069,11 +4110,14 @@ impl ConvertState {
             relative(code, indent),
           );
         }
-        LineKind::Spaces if first_quoted => break below,
-        // Only a bare closer can precede the deferred break run. A hard break
-        // after it settles the run, so the spaces above end the paragraph.
-        LineKind::Spaces if hard_break && below.is_none() => break below,
-        LineKind::Spaces => {
+        LineKind::Spaces(_) if first_quoted => break below,
+        // A line of spaces that a run of hard breaks did not write, such as
+        // the indent of a hard break that a line feed of the text ends, is
+        // blank. With a hard break after the `*`, it ends the paragraph.
+        LineKind::Spaces(spaces) if hard_break && below.is_none() && spaces != indent + 2 => {
+          break below;
+        }
+        LineKind::Spaces(_) => {
           first = None;
           line_end = line_start;
         }
@@ -4211,12 +4255,15 @@ impl ConvertState {
           // After a lone `\r` this marker sits past a space only the blank
           // line takes away, which leaves it short of the lines indented under
           // it.
-          // A hard break after the `*` changes nothing here: its line keeps
-          // the blank line under it like any hard break line does.
           MarkerLine::Bare(indent) => {
             !lone_closer
               || line_ending != b'\r'
-                && self.lone_closer_reads_as_marker(bytes, above_end - 1, indent, false)
+                && self.lone_closer_reads_as_marker(
+                  bytes,
+                  above_end - 1,
+                  indent,
+                  hard_break_follows(&bytes[above_end..]),
+                )
           }
           MarkerLine::Other => false,
           MarkerLine::Cut => {
@@ -7211,24 +7258,37 @@ mod tests {
     assert_eq!(state.markdown_line_indent(), None);
   }
 
-  // A run of hard breaks leaves a line of spaces that a stream can write after
-  // the lone `*` below it, so the rule reads past that line. A hard break after
-  // the `*` settles the run first, and then the spaces end the paragraph, in
-  // the buffer and in the paragraph a drain leaves open alike.
+  // A run of hard breaks leaves lines of spaces, each the indent of the line
+  // under it and two spaces more, that a stream can write after the lone `*`
+  // below them, so the rule reads past them. Any other line of spaces is blank:
+  // with a hard break after the `*` it ends the paragraph, in the buffer and in
+  // the paragraph a drain leaves open alike.
   #[test]
   fn lone_closer_after_a_hard_break_stops_at_the_spaces_above() {
     let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
-    let text = b"- y  \n  *x  \n    \n  *";
+    // A line feed of the text ends the hard break's indent line.
+    let text = b"- y  \n  *x  \n  \n  *";
     let closer = text.len() - 1;
     assert!(!state.lone_closer_reads_as_marker(text, closer, 2, false));
     assert!(state.lone_closer_reads_as_marker(text, closer, 2, true));
+    // A run of hard breaks wrote the line: the `*`'s indent and two spaces.
+    let text = b"- y  \n  *x  \n    \n  *";
+    assert!(!state.lone_closer_reads_as_marker(text, closer + 2, 2, true));
 
     state.has_streamed_output = true;
     state.cut_line_lead = CutLineLead::Blank(0);
     state.flushed_tail = *b" \n";
-    state.drained_paragraph = Paragraph::Spaced(2);
+    state.drained_paragraph = Paragraph::Spaced {
+      column: 2,
+      spaces: 2,
+    };
     assert!(!state.lone_closer_reads_as_marker(b"  *", 2, 2, false));
     assert!(state.lone_closer_reads_as_marker(b"  *", 2, 2, true));
+    state.drained_paragraph = Paragraph::Spaced {
+      column: 2,
+      spaces: 4,
+    };
+    assert!(!state.lone_closer_reads_as_marker(b"  *", 2, 2, true));
   }
 
   /// An open list item whose buffer a drain emptied: the item's content line

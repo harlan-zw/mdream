@@ -133,6 +133,8 @@ export interface MarkdownState {
   compactedRead?: LineRead
   /** Open paragraph column; -(column + 1) retains it across a space-only line. */
   compactedParagraph?: number
+  /** How many spaces that space-only line holds. */
+  compactedSpaces?: number
   /** Content column of the item a marker alone on the last dropped line opens, with no paragraph yet. */
   compactedItem?: number
   /** With no paragraph open after such a marker, the indent from which lines are code. */
@@ -381,12 +383,19 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
   // that item and turn this one into its sibling. A marker outside the
   // innermost blockquote keeps the blank line it already had, which the quote's
   // prefix makes harmless.
+  let trailingSpaces = 0
   for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
     const value = state.buffer[fragment]!
     for (let cursor = value.length - 1; cursor >= 0; cursor--) {
       const code = value.charCodeAt(cursor)
-      if (code === 10 || code === 32)
+      if (code === 10) {
+        trailingSpaces = 0
         continue
+      }
+      if (code === 32) {
+        trailingSpaces++
+        continue
+      }
       // A direct first-child list cannot have inserted content before its
       // parent's built-in marker. A drain/rewrite that moves that fragment
       // misses this shortcut and keeps the general line recognizer.
@@ -421,10 +430,8 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
         if (before === 13 && indent > 0)
           indent--
         // After a lone CR this marker sits past a space only the blank line
-        // takes away, which leaves it short of the lines indented under it. A
-        // hard break after the `*` changes nothing here: its line keeps the
-        // blank line under it like any hard break line does.
-        readsAsMarker = !afterCr && loneCloserReadsAsMarker(state, fragment, cursor, indent, false)
+        // takes away, which leaves it short of the lines indented under it.
+        readsAsMarker = !afterCr && loneCloserReadsAsMarker(state, fragment, cursor, indent, trailingSpaces >= 2)
       }
       state.emptyItemFragment = (recordedParent || (readsAsMarker && listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3)))
         ? undefined
@@ -441,8 +448,9 @@ function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: b
  * later compaction can carry the reading on. `kind` is 0 while only spaces
  * came, 1 inside an ordered marker's digits, 2 after a marker and `count`
  * spaces, 3 for an item whose content starts at `column`, 4 for other text.
- * A whole line of spaces is the one a run of hard breaks leaves: a stream can
- * write it after the line below it, so the rule reads past it.
+ * A run of hard breaks leaves whole lines of spaces, each the indent of the
+ * line under it and two spaces more: a stream can write them after the line
+ * below, so the rule reads past them.
  */
 export interface LineRead {
   kind: number
@@ -536,6 +544,8 @@ function endLineRead(read: LineRead): LineRead {
 interface ParagraphFold {
   /** Its column; -(column + 1) retains it across a space-only line. */
   paragraph?: number
+  /** How many spaces that space-only line holds. */
+  spaces?: number
   /** Right under a marker alone, the content column of the item it opens. */
   item?: number
   /** With no paragraph open after such a marker, the indent from which lines are code. */
@@ -557,10 +567,14 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
   fold.code = undefined
   // A negative column remembers spaces above a possible hard-break closer.
   if (line.kind === 0 && line.indent > 0) {
-    if (paragraph === undefined)
+    if (paragraph === undefined) {
       fold.code = code
-    else if (paragraph >= 0)
-      fold.paragraph = -paragraph - 1
+    }
+    else {
+      if (paragraph >= 0)
+        fold.paragraph = -paragraph - 1
+      fold.spaces = line.indent
+    }
   }
   else if (line.kind === 0) {
     fold.paragraph = undefined
@@ -597,7 +611,7 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
  */
 export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
   let read = state.compactedRead ?? LINE_START
-  const fold: ParagraphFold = { paragraph: state.compactedParagraph, item: state.compactedItem, code: state.compactedCode }
+  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, item: state.compactedItem, code: state.compactedCode }
   let start = 0
   for (let at = 0; at < cut; at++) {
     const code = text.charCodeAt(at)
@@ -611,6 +625,7 @@ export function noteBufferCompaction(state: MarkdownState, text: string, cut: nu
   }
   state.compactedRead = extendLineRead(read, text.slice(start, cut))
   state.compactedParagraph = fold.paragraph
+  state.compactedSpaces = fold.spaces
   state.compactedItem = fold.item
   state.compactedCode = fold.code
   if (cut > 0)
@@ -650,6 +665,28 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
     }
     return buffer[at]!.charCodeAt(--offset)
   }
+  // Whether the line ending at the CR just read holds paragraph text, read
+  // within the quote. Past the buffer start it counts as text, as before.
+  const paragraphLineAbove = (): boolean => {
+    const savedAt = at
+    const savedOffset = offset
+    let text = ''
+    let char = -2
+    for (;;) {
+      if (at === quoteFragment && offset === 0)
+        break
+      char = back()
+      if (char === -1 || char === 10 || char === 13)
+        break
+      text = String.fromCharCode(char) + text
+    }
+    at = savedAt
+    offset = savedOffset
+    if (char === -1)
+      return true
+    const kind = endLineRead(extendLineRead(LINE_START, text)).kind
+    return kind === 3 || kind === 4
+  }
   let code = back()
   while (code === 32)
     code = back()
@@ -677,12 +714,16 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
     : first !== undefined && first >= column
       ? column
       : shallow >= code ? undefined : top + 4 >= code ? code - 4 : below
+  // A line of spaces that a run of hard breaks did not write, such as the
+  // indent of a hard break that a line feed of the text ends, is blank. With a
+  // hard break after the `*`, it ends the paragraph.
+  const blank = (spaces: number | undefined) => hardBreak && below === undefined && spaces !== indent + 2
   const compacted = () => {
     const paragraph = state.compactedParagraph
     if (paragraph === undefined && state.compactedCode !== undefined)
       return underMarker(state.compactedItem ?? Infinity, state.compactedCode)
     return paragraph !== undefined && paragraph < 0
-      ? hardBreak && below === undefined ? undefined : -paragraph - 1
+      ? blank(state.compactedSpaces) ? undefined : -paragraph - 1
       : paragraph ?? below
   }
   for (;;) {
@@ -709,11 +750,14 @@ function loneCloserReadsAsMarker(state: MarkdownState, fragment: number, cursor:
       }
       char = back()
     }
+    // A lone CR starts a line the quote's prefix skips. Unless that line goes
+    // on with a paragraph of the quote, the quote ends there and the `*` sits
+    // in one that opens below it.
+    if (quote && char === 13 && !firstQuoted && !paragraphLineAbove())
+      return decide(below)
     // A compaction may have dropped the start of the buffer's first line.
     const read = endLineRead(extendLineRead(char === -1 && !firstQuoted ? state.compactedRead ?? LINE_START : LINE_START, line))
-    // Only a bare closer can precede the deferred break run. A hard break
-    // after it settles the run, so the spaces above end the paragraph.
-    if (read.kind === 0 && read.indent > 0 && !firstQuoted && (below !== undefined || !hardBreak)) {
+    if (read.kind === 0 && read.indent > 0 && !firstQuoted && !blank(read.indent)) {
       first = undefined
       code = char
       continue
@@ -2012,8 +2056,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     lastItemMarkerFragment: undefined,
     compactedRead: undefined,
     compactedParagraph: undefined,
+    compactedSpaces: undefined,
     compactedItem: undefined,
     compactedCode: undefined,
+    compactedTop: undefined,
     compactedCr: undefined,
     lastItemMarkerOwner: undefined,
     collapseNonSpanDepth: 0,
