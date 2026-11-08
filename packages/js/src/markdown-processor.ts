@@ -3101,7 +3101,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // the parent's list indentation only when a continuation actually arrives.
     if (closesQuote)
       quoteRuleParent = undefined
+    // An open quote that took a list rule at its enter settles the boundary
+    // of the quotes nested in it, so their close arms no parent boundary.
     if (closesQuote && !quoteRestoredRule && state.depthMap[TAG_LI]
+      && !state.blockquotes.some(frame => frame.listRulePending !== undefined)
       && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion && !isInsideTableCell(state)) {
       captionBoundary = 3
       captionBoundarySpacing = 2

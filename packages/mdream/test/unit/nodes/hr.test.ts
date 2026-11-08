@@ -117,6 +117,39 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
     }
   })
 
+  // A sibling quote that takes back the rule an earlier quote ended on keeps
+  // apart from it and keeps its nesting, even when it opens on empty quotes.
+  // Inline output after such a quote still gets main's parent boundary.
+  it.each([
+    ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n\n  > > q'],
+    ['<ul><li><blockquote><hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > ---\n\n  > > q'],
+    ['<ol><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ol>', '1. \n   > x\n   >\n   > ---\n\n   > > q'],
+    ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>', '- \n  > x\n  >\n  > ---\n\n  > > q\n\n  tail'],
+    ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n\n  > > q'],
+    ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote><p></p></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n\n  > > q'],
+    ['<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul></blockquote>', '> - \n>   > x\n>   >\n>   > ---\n>\n>   > > q'],
+    ['<ul><li><em><blockquote>-<hr></blockquote></em>tail</li></ul>', '- *\n  > \\-\n  >\n  > ---\n\n  *tail'],
+  ])('keeps a sibling quote after an inner rule apart and nested: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    const chunkings: string[][] = [[...html]]
+    for (let split = 1; split < html.length; split++)
+      chunkings.push([html.slice(0, split), html.slice(split)])
+    for (const parts of chunkings) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(stream, { engine }))
+        output += chunk
+      expect(output, `parts=${parts.length}`).toBe(expected)
+    }
+  })
+
   it('converts hr elements', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p>Above</p><hr><p>Below</p>'

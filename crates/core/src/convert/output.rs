@@ -2904,9 +2904,12 @@ impl ConvertState {
     }
     // Reuse the deferred block boundary: it already ignores invisible output
     // and supplies list continuation indentation, without taxing plain text.
+    // An open quote that took a list rule at its enter settles the boundary
+    // of the quotes nested in it, so their close arms no parent boundary.
     if closes_quote
       && !quote_restored_rule
       && !has_override
+      && !self.blockquotes.iter().any(|frame| frame.list_rule_pending)
       && self.depth_map[TAG_LI as usize] > 0
       && self.depth_map[TAG_PRE as usize] == 0
       && !self.in_raw_html_block()
