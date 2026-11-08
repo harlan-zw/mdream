@@ -5674,6 +5674,40 @@ fn sibling_quote_after_an_inner_rule_keeps_its_nesting() {
   }
 }
 
+// A quote holding a list rule settles the boundary of the empty quotes
+// nested in it at its list level, through block wrappers and deeper quotes.
+// An inline wrapper or a nested list item still gets main's parent boundary.
+#[test]
+fn rule_quote_settles_nested_empty_quotes_at_its_level() {
+  for (html, expected) in [
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><div><blockquote></blockquote></div><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>",
+      "- ***\n\n  > > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote></blockquote><table><tr><td>a</td></tr></table></blockquote></li></ul>",
+      "- ***\n\n  > | a |\n  > | --- |",
+    ),
+    (
+      "<ul><li><hr><blockquote><em>x<blockquote></blockquote></em>y</blockquote></li></ul>",
+      "- ***\n\n  > *x\n  >\n  > *y",
+    ),
+    (
+      "<ul><li><hr><blockquote><ul><li>q<blockquote></blockquote>tail</li></ul></blockquote></li></ul>",
+      "- ***\n\n  > - q\n  >\n  >   tail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
 #[test]
 fn pending_list_rule_survives_a_long_quote_and_its_sibling() {
   let body = "<p>quoted line</p>".repeat(650);
