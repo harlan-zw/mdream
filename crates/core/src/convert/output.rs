@@ -589,6 +589,11 @@ impl ConvertState {
     let marker_offset = self.buffer[output_start..content_start]
       .rfind(MARKDOWN_CODE_BLOCK)
       .expect("code fence opener missing from output");
+    if !self.fences_unreliable
+      && !self.opens_block_line(self.buffer.as_bytes(), output_start + marker_offset)
+    {
+      self.fences_unreliable = true;
+    }
     self.settle_quote_boundary_at_fence();
     self.code_fence = Some(CodeFenceState {
       output_start,
@@ -1605,6 +1610,13 @@ impl ConvertState {
       self.pre_fence_pending = true;
       self.pre_fence_pending_depth = self.depth_map[TAG_PRE as usize];
       self.pre_fence_lang = lang;
+      // Inside inline content the fences share lines with that content.
+      if self.stack[..stack_len - 1]
+        .iter()
+        .any(|node| node.is_inline)
+      {
+        self.fences_unreliable = true;
+      }
     }
 
     // Phase 1: read from node + compute output (borrows self.stack immutably)
@@ -3641,10 +3653,20 @@ impl ConvertState {
       return;
     }
     // Past the block lead, only a run after whitespace closes the heading. That
-    // includes a run right after the opening prefix and its space.
-    if marker > 0 && matches!(self.buffer.as_bytes()[marker - 1], b' ' | b'\t') {
+    // includes a run right after the opening prefix and its space. Inside a code
+    // fence the heading is code, where a backslash would be literal text.
+    if marker > 0
+      && matches!(self.buffer.as_bytes()[marker - 1], b' ' | b'\t')
+      && !self.in_pre_code_fence()
+    {
       self.replace_code_span_content(marker..marker, "\\");
     }
+  }
+
+  /// Whether output lands inside the code block of a `<pre>` fence; see
+  /// `fences_unreliable` for fences a parser may not read as written.
+  fn in_pre_code_fence(&self) -> bool {
+    self.code_fence.is_some() && !self.fences_unreliable && self.depth_map[TAG_PRE as usize] > 0
   }
 
   /// Whether only a block lead precedes `at` on its line: indentation, then

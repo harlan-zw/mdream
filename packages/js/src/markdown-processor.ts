@@ -118,6 +118,15 @@ export interface MarkdownState {
    * opener; 0 when none. Only that <pre>'s exit closes the fence.
    */
   preFenceOwnerDepth?: number
+  /**
+   * A fence was written where a parser may not read it as one: opened after
+   * text on its line, or for a <pre> inside inline content, whose closing fence
+   * can share a line with the text after it. Every later fence may then be read
+   * with the opposite parity, so open fences no longer prove code. Set from the
+   * start when a tag override writes literal text, which the processor cannot
+   * keep on a code line.
+   */
+  fencesUnreliable?: boolean
   /** Open fenced block whose delimiter is finalized after its content is known. */
   codeFence?: CodeFence
   /** A `<div>`'s cached heading-marker check; see `noteBufferRewrite`. */
@@ -1138,8 +1147,19 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
   return `${padded ? ' ' : ''}${delimiter}`
 }
 
+function hasLiteralTagOverride(overrides: EngineOptions['tagOverrides']): boolean {
+  for (const name in overrides) {
+    const override = overrides[name]
+    if (override && typeof override === 'object' && (override.enter !== undefined || override.exit !== undefined))
+      return true
+  }
+  return false
+}
+
 function startCodeFence(state: MarkdownState, fragment: number, language: string, indent: string): void {
   const markerOffset = state.buffer[fragment]!.lastIndexOf(MARKDOWN_CODE_BLOCK)
+  if (!state.fencesUnreliable && !opensBlockLine(state.buffer, fragment, markerOffset))
+    state.fencesUnreliable = true
   state.codeFence = { fragment, markerOffset, indent, language }
   state.onCodeFenceOpen?.(language)
 }
@@ -1514,6 +1534,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFencePending: false,
     preFencePendingDepth: 0,
     preFenceOwnerDepth: 0,
+    fencesUnreliable: hasLiteralTagOverride(options.tagOverrides),
     preFenceOpener: undefined,
   }
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]

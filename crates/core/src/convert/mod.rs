@@ -1011,6 +1011,13 @@ pub struct ConvertState {
   /// Depth of the `<pre>` owning the open fence; zero when none. Its exit
   /// closes the fence after any trailing siblings of a `<code>` child.
   pre_fence_owner_depth: u16,
+  /// A fence was written where a parser may not read it as one: opened after
+  /// text on its line, or for a `<pre>` inside inline content, whose closing
+  /// fence can share a line with the text after it. Every later fence may then
+  /// be read with the opposite parity, so open fences no longer prove code.
+  /// Set from the start when a tag override writes literal text, which the
+  /// converter cannot keep on a code line.
+  fences_unreliable: bool,
   /// The open `<li>` wrote its marker onto a line that continues the paragraph
   /// above, so an empty item would read as a setext underline. `empty_item_len`
   /// is the buffer length that still means "nothing written since the marker",
@@ -1282,6 +1289,7 @@ impl ConvertState {
       pre_fence_pending_depth: 0,
       pre_fence_lang: String::new(),
       pre_fence_owner_depth: 0,
+      fences_unreliable: false,
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
@@ -1339,6 +1347,9 @@ impl ConvertState {
       s.has_frontmatter = plugins.frontmatter.is_some();
       if let Some(ovs) = &plugins.tag_overrides {
         s.has_tag_overrides = true;
+        s.fences_unreliable = ovs
+          .iter()
+          .any(|(_, ov)| ov.enter.is_some() || ov.exit.is_some());
         // A longer list has keys the sentinel cannot index; leaving the table
         // unbuilt sends every lookup down the key scan instead of testing here.
         if ovs.len() < NO_OVERRIDE as usize {

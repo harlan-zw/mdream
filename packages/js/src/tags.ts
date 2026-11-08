@@ -340,9 +340,10 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
   }
   else {
     // Only a run opening the heading content or preceded by whitespace closes it.
+    // Inside a code fence the heading is code, where a backslash would be literal text.
     const previous = buffer[index - 1]
     const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
-    if (before !== ' ' && before !== '\t')
+    if ((before !== ' ' && before !== '\t') || inPreCodeFence(state))
       return
     replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
     state.outputPositions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
@@ -352,6 +353,20 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
   // The processor's trailing-whitespace trim finds the last entry by reference.
   if (state.lastContentCache === entry)
     state.lastContentCache = replacement
+}
+
+// Whether output lands inside the code block of a `<pre>` fence; see
+// `fencesUnreliable` for fences a parser may not read as written.
+function inPreCodeFence(state: HandlerContext['state']): boolean {
+  return !!state.codeFence && !state.fencesUnreliable && !!state.depthMap?.[TAG_PRE]
+}
+
+function hasInlineAncestor(node: ElementNode): boolean {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.tagHandler ? parent.tagHandler.isInline === true : parent.tagId === -1)
+      return true
+  }
+  return false
 }
 
 // What the current output line holds where a table row is about to be written.
@@ -673,6 +688,9 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideTableCell(state)) {
         return '<pre>'
       }
+      // Inside inline content the fences share lines with that content.
+      if (!state.preFenceOwnerDepth && !state.preFencePending && hasInlineAncestor(node))
+        state.fencesUnreliable = true
       return {
         _tag: 'PreEnter',
         language: getLanguageFromAttributes(node.attributes),
