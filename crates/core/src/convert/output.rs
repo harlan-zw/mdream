@@ -5799,20 +5799,18 @@ impl ConvertState {
   /// is already popped, so the top of the stack is its parent. On enter the node
   /// tops the stack: its parent decides, and a `<pre>` with no `<pre>` above it
   /// still opens outside the code. Testing the entering node itself made a
-  /// `<pre>` nested in another trim a space of the outer code.
+  /// `<pre>` nested in another trim a space of the outer code. Plain text keeps
+  /// testing the top of the stack, as the JS text engine does.
   fn at_pre_whitespace_boundary(&self, is_enter: bool) -> bool {
     let len = self.stack.len();
-    if !is_enter {
-      return self
-        .stack
-        .last()
-        .is_some_and(|parent| parent.tag_id == Some(TAG_PRE));
-    }
-    let node_is_pre = self
+    let top_is_pre = self
       .stack
       .last()
       .is_some_and(|node| node.tag_id == Some(TAG_PRE));
-    self.depth_map[TAG_PRE as usize] == u16::from(node_is_pre)
+    if !is_enter || plain_text!(self) {
+      return top_is_pre;
+    }
+    self.depth_map[TAG_PRE as usize] == u16::from(top_is_pre)
       || len >= 2 && self.stack[len - 2].tag_id == Some(TAG_PRE)
   }
 
