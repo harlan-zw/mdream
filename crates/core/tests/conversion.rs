@@ -7008,7 +7008,7 @@ fn blockquote_quoting_keeps_escaping_a_later_line() {
 // A link rewrite is anchored on the `[` the anchor itself wrote. An anchor that
 // writes none -- no href, or suppressed inside `<pre>` -- used to abort its exit
 // and let the rewrite scan reach forward into the text, which dropped a literal
-// `[` behind its own escape and left the fence's trailing whitespace untrimmed.
+// `[` behind its own escape.
 #[test]
 fn a_clean_flag_leaves_content_outside_the_link_alone() {
   for (html, expected) in [
