@@ -5010,19 +5010,28 @@ impl ConvertState {
 
   /// Character count of the current (unterminated) buffer line, i.e. since the
   /// last `\n`. This is the live output column, including any block prefix
-  /// (`> `, list indent) already written for the line.
+  /// (`> `, list indent) already written for the line. The walk stops at
+  /// `limit`, past which a wrap decides the same: words no line may start
+  /// with, such as `#`, never break, and reading their line whole for every
+  /// text node is quadratic.
   #[inline]
-  fn current_column(&self) -> usize {
+  fn current_column(&self, limit: usize) -> usize {
     let bytes = self.buffer.as_bytes();
-    let mut i = bytes.len();
-    while i > 0 && bytes[i - 1] != b'\n' {
-      i -= 1;
+    let mut column = 0;
+    let mut start = bytes.len();
+    while start > 0 && bytes[start - 1] != b'\n' && column < limit {
+      start -= 1;
+      // A continuation byte belongs to the char its lead byte counted.
+      column += usize::from(bytes[start] & 0xC0 != 0x80);
     }
-    let buffered_column = self.buffer[i..].chars().count();
-    if i == 0 {
-      self.buffer_start_column.saturating_add(buffered_column)
+    #[cfg(test)]
+    self
+      .column_bytes_read
+      .set(self.column_bytes_read.get() + bytes.len() - start);
+    if start == 0 && column < limit {
+      self.buffer_start_column.saturating_add(column)
     } else {
-      buffered_column
+      column
     }
   }
 
@@ -5166,7 +5175,8 @@ impl ConvertState {
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
     let buf_start = self.buffer.len();
-    let mut col = self.current_column();
+    // Past both the width and the prefix every word breaks or overflows.
+    let mut col = self.current_column(width.max(prefix_len + 1));
     let mut first = true;
 
     for word in text.split(' ') {
@@ -6831,6 +6841,23 @@ mod tests {
       "rows read {} bytes",
       state.row_line_scanned.get()
     );
+  }
+
+  // A `#` overflows rather than start a line, so a run of them never ends the
+  // line a wrap continues; reading that line whole for every text node was
+  // quadratic.
+  #[test]
+  fn wrapping_reads_an_unbreakable_line_a_bounded_number_of_bytes() {
+    let options = HtmlToMarkdownOptions::default().with_wrap_width(10);
+    let mut state = ConvertState::new(options, 64, OutputFormat::Markdown);
+    let html = format!("<ul><li>x{}</li></ul>", "<div>#</div>".repeat(2000));
+    assert_eq!(state.process_html(&html), html.len());
+    assert!(
+      state.column_bytes_read.get() < 16 * 2000,
+      "wrapping read {} bytes",
+      state.column_bytes_read.get()
+    );
+    assert_eq!(state.get_markdown(), format!("- x{}", " #".repeat(2000)));
   }
 
   // A header row opens at its first cell, so every table classifies the line

@@ -1067,6 +1067,9 @@ pub struct ConvertState {
   /// Bytes `opens_block_line` reads through the space run before its end.
   #[cfg(test)]
   block_line_bytes_read: std::cell::Cell<usize>,
+  /// Bytes `current_column` reads back through the line a wrap continues.
+  #[cfg(test)]
+  column_bytes_read: std::cell::Cell<usize>,
   /// tag_id -> index into `tag_overrides`; `NO_OVERRIDE` means no key. Boxed:
   /// held inline it costs the override-free path more than the scan it replaces.
   override_idx: Option<Box<[u8; MAX_TAG_ID]>>,
@@ -1306,6 +1309,8 @@ impl ConvertState {
       heading_run_bytes_read: 0,
       #[cfg(test)]
       block_line_bytes_read: std::cell::Cell::new(0),
+      #[cfg(test)]
+      column_bytes_read: std::cell::Cell::new(0),
     };
     // Resolve clean config into bitmask
     if let Some(ref clean) = s.options.clean {
