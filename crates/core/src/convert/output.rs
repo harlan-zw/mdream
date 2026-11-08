@@ -3097,6 +3097,7 @@ impl ConvertState {
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.has_last_text_node = true;
+    self.break_after_last_text = false;
     self.last_text_node_depth = depth;
     self.last_text_node_index = index;
     self.last_node_is_inline = false;
@@ -5800,6 +5801,10 @@ impl ConvertState {
   /// still opens outside the code. Testing the entering node itself made a
   /// `<pre>` nested in another trim a space of the outer code. Plain text keeps
   /// testing the top of the stack, as the JS text engine does.
+  ///
+  /// The parent rule skips a text that a block boundary already closed with
+  /// newlines: the reach-back would cross them and trim a tab, CR or form feed
+  /// that JS keeps, since JS trims only its last fragment, the newlines.
   fn at_pre_whitespace_boundary(&self, is_enter: bool) -> bool {
     let len = self.stack.len();
     let top_is_pre = self
@@ -5810,7 +5815,9 @@ impl ConvertState {
       return top_is_pre;
     }
     self.depth_map[TAG_PRE as usize] == u16::from(top_is_pre)
-      || len >= 2 && self.stack[len - 2].tag_id == Some(TAG_PRE)
+      || (top_is_pre || !self.break_after_last_text)
+        && len >= 2
+        && self.stack[len - 2].tag_id == Some(TAG_PRE)
   }
 
   #[inline]
@@ -5991,6 +5998,9 @@ impl ConvertState {
         for _ in 0..new_lines {
           self.push_code_span_content("\n", true);
         }
+      }
+      if new_lines > 0 && (!is_enter || output_str.is_empty()) {
+        self.break_after_last_text = true;
       }
     } else {
       if self.last_text_node_contains_whitespace

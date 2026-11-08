@@ -888,6 +888,10 @@ pub struct ConvertState {
   last_text_node_depth: usize,
   last_text_node_index: usize,
   has_last_text_node: bool,
+  /// A block boundary wrote newlines after the last text node. The trim's
+  /// cached run is then measured from behind those newlines, so a reach-back
+  /// would cross the break into the text, where JS only trims the break.
+  break_after_last_text: bool,
   last_node_is_inline: bool,
   /// A collapsed trailing space trimmed from the end of an inline element.
   /// It stays deferred until later visible inline content appears so Markdown
@@ -1238,6 +1242,7 @@ impl ConvertState {
       last_text_node_depth: 0,
       last_text_node_index: 0,
       has_last_text_node: false,
+      break_after_last_text: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
       caption_boundary: CaptionBoundary::None,
