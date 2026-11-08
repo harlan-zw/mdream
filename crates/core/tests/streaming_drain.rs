@@ -2121,6 +2121,36 @@ fn streaming_heading_trailing_hashes_matches_one_shot() {
   }
 }
 
+// In a code block the closing hashes are code and stay unescaped wherever a
+// chunk boundary lands. After a fence a parser may misread, the escape stays.
+#[test]
+fn streaming_heading_in_code_block_keeps_its_hashes() {
+  for (html, expected) in [
+    ("<pre><h2>foo #</h2></pre>", "```\n\n## foo #\n\n\n```"),
+    (
+      "<pre><code><h2>foo ##</h2></code></pre>",
+      "```\n## foo ##\n```",
+    ),
+    (
+      "<ul><li><pre><h2>foo #</h2></pre></li></ul>",
+      "- ```\n  ## foo #\n  ```",
+    ),
+    (
+      "<span><pre>x</pre>b</span><pre><h2>foo #</h2></pre>",
+      "```\nx\n``` b\n\n```\n\n## foo \\#\n\n\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // An empty heading in a list item drops its marker's trailing space at its exit,
 // so that space must still be held when the exit runs.
 #[test]

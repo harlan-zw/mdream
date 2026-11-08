@@ -101,6 +101,34 @@ describe('gfm text escaping', () => {
       .toBe('```\na\nb\n\n\n```\n\n[link](#x)')
   })
 
+  it.each([
+    ['<pre><h2>x #</h2></pre>', '```\n\n## x #\n\n\n```'],
+    ['<pre><h2>x ##</h2></pre>', '```\n\n## x ##\n\n\n```'],
+    ['<pre><h1>#</h1></pre>', '```\n\n# #\n\n\n```'],
+    ['<pre><code><h2>x #</h2></code></pre>', '```\n## x #\n```'],
+    ['<pre><h2>x <b>#</b></h2></pre>', '```\n\n## x #\n\n\n```'],
+    ['<ul><li><pre><h2>x #</h2></pre></li></ul>', '- ```\n  ## x #\n  ```'],
+    ['<blockquote><pre><h2>x #</h2></pre></blockquote>', '> ```\n>\n> ## x #\n>\n>\n> ```'],
+  ])('keeps a heading\'s closing hashes literal in a code block for %s', async (html, expected) => {
+    // Nothing in a fenced code block is parsed, so a backslash would show as code.
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
+  it.each<[string, string, string, Partial<MdreamOptions>]>([
+    ['a <pre> glued to inline text', '<span>a<pre><h2>x #</h2></pre></span>', 'a```\n\n## x \\#\n\n\n```', {}],
+    ['a fence closed onto inline text', '<span><pre>x</pre>b</span><pre><h2>x #</h2></pre>', '```\nx\n``` b\n\n```\n\n## x \\#\n\n\n```', {}],
+    ['a fence opened after emphasis', '<em>a<pre>x</pre></em><pre><h2>x #</h2></pre>', '*a```\nx\n```*\n\n```\n\n## x \\#\n\n\n```', {}],
+    ['a literal tag override', '<pre><h2>x #</h2></pre>', '```\n\n## x \\#\n\n\n```', { tagOverrides: { sup: { enter: '^', exit: '^' } } }],
+    ['a literal <pre> override', '<pre><h2>x #</h2></pre>', '## x \\#', { tagOverrides: { pre: { enter: '', exit: '' } } }],
+  ])('keeps the closing-hash escape after %s', async (_, html, expected, options) => {
+    // A parser may not read these fences as written, which can leave the heading a heading.
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize, options), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
   it('does not double escape parser-protected link and table text', () => {
     expect(htmlToMarkdown('<a href="/x">a[b] *c*</a>'))
       .toBe('[a\\[b\\] \\*c\\*](/x)')

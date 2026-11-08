@@ -6292,6 +6292,63 @@ fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
 }
 
 #[test]
+fn a_heading_in_a_code_block_keeps_its_hash_unescaped() {
+  // Nothing in a fenced code block is parsed, so a backslash before the closing
+  // hashes would show as code.
+  for (html, expected) in [
+    ("<pre><h2>x #</h2></pre>", "```\n\n## x #\n\n\n```"),
+    ("<pre><h2>x ##</h2></pre>", "```\n\n## x ##\n\n\n```"),
+    ("<pre><h1>#</h1></pre>", "```\n\n# #\n\n\n```"),
+    ("<pre><code><h2>x #</h2></code></pre>", "```\n## x #\n```"),
+    ("<pre><h2>x <b>#</b></h2></pre>", "```\n\n## x #\n\n\n```"),
+    (
+      "<ul><li><pre><h2>x #</h2></pre></li></ul>",
+      "- ```\n  ## x #\n  ```",
+    ),
+    (
+      "<blockquote><pre><h2>x #</h2></pre></blockquote>",
+      "> ```\n>\n> ## x #\n>\n>\n> ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_heading_after_a_misread_fence_keeps_its_escape() {
+  // A `<pre>` in inline content writes fences glued to that content, which a
+  // parser can read with the opposite parity, leaving the heading a heading.
+  for (html, expected) in [
+    (
+      "<span>a<pre><h2>x #</h2></pre></span>",
+      "a```\n\n## x \\#\n\n\n```",
+    ),
+    (
+      "<span><pre>x</pre>b</span><pre><h2>x #</h2></pre>",
+      "```\nx\n``` b\n\n```\n\n## x \\#\n\n\n```",
+    ),
+    (
+      "<em>a<pre>x</pre></em><pre><h2>x #</h2></pre>",
+      "*a```\nx\n```*\n\n```\n\n## x \\#\n\n\n```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Literal override text need not stay on a code line, so the escape stays.
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("sup".to_string(), TagOverrideConfig::wrap("^", "^"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown("<pre><h2>x #</h2></pre>", options),
+    "```\n\n## x \\#\n\n\n```"
+  );
+}
+
+#[test]
 fn ordered_lists_honor_the_start_attribute() {
   assert_eq!(
     convert("<ol start=\"3\"><li>a</li><li>b</li></ol>"),
