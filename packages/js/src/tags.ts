@@ -689,7 +689,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         return '<pre>'
       }
       // Inside inline content the fences share lines with that content.
-      if (!state.preFenceOwnerDepth && !state.preFencePending && hasInlineAncestor(node))
+      if (!state.fencesUnreliable && !state.preFenceOwnerDepth && !state.preFencePending && hasInlineAncestor(node))
         state.fencesUnreliable = true
       return {
         _tag: 'PreEnter',

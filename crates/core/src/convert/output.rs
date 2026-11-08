@@ -1611,9 +1611,10 @@ impl ConvertState {
       self.pre_fence_pending_depth = self.depth_map[TAG_PRE as usize];
       self.pre_fence_lang = lang;
       // Inside inline content the fences share lines with that content.
-      if self.stack[..stack_len - 1]
-        .iter()
-        .any(|node| node.is_inline)
+      if !self.fences_unreliable
+        && self.stack[..stack_len - 1]
+          .iter()
+          .any(|node| node.is_inline)
       {
         self.fences_unreliable = true;
       }
