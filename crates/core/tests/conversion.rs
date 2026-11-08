@@ -6931,8 +6931,9 @@ fn a_clean_flag_leaves_content_outside_the_link_alone() {
     ("<a>[", "\\["),
     ("x <a>[", "x \\["),
     ("<p><a>[</p>", "\\["),
-    ("<pre>x\t<a>", "```\nx\n```"),
-    ("<pre>x\n<a>", "```\nx\n```"),
+    // An empty link inside `<pre>` leaves the code as `<pre>x\t</pre>` gives it.
+    ("<pre>x\t<a>", "```\nx\t\n```"),
+    ("<pre>x\n<a>", "```\nx\n\n```"),
   ] {
     assert_eq!(
       convert_with_clean(html, clean_all()),

@@ -5793,6 +5793,28 @@ impl ConvertState {
   }
 
   #[inline]
+  /// Inside `<pre>` the whitespace before an element boundary is code: only the
+  /// boundary of a direct child of a `<pre>` trims it, as in JS. On exit the node
+  /// is already popped, so the top of the stack is its parent. On enter the node
+  /// tops the stack: its parent decides, and a `<pre>` with no `<pre>` above it
+  /// still opens outside the code. Testing the entering node itself made a
+  /// `<pre>` nested in another trim a space of the outer code.
+  fn at_pre_whitespace_boundary(&self, is_enter: bool) -> bool {
+    let len = self.stack.len();
+    if !is_enter {
+      return self
+        .stack
+        .last()
+        .is_some_and(|parent| parent.tag_id == Some(TAG_PRE));
+    }
+    let node_is_pre = self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_PRE));
+    self.depth_map[TAG_PRE as usize] == u16::from(node_is_pre)
+      || len >= 2 && self.stack[len - 2].tag_id == Some(TAG_PRE)
+  }
+
   pub(crate) fn write_output(
     &mut self,
     is_enter: bool,
@@ -5975,10 +5997,7 @@ impl ConvertState {
       if self.last_text_node_contains_whitespace
         && (is_inline || !self.stack.is_empty())
         && (self.depth_map[TAG_PRE as usize] == 0
-          || self
-            .stack
-            .last()
-            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE))
+          || self.at_pre_whitespace_boundary(is_enter)
           // A `<br>` inside `<pre>` settles the whitespace state on enter (the
           // `<br>` itself is on top of the stack then). Left set, a later exit
           // reaches back and trims the break's own newline.
