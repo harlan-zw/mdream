@@ -127,6 +127,7 @@ export interface MarkdownState {
    * keep on a code line.
    */
   fencesUnreliable?: boolean
+  preFenceInline?: boolean
   /** Open fenced block whose delimiter is finalized after its content is known. */
   codeFence?: CodeFence
   /** A `<div>`'s cached heading-marker check; see `noteBufferRewrite`. */
@@ -1156,9 +1157,14 @@ function hasLiteralTagOverride(overrides: EngineOptions['tagOverrides']): boolea
   return false
 }
 
+function notePluginFences(state: MarkdownState, output: string[] | undefined): void {
+  if (!state.fencesUnreliable && output?.some(part => part.includes('```') || part.includes('~~~')))
+    state.fencesUnreliable = true
+}
+
 function startCodeFence(state: MarkdownState, fragment: number, language: string, indent: string): void {
   const markerOffset = state.buffer[fragment]!.lastIndexOf(MARKDOWN_CODE_BLOCK)
-  if (!state.fencesUnreliable && !opensBlockLine(state.buffer, fragment, markerOffset))
+  if (!state.fencesUnreliable && (state.preFenceInline || !opensBlockLine(state.buffer, fragment, markerOffset)))
     state.fencesUnreliable = true
   state.codeFence = { fragment, markerOffset, indent, language }
   state.onCodeFenceOpen?.(language)
@@ -2161,6 +2167,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.preFenceLang = language
         }
         if (pendingElement.pluginOutput?.length || literalOverride) {
+          notePluginFences(state, pendingElement.pluginOutput)
           preparePendingPreFence()
           flushPreFence(state)
         }
@@ -2333,6 +2340,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     let output: string[] | undefined
     const hasPluginOutput = !!element.pluginOutput?.length
     if (hasPluginOutput) {
+      notePluginFences(state, element.pluginOutput)
       output = element.pluginOutput
       element.pluginOutput = undefined
     }

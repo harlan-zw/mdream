@@ -6009,3 +6009,11 @@ fn a_drain_inside_a_line_lead_keeps_block_line_checks_like_one_shot() {
     }
   }
 }
+
+#[test]
+fn streaming_empty_inline_pre_fence_reliability() {
+  for body in ["", " ", "\n", "<code></code>"] {
+    let html = format!("<span><pre>{body}</pre></span><pre><h2>x #</h2></pre>");
+    assert_stream_matches_every_split(&html, HtmlToMarkdownOptions::default());
+  }
+}

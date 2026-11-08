@@ -590,7 +590,12 @@ impl ConvertState {
       .rfind(MARKDOWN_CODE_BLOCK)
       .expect("code fence opener missing from output");
     if !self.fences_unreliable
-      && !self.opens_block_line(self.buffer.as_bytes(), output_start + marker_offset)
+      && (self
+        .stack
+        .iter()
+        .position(|node| node.tag_id == Some(TAG_PRE))
+        .is_some_and(|index| self.stack[..index].iter().any(|node| node.is_inline))
+        || !self.opens_block_line(self.buffer.as_bytes(), output_start + marker_offset))
     {
       self.fences_unreliable = true;
     }
@@ -1610,14 +1615,6 @@ impl ConvertState {
       self.pre_fence_pending = true;
       self.pre_fence_pending_depth = self.depth_map[TAG_PRE as usize];
       self.pre_fence_lang = lang;
-      // Inside inline content the fences share lines with that content.
-      if !self.fences_unreliable
-        && self.stack[..stack_len - 1]
-          .iter()
-          .any(|node| node.is_inline)
-      {
-        self.fences_unreliable = true;
-      }
     }
 
     // Phase 1: read from node + compute output (borrows self.stack immutably)

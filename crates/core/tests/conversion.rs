@@ -8671,3 +8671,34 @@ fn text_after_a_closed_nested_item_stays_escaped() {
     "- a\n\n  - \\# t"
   );
 }
+
+#[test]
+fn empty_inline_pre_does_not_taint_later_fences() {
+  for body in ["", " ", "\n", "<code></code>"] {
+    let html = format!("<span><pre>{body}</pre></span><pre><h2>x #</h2></pre>");
+    let expected = if body.contains("code") {
+      "## x \\#"
+    } else {
+      "## x #"
+    };
+    assert!(convert(&html).contains(expected), "{html:?}");
+  }
+}
+
+#[test]
+fn frontmatter_keeps_heading_fences_reliable() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      frontmatter: Some(FrontmatterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert!(
+    html_to_markdown(
+      "<head><title>Title</title></head><pre><h2>x #</h2></pre>",
+      options
+    )
+    .contains("## x #")
+  );
+}

@@ -1,6 +1,7 @@
 import type { MdreamOptions, TextNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { createPlugin, htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown, TEXT_NODE } from '../../src/index'
+import { frontmatterPlugin } from '../../src/plugins/frontmatter'
 
 async function streamConvert(
   html: string,
@@ -244,5 +245,30 @@ describe('gfm text escaping', () => {
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
         expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
     }
+  })
+})
+
+describe('heading fence reliability', () => {
+  it.each(['', ' ', '\n', '<code></code>'])('marks inline pre only when emitting a fence: %j', async (body) => {
+    const html = `<span><pre>${body}</pre></span><pre><h2>x #</h2></pre>`
+    const expected = htmlToMarkdown(html)
+    expect(expected).toContain(body.includes('code') ? '## x \\#' : '## x #')
+    for (let size = 1; size <= html.length; size++)
+      expect(await streamConvert(html, size)).toBe(expected)
+  })
+
+  it.each(['```', '~~~', '````', 'prefix```suffix', 'prefix~~~suffix', 'note'])('tracks raw plugin fences: %s', async (marker) => {
+    for (const hook of ['onNodeEnter', 'onNodeExit'] as const) {
+      const options = { plugins: [createPlugin({ [hook]: node => node.name === 'div' ? `${marker}\n` : undefined })] }
+      const html = '<div>a</div><pre><h2>x #</h2></pre>'
+      const expected = htmlToMarkdown(html, options)
+      expect(expected).toContain(marker === 'note' ? '## x #' : '## x \\#')
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+
+  it('keeps reliable fences with frontmatter', () => {
+    expect(htmlToMarkdown('<head><title>Title</title></head><pre><h2>x #</h2></pre>', { plugins: [frontmatterPlugin()] })).toContain('## x #')
   })
 })
