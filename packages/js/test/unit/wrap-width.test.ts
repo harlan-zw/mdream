@@ -1,6 +1,7 @@
 import type { MdreamOptions } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown as streamWithOptions } from '../../src/index'
+import { currentColumn } from '../../src/markdown-processor'
 import { filterPlugin } from '../../src/plugins'
 import { streamHtmlToMarkdown } from '../../src/stream'
 
@@ -334,5 +335,44 @@ describe('wrap width (issue #106)', () => {
     for await (const chunk of streamHtmlToMarkdown(stream, { wrapWidth: 40 }))
       out += chunk
     expect(out.trimEnd()).toBe(oneshot)
+  })
+})
+
+describe('wrap column', () => {
+  // A `#` overflows rather than start a line, so a run of them never ends the
+  // line a wrap continues; reading that line whole for every text node was
+  // quadratic.
+  it('reads an unbreakable line only up to the limit', () => {
+    let reads = 0
+    const text = `- x${' #'.repeat(5_000)}`
+    const entry = {
+      length: text.length,
+      charCodeAt: (index: number) => {
+        reads++
+        return text.charCodeAt(index)
+      },
+    } as unknown as string
+    const buffer = ['\n', entry, ' #']
+    for (let i = 0; i < 100; i++)
+      expect(currentColumn(buffer, 10)).toBe(10)
+    expect(reads).toBeLessThanOrEqual(100 * 10)
+  })
+
+  it.each([
+    [['ab\ncd', 'ef'], 4],
+    [['ab', 'cd'], 4],
+    [['a\n', ''], 0],
+    [['x\n\uD83D\uDE00 \u00E9'], 3],
+    [['a\uFDD0b\uFDD1c'], 3],
+  ])('counts the current line in code points: %j', (buffer, column) => {
+    expect(currentColumn(buffer, 80)).toBe(column)
+  })
+
+  it.each([
+    [`<p>x${'<span> #</span>'.repeat(20)} word</p>`, 10, `x${' #'.repeat(20)}\nword`],
+    // The prefix is wider than the width, so the limit has to clear it.
+    ['<ul><li><ul><li><ul><li><ul><li>a<span> b</span><span> c</span></li></ul></li></ul></li></ul></li></ul>', 6, '-\n  -\n    -\n      - a\n        b\n        c'],
+  ])('breaks after a capped column as after the full one: %s', async (html, wrapWidth, expected) => {
+    await expectEveryChunking(html, { wrapWidth }, expected)
   })
 })

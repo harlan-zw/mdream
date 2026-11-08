@@ -850,34 +850,33 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
 /**
  * Character count (code points) of the current unterminated output line, i.e.
  * since the last newline across the buffer chunks. Includes any block prefix
- * (`> `, list indent) already written for the line.
+ * (`> `, list indent) already written for the line. The walk stops at `limit`,
+ * past which a wrap decides the same: words no line may start with, such as
+ * `#`, never break, and reading their line whole for every text node is
+ * quadratic. Parity with the Rust `current_column`.
  */
-function currentColumn(buffer: string[]): number {
+export function currentColumn(buffer: string[], limit: number): number {
   let col = 0
   for (let i = buffer.length - 1; i >= 0; i--) {
     const s = buffer[i]!
-    const nl = s.lastIndexOf('\n')
-    if (nl >= 0) {
-      return col + columnWidth(s, nl + 1)
+    for (let j = s.length - 1; j >= 0; j--) {
+      const code = s.charCodeAt(j)
+      if (code === 10)
+        return col
+      if (takesColumn(code) && ++col >= limit)
+        return col
     }
-    col += columnWidth(s, 0)
   }
   return col
 }
 
 /**
- * Code points in `value` from `start`. The fragment link markers `clean`
- * writes are removed before output, so they take no column.
+ * Whether a UTF-16 unit starts a code point that takes a column. A low
+ * surrogate completes a pair already counted, and the fragment link markers
+ * `clean` writes are removed before output.
  */
-function columnWidth(value: string, start: number): number {
-  let width = 0
-  for (let i = start; i < value.length; i++) {
-    const code = value.charCodeAt(i)
-    // A low surrogate completes a pair already counted.
-    if ((code & 0xFC00) !== 0xDC00 && code !== FRAGMENT_LINK_OPEN_CODE && code !== FRAGMENT_LINK_CLOSE_CODE)
-      width++
-  }
-  return width
+function takesColumn(code: number): boolean {
+  return (code & 0xFC00) !== 0xDC00 && code !== FRAGMENT_LINK_OPEN_CODE && code !== FRAGMENT_LINK_CLOSE_CODE
 }
 
 /**
@@ -2067,7 +2066,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
-        const wrapped = wrapText(textNode.value, currentColumn(state.buffer), wrapWidth, state.listIndent)
+        // Past both the width and the prefix every word breaks or overflows.
+        const column = currentColumn(state.buffer, Math.max(wrapWidth, state.listIndent.length + 1))
+        const wrapped = wrapText(textNode.value, column, wrapWidth, state.listIndent)
         state.buffer.push(wrapped)
         state.lastContentCache = wrapped
       }
