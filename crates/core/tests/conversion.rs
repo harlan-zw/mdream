@@ -6397,6 +6397,42 @@ fn whitespace_before_a_nested_pre_stays_in_the_code() {
 }
 
 #[test]
+fn whitespace_before_a_block_break_in_code_stays() {
+  // In a `<pre>` an inline wraps, a child block's exit writes newlines after its
+  // text. The next block must not trim back across them: the tab, CR or form
+  // feed before them is code, kept as JS keeps it.
+  assert_eq!(
+    convert("<span><pre><p>a b\t</p><table><tr><td>x</td></tr></table></pre></span>"),
+    "```\n\na b\t\n\n| x |\n| --- |\n```"
+  );
+  for (ws, kept) in [
+    ("\t", '\t'),
+    ("&#9;", '\t'),
+    ("&#13;", '\r'),
+    ("&#12;", '\u{c}'),
+  ] {
+    for (open, close) in [("<span>", "</span>"), ("", "")] {
+      for block in ["p", "h4"] {
+        for next in [
+          "<table><tr><td>x</td></tr></table>",
+          "<figure><figcaption>x</figcaption></figure>",
+          "<hr>",
+          "<ul><li>x</li></ul>",
+          "<ol><li>x</li></ol>",
+        ] {
+          let html = format!("{open}<pre><{block}>a b{ws}</{block}>{next}</pre>{close}");
+          let out = convert(&html);
+          assert!(
+            out.contains(&format!("a b{kept}")),
+            "html={html:?} out={out:?}"
+          );
+        }
+      }
+    }
+  }
+}
+
+#[test]
 fn ordered_lists_honor_the_start_attribute() {
   assert_eq!(
     convert("<ol start=\"3\"><li>a</li><li>b</li></ol>"),

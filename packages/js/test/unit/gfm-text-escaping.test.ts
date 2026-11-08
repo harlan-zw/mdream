@@ -148,6 +148,29 @@ describe('gfm text escaping', () => {
       expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
   })
 
+  const blockBreakCases = [['\t', '\t'], ['&#9;', '\t'], ['&#13;', '\r'], ['&#12;', '\f']].flatMap(([ws, kept]) =>
+    [['<span>', '</span>'], ['', '']].flatMap(([open, close]) => ['p', 'h4'].flatMap(block => [
+      '<table><tr><td>x</td></tr></table>',
+      '<figure><figcaption>x</figcaption></figure>',
+      '<hr>',
+      '<ul><li>x</li></ul>',
+      '<ol><li>x</li></ol>',
+    ].map(next => [`${open}<pre><${block}>a b${ws}</${block}>${next}</pre>${close}`, `a b${kept}`]))))
+
+  it.each(blockBreakCases)('keeps the whitespace before a block break in code for %j', async (html, kept) => {
+    // In a <pre> an inline wraps, a child block's exit writes a line break after
+    // its text; the tab, CR or form feed before it is code.
+    const out = htmlToMarkdown(html)
+    expect(out).toContain(kept)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(out)
+  })
+
+  it('keeps the tab before a table in a <pre> an inline wraps', () => {
+    expect(htmlToMarkdown('<span><pre><p>a b\t</p><table><tr><td>x</td></tr></table></pre></span>'))
+      .toBe('```\n\na b\t\n\n| x |\n| --- |\n```')
+  })
+
   it('does not double escape parser-protected link and table text', () => {
     expect(htmlToMarkdown('<a href="/x">a[b] *c*</a>'))
       .toBe('[a\\[b\\] \\*c\\*](/x)')

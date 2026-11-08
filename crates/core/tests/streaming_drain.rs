@@ -2154,6 +2154,39 @@ fn streaming_whitespace_before_a_nested_pre_stays_in_the_code() {
   }
 }
 
+// The tab, CR or form feed a child block's text ends with, inside a `<pre>` an
+// inline wraps, stays in the code however the input is chunked.
+#[test]
+fn streaming_whitespace_before_a_block_break_in_code_stays() {
+  for (html, expected) in [
+    (
+      "<span><pre><p>a b\t</p><table><tr><td>x</td></tr></table></pre></span>",
+      "```\n\na b\t\n\n| x |\n| --- |\n```",
+    ),
+    (
+      "<span><pre><p>a b&#12;</p><figure><figcaption>x</figcaption></figure></pre></span>",
+      "```\n\na b\u{c}\n\nx\n```",
+    ),
+    (
+      "<span><pre><p>a b&#13;</p><hr></pre></span>",
+      "```\n\na b\r\n\n---\n```",
+    ),
+    (
+      "<span><pre><h4>a b\t</h4><ul><li>x</li></ul></pre></span>",
+      "```\n\n#### a b\t\n\n- x\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chars(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // In a code block the closing hashes are code and stay unescaped wherever a
 // chunk boundary lands. After a fence a parser may misread, the escape stays.
 #[test]
