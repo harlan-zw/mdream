@@ -2,6 +2,7 @@ import type { ElementNode, MdreamOptions, TextNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { createPlugin, htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown, TEXT_NODE } from '../../src/index'
 import { frontmatterPlugin } from '../../src/plugins/frontmatter'
+import { tailwindPlugin } from '../../src/plugins/tailwind'
 
 async function streamConvert(
   html: string,
@@ -257,7 +258,7 @@ describe('heading fence reliability', () => {
       expect(await streamConvert(html, size)).toBe(expected)
   })
 
-  it.each(['```', '~~~', '````', 'prefix```suffix', 'prefix~~~suffix', 'note'])('tracks raw plugin fences: %s', async (marker) => {
+  it.each(['```', '~~~', '````', 'prefix```suffix', 'prefix~~~suffix', '`', '~', 'note'])('tracks raw plugin fences: %s', async (marker) => {
     for (const hook of ['onNodeEnter', 'onNodeExit'] as const) {
       const options = { plugins: [createPlugin({ [hook]: (node: ElementNode) => node.name === 'div' ? `${marker}\n` : undefined })] }
       const html = '<div>a</div><pre><h2>x #</h2></pre>'
@@ -270,5 +271,41 @@ describe('heading fence reliability', () => {
 
   it('keeps reliable fences with frontmatter', () => {
     expect(htmlToMarkdown('<head><title>Title</title></head><pre><h2>x #</h2></pre>', { plugins: [frontmatterPlugin()] })).toContain('## x #')
+  })
+
+  it('tracks a fence split across plugin fragments and events', async () => {
+    const cases: [string, Partial<MdreamOptions>][] = [
+      ['<div>a</div><pre><h2>x #</h2></pre>', { plugins: [
+        createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? '`' : undefined }),
+        createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? '``\n' : undefined }),
+      ] }],
+      ['<x-a></x-a><x-b></x-b>a<pre><h2>x #</h2></pre>', { plugins: [
+        createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'x-a' ? '`' : node.name === 'x-b' ? '``\n' : undefined }),
+      ] }],
+    ]
+    for (const [html, options] of cases) {
+      const expected = htmlToMarkdown(html, options)
+      expect(expected).toContain('## x \\#')
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+
+  it.each(['```\n', '`', '~~~\n', '~~'])('tracks fences in generated text delimiters: %j', async (prefix) => {
+    const options = { plugins: [createPlugin({ processTextNode(node: TextNode) {
+      if (node.value === 'a')
+        node.generatedMarkdown = { prefix, suffix: '' }
+      return undefined
+    } })] }
+    const html = '<div>a</div><pre><h2>x #</h2></pre>'
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toContain(prefix === '~~' ? '## x #' : '## x \\#')
+    for (let size = 1; size <= html.length; size++)
+      expect(await streamConvert(html, size, options)).toBe(expected)
+  })
+
+  it('keeps reliable fences with Tailwind delimiters', () => {
+    const html = '<p><span class="line-through font-bold italic">a</span></p><pre><h2>x #</h2></pre>'
+    expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toContain('## x #')
   })
 })

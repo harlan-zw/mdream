@@ -1157,9 +1157,22 @@ function hasLiteralTagOverride(overrides: EngineOptions['tagOverrides']): boolea
   return false
 }
 
+// Raw plugin text is written unescaped, and a single backtick or tilde can
+// join a neighbouring fragment or event into a fence.
 function notePluginFences(state: MarkdownState, output: string[] | undefined): void {
-  if (!state.fencesUnreliable && output?.some(part => part.includes('```') || part.includes('~~~')))
+  if (!state.fencesUnreliable && output?.some(part => part.includes('`') || part.includes('~')))
     state.fencesUnreliable = true
+}
+
+// Tailwind writes at most `~~`, so only a backtick or three tildes can come
+// from another plugin's fence.
+function noteGeneratedFences(state: MarkdownState, delimiters: { prefix: string, suffix: string }): void {
+  if (!state.fencesUnreliable && (mayOpenFence(delimiters.prefix) || mayOpenFence(delimiters.suffix)))
+    state.fencesUnreliable = true
+}
+
+function mayOpenFence(delimiter: string): boolean {
+  return delimiter.includes('`') || delimiter.includes('~~~')
 }
 
 function startCodeFence(state: MarkdownState, fragment: number, language: string, indent: string): void {
@@ -2012,8 +2025,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
       }
 
-      if (textNode.generatedMarkdown && textNode.value)
+      if (textNode.generatedMarkdown && textNode.value) {
+        noteGeneratedFences(state, textNode.generatedMarkdown)
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
+      }
 
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
