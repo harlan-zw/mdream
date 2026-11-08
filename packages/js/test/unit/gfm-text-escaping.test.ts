@@ -129,6 +129,25 @@ describe('gfm text escaping', () => {
       expect(await streamConvert(html, chunkSize, options), `chunk size ${chunkSize}`).toBe(expected)
   })
 
+  it.each([
+    ['<pre><code><h4>x y </h4><pre><i>z</i></pre></code></pre>', '```\n#### x y z\n```'],
+    ['<pre><code><h4>x y   </h4><pre><i>z</i></pre></code></pre>', '```\n#### x y   z\n```'],
+    ['<pre><code><h4>x # </h4><pre><i>z</i></pre></code></pre>', '```\n#### x # z\n```'],
+    ['<pre><code><blockquote><h4>&nbsp;x # </h4><pre><i>z</i></pre></blockquote></code></pre>', '```\n> ####  x # z\n```'],
+    ['<pre><code><blockquote><h4>x y </h4><pre><i>z</i></pre></blockquote></code></pre>', '```\n> #### x y z\n```'],
+    ['<pre><code><ul><li>x y <pre><i>z</i></pre></li></ul></code></pre>', '```\n- x y z\n```'],
+    ['<pre><code><ul><li><h4>x # </h4><pre><b>z</b></pre></li></ul></code></pre>', '```\n- #### x # z\n```'],
+    ['<pre><code><h4>&nbsp;x y&nbsp; </h4><pre><span>z</span></pre></code></pre>', '```\n####  x y  z\n```'],
+    ['<pre><code>x y <pre><code>z</code></pre></code></pre>', '```\nx y z\n```'],
+    ['<span>a <pre>x</pre></span>', 'a```\nx\n```'],
+  ])('keeps the whitespace before a nested <pre> in the code for %s', async (html, expected) => {
+    // A <pre> in another one enters inside that one's code block; outside the
+    // code, the space before a <pre> still goes.
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
   it('does not double escape parser-protected link and table text', () => {
     expect(htmlToMarkdown('<a href="/x">a[b] *c*</a>'))
       .toBe('[a\\[b\\] \\*c\\*](/x)')

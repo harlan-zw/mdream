@@ -6349,6 +6349,54 @@ fn a_heading_after_a_misread_fence_keeps_its_escape() {
 }
 
 #[test]
+fn whitespace_before_a_nested_pre_stays_in_the_code() {
+  // A `<pre>` nested in another enters inside that one's code block, so the
+  // whitespace before it is code, not a boundary to trim.
+  for (html, expected) in [
+    (
+      "<pre><code><h4>x y </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y z\n```",
+    ),
+    (
+      "<pre><code><h4>x y   </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y   z\n```",
+    ),
+    (
+      "<pre><code><h4>x # </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>&nbsp;x # </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### \u{a0}x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>x y </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### x y z\n```",
+    ),
+    (
+      "<pre><code><ul><li>x y <pre><i>z</i></pre></li></ul></code></pre>",
+      "```\n- x y z\n```",
+    ),
+    (
+      "<pre><code><ul><li><h4>x # </h4><pre><b>z</b></pre></li></ul></code></pre>",
+      "```\n- #### x # z\n```",
+    ),
+    (
+      "<pre><code><h4>&nbsp;x y&nbsp; </h4><pre><span>z</span></pre></code></pre>",
+      "```\n#### \u{a0}x y\u{a0} z\n```",
+    ),
+    (
+      "<pre><code>x y <pre><code>z</code></pre></code></pre>",
+      "```\nx y z\n```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Outside the code, the space before a `<pre>` still goes.
+  assert_eq!(convert("<span>a <pre>x</pre></span>"), "a```\nx\n```");
+}
+
+#[test]
 fn ordered_lists_honor_the_start_attribute() {
   assert_eq!(
     convert("<ol start=\"3\"><li>a</li><li>b</li></ol>"),

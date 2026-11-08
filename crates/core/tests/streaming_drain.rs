@@ -2121,6 +2121,39 @@ fn streaming_heading_trailing_hashes_matches_one_shot() {
   }
 }
 
+// The whitespace before a `<pre>` nested in another one is code, kept however
+// the input is chunked.
+#[test]
+fn streaming_whitespace_before_a_nested_pre_stays_in_the_code() {
+  for (html, expected) in [
+    (
+      "<pre><code><h4>x y </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y z\n```",
+    ),
+    (
+      "<pre><code><h4>x # </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>&nbsp;x # </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### \u{a0}x # z\n```",
+    ),
+    (
+      "<pre><code><ul><li>x y   <pre><b>z</b></pre></li></ul></code></pre>",
+      "```\n- x y   z\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chars(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // In a code block the closing hashes are code and stay unescaped wherever a
 // chunk boundary lands. After a fence a parser may misread, the escape stays.
 #[test]
