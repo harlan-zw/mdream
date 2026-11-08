@@ -911,6 +911,31 @@ fn streaming_nested_blockquote_separator_collapse_matches_one_shot() {
   }
 }
 
+// A root break before a nested quote strands the outer frame like leading text.
+#[test]
+fn streaming_nested_blockquote_after_block_break_matches_one_shot() {
+  for html in [
+    "<h3>y</h3><br><blockquote><blockquote>x</blockquote>y</blockquote>",
+    "<p>a</p><br><br><blockquote><blockquote><blockquote>x</blockquote></blockquote>y</blockquote>z",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches(
+      html,
+      HtmlToMarkdownOptions {
+        wrap_width: 12,
+        ..Default::default()
+      },
+    );
+    assert_stream_matches(
+      html,
+      HtmlToMarkdownOptions {
+        clean: Some(safe_clean()),
+        ..Default::default()
+      },
+    );
+  }
+}
+
 #[test]
 fn streaming_large_nested_blockquote_drains_without_changing_output() {
   let mut html = String::from("<blockquote><blockquote><blockquote>");
