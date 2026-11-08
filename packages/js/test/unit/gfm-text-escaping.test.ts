@@ -1,4 +1,4 @@
-import type { MdreamOptions, TextNode } from '../../src/types'
+import type { ElementNode, MdreamOptions, TextNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { createPlugin, htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown, TEXT_NODE } from '../../src/index'
 import { frontmatterPlugin } from '../../src/plugins/frontmatter'
@@ -259,7 +259,7 @@ describe('heading fence reliability', () => {
 
   it.each(['```', '~~~', '````', 'prefix```suffix', 'prefix~~~suffix', 'note'])('tracks raw plugin fences: %s', async (marker) => {
     for (const hook of ['onNodeEnter', 'onNodeExit'] as const) {
-      const options = { plugins: [createPlugin({ [hook]: node => node.name === 'div' ? `${marker}\n` : undefined })] }
+      const options = { plugins: [createPlugin({ [hook]: (node: ElementNode) => node.name === 'div' ? `${marker}\n` : undefined })] }
       const html = '<div>a</div><pre><h2>x #</h2></pre>'
       const expected = htmlToMarkdown(html, options)
       expect(expected).toContain(marker === 'note' ? '## x #' : '## x \\#')
