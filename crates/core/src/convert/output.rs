@@ -5793,7 +5793,6 @@ impl ConvertState {
     self.last_text_node_contains_whitespace = false;
   }
 
-  #[inline]
   /// Inside `<pre>` the whitespace before an element boundary is code: only the
   /// boundary of a direct child of a `<pre>` trims it, as in JS. On exit the node
   /// is already popped, so the top of the stack is its parent. On enter the node
@@ -5814,6 +5813,7 @@ impl ConvertState {
       || len >= 2 && self.stack[len - 2].tag_id == Some(TAG_PRE)
   }
 
+  #[inline]
   pub(crate) fn write_output(
     &mut self,
     is_enter: bool,
