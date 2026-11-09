@@ -2373,3 +2373,26 @@ fn every_space_is_a_cut_candidate_whatever_its_phase() {
     }
   }
 }
+
+#[test]
+fn exhausted_code_span_keeps_nested_item_separator() {
+  for quote in [
+    "",
+    "q",
+    "<p>q</p><p>r</p>",
+    "<blockquote>q</blockquote>",
+    "q<br>r",
+    "<pre>q</pre>",
+    "<p>q</p>",
+  ] {
+    for cap in [4, 8] {
+      let html = format!(
+        "<ul><li>x<ul><li><code><hr><blockquote>{quote}</blockquote>t</code></li></ul></li></ul>"
+      );
+      assert_capped_inline_code(&html, cap, "- x\n\n  -", true);
+      for chunk in [1, 2, 3, 11] {
+        assert_eq!(stream(&html, chunk, cap), "- x\n\n  -");
+      }
+    }
+  }
+}

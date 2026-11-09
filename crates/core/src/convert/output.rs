@@ -3894,10 +3894,11 @@ impl ConvertState {
     let item_content_start = self.buffer.len() - tail.len();
     let opens_the_item = |position: usize| position >= end && position <= item_content_start;
     if !at_exit
-      && (self
-        .open_markers
-        .first()
-        .is_some_and(|marker| opens_the_item(marker.output_start))
+      && (!self.code_spans.is_empty()
+        || self
+          .open_markers
+          .first()
+          .is_some_and(|marker| opens_the_item(marker.output_start))
         || self.open_link_hold_floor().is_some_and(opens_the_item)
         || self
           .first_tentative_caption_start()
