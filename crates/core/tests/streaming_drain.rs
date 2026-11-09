@@ -5628,69 +5628,24 @@ fn pending_rule_quote_review_boundaries_at_every_split() {
   }
 }
 
-// A sibling quote that takes back the rule an earlier quote ended on keeps
-// apart from it and keeps its nesting, even when it opens on empty quotes.
-// Inline output after such a quote still gets main's parent boundary.
 #[test]
-fn sibling_quote_after_an_inner_rule_keeps_its_nesting() {
+fn rule_quote_boundaries_preserve_nested_content() {
   for (html, expected) in [
-    (
-      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
-      "- \n  > x\n  >\n  > ---\n\n  > > q",
-    ),
-    (
-      "<ul><li><blockquote><hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
-      "- \n  > ---\n\n  > > q",
-    ),
-    (
-      "<ol><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ol>",
-      "1. \n   > x\n   >\n   > ---\n\n   > > q",
-    ),
-    (
-      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>",
-      "- \n  > x\n  >\n  > ---\n\n  > > q\n\n  tail",
-    ),
-    (
-      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
-      "- \n  > x\n  >\n  > ---\n\n  > > q",
-    ),
-    (
-      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote><p></p></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
-      "- \n  > x\n  >\n  > ---\n\n  > > q",
-    ),
-    (
-      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul></blockquote>",
-      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > > q",
-    ),
     (
       "<ul><li><em><blockquote>-<hr></blockquote></em>tail</li></ul>",
       "- *\n  > \\-\n  >\n  > ---\n\n  *tail",
     ),
-  ] {
-    let options = HtmlToMarkdownOptions::default();
-    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
-    assert_stream_matches(html, options.clone());
-    assert_stream_matches_every_split(html, options);
-  }
-}
-
-// A quote holding a list rule settles the boundary of the empty quotes
-// nested in it at its list level, through block wrappers and deeper quotes.
-// An inline wrapper or a nested list item still gets main's parent boundary.
-#[test]
-fn rule_quote_settles_nested_empty_quotes_at_its_level() {
-  for (html, expected) in [
     (
       "<ul><li><blockquote>x<hr></blockquote><blockquote><div><blockquote></blockquote></div><blockquote>q</blockquote></blockquote></li></ul>",
-      "- \n  > x\n  >\n  > ---\n\n  > > q",
+      "- \n  > x\n  >\n  > ---\n  > > q",
     ),
     (
       "<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>",
-      "- ***\n\n  > > > q",
+      "- ***\n  > > > q",
     ),
     (
       "<ul><li><hr><blockquote><blockquote></blockquote><table><tr><td>a</td></tr></table></blockquote></li></ul>",
-      "- ***\n\n  > | a |\n  > | --- |",
+      "- ***\n\n  >   | a |\n  > | --- |",
     ),
     (
       "<ul><li><hr><blockquote><em>x<blockquote></blockquote></em>y</blockquote></li></ul>",
@@ -5699,6 +5654,94 @@ fn rule_quote_settles_nested_empty_quotes_at_its_level() {
     (
       "<ul><li><hr><blockquote><ul><li>q<blockquote></blockquote>tail</li></ul></blockquote></li></ul>",
       "- ***\n\n  > - q\n  >\n  >   tail",
+    ),
+    (
+      "<ul><li><blockquote><hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > ---\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>   > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote>q</blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><p>q</p></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><p></p><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote><p></p></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<ol><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ol>",
+      "1. \n   > x\n   >\n   > ---\n   > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote><p>x</p><blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote>y</blockquote></li></ul>",
+      "- ***\n\n  > x\n  >\n  > y",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote><p>y</p></blockquote></li></ul>",
+      "- ***\n\n  > x\n  >\n  > y",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote><blockquote></blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote><table><tr><td>x</td></tr></table><blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  > | x |\n  > | --- |\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote>===</blockquote></li></ul>",
+      "- ***\n\n  > x\n  >\n  > \\===",
+    ),
+    (
+      "<ol><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote>tail</li></ol>",
+      "1. ***\n\n   > x\n   >\n   >    ---\n\n   tail",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>",
+      "- ***\n\n  > > q\n  >\n  > > r",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q\n  >\n  > > r",
+    ),
+    (
+      "<ul><li><hr><blockquote><p>x</p><hr></blockquote></li></ul>",
+      "- ***\n\n  > x\n  >\n  > ---",
     ),
   ] {
     let options = HtmlToMarkdownOptions::default();

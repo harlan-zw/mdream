@@ -1437,6 +1437,8 @@ function commitGfmAction(
       if (state.blockquotes.length > 0 && !keepsQuoteSeparator
         && (!rawHtmlQuoteBoundary || newlineRunBefore(state.buffer, state.buffer.length) > 2)) {
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
+        for (const frame of state.blockquotes)
+          frame.fragment = Math.min(frame.fragment, state.buffer.length)
         noteBufferRewrite(state)
       }
       const before = lastOutputChar(state.buffer)
@@ -3101,13 +3103,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // the parent's list indentation only when a continuation actually arrives.
     if (closesQuote)
       quoteRuleParent = undefined
-    // A quote that took a list rule at its enter settles the boundary of the
-    // quotes nested in it at its own list level, so their close arms no parent
-    // boundary. A list item or an inline wrapper between them still needs one.
-    const parent = element.parent
     if (closesQuote && !quoteRestoredRule && state.depthMap[TAG_LI]
-      && !(parent && !(parent.tagHandler ? parent.tagHandler.isInline : parent.tagId === -1)
-        && state.blockquotes.some(frame => frame.listRulePending !== undefined && frame.listIndent === state.listIndent))
       && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion && !isInsideTableCell(state)) {
       captionBoundary = 3
       captionBoundarySpacing = 2
