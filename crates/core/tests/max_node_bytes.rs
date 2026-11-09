@@ -2391,7 +2391,10 @@ fn exhausted_code_span_keeps_nested_item_separator() {
       );
       assert_capped_inline_code(&html, cap, "- x\n\n  -", true);
       for chunk in [1, 2, 3, 11] {
-        assert_eq!(stream(&html, chunk, cap), "- x\n\n  -");
+        assert_eq!(
+          stream_reporting(&html, chunk, cap),
+          ("- x\n\n  -".to_string(), true)
+        );
       }
     }
   }
