@@ -152,4 +152,6 @@ export const CONVERSION_CORPUS: string[] = [
   `<a href="/a" title="A"><p>x</a><a href="/b" title="B"><p>y</a>`,
   `<a href="/a" title="A"><div><a href="/b" title="B"><p>y</p>z</a>w</div></a>`,
   `<a href="/a" title="A"><div><img src="/i" alt="I"><a href="/b" title="B"><p>y</p></a></div></a>`,
+  `<ul><li><dl><dt>l</dt></dl><br><br>l</li></ul>`,
+  `<dl><dt>l</dt></dl><br><br>l`,
 ]
