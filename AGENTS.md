@@ -45,7 +45,7 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 - Test with pattern: `pnpm test -t "test pattern"`
 - Test folder: `pnpm test packages/js/test/unit/`
 - Test browser/Playwright: `pnpm exec vitest run --project browser` (root)
-- Rust: `cargo test --workspace --exclude mdream-edge` and `cargo clippy --workspace --exclude mdream-edge -- -D warnings` (in crates/)
+- Rust: `cargo test --workspace --exclude mdream-edge` and `cargo clippy --workspace --exclude mdream-edge --all-targets -- -D warnings -A clippy::pedantic -A clippy::nursery` (in crates/)
 - Development build (stub): `pnpm dev:prepare` (in packages/mdream/)
 - Live test with real sites: `pnpm test:github:live`, `pnpm test:wiki:file` (in packages/mdream/)
 - Benchmarking: `pnpm bench` (root, see `bench/README.md`)

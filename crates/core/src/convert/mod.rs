@@ -2921,7 +2921,7 @@ impl ConvertState {
         .rposition(|&byte| !is_whitespace(byte));
       #[cfg(test)]
       {
-        self.break_run_scanned += stable_end - content_end.map_or(0, |end| end);
+        self.break_run_scanned += stable_end - content_end.unwrap_or(0);
       }
       for run in &self.streaming_break_runs {
         if run.output_end > stable_end || content_end.is_none_or(|end| end < run.output_end) {
