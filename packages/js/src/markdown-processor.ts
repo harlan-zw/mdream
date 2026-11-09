@@ -2096,7 +2096,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        const separator = `\n\n${state.listRulePending}`
+        // The entering quote writes its markers on exit. Keep the separator
+        // in the surrounding list item, as in Rust's rule flush.
+        const prefix = opensVisibleElement && (node as ElementNode).tagId === TAG_BLOCKQUOTE
+          ? state.listIndent
+          : state.listRulePending
+        const separator = `\n\n${prefix}`
         state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined

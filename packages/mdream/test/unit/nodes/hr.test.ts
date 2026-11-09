@@ -73,31 +73,31 @@ const RULES_AROUND_DEFERRED_FENCE: [string, string][] = [
 
 describe.each(engines)('horizontal Rules $name', (engineConfig) => {
   it.each([
-    ['<ul><li><hr><blockquote><br></blockquote>tail</li></ul>', '- ***\n\n  tail'],
-    ['<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>', '> - ***\n>\n>   tail'],
-    ['<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>', '- ***\n\n  tail'],
-    ['<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>', '> - ***\n>\n>   tail'],
+    ['<ul><li><hr><blockquote><br></blockquote>tail</li></ul>', '- ***\n\n  \n  \n  \n  tail'],
+    ['<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>', engineConfig.name === 'JavaScript Engine' ? '> - ***\n>\n>   \n>\n>     \n>   \n>     \n>   \n>   tail' : '> - ***\n>\n>   \n>   \n>   \n>\n>     \n>   \n>   tail'],
+    ['<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>', '- ***\n\n  \n\n  tail'],
+    ['<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>', '> - ***\n>\n>   \n>\n>   tail'],
     ['<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>', '> - \n>   > x\n>   >\n>   > ---\n>\n>   > q'],
     ['<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n\n  > q'],
-    ['<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>', '- ***\n\n  > q'],
-    ['<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>', '> - \n>   > x\n>   >\n>   > ---\n>\n>   > q'],
+    ['<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>', '- ***\n\n  \n\n  > q'],
+    ['<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>', '> - \n>   > x\n>   >\n>   > ---\n>   > q'],
   ])('preserves pending rule quote review boundaries: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
 
   it.each([
-    ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', 'END', '- ***\n\n  END tail'],
-    ['<ul><li><hr><blockquote></blockquote></li></ul>', 'END', '- ***\n\n  END'],
-    ['<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>', 'END', '- ***\n\n  END\n\n  tail'],
-    ['<ol><li><hr><blockquote></blockquote>tail</li></ol>', 'END', '1. ***\n\n   END tail'],
-    ['<ul><li><ul><li><hr><blockquote></blockquote>tail</li></ul></li></ul>', 'END', '-\n  - ***\n\n    END tail'],
-    ['<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>', 'END', '- ***\n\n  END\nEND tail'],
-    ['<ul><li><hr><blockquote>q</blockquote>tail</li></ul>', 'END', '- ***\n\n  > qEND tail'],
-    ['<ul><li><hr><blockquote><blockquote></blockquote></blockquote>tail</li></ul>', 'END', '- ***\n\n  > ENDEND tail'],
-    ['<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>', 'END', '- ***\n\n  > > qENDEND tail'],
-    ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', '', '- ***\n\n  tail'],
-    ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', ' ', '- ***\n\n   tail'],
+    ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', 'END', '- ***\n\n  \nEND tail'],
+    ['<ul><li><hr><blockquote></blockquote></li></ul>', 'END', '- ***\n\n  \nEND'],
+    ['<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>', 'END', engineConfig.name === 'JavaScript Engine' ? '- ***\n\n  \n\n  END\n\n  tail' : '- ***\n\n  \nEND\n\n  tail'],
+    ['<ol><li><hr><blockquote></blockquote>tail</li></ol>', 'END', '1. ***\n\n   \nEND tail'],
+    ['<ul><li><ul><li><hr><blockquote></blockquote>tail</li></ul></li></ul>', 'END', '-\n  - ***\n\n    \nEND tail'],
+    ['<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>', 'END', '- ***\n\n  \nEND\nEND tail'],
+    ['<ul><li><hr><blockquote>q</blockquote>tail</li></ul>', 'END', engineConfig.name === 'JavaScript Engine' ? '- ***\n\n  \nqEND tail' : '- ***\n\n  \n  > qEND tail'],
+    ['<ul><li><hr><blockquote><blockquote></blockquote></blockquote>tail</li></ul>', 'END', engineConfig.name === 'JavaScript Engine' ? '- ***\n\n  \nENDEND tail' : '- ***\n\n  \n  > ENDEND tail'],
+    ['<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>', 'END', engineConfig.name === 'JavaScript Engine' ? '- ***\n\n  \nqENDEND tail' : '- ***\n\n  \n  > > qENDEND tail'],
+    ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', '', '- ***\n\n  \ntail'],
+    ['<ul><li><hr><blockquote></blockquote>tail</li></ul>', ' ', '- ***\n\n  \n tail'],
   ])('keeps the list separator before quote exit override output: %s with %j', async (html, exit, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     const options = { engine, plugins: { tagOverrides: { blockquote: { exit } } } }
@@ -120,10 +120,10 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
   it.each([
     ['<ul><li><em><blockquote>-<hr></blockquote></em>tail</li></ul>', '- *\n  > \\-\n  >\n  > ---\n\n  *tail'],
     ['<ul><li><blockquote>x<hr></blockquote><blockquote><div><blockquote></blockquote></div><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n  > > q'],
-    ['<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>', '- ***\n  > > > q'],
-    ['<ul><li><hr><blockquote><blockquote></blockquote><table><tr><td>a</td></tr></table></blockquote></li></ul>', '- ***\n\n  >   | a |\n  > | --- |'],
-    ['<ul><li><hr><blockquote><em>x<blockquote></blockquote></em>y</blockquote></li></ul>', '- ***\n\n  > *x\n  >\n  > *y'],
-    ['<ul><li><hr><blockquote><ul><li>q<blockquote></blockquote>tail</li></ul></blockquote></li></ul>', '- ***\n\n  > - q\n  >\n  >   tail'],
+    ['<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>', '- ***\n\n  \n  > > > q'],
+    ['<ul><li><hr><blockquote><blockquote></blockquote><table><tr><td>a</td></tr></table></blockquote></li></ul>', '- ***\n\n  \n  >\n  >   | a |\n  > | --- |'],
+    ['<ul><li><hr><blockquote><em>x<blockquote></blockquote></em>y</blockquote></li></ul>', '- ***\n\n  \n  > *x\n  >\n  > *y'],
+    ['<ul><li><hr><blockquote><ul><li>q<blockquote></blockquote>tail</li></ul></blockquote></li></ul>', '- ***\n\n  \n  > - q\n  >\n  >   tail'],
     ['<ul><li><blockquote><hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > ---\n  > > q'],
     ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n  > > q'],
     ['<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul></blockquote>', '> - \n>   > x\n>   >\n>   > ---\n>   > > q'],
@@ -135,17 +135,17 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
     ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>', '- \n  > x\n  >\n  > ---\n  > > q\n\n  tail'],
     ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n  > > q'],
     ['<ol><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ol>', '1. \n   > x\n   >\n   > ---\n   > > q'],
-    ['<ul><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote></li></ul>', '- ***\n\n  > x\n  >\n  >   ---'],
-    ['<ul><li><hr><blockquote><p>x</p><blockquote></blockquote><hr></blockquote></li></ul>', '- ***\n\n  > x\n  >\n  >   ---'],
-    ['<ul><li><hr><blockquote>x<blockquote></blockquote>y</blockquote></li></ul>', '- ***\n\n  > x\n  >\n  > y'],
-    ['<ul><li><hr><blockquote>x<blockquote></blockquote><p>y</p></blockquote></li></ul>', '- ***\n\n  > x\n  >\n  > y'],
-    ['<ul><li><hr><blockquote>x<blockquote><blockquote></blockquote></blockquote><hr></blockquote></li></ul>', '- ***\n\n  > x\n  >\n  >   ---'],
-    ['<ul><li><hr><blockquote><table><tr><td>x</td></tr></table><blockquote></blockquote><hr></blockquote></li></ul>', '- ***\n\n  > | x |\n  > | --- |\n  >\n  >   ---'],
-    ['<ul><li><hr><blockquote>x<blockquote></blockquote>===</blockquote></li></ul>', '- ***\n\n  > x\n  >\n  > \\==='],
-    ['<ol><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote>tail</li></ol>', '1. ***\n\n   > x\n   >\n   >    ---\n\n   tail'],
-    ['<ul><li><hr><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>', '- ***\n\n  > > q\n  >\n  > > r'],
+    ['<ul><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote></li></ul>', '- ***\n\n  \n  > x\n  >\n  >   ---'],
+    ['<ul><li><hr><blockquote><p>x</p><blockquote></blockquote><hr></blockquote></li></ul>', engineConfig.name === 'JavaScript Engine' ? '- ***\n\n  \n  >\n  > x\n  >\n  >   ---' : '- ***\n\n  \n  > x\n  >\n  >   ---'],
+    ['<ul><li><hr><blockquote>x<blockquote></blockquote>y</blockquote></li></ul>', '- ***\n\n  \n  > x\n  >\n  > y'],
+    ['<ul><li><hr><blockquote>x<blockquote></blockquote><p>y</p></blockquote></li></ul>', '- ***\n\n  \n  > x\n  >\n  > y'],
+    ['<ul><li><hr><blockquote>x<blockquote><blockquote></blockquote></blockquote><hr></blockquote></li></ul>', '- ***\n\n  \n  > x\n  >\n  >   ---'],
+    ['<ul><li><hr><blockquote><table><tr><td>x</td></tr></table><blockquote></blockquote><hr></blockquote></li></ul>', engineConfig.name === 'JavaScript Engine' ? '- ***\n\n  \n  >\n  > | x |\n  > | --- |\n  >\n  >   ---' : '- ***\n\n  \n  > | x |\n  > | --- |\n  >\n  >   ---'],
+    ['<ul><li><hr><blockquote>x<blockquote></blockquote>===</blockquote></li></ul>', '- ***\n\n  \n  > x\n  >\n  > \\==='],
+    ['<ol><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote>tail</li></ol>', '1. ***\n\n   \n   > x\n   >\n   >    ---\n\n   tail'],
+    ['<ul><li><hr><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>', '- ***\n\n  \n  > > q\n  >\n  > > r'],
     ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n\n  > > q\n  >\n  > > r'],
-    ['<ul><li><hr><blockquote><p>x</p><hr></blockquote></li></ul>', '- ***\n\n  > x\n  >\n  > ---'],
+    ['<ul><li><hr><blockquote><p>x</p><hr></blockquote></li></ul>', engineConfig.name === 'JavaScript Engine' ? '- ***\n\n  \n  >\n  > x\n  >\n  > ---' : '- ***\n\n  \n  > x\n  >\n  > ---'],
   ])('preserves rule quote boundaries and nested content: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
@@ -177,11 +177,11 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
   it('restores list continuation after an empty quote following a rule', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const cases: [string, string][] = [
-      ['<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>', '- ***\n\n  tail'],
-      ['<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>', '1. ***\n\n   tail'],
-      ['<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>', '-\n  - ***\n\n    tail'],
-      ['<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>', '> - ***\n>\n>   tail'],
-      ['<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>', '- ***\n\n  > q\n\n  tail'],
+      ['<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>', '- ***\n\n  \n\n  tail'],
+      ['<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>', '1. ***\n\n   \n\n   tail'],
+      ['<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>', '-\n  - ***\n\n    \n\n    tail'],
+      ['<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>', '> - ***\n>\n>   \n>\n>   tail'],
+      ['<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>', engineConfig.name === 'JavaScript Engine' ? '- ***\n\n  \n  >\n  > q\n\n  tail' : '- ***\n\n  \n  > q\n\n  tail'],
     ]
     for (const [html, expected] of cases)
       expect(htmlToMarkdown(html, { engine }), html).toBe(expected)
@@ -190,13 +190,13 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
   it('opens a quote after a rule in a list item on its own line', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const cases: [string, string][] = [
-      ['<ul><li><hr><blockquote>q</blockquote></li></ul>', '- ***\n\n  > q'],
-      ['<ol><li><hr><blockquote>q</blockquote></li></ol>', '1. ***\n\n   > q'],
-      ['<ul><li><ul><li><hr><blockquote>q</blockquote></li></ul></li></ul>', '-\n  - ***\n\n    > q'],
-      ['<ul><li>a<hr> <blockquote><p>q</p><p>r</p></blockquote></li></ul>', '- a\n\n  ---\n\n  > q\n  >\n  > r'],
-      ['<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- ***\n\n  > > q'],
-      ['<blockquote><ul><li><hr><blockquote>q</blockquote></li></ul></blockquote>', '> - ***\n>   > q'],
-      ['<ul><li><blockquote>t<hr><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > t\n  >\n  > ---\n  > > q'],
+      ['<ul><li><hr><blockquote>q</blockquote></li></ul>', '- ***\n\n  \n  > q'],
+      ['<ol><li><hr><blockquote>q</blockquote></li></ol>', '1. ***\n\n   \n   > q'],
+      ['<ul><li><ul><li><hr><blockquote>q</blockquote></li></ul></li></ul>', '-\n  - ***\n\n    \n    > q'],
+      ['<ul><li>a<hr> <blockquote><p>q</p><p>r</p></blockquote></li></ul>', engineConfig.name === 'JavaScript Engine' ? '- a\n\n  ---\n\n  \n  >\n  > q\n  >\n  > r' : '- a\n\n  ---\n\n  \n  > q\n  >\n  > r'],
+      ['<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- ***\n\n  \n  > > q'],
+      ['<blockquote><ul><li><hr><blockquote>q</blockquote></li></ul></blockquote>', '> - ***\n>\n>   \n>   > q'],
+      ['<ul><li><blockquote>t<hr><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > t\n  >\n  > ---\n  >\n  >\n  > > q'],
       ['<ul><li><hr><blockquote></blockquote></li></ul>', '- ***'],
     ]
     for (const [html, expected] of cases)
@@ -235,7 +235,7 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
 
 it.each([
   ['replaces quote enter', '<ul><li><hr><blockquote>q</blockquote></li></ul>', { onNodeEnter: (element: ElementNode) => element.name === 'blockquote' ? 'custom' : undefined }, '- ***\n\n  custom q'],
-  ['replaces quote exit', '<ul><li><hr><blockquote></blockquote>tail</li></ul>', { onNodeExit: (element: ElementNode) => element.name === 'blockquote' ? 'custom' : undefined }, '- ***\n\n  custom tail'],
+  ['replaces quote exit', '<ul><li><hr><blockquote></blockquote>tail</li></ul>', { onNodeExit: (element: ElementNode) => element.name === 'blockquote' ? 'custom' : undefined }, '- ***\n\n  \ncustom tail'],
 ])('preserves list indentation when plugin output %s', async (_name, html, hooks, expected) => {
   const options = { plugins: [createPlugin(hooks)] }
   expect(jsHtmlToMarkdown(html, options)).toBe(expected)

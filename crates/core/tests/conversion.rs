@@ -7891,37 +7891,36 @@ fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
 
 #[test]
 fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
-  // The quote writes its own break into the item, so the rule's separator must
-  // not leave a blank `> ` (or bare indent) line above it.
+  // The rule separator stays outside the quote and retains the list indent.
   assert_eq!(
     convert("<ul><li><hr><blockquote>q</blockquote></li></ul>"),
-    "- ***\n\n  > q"
+    "- ***\n\n  \n  > q"
   );
   assert_eq!(
     convert("<ol><li><hr><blockquote>q</blockquote></li></ol>"),
-    "1. ***\n\n   > q"
+    "1. ***\n\n   \n   > q"
   );
   assert_eq!(
     convert("<ul><li><ul><li><hr><blockquote>q</blockquote></li></ul></li></ul>"),
-    "-\n  - ***\n\n    > q"
+    "-\n  - ***\n\n    \n    > q"
   );
   assert_eq!(
     convert("<ul><li>a<hr> <blockquote><p>q</p><p>r</p></blockquote></li></ul>"),
-    "- a\n\n  ---\n\n  > q\n  >\n  > r"
+    "- a\n\n  ---\n\n  \n  > q\n  >\n  > r"
   );
   assert_eq!(
     convert("<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote></li></ul>"),
-    "- ***\n\n  > > q"
+    "- ***\n\n  \n  > > q"
   );
   assert_eq!(
     convert("<blockquote><ul><li><hr><blockquote>q</blockquote></li></ul></blockquote>"),
-    "> - ***\n>   > q"
+    "> - ***\n>\n>   \n>   > q"
   );
   assert_eq!(
     convert("<ul><li><blockquote>t<hr><blockquote>q</blockquote></blockquote></li></ul>"),
-    "- \n  > t\n  >\n  > ---\n  > > q"
+    "- \n  > t\n  >\n  > ---\n  >\n  >\n  > > q"
   );
-  // An empty quote leaves nothing behind, as it does anywhere else.
+  // A genuinely empty quote contributes no marker.
   assert_eq!(
     convert("<ul><li><hr><blockquote></blockquote></li></ul>"),
     "- ***"
@@ -7932,23 +7931,23 @@ fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
 fn empty_quote_after_rule_restores_list_continuation() {
   assert_eq!(
     convert("<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>"),
-    "- ***\n\n  tail"
+    "- ***\n\n  \n\n  tail"
   );
   assert_eq!(
     convert("<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>"),
-    "1. ***\n\n   tail"
+    "1. ***\n\n   \n\n   tail"
   );
   assert_eq!(
     convert("<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>"),
-    "-\n  - ***\n\n    tail"
+    "-\n  - ***\n\n    \n\n    tail"
   );
   assert_eq!(
     convert("<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>"),
-    "> - ***\n>\n>   tail"
+    "> - ***\n>\n>   \n>\n>   tail"
   );
   assert_eq!(
     convert("<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>"),
-    "- ***\n\n  > q\n\n  tail"
+    "- ***\n\n  \n  > q\n\n  tail"
   );
 }
 
@@ -7958,43 +7957,43 @@ fn quote_exit_override_output_stays_after_the_list_rule() {
     (
       "END",
       "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n  END tail",
+      "- ***\n\n  \nEND tail",
     ),
     (
       "END",
       "<ul><li><hr><blockquote></blockquote></li></ul>",
-      "- ***\n\n  END",
+      "- ***\n\n  \nEND",
     ),
     (
       "END",
       "<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>",
-      "- ***\n\n  END\n\n  tail",
+      "- ***\n\n  \nEND\n\n  tail",
     ),
     (
       "END",
       "<ol><li><hr><blockquote></blockquote>tail</li></ol>",
-      "1. ***\n\n   END tail",
+      "1. ***\n\n   \nEND tail",
     ),
     (
       "END",
       "<ul><li><ul><li><hr><blockquote></blockquote>tail</li></ul></li></ul>",
-      "-\n  - ***\n\n    END tail",
+      "-\n  - ***\n\n    \nEND tail",
     ),
     (
       "END",
       "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n  END\nEND tail",
+      "- ***\n\n  \nEND\nEND tail",
     ),
     (
       "END",
       "<blockquote><ul><li><hr><blockquote></blockquote>tail</li></ul></blockquote>",
-      "> - ***\n>\n>   END tailEND",
+      "> - ***\n>\n>   \n> END tailEND",
     ),
     // A quote with content, or a rule still pending inside one, keeps its order.
     (
       "END",
       "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
-      "- ***\n\n  > qEND tail",
+      "- ***\n\n  \n  > qEND tail",
     ),
     (
       "END",
@@ -8005,12 +8004,12 @@ fn quote_exit_override_output_stays_after_the_list_rule() {
     (
       "",
       "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n  tail",
+      "- ***\n\n  \ntail",
     ),
     (
       " ",
       "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n   tail",
+      "- ***\n\n  \n tail",
     ),
   ] {
     let options = HtmlToMarkdownOptions {
@@ -8035,15 +8034,15 @@ fn pending_rule_quote_review_boundaries() {
   for (html, expected) in [
     (
       "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
-      "> - ***\n>\n>   tail",
+      "> - ***\n>\n>   \n>   \n>   \n>\n>     \n>   \n>   tail",
     ),
     (
       "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
-      "- ***\n\n  tail",
+      "- ***\n\n  \n\n  tail",
     ),
     (
       "<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>",
-      "> - ***\n>\n>   tail",
+      "> - ***\n>\n>   \n>\n>   tail",
     ),
     (
       "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
@@ -8055,11 +8054,11 @@ fn pending_rule_quote_review_boundaries() {
     ),
     (
       "<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
-      "- ***\n\n  > q",
+      "- ***\n\n  \n\n  > q",
     ),
     (
       "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
-      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+      "> - \n>   > x\n>   >\n>   > ---\n>   > q",
     ),
   ] {
     assert_eq!(

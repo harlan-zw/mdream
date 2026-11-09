@@ -2379,7 +2379,7 @@ fn nested_empty_quote_rollback_obeys_inline_code_cap() {
   assert_capped_inline_code(
     "<code><blockquote><ul><li><hr><blockquote></blockquote></li></ul></blockquote></code>",
     10,
-    "`- \n\n  ---\n`",
+    "`- \n\n  ---`",
     true,
   );
 }

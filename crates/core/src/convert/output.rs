@@ -5024,7 +5024,17 @@ impl ConvertState {
   }
 
   fn flush_list_rule(&mut self) {
-    let prefix = self.continuation_prefix();
+    // The entering quote has not opened its buffered frame yet. Its marker
+    // belongs to the content written on exit, not this list separator.
+    let prefix = if self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_BLOCKQUOTE))
+    {
+      self.list_indent.clone()
+    } else {
+      self.continuation_prefix()
+    };
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
       self.buffer.reserve(2 + prefix.len());
       self.buffer.push_str("\n\n");
