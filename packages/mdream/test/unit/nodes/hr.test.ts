@@ -118,6 +118,28 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
   })
 
   it.each([
+    ['<ul><li><blockquote><hr>text</blockquote></li></ul>', '- X\n\n  > ---\n\n  > textY'],
+    ['<blockquote><ol start="10000"><li><hr><blockquote>q</blockquote></li></ol></blockquote>', engineConfig.name === 'JavaScript Engine' ? 'X\n\n10000. ***\n\n>        X qY\n\nY' : 'X\n\n10000. ***\n\n>        > X qY\n\nY'],
+  ])('keeps quote markers when a literal enter override opens no quote frame: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, plugins: { tagOverrides: { blockquote: { enter: 'X', exit: 'Y' } } } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(stream, options))
+        output += chunk
+      expect(output, `split=${split}`).toBe(expected)
+    }
+  })
+
+  it.each([
     ['<ul><li><em><blockquote>-<hr></blockquote></em>tail</li></ul>', '- *\n  > \\-\n  >\n  > ---\n\n  *tail'],
     ['<ul><li><blockquote>x<hr></blockquote><blockquote><div><blockquote></blockquote></div><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n  > > q'],
     ['<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>', '- ***\n\n  \n  > > > q'],

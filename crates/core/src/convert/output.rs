@@ -1332,7 +1332,7 @@ impl ConvertState {
       return;
     }
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+      self.flush_list_rule(false);
     }
 
     let tag_id: Option<u8>;
@@ -1587,7 +1587,7 @@ impl ConvertState {
     }
 
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+      self.flush_list_rule(true);
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -3242,7 +3242,7 @@ impl ConvertState {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_list_rule();
+      self.flush_list_rule(false);
     }
 
     let mut relocated_space = false;
@@ -5023,18 +5023,14 @@ impl ConvertState {
     p
   }
 
-  fn flush_list_rule(&mut self) {
-    // The entering quote has not opened its buffered frame yet. Its marker
-    // belongs to the content written on exit, not this list separator.
-    let prefix = if self
-      .stack
-      .last()
-      .is_some_and(|node| node.tag_id == Some(TAG_BLOCKQUOTE))
-    {
-      self.list_indent.clone()
-    } else {
-      self.continuation_prefix()
-    };
+  fn flush_list_rule(&mut self, entering: bool) {
+    let mut prefix = self.continuation_prefix();
+    // An entering quote is already on the stack, but the frame it opens next
+    // writes its markers on exit. Only its own trailing marker leaves the
+    // separator; unbuffered outer quotes keep theirs.
+    if entering && prefix.ends_with("> ") && self.top_opens_quote_frame() {
+      prefix.truncate(prefix.len() - 2);
+    }
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
       self.buffer.reserve(2 + prefix.len());
       self.buffer.push_str("\n\n");
@@ -5045,6 +5041,27 @@ impl ConvertState {
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
     self.list_rule_pending = false;
+  }
+
+  /// Mirrors the frame condition in `emit_enter_element`: a literal enter
+  /// override writes the quote inline and opens no frame.
+  fn top_opens_quote_frame(&self) -> bool {
+    let Some(node) = self.stack.last() else {
+      return false;
+    };
+    if node.tag_id != Some(TAG_BLOCKQUOTE) {
+      return false;
+    }
+    if !self.has_tag_overrides {
+      return true;
+    }
+    let ovs = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|p| p.tag_overrides.as_ref());
+    !Self::override_for_node(ovs, self.override_idx.as_deref(), node)
+      .is_some_and(|ov| ov.enter.is_some())
   }
 
   /// Only the word's own line counts: a decoded line ending or a trailing tab

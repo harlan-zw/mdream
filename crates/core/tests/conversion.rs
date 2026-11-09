@@ -7927,6 +7927,37 @@ fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
   );
 }
 
+// A literal enter override opens no quote frame, so the rule separator keeps
+// every marker of the continuation prefix.
+#[test]
+fn a_literal_quote_enter_override_keeps_rule_separator_markers() {
+  let options = || HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("blockquote", TagOverrideConfig::wrap("X", "Y")),
+    ),
+    ..Default::default()
+  };
+  for (input, expected) in [
+    (
+      "<ul><li><blockquote><hr>text</blockquote></li></ul>",
+      "- X\n\n  > ---\n\n  > textY",
+    ),
+    (
+      "<blockquote><ol start=\"10000\"><li><hr><blockquote>q</blockquote></li></ol></blockquote>",
+      "X\n\n10000. ***\n\n>        > XqY\n\nY",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(input, options()), expected, "{input}");
+    for split in 0..=input.len() {
+      let mut processor = MarkdownStreamProcessor::new(options());
+      let mut output = processor.process_chunk(&input[..split]);
+      output.push_str(&processor.process_chunk(&input[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{input} split={split}");
+    }
+  }
+}
+
 #[test]
 fn empty_quote_after_rule_restores_list_continuation() {
   assert_eq!(
