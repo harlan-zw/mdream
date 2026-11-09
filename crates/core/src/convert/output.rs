@@ -701,16 +701,6 @@ impl ConvertState {
     if content_end < frame.content_start
       || (content_end == frame.content_start && content_left_buffer)
     {
-      self.list_rule_pending |= frame.list_rule_pending;
-      self.list_rule_restored |= frame.list_rule_pending;
-      if frame.list_rule_pending && !content_left_buffer {
-        self.truncate_buffer(frame.content_start);
-      }
-      // Nested quote entry collapses one separator newline; an empty rollback
-      // must restore it before the rule's list continuation is flushed.
-      if frame.list_rule_pending && !self.list_rule_after_quote && !self.blockquotes.is_empty() {
-        self.last_content_cache_len = self.push_code_span_content("\n", true);
-      }
       return;
     }
     let content = &self.buffer[frame.content_start..content_end];
@@ -841,9 +831,6 @@ impl ConvertState {
     self.shift_raw_html_scan(content_end, quoted_end);
     self.last_content_cache_len = quoted.len();
     self.blockquote_scratch = quoted;
-    if self.list_rule_pending {
-      self.list_rule_after_quote = true;
-    }
     // Quoting inserted a `> ` and a newline per line, so a line the scan had
     // already passed is no longer where the cache says the current one begins.
     self.invalidate_line_start();
@@ -1344,9 +1331,8 @@ impl ConvertState {
       self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
       return;
     }
-    self.quote_rule_parent = false;
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule(false);
+      self.flush_list_rule();
     }
 
     let tag_id: Option<u8>;
@@ -1600,21 +1586,8 @@ impl ConvertState {
       return;
     }
 
-    if self.quote_rule_parent {
-      self.quote_rule_parent = false;
-      if self.caption_boundary == CaptionBoundary::QuoteParent
-        && !self.stack[stack_len - 1].excludes_text_nodes
-        && self.rule_break_opens_quote(stack_len - 1)
-      {
-        self.caption_boundary = CaptionBoundary::None;
-        self.list_rule_pending = true;
-      }
-    }
-    let quote_rule_pending = self.list_rule_pending
-      && !self.stack[stack_len - 1].excludes_text_nodes
-      && self.rule_break_opens_quote(stack_len - 1);
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule(quote_rule_pending);
+      self.flush_list_rule();
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -2079,7 +2052,6 @@ impl ConvertState {
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
-        list_rule_pending: quote_rule_pending,
         // A quote in a table cell starts mid-row, past any list indent.
         list_indent: if self.in_table_cell() {
           String::new()
@@ -2695,27 +2667,12 @@ impl ConvertState {
       && self.depth_map[TAG_LI as usize] > 0
     {
       self.list_rule_pending = true;
-      self.list_rule_after_quote = false;
-      self.list_rule_restored = false;
     }
 
     let closes_quote =
       !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) && !self.blockquotes.is_empty();
-    // An empty quote hands back the rule written before it, which the parent
-    // boundary below must not drop.
-    let mut quote_restored_rule = false;
     if closes_quote {
-      self.quote_rule_parent = false;
-      let rule_was_pending = self.list_rule_pending;
       self.finalize_blockquote();
-      quote_restored_rule = !rule_was_pending && self.list_rule_pending;
-      // Literal exit output follows the restored list continuation indentation.
-      if !rule_was_pending
-        && self.list_rule_pending
-        && output.as_deref().is_some_and(|value| !value.is_empty())
-      {
-        self.flush_list_rule(false);
-      }
     }
     if !plain_text!(self) && tag_id == Some(TAG_BLOCKQUOTE) {
       // The quote's close separates a raw HTML region that ended inside it,
@@ -2905,7 +2862,6 @@ impl ConvertState {
     // Reuse the deferred block boundary: it already ignores invisible output
     // and supplies list continuation indentation, without taxing plain text.
     if closes_quote
-      && !quote_restored_rule
       && !has_override
       && self.depth_map[TAG_LI as usize] > 0
       && self.depth_map[TAG_PRE as usize] == 0
@@ -2913,9 +2869,7 @@ impl ConvertState {
       && !self.in_table_cell()
     {
       self.caption_boundary = CaptionBoundary::QuoteParent;
-      // An HR inside this quote cannot own the parent's deferred separator,
-      // unless a sibling quote opens next.
-      self.quote_rule_parent = self.list_rule_pending;
+      // An HR inside this quote cannot own the parent's deferred separator.
       self.list_rule_pending = false;
     }
     self.settle_empty_text_pending(output_start, || false);
@@ -3288,7 +3242,7 @@ impl ConvertState {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_list_rule(false);
+      self.flush_list_rule();
     }
 
     let mut relocated_space = false;
@@ -5069,77 +5023,18 @@ impl ConvertState {
     p
   }
 
-  /// Whether the element at `index` is a quote whose own enter writes the line
-  /// break into the item. Its subtree is quoted once it completes, so a rule
-  /// before it only has to end its line: the full separator would leave a stray
-  /// continuation line above the quote, and here `continuation_prefix` already
-  /// counts the entering quote's own `> `.
-  #[cold]
-  fn rule_break_opens_quote(&self, index: usize) -> bool {
-    let node = &self.stack[index];
-    node.tag_id == Some(TAG_BLOCKQUOTE)
-      && !(self.has_tag_overrides
-        && Self::override_for_node(
-          self
-            .options
-            .plugins
-            .as_ref()
-            .and_then(|p| p.tag_overrides.as_ref()),
-          self.override_idx.as_deref(),
-          node,
-        )
-        .is_some_and(|ov| ov.enter.is_some()))
-  }
-
-  fn flush_list_rule(&mut self, opens_quote: bool) {
-    if !opens_quote && !self.list_rule_restored {
-      let prefix = self.continuation_prefix();
-      if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
-        self.buffer.reserve(2 + prefix.len());
-        self.buffer.push_str("\n\n");
-        self.buffer.push_str(&prefix);
-        self.last_content_cache_len = 2 + prefix.len();
-      } else {
-        let output = format!("\n\n{prefix}");
-        self.last_content_cache_len = self.push_code_span_content(&output, true);
-      }
-      self.list_rule_pending = false;
-      return;
-    }
-    let output = if opens_quote {
-      // The quote enter supplies one newline, and a nested quote removes one.
-      // A closed non-empty sibling still needs its paragraph boundary.
-      let wanted = 1 + usize::from(self.list_rule_after_quote && !self.blockquotes.is_empty());
-      self.trim_trailing_spaces();
-      let end = self.buffer.len();
-      let run = self
-        .buffer
-        .as_bytes()
-        .iter()
-        .rev()
-        .take_while(|&&byte| byte == b'\n')
-        .count();
-      if run > wanted {
-        self.truncate_buffer(end - run + wanted);
-      }
-      match wanted.saturating_sub(usize::from(self.trailing_new_lines())) {
-        0 => Cow::Borrowed(""),
-        1 => Cow::Borrowed("\n"),
-        _ => Cow::Borrowed("\n\n"),
-      }
-    } else {
-      self
-        .block_open_prefix(&self.continuation_prefix())
-        .unwrap_or(Cow::Borrowed(""))
-    };
+  fn flush_list_rule(&mut self) {
+    let prefix = self.continuation_prefix();
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
-      self.buffer.push_str(&output);
-      self.last_content_cache_len = output.len();
+      self.buffer.reserve(2 + prefix.len());
+      self.buffer.push_str("\n\n");
+      self.buffer.push_str(&prefix);
+      self.last_content_cache_len = 2 + prefix.len();
     } else {
+      let output = format!("\n\n{prefix}");
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
     self.list_rule_pending = false;
-    self.list_rule_restored = false;
   }
 
   /// Only the word's own line counts: a decoded line ending or a trailing tab
@@ -6722,7 +6617,6 @@ mod tests {
     state.flushed_tail = *b"y\n";
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
-      list_rule_pending: false,
       list_indent: "  ".to_string(),
     });
     state.stack.push(entering_node(TAG_H2, false));

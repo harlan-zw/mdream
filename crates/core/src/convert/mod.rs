@@ -294,7 +294,6 @@ struct FragmentLink {
 
 #[derive(Clone)]
 struct BlockquoteFrame {
-  list_rule_pending: bool,
   content_start: usize,
   list_indent: String,
 }
@@ -1027,13 +1026,6 @@ pub struct ConvertState {
   empty_item_answered: bool,
   /// A list item rule waiting to see whether visible content follows it.
   list_rule_pending: bool,
-  list_rule_after_quote: bool,
-  /// An empty quote left the pending rule's separator in the buffer.
-  list_rule_restored: bool,
-  /// The quote that just closed ended on a list rule, which the parent's
-  /// deferred boundary took over. A sibling quote opening next, with that
-  /// boundary still pending, takes the rule back to keep the two apart.
-  quote_rule_parent: bool,
   /// A heading closed in a list item. Inside the item its block spacing is
   /// collapsed, so the next visible content owes it the block break the root
   /// writes, or that content joins the heading's line.
@@ -1296,9 +1288,6 @@ impl ConvertState {
       empty_item_after_cr: false,
       empty_item_answered: false,
       list_rule_pending: false,
-      list_rule_after_quote: false,
-      list_rule_restored: false,
-      quote_rule_parent: false,
       heading_break_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
@@ -3653,7 +3642,6 @@ mod tests {
     state.buffer = format!("{}\n{}", "a".repeat(8192), "#".repeat(64));
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
-      list_rule_pending: false,
       list_indent: "  ".to_string(),
     });
     assert_eq!(state.trailing_heading_run(1 << 20), 64);

@@ -134,9 +134,6 @@ export interface MarkdownState {
   emptyItemAfterCr?: boolean
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
-  listRuleAfterQuote?: boolean
-  /** An empty quote left the pending rule's separator in the buffer. */
-  listRuleRestored?: boolean
   /**
    * A heading closed in a list item. Inside the item its block spacing is
    * collapsed, so the next visible content owes it the block break the root
@@ -161,7 +158,6 @@ interface CodeFence {
 }
 
 export interface BlockquoteFrame {
-  owner: ElementNode
   fragment: number
   listIndent: string
   /**
@@ -170,7 +166,6 @@ export interface BlockquoteFrame {
    * can flush the pre-quote context before the exit reads it.
    */
   followsWhitespace: boolean
-  listRulePending?: string
 }
 
 interface GfmLifecycleState {
@@ -1214,20 +1209,8 @@ function finalizeBlockquote(state: MarkdownState): void {
   // An empty quote whose start followed terminated output writes nothing.
   // The context is the enter-time snapshot: streaming may have already
   // yielded and compacted the characters this decision used to read back.
-  if (!content && frame.followsWhitespace) {
-    state.listRulePending = frame.listRulePending
-    if (frame.listRulePending !== undefined) {
-      state.listRuleRestored = true
-      state.outputPositions?.replace(frame.fragment, buffer.length, [])
-      buffer.length = frame.fragment
-      noteBufferRewrite(state)
-    }
-    if (frame.listRulePending !== undefined && !state.listRuleAfterQuote && state.blockquotes.length > 0)
-      buffer.push('\n')
+  if (!content && frame.followsWhitespace)
     return
-  }
-  if (state.listRulePending !== undefined)
-    state.listRuleAfterQuote = true
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -1306,15 +1289,12 @@ function collapseNestedBlockquoteSeparator(buffer: string[], positions?: OutputP
   if (newlineRunBefore(buffer, buffer.length) < 2)
     return
 
-  let index = buffer.length - 1
-  while (!buffer[index]!.length)
-    index--
-  const last = buffer[index]!
-  positions?.replace(index, index + 1, last.length === 1 ? [] : [last.slice(0, -1)])
+  const last = buffer.at(-1)!
+  positions?.replace(buffer.length - 1, buffer.length, last.length === 1 ? [] : [last.slice(0, -1)])
   if (last.length === 1)
-    buffer.splice(index, 1)
+    buffer.pop()
   else
-    buffer[index] = last.slice(0, -1)
+    buffer[buffer.length - 1] = last.slice(0, -1)
 }
 
 /**
@@ -1430,22 +1410,17 @@ function commitGfmAction(
   owner: ElementNode,
   keepsQuoteSeparator: boolean,
   rawHtmlQuoteBoundary = false,
-  listRulePending?: string,
 ): void {
   switch (action._tag) {
     case 'BlockquoteEnter': {
       if (state.blockquotes.length > 0 && !keepsQuoteSeparator
         && (!rawHtmlQuoteBoundary || newlineRunBefore(state.buffer, state.buffer.length) > 2)) {
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
-        for (const frame of state.blockquotes)
-          frame.fragment = Math.min(frame.fragment, state.buffer.length)
         noteBufferRewrite(state)
       }
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
-        owner,
         fragment: state.buffer.length,
-        listRulePending,
         // A quote in a table cell starts mid-row, past any list indent.
         listIndent: isInsideTableCell(state) ? '' : state.listIndent,
         // Snapshot the pre-quote context now: streaming can flush these
@@ -1526,8 +1501,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     listIndent: '',
     listIndentWidths: [],
     blockquotes: [],
-    listRuleAfterQuote: false,
-    listRuleRestored: false,
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
@@ -1557,9 +1530,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // output. Empty markers retract that spacing before the next list transition.
   // 5 is 4 past a closing delimiter, where the next source space separates words.
   let captionBoundary = 0
-  // Prefix of a list rule the parent boundary took over from the quote that
-  // just closed; see where a sibling quote's enter reads it.
-  let quoteRuleParent: string | undefined
   let quoteTentativeSpacing: string | undefined
   let captionBoundarySpacing = 0
   let captionBreakRun = 0
@@ -2117,20 +2087,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
-    // The quote that just closed ended on a list rule, which the parent's
-    // deferred boundary took over. A sibling quote opening next, with that
-    // boundary still pending, takes the rule back to keep the two apart.
-    if (quoteRuleParent !== undefined && node.type === ELEMENT_NODE && eventType === NodeEventEnter) {
-      if (captionBoundary === 3 && (node as ElementNode).tagId === TAG_BLOCKQUOTE
-        && !node.tagHandler?.excludesTextNodes
-        && !node.tagHandler?.literalEnter
-        && !(node as ElementNode).pluginOutput?.length) {
-        state.listRulePending = quoteRuleParent
-        captionBoundary = 0
-      }
-      quoteRuleParent = undefined
-    }
-    let quoteRulePending: string | undefined
     if (state.listRulePending !== undefined) {
       const isVisibleText = node.type === TEXT_NODE
         && eventType === NodeEventEnter
@@ -2140,45 +2096,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && eventType === NodeEventEnter
         && !node.tagHandler?.excludesTextNodes
       if (isVisibleText || opensVisibleElement) {
-        // A quote's own enter writes the line break into the item and its
-        // subtree is quoted once it completes, so the rule only ends its line.
-        const opensQuote = opensVisibleElement
-          && (node as ElementNode).tagId === TAG_BLOCKQUOTE
-          && !node.tagHandler?.literalEnter
-          && !(node as ElementNode).pluginOutput?.length
-        let separator: string
-        if (opensQuote) {
-          const wanted = state.listRuleAfterQuote && state.blockquotes.length > 0 ? 2 : 1
-          trimTrailingSpaces(state.buffer)
-          const run = newlineRunBefore(state.buffer, state.buffer.length)
-          let excess = run - wanted
-          while (excess > 0) {
-            const index = state.buffer.length - 1
-            const value = state.buffer[index]!
-            const removed = Math.min(excess, value.length)
-            const retained = value.slice(0, value.length - removed)
-            state.outputPositions?.replace(index, index + 1, retained ? [retained] : [])
-            if (retained)
-              state.buffer[index] = retained
-            else
-              state.buffer.pop()
-            excess -= removed
-          }
-          noteBufferRewrite(state)
-          separator = run >= wanted ? '' : wanted - run === 1 ? '\n' : '\n\n'
-        }
-        else {
-          separator = state.listRuleRestored
-            ? blockOpenPrefix(state, state.listRulePending) ?? ''
-            : `\n\n${state.listRulePending}`
-        }
-        if (opensQuote)
-          quoteRulePending = state.listRulePending
-        if (separator)
-          state.buffer.push(separator)
+        const separator = `\n\n${state.listRulePending}`
+        state.buffer.push(separator)
         state.lastContentCache = separator
         state.listRulePending = undefined
-        state.listRuleRestored = false
       }
       else if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
         state.listRulePending = undefined
@@ -2401,7 +2322,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // An unknown tag with no handler is inline, as in the Rust engine.
     const isInlineElement = handler ? handler.isInline === true : tagId === -1
     let closesQuote = false
-    let quoteRestoredRule = false
     let closesQuoteWrapper = false
     let keepsQuoteSeparator = false
     let gfmAction: GfmAction | undefined
@@ -2495,34 +2415,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             closesQuote = state.blockquotes.length > 0
           if (res._tag === 'CodeSpanEnter' && captionBoundary === 3 && res.output === ' `')
             res.output = MARKDOWN_INLINE_CODE
-          const ruleWasPending = state.listRulePending !== undefined
           handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
-          // An empty quote hands back the rule written before it, which the
-          // parent boundary below must not drop.
-          quoteRestoredRule = closesQuote && !ruleWasPending && state.listRulePending !== undefined
         }
         if (handlerOutput)
           output = [handlerOutput]
         if (res._tag === 'BlockquoteExit')
           captionBufferChanged = true
-      }
-    }
-    // An exit override or plugin output replaces the handler that closes the
-    // quote. A quote holding a list rule still closes here to settle that rule.
-    if (tagId === TAG_BLOCKQUOTE && eventType === NodeEventExit && !gfmAction
-      && state.blockquotes.at(-1)?.owner === element
-      && state.blockquotes.some(frame => frame.listRulePending !== undefined)) {
-      const rulePending = state.listRulePending
-      finalizeBlockquote(state)
-      captionBufferChanged = true
-      // Literal exit output follows the restored list continuation indentation.
-      if (rulePending === undefined && state.listRulePending !== undefined && output?.some(value => value.length > 0)) {
-        const separator = blockOpenPrefix(state, state.listRulePending) ?? ''
-        if (separator)
-          state.buffer.push(separator)
-        state.lastContentCache = separator
-        state.listRulePending = undefined
-        state.listRuleRestored = false
       }
     }
     // The row owns its deferred opener. Cell overrides and plugin output
@@ -2833,7 +2731,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           }
         }
         if (gfmAction)
-          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element, keepsQuoteSeparator, false, quoteRulePending)
+          commitGfmAction(gfmAction, state, gfmLifecycle, state.buffer.length, element, keepsQuoteSeparator)
         updateListIndent(state, element, eventType)
         return
       }
@@ -3044,7 +2942,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (gfmAction)
-      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, keepsQuoteSeparator, rawHtmlQuoteBoundary, quoteRulePending)
+      commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, keepsQuoteSeparator, rawHtmlQuoteBoundary)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
@@ -3101,15 +2999,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     // The existing deferred block boundary ignores invisible output and adds
     // the parent's list indentation only when a continuation actually arrives.
-    if (closesQuote)
-      quoteRuleParent = undefined
-    if (closesQuote && !quoteRestoredRule && state.depthMap[TAG_LI]
+    if (closesQuote && state.depthMap[TAG_LI]
       && !state.depthMap[TAG_PRE] && !insideRawHtmlRegion && !isInsideTableCell(state)) {
       captionBoundary = 3
       captionBoundarySpacing = 2
-      // An HR inside this quote cannot own the parent's deferred separator,
-      // unless a sibling quote opens next.
-      quoteRuleParent = state.listRulePending
       state.listRulePending = undefined
     }
     updateListIndent(state, element, eventType)
