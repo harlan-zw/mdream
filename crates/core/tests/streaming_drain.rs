@@ -2463,6 +2463,53 @@ fn streaming_raw_html_blank_line_drained_matches_one_shot() {
   }
 }
 
+// Streaming buffers one copy of a run of identical breaks. The blank line those
+// breaks already write after a raw HTML block must count every copy, or the
+// stream adds a second separator.
+#[test]
+fn streaming_raw_html_separator_counts_a_break_run() {
+  for (html, expected) in [
+    (
+      "<ul><li><dl><dt>l</dt></dl><br><br>l</li></ul>",
+      "- <dl><dt>l</dt></dl>  \n    \n  l",
+    ),
+    (
+      "<ul><li><dl><dt>l</dt></dl><br><br><br>l</li></ul>",
+      "- <dl><dt>l</dt></dl>  \n    \n    \n  l",
+    ),
+    (
+      "<ol><li><dl><dt>l</dt></dl><br><br>l</li></ol>",
+      "1. <dl><dt>l</dt></dl>  \n     \n   l",
+    ),
+    (
+      "<ul><li><ul><li><dl><dd>l</dd></dl><br><br>l</li></ul></li></ul>",
+      "-\n  - <dl><dd>l</dd></dl>  \n      \n    l",
+    ),
+    (
+      "<dl><dt>l</dt></dl><br><br>l",
+      "<dl><dt>l</dt>\n</dl>  \n  \nl",
+    ),
+    (
+      "<address>a</address><br><br><b>l</b>",
+      "<address>a</address>  \n  \n**l**",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+    let long = format!("<p>{}</p>{html}", "lead ".repeat(1000));
+    let long_expected = html_to_markdown(&long, opts.clone());
+    for width in [1, 7, 4096] {
+      assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+    }
+  }
+}
+
 #[test]
 fn streaming_raw_html_ignores_rewritable_blockquote_separator() {
   let html = "<dd>*<blockquote><blockquote>_";
