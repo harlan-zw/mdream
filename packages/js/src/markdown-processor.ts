@@ -651,6 +651,11 @@ function isEqualsLine(value: string, start: number): boolean {
 
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
 
+/**
+ * Reject ordinary prose through the native string search before entering the
+ * precise JavaScript scanner. A block marker can only begin within the first
+ * four characters here; later lines are covered by the newline trigger.
+ */
 function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number): boolean {
   if (value.search(GFM_TEXT_NATIVE_TRIGGER) !== -1)
     return true

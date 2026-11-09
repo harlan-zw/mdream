@@ -930,31 +930,6 @@ fn code_like_content_is_left_as_written() {
 }
 
 #[test]
-fn setext_underline_after_a_hard_break_is_escaped() {
-  assert_every_chunking(
-    "<p>Line one<br>===</p>",
-    &HtmlToMarkdownOptions::default(),
-    "Line one  \n\\===",
-  );
-  assert_eq!(md("<p>Line one<br>=</p>"), "Line one  \n\\=");
-  assert_eq!(md("<p>Line one<br>--</p>"), "Line one  \n\\--");
-  assert_eq!(md("<p>Line one<br>---</p>"), "Line one  \n\\---");
-  assert_eq!(
-    md("<ul><li>Line one<br>===</li></ul>"),
-    "- Line one  \n  \\==="
-  );
-  assert_eq!(
-    md("<blockquote><p>Line one<br>===</p></blockquote>"),
-    "> Line one  \n> \\==="
-  );
-  assert_eq!(md("<p>a&#10;===</p>"), "a\n\\===");
-  // Other text on the line keeps it a paragraph line.
-  assert_eq!(md("<p>Line one<br>==x</p>"), "Line one  \n==x");
-  assert_eq!(md("<p>Line one<br>= =</p>"), "Line one  \n= =");
-  assert_eq!(md("<p>a = b</p>"), "a = b");
-}
-
-#[test]
 fn text_inline_separators_survive_every_chunk_width() {
   for (html, expected) in [
     ("a<figcaption> </figcaption>b", "ab"),

@@ -114,7 +114,7 @@ fn split_point(text: &str, floor: usize, hard_cut: bool) -> Option<usize> {
     if bytes[index] == SPACE_CHAR
       && !matches!(
         bytes[index + 1],
-        b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9'
+        b' ' | b'#' | b'-' | b'+' | b'>' | b'0'..=b'9'
       )
     {
       // A piece ending on a `-`/`=`/`*`/`_` run may end its line there, which the
