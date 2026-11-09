@@ -689,15 +689,18 @@ describe('excluded-content review regressions', () => {
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
   })
   it('title-e', async () => {
-    const html = '<a href="/x" title="e ">e</a>'
-    const expected = '[e](/x)'
-    expect(htmlToMarkdown(html)).toBe(expected)
-    for (const width of [1, 2, 3, 7]) {
-      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
-      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    for (const [html, expected] of [
+      ['<a href="/x" title="e ">e</a>', '[e](/x)'],
+      ['<a title="e ">e</a>', 'e'],
+    ] as const) {
+      expect(htmlToMarkdown(html)).toBe(expected)
+      for (const width of [1, 2, 3, 7]) {
+        const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+        expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+      }
+      for (let split = 0; split <= html.length; split++)
+        expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
     }
-    for (let split = 0; split <= html.length; split++)
-      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
   })
   it('raw-script', async () => {
     const html = '<p>a<span> <script>s</script><span> <b>D</b></span></span></p>'

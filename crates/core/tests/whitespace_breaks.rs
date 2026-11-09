@@ -1475,18 +1475,21 @@ fn review_title_read() {
 
 #[test]
 fn review_title_e() {
-  let html = r#"<a href="/x" title="e ">e</a>"#;
-  let expected = "[e](/x)";
-  assert_eq!(md(html), expected);
-  for width in [1, 2, 3, 11] {
-    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
-  }
-  for split in 0..=html.len() {
-    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
-    let mut out = p.process_chunk(&html[..split]);
-    out.push_str(&p.process_chunk(&html[split..]));
-    out.push_str(&p.finish());
-    assert_eq!(out, expected, "split={split}");
+  for (html, expected) in [
+    (r#"<a href="/x" title="e ">e</a>"#, "[e](/x)"),
+    (r#"<a title="e ">e</a>"#, "e"),
+  ] {
+    assert_eq!(md(html), expected);
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split}");
+    }
   }
 }
 
