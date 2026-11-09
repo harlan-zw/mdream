@@ -119,8 +119,9 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
 
   it.each([
     ['<ul><li><blockquote><hr>text</blockquote></li></ul>', '- X\n\n  > ---\n\n  > textY'],
-    ['<blockquote><ol start="10000"><li><hr><blockquote>q</blockquote></li></ol></blockquote>', engineConfig.name === 'JavaScript Engine' ? 'X\n\n10000. ***\n\n>        X qY\n\nY' : 'X\n\n10000. ***\n\n>        > X qY\n\nY'],
-  ])('keeps quote markers when a literal enter override opens no quote frame: %s', async (html, expected) => {
+    ['<ul><li><hr><blockquote>q</blockquote></li></ul>', '- ***\n\n  X qY'],
+    ['<blockquote><ol start="10000"><li><hr><blockquote>q</blockquote></li></ol></blockquote>', 'X\n\n10000. ***\n\n>        X qY\n\nY'],
+  ])('writes a literal enter override quote inline after a list rule: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     const options = { engine, plugins: { tagOverrides: { blockquote: { enter: 'X', exit: 'Y' } } } }
     expect(htmlToMarkdown(html, options)).toBe(expected)

@@ -7927,10 +7927,11 @@ fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
   );
 }
 
-// A literal enter override opens no quote frame, so the rule separator keeps
-// every marker of the continuation prefix.
+// A literal enter override writes the quote inline, as it does without the
+// rule, so the separator drops only that quote's marker. Outer quotes and text
+// inside an open quote keep theirs.
 #[test]
-fn a_literal_quote_enter_override_keeps_rule_separator_markers() {
+fn a_literal_quote_enter_override_after_a_rule_stays_inline() {
   let options = || HtmlToMarkdownOptions {
     plugins: Some(
       PluginConfig::default().with_tag_override("blockquote", TagOverrideConfig::wrap("X", "Y")),
@@ -7943,8 +7944,12 @@ fn a_literal_quote_enter_override_keeps_rule_separator_markers() {
       "- X\n\n  > ---\n\n  > textY",
     ),
     (
+      "<ul><li><hr><blockquote>q</blockquote></li></ul>",
+      "- ***\n\n  XqY",
+    ),
+    (
       "<blockquote><ol start=\"10000\"><li><hr><blockquote>q</blockquote></li></ol></blockquote>",
-      "X\n\n10000. ***\n\n>        > XqY\n\nY",
+      "X\n\n10000. ***\n\n>        XqY\n\nY",
     ),
   ] {
     assert_eq!(html_to_markdown(input, options()), expected, "{input}");
