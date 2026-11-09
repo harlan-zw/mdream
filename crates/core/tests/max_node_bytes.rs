@@ -2373,3 +2373,78 @@ fn every_space_is_a_cut_candidate_whatever_its_phase() {
     }
   }
 }
+
+#[test]
+fn oversized_quote_in_inline_code_drops_unquoted_content() {
+  assert_capped_inline_code(
+    "<ul><li><code>aaaa<blockquote>q</blockquote></code></li></ul>",
+    8,
+    "- `aaaa\n\n  `",
+    true,
+  );
+  assert_capped_inline_code(
+    "<ul><li><code><blockquote><p>q</p><p>r</p></blockquote></code></li></ul>",
+    8,
+    "- `\n\n  `",
+    true,
+  );
+  assert_capped_inline_code(
+    "<ul><li><code><blockquote><p>q</p><p>r</p></blockquote></code></li></ul>",
+    12,
+    "- `\n\n  `",
+    true,
+  );
+  assert_capped_inline_code(
+    "<ul><li><code><hr><blockquote>q</blockquote></code></li></ul>",
+    16,
+    "- `\n\n  ---\n\n  > \n\n  `",
+    true,
+  );
+  assert_capped_inline_code(
+    "<ol><li><code>aaaa<blockquote>q</blockquote></code></li></ol>",
+    8,
+    "1. `aaaa\n\n   `",
+    true,
+  );
+  assert_capped_inline_code(
+    "<ul><li>parent<ul><li><code>aaaa<blockquote>q</blockquote></code></li></ul></li></ul>",
+    8,
+    "- parent\n  - `aaaa\n\n    `",
+    true,
+  );
+  // A quote that fits keeps its structure and content.
+  assert_capped_inline_code(
+    "<code>aaaa<blockquote>q</blockquote></code>",
+    8,
+    "`aaaa>  q`",
+    false,
+  );
+  assert_capped_inline_code(
+    "<ul><li><code>aaaa<blockquote><blockquote>q</blockquote></blockquote></code></li></ul>",
+    12,
+    "- `aaaa\n  > > q\n\n  `",
+    false,
+  );
+}
+
+#[test]
+fn exhausted_quote_discards_nested_structure_and_later_span_content() {
+  assert_capped_inline_code(
+    "<code><blockquote><p>q</p><p>r</p></blockquote>tail</code>",
+    4,
+    "",
+    true,
+  );
+  assert_capped_inline_code(
+    "<ul><li><code>aaaa<blockquote><blockquote>q</blockquote></blockquote>tail</code></li></ul>",
+    8,
+    "- `aaaa\n`",
+    true,
+  );
+  assert_capped_inline_code(
+    "<ul><li>lead <code><blockquote><pre>q</pre></blockquote>tail</code></li></ul>",
+    16,
+    "- lead `\n`",
+    true,
+  );
+}

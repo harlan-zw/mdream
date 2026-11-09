@@ -738,6 +738,8 @@ impl ConvertState {
         self.code_spans[0].exhausted = true;
         self.truncated = true;
         self.blockquote_scratch = quoted;
+        // Structural growth is atomic: never retain the unquoted payload.
+        self.truncate_buffer(frame.content_start);
         return;
       }
     }
