@@ -1529,6 +1529,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let openMarkerCount = 0
   // Per open marker: the opener follows the space a pending separator wrote.
   const openMarkerFollowsSpace: boolean[] = []
+  // Indices survive buffer rewrites and drains; an empty pair only pops the tail.
+  const openMarkerRunStart: number[] = []
   // The fragment holding the space the current event's pending separator wrote.
   let pendingSpaceFragment = -1
   // Depth and buffer length right after each open inline element's literal
@@ -1691,6 +1693,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         let opening = flags & CAPTION_INTERNAL_BREAK
           ? ''
           : captionSpacingPrefix(frames[offset]!, true, beforeFragment)
+        // The caption boundary consumes the separator before its opener.
+        if (opening)
+          state.pendingInlineWhitespace = false
         flags |= CAPTION_OPEN
         if (!explicitTop || index !== captionFrameCount - 1)
           opening += MARKDOWN_EMPHASIS
@@ -1860,8 +1865,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // position; a space in front of it would sit inside the opener.
     if (state.blockquotes.at(-1)?.fragment === fragment + 1)
       return false
-    while (index > 0 && (openMarkers[index - 1]! & MARKER_TYPE_MASK) <= 4 && openMarkers[index - 1]! >> 3 === fragment - 1)
-      fragment = openMarkers[--index]! >> 3
+    index = openMarkerRunStart[index]!
+    fragment = openMarkers[index]! >> 3
     if (literalOpeners.length) {
       const link = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
       let at = fragment
@@ -2887,12 +2892,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       newLines = 0
 
     pendingSpaceFragment = -1
-    if (state.pendingInlineWhitespace) {
+    // Tentative caption markers wait for the caption-owned boundary.
+    if (state.pendingInlineWhitespace && !(captionTransition && captionFrameCount !== 0)) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
         // A raw `<br>` (heading, table cell) is no line end, so it keeps the
         // separator like any inline output, as in Rust.
-        if (!isInlineElement || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+        if ((!isInlineElement && (tagId !== TAG_DIV || firstOutput)) || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
@@ -3175,6 +3181,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
+        const previous = openMarkers[openMarkerCount - 1]
+        openMarkerRunStart[openMarkerCount] = openMarkerCount > 0 && markerType <= 4
+          && (previous! & MARKER_TYPE_MASK) <= 4 && previous! >> 3 === buff.length - 2
+          ? openMarkerRunStart[openMarkerCount - 1]!
+          : openMarkerCount
         openMarkerFollowsSpace[openMarkerCount] = pendingSpaceFragment === buff.length - 2
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }

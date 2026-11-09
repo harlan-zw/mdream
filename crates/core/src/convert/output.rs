@@ -417,8 +417,7 @@ impl ConvertState {
   /// front of the run, merged with any whitespace already there, and this
   /// returns true so the caller drops it from the text.
   fn hoist_opener_space(&mut self) -> bool {
-    let mut markers = self.open_markers.iter().rev();
-    let Some(innermost) = markers.next() else {
+    let Some(innermost) = self.open_markers.last() else {
       return false;
     };
     // Code-like spans keep their content as written.
@@ -432,15 +431,8 @@ impl ConvertState {
     {
       return false;
     }
-    let mut start = innermost.output_start;
-    let mut outermost = self.open_markers.len() - 1;
-    for marker in markers {
-      if marker.kind > 4 || marker.content_start != start {
-        break;
-      }
-      start = marker.output_start;
-      outermost -= 1;
-    }
+    let outermost = innermost.run_start;
+    let start = self.open_markers[outermost].output_start;
     // At the start of link text, whitespace before the `[` already parts the words.
     let at = if self.link.open && self.link.bracket_emitted && start == self.link.bracket_pos + 1 {
       self.link.bracket_pos
@@ -1253,7 +1245,15 @@ impl ConvertState {
       && self.buffer.ends_with(emitted)
     {
       let marker_start = self.buffer.len() - emitted.len();
+      let run_start = self
+        .open_markers
+        .last()
+        .filter(|marker| {
+          inline_marker_type <= 4 && marker.kind <= 4 && marker.content_start == marker_start
+        })
+        .map_or(self.open_markers.len(), |marker| marker.run_start);
       self.open_markers.push(OpenMarker {
+        run_start,
         output_start: marker_start,
         content_start: self.buffer.len(),
         kind: inline_marker_type,
@@ -4918,6 +4918,8 @@ impl ConvertState {
       }
       let output_start = self.buffer.len();
       if let Some(prefix) = prefix {
+        // The caption boundary consumes the separator before its opener.
+        self.pending_inline_whitespace = false;
         self.push_caption_content(prefix.as_ref());
       }
       if !plain_text!(self) && (!explicit_top || index != top) {
@@ -6045,8 +6047,14 @@ impl ConvertState {
     // inline output begins; block boundaries and line breaks subsume it.
     self.pending_space_end = usize::MAX;
     if self.pending_inline_whitespace && is_enter {
+      // A div enter with no output only groups content on the same line.
+      let transparent_div = output_str.is_empty()
+        && self
+          .stack
+          .last()
+          .is_some_and(|node| node.tag_id == Some(TAG_DIV));
       let first_output = output_str.as_bytes().first().copied();
-      if !is_inline
+      if (!is_inline && !transparent_div)
         || is_line_boundary()
         || configured_new_lines > 0
         || matches!(first_output, Some(b'\n' | b'\r'))

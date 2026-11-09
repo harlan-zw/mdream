@@ -672,6 +672,9 @@ export interface ParseState {
   /** Whether emitted text should skip Markdown-only escaping */
   plainText?: boolean
   keepLeadingBlanks?: boolean
+  /** Reuse ancestry for repeated retained blanks before any visible child. */
+  leadingBlankParent?: ElementNode
+  leadingBlankAncestors?: ElementNode[]
   /** Output state whose `options.origin` the first usable `<base href>` replaces. */
   urlBaseTarget?: { options: EngineOptions }
   /** Only the first `<base href>` counts, even when it is not usable. */
@@ -827,8 +830,16 @@ function pushScriptTextChunk(state: ParseState, text: string): void {
 
 function scanScriptChunk(html: string, start: number, state: ParseState): number {
   const result = findScriptEndTag(html, start, state)
-  if (state.discardExcludedText && state.currentNode?.tagHandler?.excludesTextNodes)
+  if (state.discardExcludedText && state.currentNode?.tagHandler?.excludesTextNodes) {
+    const end = result === SCRIPT_SCAN_COMPLETE ? html.length : result <= SCRIPT_SEQUENCE_INCOMPLETE ? -result - 2 : result
+    // Discarded script bytes still end the preceding whitespace run, just
+    // as pushScriptTextChunk does when one-shot or plugins retain the body.
+    if (end > start) {
+      state.lastCharWasWhitespace = false
+      state.justClosedTag = false
+    }
     return result
+  }
   if (result === SCRIPT_SCAN_COMPLETE) {
     pushScriptTextChunk(state, html.substring(start))
   }
@@ -1176,8 +1187,13 @@ function parseHtmlInternal(
         // An end tag name cut off by the input end is still text of this run:
         // it closes nothing yet, and at end of input it stays literal.
         if (peekEnd === chunkLength) {
-          state.textBufferContainsNonWhitespace = true
-          state.lastCharWasWhitespace = false
+          // An excluded raw-text end-tag prefix is retained for the next
+          // chunk. Its syntax has not consumed any body text yet.
+          if (!state.discardExcludedText || !state.currentNode.tagHandler.excludesTextNodes
+            || !state.currentNode.name.startsWith(normalizeTagName(htmlChunk.substring(i + 2, peekEnd)))) {
+            state.textBufferContainsNonWhitespace = true
+            state.lastCharWasWhitespace = false
+          }
           textBuffer += htmlChunk.substring(i)
           break
         }
@@ -1402,7 +1418,17 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     return
   }
 
-  const parentsToIncrement = traverseUpToFirstBlockNode(state.currentNode)
+  let parentsToIncrement: ElementNode[]
+  if (isLeadingBlank && !state.resolvedPlugins?.length) {
+    if (state.leadingBlankParent !== state.currentNode) {
+      state.leadingBlankParent = state.currentNode
+      state.leadingBlankAncestors = traverseUpToFirstBlockNode(state.currentNode)
+    }
+    parentsToIncrement = state.leadingBlankAncestors!
+  }
+  else {
+    parentsToIncrement = traverseUpToFirstBlockNode(state.currentNode)
+  }
   const firstBlockParent = parentsToIncrement.at(-1)!
 
   // The first text of a block drops its leading whitespace. With no block

@@ -4,8 +4,10 @@ import { describe, expect, it, vi } from 'vitest'
 import { clean } from '../../src/clean'
 import { MAX_TAG_ID, TAG_DIV, TAG_LI } from '../../src/const'
 import { createPlugin, htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
+import { extractionPlugin } from '../../src/plugins/extraction'
 import { filterPlugin } from '../../src/plugins/filter'
 import { tailwindPlugin } from '../../src/plugins/tailwind'
+import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { tagHandlers } from '../../src/tags'
 
 async function streamConvert(chunks: string[], options?: Parameters<typeof streamHtmlToMarkdown>[1]): Promise<string> {
@@ -583,4 +585,206 @@ describe('empty captions after a heading in a list item', () => {
     expect(output.endsWith('\n\n  x')).toBe(true)
     expect(reads).toBeLessThan(html.length * 4)
   })
+})
+
+// Review regressions: word boundaries, caption delimiters and link titles.
+describe('excluded-content review regressions', () => {
+  it('div-empty', async () => {
+    const html = '<ul><li><span>Aa </span><i></i><div><span>Bb</span></div></li></ul>'
+    const expected = '- Aa Bb'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('div-icons', async () => {
+    const html = '<ul><li><span>Aa </span><i><svg></svg></i><div><i><svg></svg></i>Bb</div></li></ul>'
+    const expected = '- Aa Bb'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('div-buttons', async () => {
+    const html = '<button><div>Aa</div> </button> <button><div><span>Bb</span></div></button>'
+    const expected = 'Aa Bb'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('div-main', async () => {
+    const html = '<ul><li><span>Aa </span><div><i></i>Bb</div></li></ul>'
+    const expected = '- Aa Bb'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('caption-icon', async () => {
+    const html = '<figure><img src="/a.png"><button><svg></svg> </button><figcaption>Caption text</figcaption></figure>'
+    const expected = '![](/a.png)\n\n*Caption text*'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('caption-em', async () => {
+    const html = '<figure><img src="/a.png"><button><svg></svg> </button><figcaption><em>The x.</em></figcaption></figure>'
+    const expected = '![](/a.png)\n\n**The x.**'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('caption-main', async () => {
+    const html = '<button><span>x</span> </button><figcaption>Caption text</figcaption>'
+    const expected = 'x\n\n*Caption text*'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('link-raw', async () => {
+    const html = '<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>'
+    const expected = 'D [<mark></mark>7](/x)'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('title-read', async () => {
+    const html = '<p><a href="/x" title="Read more "><span>Read more </span></a></p>'
+    const expected = '[Read more](/x)'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('title-e', async () => {
+    const html = '<a href="/x" title="e ">e</a>'
+    const expected = '[e](/x)'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('raw-script', async () => {
+    const html = '<p>a<span> <script>s</script><span> <b>D</b></span></span></p>'
+    const expected = 'a **D**'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it('raw-style', async () => {
+    const html = '<p>a<span> <style>s</style><span> <b>D</b></span></span></p>'
+    const expected = 'a **D**'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+})
+
+it('exposes retained leading blanks to hooks, extraction and header metadata', async () => {
+  const html = '<h2>Aa<span> <span>Bb</span></span></h2><p>body</p>'
+  const blanks: string[] = []
+  const extracted: string[] = []
+  const options = {
+    plugins: [
+      createPlugin({
+        processTextNode(node) {
+          if (node.leadingBlank)
+            blanks.push(node.value)
+        },
+      }),
+      extractionPlugin({ h2: node => extracted.push(node.textContent) }),
+    ],
+  }
+  const check = () => {
+    expect(blanks).toEqual([' '])
+    expect(extracted).toEqual(['Aa Bb'])
+    blanks.length = 0
+    extracted.length = 0
+  }
+  expect(htmlToMarkdown(html, options)).toBe('## Aa Bb\n\nbody')
+  check()
+  for (const width of [1, 2, 3, 7]) {
+    const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+    expect(await streamConvert(chunks, options)).toBe('## Aa Bb\n\nbody')
+    check()
+  }
+  for (let split = 0; split <= html.length; split++) {
+    expect(await streamConvert([html.slice(0, split), html.slice(split)], options)).toBe('## Aa Bb\n\nbody')
+    check()
+  }
+  expect(htmlToMarkdownSplitChunks(html)[0]?.metadata.headers).toEqual({ h2: 'Aa Bb' })
+})
+
+it('reuses an opener run across repeated blanks without leaking it to siblings', async () => {
+  for (const depth of [2, 8, 254]) {
+    const html = `<p>a${'<s><cite>'.repeat(depth)}${' <svg></svg>'.repeat(32)
+    }b${'</cite></s>'.repeat(depth)}<span> </span>c</p><p><span> <b>d</b></span></p>`
+    const expected = `a ${'~~*'.repeat(depth)}b${'*~~'.repeat(depth)} c\n\n**d**`
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `depth=${depth}, width=${width}`).toBe(expected)
+    }
+    if (depth <= 8) {
+      for (let split = 0; split <= html.length; split++)
+        expect(await streamConvert([html.slice(0, split), html.slice(split)]), `depth=${depth}, split=${split}`).toBe(expected)
+    }
+  }
+})
+
+it('does not count a split empty raw-text closer as body text', async () => {
+  for (const tag of ['script', 'style']) {
+    const html = `<p>a<span> <${tag}></${tag}><span> <b>D</b></span></span></p>`
+    const expected = 'a**D**'
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `${tag}, width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `${tag}, split=${split}`).toBe(expected)
+  }
 })

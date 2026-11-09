@@ -175,6 +175,8 @@ struct CodeSpanState {
 
 #[derive(Clone, Copy)]
 struct OpenMarker {
+  /// Index of the first contiguous emphasis opener in this run.
+  run_start: usize,
   output_start: usize,
   content_start: usize,
   kind: u8,
@@ -3132,7 +3134,9 @@ impl ConvertState {
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
     if self.separator_end != usize::MAX && self.separator_end <= drain_end {
-      self.separator_drained = true;
+      // Only a separator still ending the output can precede the next text.
+      // Raw HTML or a delimiter written after it must survive this drain.
+      self.separator_drained = self.separator_end == self.buffer.len();
       self.separator_end = usize::MAX;
     } else if self.separator_end != usize::MAX {
       self.separator_end -= drain_end;

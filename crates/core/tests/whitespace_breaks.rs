@@ -1342,3 +1342,262 @@ fn text_output_drops_an_empty_quotation_around_a_dropped_element() {
     assert_eq!(text(html), expected, "{html}");
   }
 }
+
+// Review regressions: check the same expected output at every short split.
+#[test]
+fn review_div_empty() {
+  let html = r#"<ul><li><span>Aa </span><i></i><div><span>Bb</span></div></li></ul>"#;
+  let expected = "- Aa Bb";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_div_icons() {
+  let html =
+    r#"<ul><li><span>Aa </span><i><svg></svg></i><div><i><svg></svg></i>Bb</div></li></ul>"#;
+  let expected = "- Aa Bb";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_div_buttons() {
+  let html = r#"<button><div>Aa</div> </button> <button><div><span>Bb</span></div></button>"#;
+  let expected = "Aa Bb";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_div_main() {
+  let html = r#"<ul><li><span>Aa </span><div><i></i>Bb</div></li></ul>"#;
+  let expected = "- Aa Bb";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_icon() {
+  let html = r#"<figure><img src="/a.png"><button><svg></svg> </button><figcaption>Caption text</figcaption></figure>"#;
+  let expected = "![](/a.png)\n\n*Caption text*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_em() {
+  let html = r#"<figure><img src="/a.png"><button><svg></svg> </button><figcaption><em>The x.</em></figcaption></figure>"#;
+  let expected = "![](/a.png)\n\n**The x.**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_main() {
+  let html = r#"<button><span>x</span> </button><figcaption>Caption text</figcaption>"#;
+  let expected = "x\n\n*Caption text*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_link_raw() {
+  let html = r#"<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>"#;
+  let expected = "D [<mark></mark>7](/x)";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_title_read() {
+  let html = r#"<p><a href="/x" title="Read more "><span>Read more </span></a></p>"#;
+  let expected = "[Read more](/x)";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_title_e() {
+  let html = r#"<a href="/x" title="e ">e</a>"#;
+  let expected = "[e](/x)";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_raw_script() {
+  let html = r#"<p>a<span> <script>s</script><span> <b>D</b></span></span></p>"#;
+  let expected = "a **D**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_raw_style() {
+  let html = r#"<p>a<span> <style>s</style><span> <b>D</b></span></span></p>"#;
+  let expected = "a **D**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn opener_run_survives_repeated_blanks_without_leaking_to_siblings() {
+  for depth in [2, 8, 254] {
+    let html = format!(
+      "<p>a{}{}b{}<span> </span>c</p><p><span> <b>d</b></span></p>",
+      "<s><cite>".repeat(depth),
+      " <svg></svg>".repeat(32),
+      "</cite></s>".repeat(depth)
+    );
+    let expected = format!(
+      "a {}b{} c\n\n**d**",
+      "~~*".repeat(depth),
+      "*~~".repeat(depth)
+    );
+    assert_eq!(md(&html), expected);
+    for width in [1, 2, 3, 11] {
+      assert_eq!(
+        md_streamed(&html, width),
+        expected,
+        "depth={depth}, width={width}"
+      );
+    }
+    if depth <= 8 {
+      for split in 0..=html.len() {
+        let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut out = p.process_chunk(&html[..split]);
+        out.push_str(&p.process_chunk(&html[split..]));
+        out.push_str(&p.finish());
+        assert_eq!(out, expected, "depth={depth}, split={split}");
+      }
+    }
+  }
+}
+
+#[test]
+fn empty_raw_text_closer_does_not_count_as_body_text() {
+  for tag in ["script", "style"] {
+    let html = format!("<p>a<span> <{tag}></{tag}><span> <b>D</b></span></span></p>");
+    let expected = "a**D**";
+    assert_eq!(md(&html), expected);
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(&html, width), expected, "{tag}, width={width}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "{tag}, split={split}");
+    }
+  }
+}

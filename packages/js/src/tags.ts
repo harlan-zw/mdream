@@ -807,9 +807,8 @@ export const tagHandlers: Record<number, TagHandler> = {
       // Drop a title that repeats the link's last text run. A separator
       // written on its own is no part of that text, so `[x e](u "e")` keeps
       // its title while `[e](u "e")` still drops the duplicate.
-      const lastContent = state.lastContentCache
-      const trimmedTitle = title?.replace(/[ \t\n\f\r]+$/, '')
-      if (lastContent === trimmedTitle && !state.cacheFollowsSeparator) {
+      if (title && !state.cacheFollowsSeparator
+        && state.lastContentCache?.replace(/[ \t\n\f\r]+$/, '') === title.replace(/[ \t\n\f\r]+$/, '')) {
         title = ''
       }
       // GFM autolink shorthand: when the link text equals href and href is a
