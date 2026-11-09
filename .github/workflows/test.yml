@@ -69,8 +69,8 @@ jobs:
 
       - name: Run clippy (edge, wasm target)
         working-directory: crates
-        run: cargo clippy -p mdream-edge --target wasm32-unknown-unknown --locked -- -D
-          warnings -A clippy::pedantic -A clippy::nursery
+        run: cargo clippy -p mdream-edge --target wasm32-unknown-unknown --all-targets --locked --
+          -D warnings -A clippy::pedantic -A clippy::nursery
 
   # ── MSRV check (keep in sync with rust-version in crates/Cargo.toml) ──
   rust-msrv:
