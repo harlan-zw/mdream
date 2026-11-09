@@ -6112,3 +6112,16 @@ fn a_drain_inside_a_line_lead_keeps_block_line_checks_like_one_shot() {
     }
   }
 }
+
+// A drained separator with output written after it, like raw HTML, no longer
+// sits in front of the text, so the redundant-title check still runs.
+#[test]
+fn link_title_check_ignores_a_drained_separator_with_output_after_it() {
+  let html = r#"<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>"#;
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "D [<mark></mark>7](/x)"
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
