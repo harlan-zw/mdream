@@ -5741,7 +5741,8 @@ impl ConvertState {
       return;
     }
     let mut newlines = 0;
-    for &byte in self.buffer.as_bytes().iter().rev() {
+    let mut tail_start = 0;
+    for (at, &byte) in self.buffer.as_bytes().iter().enumerate().rev() {
       if byte == b'\n' {
         newlines += 1;
         if newlines == 2 {
@@ -5749,8 +5750,21 @@ impl ConvertState {
           return;
         }
       } else if !is_whitespace(byte) {
+        tail_start = at + 1;
         break;
       }
+    }
+    // A streamed break run buffers one copy of its unit for all `count` breaks.
+    newlines += self
+      .streaming_break_runs
+      .iter()
+      .rev()
+      .take_while(|run| run.output_start >= tail_start)
+      .map(|run| (run.count - 1) * run.unit.matches('\n').count())
+      .sum::<usize>();
+    if newlines >= 2 {
+      self.pending_raw_html_boundary = false;
+      return;
     }
     let indent_len = if indent { self.list_indent.len() } else { 0 };
     // Charge the complete separator to an open code span. A rejected write
