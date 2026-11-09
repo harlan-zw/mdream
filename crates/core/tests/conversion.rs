@@ -7117,7 +7117,8 @@ fn text_runs_keep_unicode_entities_and_gfm_context_across_chunks() {
     "<table><tr><td>é|東京_🙂&amp;x</td></tr></table>",
   ] {
     // `OutputFormat` is non-exhaustive, so pair each format with its converter.
-    let converters: [(OutputFormat, fn(&str, HtmlToMarkdownOptions) -> String); 3] = [
+    type Converter = fn(&str, HtmlToMarkdownOptions) -> String;
+    let converters: [(OutputFormat, Converter); 3] = [
       (OutputFormat::Markdown, html_to_markdown),
       (OutputFormat::Text, html_to_text),
       (OutputFormat::Html, html_to_html),
