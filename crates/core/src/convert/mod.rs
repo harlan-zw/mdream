@@ -186,9 +186,20 @@ struct OpenMarker {
   /// a pending one. When the pair turns out empty it goes with the opener and
   /// is owed to the content after it.
   follows_separator: bool,
+  /// Openers in the contiguous emphasis run this one ends, itself included.
+  /// An index count, so drains and shifts that move both offsets keep it.
+  run_len: u32,
   /// The opener carries the block break a heading in a list item owed, so
   /// dropping the empty pair owes it again.
   restores_heading_break: bool,
+}
+
+struct LiteralOpener {
+  depth: usize,
+  end: usize,
+  /// The opener's bytes after its last newline, which `end` must still follow.
+  #[cfg(debug_assertions)]
+  tail: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -901,14 +912,13 @@ pub struct ConvertState {
   /// That separator is a blank that opened an inline element, or one an empty
   /// pair took along and gave back, so it is written on its own.
   pending_leading_blank: bool,
-  /// End of the space the current element's enter wrote for a pending
-  /// separator, so an opener written right after it can take it along.
+  /// Stream position (see `drained`) after the space the current element's
+  /// enter wrote for a pending separator, so an opener written right after it
+  /// can take it along.
   pending_space_end: usize,
-  /// End of the last separator written on its own, which is not part of the
-  /// text after it.
+  /// Stream position after the last separator written on its own, which is
+  /// not part of the text after it.
   separator_end: usize,
-  /// That separator has been drained, so the next text still follows it.
-  separator_drained: bool,
   /// The cached run follows a separator written on its own, so the
   /// redundant-title check must not treat it as the link's whole text.
   cache_follows_separator: bool,
@@ -968,10 +978,16 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
-  /// Depth and buffer offset right after each open inline element's literal
-  /// `tagOverrides` opener. The offset still ends the buffer while nothing
-  /// has been written since.
-  literal_opener_ends: Vec<(usize, usize)>,
+  /// Each open inline element's literal `tagOverrides` opener, with the
+  /// stream position after it, which still ends the output while nothing has
+  /// been written since.
+  literal_opener_ends: Vec<LiteralOpener>,
+  /// Buffer bytes drained so far. A stream position is this plus a buffer
+  /// index, so a drain moves none of them.
+  drained: usize,
+  /// The last drained bytes, so debug checks can read just before the buffer.
+  #[cfg(debug_assertions)]
+  drained_tail: Vec<u8>,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1258,7 +1274,6 @@ impl ConvertState {
       pending_leading_blank: false,
       pending_space_end: usize::MAX,
       separator_end: usize::MAX,
-      separator_drained: false,
       cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
@@ -1285,6 +1300,9 @@ impl ConvertState {
       streaming: false,
       open_markers: Vec::new(),
       literal_opener_ends: Vec::new(),
+      drained: 0,
+      #[cfg(debug_assertions)]
+      drained_tail: Vec::new(),
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -3131,12 +3149,14 @@ impl ConvertState {
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
-    if self.separator_end != usize::MAX && self.separator_end <= drain_end {
-      self.separator_drained = true;
-      self.separator_end = usize::MAX;
-    } else if self.separator_end != usize::MAX {
-      self.separator_end -= drain_end;
+    #[cfg(debug_assertions)]
+    {
+      let tail = &self.buffer.as_bytes()[drain_end.saturating_sub(64)..drain_end];
+      let excess = (self.drained_tail.len() + tail.len()).saturating_sub(64);
+      self.drained_tail.drain(..excess);
+      self.drained_tail.extend_from_slice(tail);
     }
+    self.drained += drain_end;
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;
@@ -3147,14 +3167,6 @@ impl ConvertState {
     for marker in &mut self.open_markers {
       marker.output_start -= drain_end;
       marker.content_start -= drain_end;
-    }
-    // An opener with drained output after it no longer ends anything.
-    for end in &mut self.literal_opener_ends {
-      end.1 = if end.1 == usize::MAX || end.1 < drain_end {
-        usize::MAX
-      } else {
-        end.1 - drain_end
-      };
     }
     for frame in &mut self.caption_frames {
       if let CaptionState::Tentative {

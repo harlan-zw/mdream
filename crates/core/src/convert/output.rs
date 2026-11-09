@@ -417,8 +417,7 @@ impl ConvertState {
   /// front of the run, merged with any whitespace already there, and this
   /// returns true so the caller drops it from the text.
   fn hoist_opener_space(&mut self) -> bool {
-    let mut markers = self.open_markers.iter().rev();
-    let Some(innermost) = markers.next() else {
+    let Some(innermost) = self.open_markers.last() else {
       return false;
     };
     // Code-like spans keep their content as written.
@@ -432,15 +431,10 @@ impl ConvertState {
     {
       return false;
     }
-    let mut start = innermost.output_start;
-    let mut outermost = self.open_markers.len() - 1;
-    for marker in markers {
-      if marker.kind > 4 || marker.content_start != start {
-        break;
-      }
-      start = marker.output_start;
-      outermost -= 1;
-    }
+    let outermost = self.open_markers.len() - innermost.run_len as usize;
+    #[cfg(debug_assertions)]
+    self.check_opener_run(outermost);
+    let start = self.open_markers[outermost].output_start;
     // At the start of link text, whitespace before the `[` already parts the words.
     let at = if self.link.open && self.link.bracket_emitted && start == self.link.bracket_pos + 1 {
       self.link.bracket_pos
@@ -465,19 +459,19 @@ impl ConvertState {
     {
       return false;
     }
-    if before.is_some_and(|byte| !matches!(byte, b' ' | b'\n' | b'\t'))
-      && self.replace_code_span_content(start..start, " ")
-    {
-      self.shift_offsets_at_or_after(start);
-      self.open_markers[outermost].follows_separator = true;
-      // The space is content of an enclosing `<q>` that starts with the run,
-      // so that pair still reads as empty once the run drops with it.
-      if let Some(enclosing) = outermost
-        .checked_sub(1)
-        .map(|index| &mut self.open_markers[index])
-        && enclosing.content_start == start + 1
-      {
-        enclosing.content_start = start;
+    if before.is_some_and(|byte| !matches!(byte, b' ' | b'\n' | b'\t')) {
+      #[cfg(debug_assertions)]
+      self.check_untracked_from(start, outermost);
+      // Only the run follows `start`, so this re-appends it after the space and
+      // moves nothing but the run's own markers. An enclosing `<q>` that starts
+      // with the run keeps its content start, so the space is its content and
+      // that pair still reads as empty once the run drops with it.
+      if self.replace_code_span_content(start..start, " ") {
+        for marker in &mut self.open_markers[outermost..] {
+          marker.output_start += 1;
+          marker.content_start += 1;
+        }
+        self.open_markers[outermost].follows_separator = true;
       }
     }
     true
@@ -526,10 +520,16 @@ impl ConvertState {
   /// innermost open one, would split it from the content after it.
   #[inline]
   fn follows_literal_opener(&self, at: usize) -> bool {
-    self
+    let follows = self
       .literal_opener_ends
       .last()
-      .is_some_and(|&(_, end)| end == at)
+      .is_some_and(|opener| opener.end == self.drained + at);
+    #[cfg(debug_assertions)]
+    if follows {
+      let tail = &self.literal_opener_ends[self.literal_opener_ends.len() - 1].tail;
+      self.check_written_before(self.drained + at, tail);
+    }
+    follows
   }
 
   fn max_backtick_run(value: &str) -> usize {
@@ -1112,7 +1112,7 @@ impl ConvertState {
       replace_buffer_range(&mut self.buffer, shared_start..flush_end, &quoted);
       let quoted_end = shared_start + quoted.len();
       self.shift_raw_html_scan(flush_end, quoted_end);
-      self.shift_literal_opener_ends(flush_end, quoted_end);
+      self.requote_stream_positions(flush_end, quoted_end);
       flush_end = quoted_end;
       self.blockquote_scratch = quoted;
       for frame in &mut self.blockquotes {
@@ -1162,7 +1162,7 @@ impl ConvertState {
     }
     self.blockquote_scratch = quoted;
     self.shift_raw_html_scan(unquoted_end, flush_end);
-    self.shift_literal_opener_ends(unquoted_end, flush_end);
+    self.requote_stream_positions(unquoted_end, flush_end);
 
     for frame in &mut self.blockquotes {
       frame.content_start = flush_end;
@@ -1253,12 +1253,26 @@ impl ConvertState {
       && self.buffer.ends_with(emitted)
     {
       let marker_start = self.buffer.len() - emitted.len();
+      let follows_separator = separator_end == self.drained + marker_start;
+      #[cfg(debug_assertions)]
+      if follows_separator {
+        self.check_written_before(separator_end, b" ");
+      }
+      let run_len = match self.open_markers.last() {
+        Some(outer)
+          if inline_marker_type <= 4 && outer.kind <= 4 && outer.content_start == marker_start =>
+        {
+          outer.run_len + 1
+        }
+        _ => 1,
+      };
       self.open_markers.push(OpenMarker {
         output_start: marker_start,
         content_start: self.buffer.len(),
         kind: inline_marker_type,
         starts_at_hard_break: self.hard_break_end == marker_start,
-        follows_separator: separator_end == marker_start,
+        follows_separator,
+        run_len,
         // No marker opens with a newline; only a prefixed heading break does.
         restores_heading_break: emitted.starts_with('\n'),
       });
@@ -2128,9 +2142,19 @@ impl ConvertState {
       enter_is_literal || caption_heading_enter,
     );
     if enter_is_literal && is_inline && self.buffer.len() > output_start {
-      self
-        .literal_opener_ends
-        .push((self.stack[stack_len - 1].depth, self.buffer.len()));
+      self.literal_opener_ends.push(LiteralOpener {
+        depth: self.stack[stack_len - 1].depth,
+        end: self.drained + self.buffer.len(),
+        #[cfg(debug_assertions)]
+        tail: {
+          let opener = &self.buffer.as_bytes()[output_start..];
+          let line = opener
+            .iter()
+            .rposition(|&byte| byte == b'\n')
+            .map_or(0, |at| at + 1);
+          opener[line..].to_vec()
+        },
+      });
     }
 
     if tag_id == Some(TAG_IMG)
@@ -2620,7 +2644,7 @@ impl ConvertState {
       while self
         .literal_opener_ends
         .last()
-        .is_some_and(|&(depth, _)| depth >= node.depth)
+        .is_some_and(|opener| opener.depth >= node.depth)
       {
         self.literal_opener_ends.pop();
       }
@@ -3445,7 +3469,7 @@ impl ConvertState {
           relocated_space = true;
         } else {
           self.push_code_span_content(" ", true);
-          self.separator_end = self.buffer.len();
+          self.separator_end = self.drained + self.buffer.len();
         }
       }
       self.pending_inline_whitespace = false;
@@ -4167,6 +4191,8 @@ impl ConvertState {
     for _ in 0..inserted {
       self.shift_offsets_at_or_after(at);
     }
+    let from = self.drained + at;
+    self.move_stream_positions(|pos| Some(if pos >= from { pos + inserted } else { pos }));
     for frame in &mut self.blockquotes {
       if frame.content_start > at {
         frame.content_start += inserted;
@@ -4184,27 +4210,119 @@ impl ConvertState {
   /// own, whether or not a drain already took that separator.
   #[inline(always)]
   fn take_follows_separator(&mut self) -> bool {
-    let follows = self.separator_end == self.buffer.len() || self.separator_drained;
-    self.separator_drained = false;
+    let follows = self.separator_end == self.drained + self.buffer.len();
+    #[cfg(debug_assertions)]
+    if follows {
+      self.check_written_before(self.separator_end, b" ");
+    }
     self.separator_end = usize::MAX;
     follows
   }
 
-  /// Follow a rewrite that moved the bytes from `old_end` on to `new_end`. An
-  /// opener ending before `old_end` had a whole line written after it.
-  fn shift_literal_opener_ends(&mut self, old_end: usize, new_end: usize) {
-    for end in &mut self.literal_opener_ends {
-      end.1 = if end.1 == usize::MAX || end.1 < old_end {
-        usize::MAX
-      } else {
-        end.1 - old_end + new_end
-      };
-    }
-    self.separator_end = if self.separator_end == usize::MAX || self.separator_end < old_end {
-      usize::MAX
-    } else {
-      self.separator_end - old_end + new_end
+  /// Map each stored stream position (`separator_end`, the literal opener
+  /// ends) through `map`, where `None` drops it. Every rewrite that moves or
+  /// removes buffered bytes behind one goes through here; drains need not.
+  #[inline]
+  fn move_stream_positions(&mut self, map: impl Fn(usize) -> Option<usize>) {
+    let apply = |pos: &mut usize| {
+      if *pos != usize::MAX {
+        *pos = map(*pos).unwrap_or(usize::MAX);
+      }
     };
+    apply(&mut self.separator_end);
+    for opener in &mut self.literal_opener_ends {
+      apply(&mut opener.end);
+    }
+  }
+
+  /// Follow a quote rewrite that moved the bytes from `old_end` on to
+  /// `new_end`. A position before `old_end` had a whole line written after it.
+  fn requote_stream_positions(&mut self, old_end: usize, new_end: usize) {
+    let (old_end, new_end) = (self.drained + old_end, self.drained + new_end);
+    self.move_stream_positions(|pos| (pos >= old_end).then(|| pos - old_end + new_end));
+  }
+
+  /// A stored position that still ends the output must follow the bytes
+  /// written there, as read back from the stream. Bytes drained too long ago
+  /// go unchecked, and a capped code span may have refused the write.
+  #[cfg(debug_assertions)]
+  fn check_written_before(&self, end: usize, written: &[u8]) {
+    let kept = self.drained - self.drained_tail.len();
+    let Some(start) = end
+      .checked_sub(written.len())
+      .filter(|&start| start >= kept)
+    else {
+      return;
+    };
+    let read: Vec<u8> = (start..end)
+      .map(|pos| match pos.checked_sub(self.drained) {
+        Some(at) => self.buffer.as_bytes()[at],
+        None => self.drained_tail[pos - kept],
+      })
+      .collect();
+    assert!(
+      read == written || self.truncated,
+      "stale stream position {end}: {read:?} != {written:?}"
+    );
+  }
+
+  /// The markers `run_len` counts are the contiguous emphasis openers before
+  /// the innermost one.
+  #[cfg(debug_assertions)]
+  fn check_opener_run(&self, outermost: usize) {
+    let mut walk = self.open_markers.len() - 1;
+    while walk > 0
+      && self.open_markers[walk - 1].kind <= 4
+      && self.open_markers[walk - 1].content_start == self.open_markers[walk].output_start
+    {
+      walk -= 1;
+    }
+    assert_eq!(walk, outermost, "opener run length is stale");
+  }
+
+  /// Only the run's own markers sit at or past its start, so moving the run
+  /// moves nothing else. A `<q>` around it may start its content there.
+  #[cfg(debug_assertions)]
+  fn check_untracked_from(&self, start: usize, outermost: usize) {
+    let pos = self.drained + start;
+    assert!(self.separator_end == usize::MAX || self.separator_end < pos);
+    assert!(
+      self
+        .literal_opener_ends
+        .iter()
+        .all(|opener| opener.end == usize::MAX || opener.end < pos)
+    );
+    assert!(
+      self.open_markers[..outermost]
+        .iter()
+        .all(|marker| marker.output_start < start && marker.content_start <= start)
+    );
+    assert!(
+      self
+        .streaming_break_runs
+        .iter()
+        .all(|run| run.output_end < start)
+    );
+    assert!(self.caption_frames.iter().all(|frame| match frame.state {
+      CaptionState::Tentative {
+        output_start,
+        content_start,
+        ..
+      } => output_start < start && content_start < start,
+      _ => true,
+    }));
+    assert!(
+      self
+        .code_spans
+        .iter()
+        .all(|span| span.content_start < start)
+    );
+    assert!(
+      self
+        .code_fence
+        .as_ref()
+        .is_none_or(|fence| fence.content_start < start)
+    );
   }
 
   /// Move every cached offset at or past `at` one byte right, for a newline inserted at `at`.
@@ -4216,14 +4334,6 @@ impl ConvertState {
       if marker.content_start >= at {
         marker.content_start += 1;
       }
-    }
-    for end in &mut self.literal_opener_ends {
-      if end.1 != usize::MAX && end.1 >= at {
-        end.1 += 1;
-      }
-    }
-    if self.separator_end != usize::MAX && self.separator_end >= at {
-      self.separator_end += 1;
     }
     for run in &mut self.streaming_break_runs {
       if run.output_start >= at {
@@ -4514,15 +4624,9 @@ impl ConvertState {
   pub(super) fn truncate_buffer(&mut self, len: usize) {
     self.note_buffer_rewrite(len);
     self.buffer.truncate(len);
-    if self.separator_end != usize::MAX && self.separator_end > len {
-      self.separator_end = usize::MAX;
-    }
-    // Output that grows back to a trimmed opener's end is not that opener.
-    for end in &mut self.literal_opener_ends {
-      if end.1 != usize::MAX && end.1 > len {
-        end.1 = usize::MAX;
-      }
-    }
+    // Output that grows back to a trimmed position is not what ended there.
+    let end = self.drained + len;
+    self.move_stream_positions(|pos| (pos <= end).then_some(pos));
     while self
       .streaming_break_runs
       .last()
@@ -6036,7 +6140,6 @@ impl ConvertState {
         self.finish_raw_html_block(output_str, true);
       }
     }
-    self.separator_drained = false;
     let is_line_boundary =
       || !literal && (output_str.starts_with('\n') || output_str.starts_with("\\\n"));
 
@@ -6061,10 +6164,10 @@ impl ConvertState {
           && (self.open_markers.is_empty() || !self.hoist_opener_space())
         {
           self.push_code_span_content(" ", true);
-          self.separator_end = self.buffer.len();
+          self.separator_end = self.drained + self.buffer.len();
           // Only Markdown drops an empty pair with the separator in front of it.
           if self.is_markdown() {
-            self.pending_space_end = self.buffer.len();
+            self.pending_space_end = self.separator_end;
           }
         }
         self.pending_inline_whitespace = false;
