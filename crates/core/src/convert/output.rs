@@ -4179,8 +4179,27 @@ impl ConvertState {
           first = None;
           line_end = line_start;
         }
-        LineKind::Item { indent, column } => {
-          break (Some(relative(column, indent)), relative(column, indent));
+        // A non-1 ordinal with content can still continue the paragraph
+        // above, so defer its item column just like an empty marker.
+        LineKind::Item {
+          indent,
+          column,
+          interrupts,
+        } => {
+          let column = relative(column, indent);
+          if interrupts
+            || pending.is_some()
+            || first_quoted
+            || !self.paragraph_text_above(bytes, line_start, quote.map(|(start, _)| start))
+          {
+            break (Some(column), column);
+          }
+          pending = Some((relative(indent, indent), Some(column), column));
+          below = Some(0);
+          first = Some(indent);
+          top = relative(indent, indent);
+          shallow = shallow.min(top);
+          line_end = line_start;
         }
         LineKind::Text(indent) => {
           below = Some(0);

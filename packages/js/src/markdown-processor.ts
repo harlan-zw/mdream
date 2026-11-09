@@ -524,13 +524,17 @@ export interface LineRead {
   count: number
   /** The content column of the item a marker would nest in, or -1. */
   outer: number
+  /** Numeric value while reading an ordered marker, including leading zeroes. */
+  ordinal?: number
+  /** Whether the outermost marker can interrupt paragraph text. */
+  interrupts?: boolean
 }
 
 const LINE_START: LineRead = { kind: 0, indent: 0, column: 0, count: 0, outer: -1 }
 
 /** The same reading once `more` of the line follows. */
 function extendLineRead(read: LineRead, more: string): LineRead {
-  let { kind, indent, column, count, outer } = read
+  let { kind, indent, column, count, outer, ordinal, interrupts } = read
   // No marker starts where one could: the content of the item it would have
   // nested in, or text.
   const content = () => {
@@ -548,11 +552,14 @@ function extendLineRead(read: LineRead, more: string): LineRead {
       kind = 2
       column = at + 1
       count = 0
+      if (outer < 0)
+        interrupts = true
     }
     else if (code >= 48 && code <= 57) {
       kind = 1
       column = at + 1
       count = 1
+      ordinal = code - 48
     }
     else {
       content()
@@ -570,8 +577,11 @@ function extendLineRead(read: LineRead, more: string): LineRead {
       if (code >= 48 && code <= 57 && count < 9) {
         column++
         count++
+        ordinal = (ordinal ?? 0) * 10 + code - 48
       }
       else if (code === 46 || code === 41) {
+        if (outer < 0)
+          interrupts = ordinal === 1
         kind = 2
         column++
         count = 0
@@ -597,7 +607,7 @@ function extendLineRead(read: LineRead, more: string): LineRead {
       markerStart(code, outer)
     }
   }
-  return { kind, indent, column, count, outer }
+  return { kind, indent, column, count, outer, ordinal, interrupts }
 }
 
 /** A whole line's reading: digits that open no marker are the content of the item they sit in. */
@@ -653,8 +663,8 @@ function foldLine(fold: ParagraphFold, read: LineRead): void {
   else if (line.kind === 0) {
     fold.paragraph = undefined
   }
-  else if (line.kind === 2 && paragraph !== undefined && paragraph >= 0 && line.indent >= paragraph) {
-    // An empty item cannot interrupt a paragraph it reaches the column of.
+  else if ((line.kind === 2 || (line.kind === 3 && line.interrupts === false)) && paragraph !== undefined && paragraph >= 0 && line.indent >= paragraph) {
+    // Empty items and ordered items not starting at 1 cannot interrupt a paragraph.
   }
   else if (line.kind === 2) {
     fold.paragraph = undefined
@@ -920,8 +930,14 @@ function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: num
     }
     if (read.kind === 0)
       return decide(below, top)
-    if (read.kind === 3)
-      return decide(relative(read.column, read.indent), relative(read.column, read.indent))
+    // A non-1 ordinal with content can still be paragraph continuation.
+    // Defer its item column until the paragraph above has been located.
+    if (read.kind === 3) {
+      const column = relative(read.column, read.indent)
+      if (read.interrupts !== false || pending || firstQuoted || !textAbove(char))
+        return decide(column, column)
+      pending = { indent: relative(read.indent, read.indent), answer: column, top: column }
+    }
     below = 0
     first = read.indent
     top = relative(read.indent, read.indent)

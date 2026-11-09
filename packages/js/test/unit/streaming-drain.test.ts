@@ -689,3 +689,25 @@ it('does not rescan an unchanged whitespace fragment on every settlement', () =>
   expect(state.emptyListMarkerFragment).toBeUndefined()
   expect(state.listTailStart).toBeUndefined()
 })
+
+it('preserves nested items after a noninterrupting ordinal 0', async () => {
+  const html = '<ol><li>&#10;+1<div>y</div></li><li>x&#10;<em>&#13;&#10;<ol start="7"><li></li></ol></em></li></ol>'
+  const one = htmlToMarkdown(html)
+  expect(one).toBe('1. \n+1 y\n2. x\n*\r\n\n   7. *')
+  for (const width of [1, 2, 7, 16, 64])
+    expect(await streamConvert(html, width)).toBe(one)
+})
+it('preserves nested items after a noninterrupting ordinal 1', async () => {
+  const html = '<ol><li>&#10;+1<div>y</div></li><li>x&#10;<em>&#10;<ol start="7"><li></li></ol></em></li></ol>'
+  const one = htmlToMarkdown(html)
+  expect(one).toBe('1. \n+1 y\n2. x\n*\n\n   7. *')
+  for (const width of [1, 2, 7, 16, 64])
+    expect(await streamConvert(html, width)).toBe(one)
+})
+it('preserves nested items after a noninterrupting ordinal 2', async () => {
+  const html = '<ol><li><ol start="7"><li></li><li><br><span>&#10;   <div>y</div>#x-1.>&#10;&#10;+</span><div><span>1</span><h1>t</h1>1.#</div></li></ol><p></p><div>y</div><em>   </em></li><li>==&#10;<em>&#13;&#10;<ol start="7"><li></li><li></li></ol></em></li></ol>'
+  const one = htmlToMarkdown(html)
+  expect(one).toContain('2. \\==\n*\r\n\n   7.    8. *')
+  for (const width of [1, 2, 7, 16, 64])
+    expect(await streamConvert(html, width)).toBe(one)
+})

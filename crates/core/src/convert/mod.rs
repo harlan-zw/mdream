@@ -489,6 +489,10 @@ pub(super) enum LineRead {
     indent: usize,
     column: usize,
     count: usize,
+    // Numeric value, including leading zeroes.
+    ordinal: usize,
+    // Whether the outermost marker can interrupt paragraph text.
+    interrupts: bool,
     outer: Option<usize>,
   },
   /// A list marker ending at `column`, then `spaces` spaces and nothing else.
@@ -496,10 +500,15 @@ pub(super) enum LineRead {
     indent: usize,
     column: usize,
     spaces: usize,
+    interrupts: bool,
     outer: Option<usize>,
   },
   /// A list item whose content starts at `column`.
-  Item { indent: usize, column: usize },
+  Item {
+    indent: usize,
+    column: usize,
+    interrupts: bool,
+  },
   /// Other text, starting after `indent` spaces.
   Text(usize),
 }
@@ -526,7 +535,11 @@ pub(super) enum LineKind {
   /// it.
   Spaces(usize),
   /// A list item whose content starts at `column`.
-  Item { indent: usize, column: usize },
+  Item {
+    indent: usize,
+    column: usize,
+    interrupts: bool,
+  },
   /// Other text, starting after `indent` spaces.
   Text(usize),
 }
@@ -565,28 +578,41 @@ impl LineRead {
 
   /// A marker or digits starting at `column`, nested in the item whose
   /// content starts there when `outer` says so.
-  fn marker_start(byte: u8, indent: usize, column: usize, outer: Option<usize>) -> Self {
+  fn marker_start(
+    byte: u8,
+    indent: usize,
+    column: usize,
+    outer: Option<usize>,
+    interrupts: bool,
+  ) -> Self {
     match byte {
       b'-' | b'*' | b'+' => Self::Marker {
         indent,
         column: column + 1,
         spaces: 0,
+        interrupts: outer.is_none() || interrupts,
         outer,
       },
       b'0'..=b'9' => Self::Digits {
         indent,
         column: column + 1,
         count: 1,
+        ordinal: usize::from(byte - b'0'),
+        interrupts,
         outer,
       },
-      _ => Self::content(indent, outer),
+      _ => Self::content(indent, outer, interrupts),
     }
   }
 
   /// What a line holds once no marker starts where one could: the content of
   /// the item it would have nested in, or text.
-  fn content(indent: usize, outer: Option<usize>) -> Self {
-    outer.map_or(Self::Text(indent), |column| Self::Item { indent, column })
+  fn content(indent: usize, outer: Option<usize>, interrupts: bool) -> Self {
+    outer.map_or(Self::Text(indent), |column| Self::Item {
+      indent,
+      column,
+      interrupts,
+    })
   }
 
   /// The same reading once `more` of the line follows.
@@ -595,48 +621,66 @@ impl LineRead {
       self = match self {
         Self::Item { .. } | Self::Text(_) => return self,
         Self::Indent(indent) if byte == b' ' => Self::Indent(indent + 1),
-        Self::Indent(indent) => Self::marker_start(byte, indent, indent, None),
+        Self::Indent(indent) => Self::marker_start(byte, indent, indent, None, true),
         Self::Digits {
           indent,
           column,
           count,
+          ordinal,
+          interrupts,
           outer,
         } => match byte {
           b'0'..=b'9' if count < 9 => Self::Digits {
             indent,
             column: column + 1,
             count: count + 1,
+            ordinal: ordinal * 10 + usize::from(byte - b'0'),
+            interrupts,
             outer,
           },
           b'.' | b')' => Self::Marker {
             indent,
             column: column + 1,
             spaces: 0,
+            interrupts: if outer.is_none() {
+              ordinal == 1
+            } else {
+              interrupts
+            },
             outer,
           },
-          _ => Self::content(indent, outer),
+          _ => Self::content(indent, outer, interrupts),
         },
         Self::Marker {
           indent,
           column,
           spaces,
+          interrupts,
           outer,
         } => match byte {
           b' ' => Self::Marker {
             indent,
             column,
             spaces: spaces + 1,
+            interrupts,
             outer,
           },
-          _ if spaces == 0 => Self::content(indent, outer),
+          _ if spaces == 0 => Self::content(indent, outer, interrupts),
           // Past four spaces the content is code, and the column sits one past
           // the marker.
           _ if spaces > 4 => Self::Item {
             indent,
             column: column + 1,
+            interrupts,
           },
           // The content can open a list of its own, as `- *` does.
-          _ => Self::marker_start(byte, indent, column + spaces, Some(column + spaces)),
+          _ => Self::marker_start(
+            byte,
+            indent,
+            column + spaces,
+            Some(column + spaces),
+            interrupts,
+          ),
         },
       };
     }
@@ -661,9 +705,18 @@ impl LineRead {
       Self::Digits {
         indent,
         outer: Some(column),
+        interrupts,
         ..
       }
-      | Self::Item { indent, column } => LineKind::Item { indent, column },
+      | Self::Item {
+        indent,
+        column,
+        interrupts,
+      } => LineKind::Item {
+        indent,
+        column,
+        interrupts,
+      },
       Self::Digits { indent, .. } | Self::Text(indent) => LineKind::Text(indent),
     }
   }
@@ -674,10 +727,16 @@ impl Paragraph {
   pub(super) fn then(self, line: LineKind) -> Self {
     match (self, line) {
       (_, LineKind::Blank) => Self::Closed,
-      // An empty item cannot interrupt a paragraph it reaches the column of.
-      (Self::Open { column, first }, LineKind::Marker { indent, .. }) if indent >= column => {
-        Self::Open { column, first }
-      }
+      // Empty items and ordered items not starting at 1 cannot interrupt a paragraph.
+      (
+        Self::Open { column, first },
+        LineKind::Marker { indent, .. }
+        | LineKind::Item {
+          indent,
+          interrupts: false,
+          ..
+        },
+      ) if indent >= column => Self::Open { column, first },
       (_, LineKind::Marker { column, code, .. }) => Self::Bare { column, code },
       // A line of spaces under a marker alone leaves its item empty.
       (Self::Bare { code, .. }, LineKind::Spaces(_)) => Self::Code { code, top: None },

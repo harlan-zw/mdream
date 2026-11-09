@@ -6992,3 +6992,30 @@ fn lone_closer_with_a_nested_marker_past_its_paragraph_streams() {
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
   }
 }
+
+#[test]
+fn noninterrupting_ordinal_preserves_nested_items_0() {
+  let html = r#"<ol><li>&#10;+1<div>y</div></li><li>x&#10;<em>&#13;&#10;<ol start="7"><li></li></ol></em></li></ol>"#;
+  let one = html_to_markdown(html, HtmlToMarkdownOptions::default());
+  assert_eq!(one, "1. \n+1 y\n2. x\n*\r\n\n   7. *");
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
+
+#[test]
+fn noninterrupting_ordinal_preserves_nested_items_1() {
+  let html = r#"<ol><li>&#10;+1<div>y</div></li><li>x&#10;<em>&#10;<ol start="7"><li></li></ol></em></li></ol>"#;
+  let one = html_to_markdown(html, HtmlToMarkdownOptions::default());
+  assert_eq!(one, "1. \n+1 y\n2. x\n*\n\n   7. *");
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
+
+#[test]
+fn noninterrupting_ordinal_preserves_nested_items_2() {
+  let html = r#"<ol><li><ol start="7"><li></li><li><br><span>&#10;   <div>y</div>#x-1.>&#10;&#10;+</span><div><span>1</span><h1>t</h1>1.#</div></li></ol><p></p><div>y</div><em>   </em></li><li>==&#10;<em>&#13;&#10;<ol start="7"><li></li><li></li></ol></em></li></ol>"#;
+  let one = html_to_markdown(html, HtmlToMarkdownOptions::default());
+  assert!(one.contains("2. \\==\n*\r\n\n   7.    8. *"));
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
