@@ -3846,7 +3846,7 @@ impl ConvertState {
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
       && self.code_fence.is_none()
-      && self.depth_map[TAG_A as usize] == 0
+      && self.open_link_hold_floor().is_none()
       && self.first_tentative_caption_start().is_none()
       // The blank line leaves quote frames where they are, right only for those
       // the item sits in.
@@ -3855,7 +3855,9 @@ impl ConvertState {
         .last()
         .is_none_or(|frame| frame.content_start <= self.empty_item_line_start)
     {
-      self.resolve_item_marker(true);
+      // Keep the exit guard for a live link: the item exit still uses it
+      // to preserve continuation indentation after a hard break.
+      self.resolve_item_marker(self.depth_map[TAG_A as usize] == 0);
     }
   }
 

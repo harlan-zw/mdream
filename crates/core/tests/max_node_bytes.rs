@@ -2399,3 +2399,30 @@ fn exhausted_code_span_keeps_nested_item_separator() {
     }
   }
 }
+
+#[test]
+fn capped_code_in_open_link_preserves_adjacent_item() {
+  {
+    let html = "<blockquote><ul><li>root<ul><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ul></li></ul></blockquote>";
+    let expected =
+      "> - root\n>   - [`\n>\n>     ---\n>\n>     \n>     > z\n>\n>     end`](/z)\n>   - adj";
+    assert_capped_inline_code(html, 38, expected, false);
+    for chunk in [1, 2, 3, 11] {
+      assert_eq!(
+        stream_reporting(html, chunk, 38),
+        (expected.to_string(), false)
+      );
+    }
+  }
+  {
+    let html = "<blockquote><ol><li>root<ol><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ol></li></ol></blockquote>";
+    let expected = "> 1. root\n>    1. [`\n>\n>       ---\n>\n>       \n>       > z\n>\n>       end`](/z)\n>    2. adj";
+    assert_capped_inline_code(html, 48, expected, false);
+    for chunk in [1, 2, 3, 11] {
+      assert_eq!(
+        stream_reporting(html, chunk, 48),
+        (expected.to_string(), false)
+      );
+    }
+  }
+}
