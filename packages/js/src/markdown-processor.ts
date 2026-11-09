@@ -1534,8 +1534,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let openMarkerCount = 0
   // Per open marker: the opener follows the space a pending separator wrote.
   const openMarkerFollowsSpace: boolean[] = []
-  // Indices survive buffer rewrites and drains; an empty pair only pops the tail.
-  const openMarkerRunStart: number[] = []
+  // Number of contiguous emphasis fragments ending at each open marker.
+  const openMarkerRunLength: number[] = []
   // The fragment holding the space the current event's pending separator wrote.
   let pendingSpaceFragment = -1
   // Depth and buffer length right after each open inline element's literal
@@ -1859,7 +1859,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   function hoistOpenerSpace(): boolean {
     const buffer = state.buffer
     const depthMap = state.depthMap
-    let index = openMarkerCount - 1
+    const index = openMarkerCount - 1
     let fragment = openMarkers[index]! >> 3
     // Code-like spans keep their content as written.
     if (fragment !== buffer.length - 1 || (openMarkers[index]! & MARKER_TYPE_MASK) > 4
@@ -1870,8 +1870,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // position; a space in front of it would sit inside the opener.
     if (state.blockquotes.at(-1)?.fragment === fragment + 1)
       return false
-    index = openMarkerRunStart[index]!
-    fragment = openMarkers[index]! >> 3
+    fragment -= openMarkerRunLength[index]! - 1
     if (literalOpeners.length) {
       const link = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
       let at = fragment
@@ -3187,10 +3186,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
         const previous = openMarkers[openMarkerCount - 1]
-        openMarkerRunStart[openMarkerCount] = openMarkerCount > 0 && markerType <= 4
+        openMarkerRunLength[openMarkerCount] = openMarkerCount > 0 && markerType <= 4
           && (previous! & MARKER_TYPE_MASK) <= 4 && previous! >> 3 === buff.length - 2
-          ? openMarkerRunStart[openMarkerCount - 1]!
-          : openMarkerCount
+          ? openMarkerRunLength[openMarkerCount - 1]! + 1
+          : 1
         openMarkerFollowsSpace[openMarkerCount] = pendingSpaceFragment === buff.length - 2
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }
