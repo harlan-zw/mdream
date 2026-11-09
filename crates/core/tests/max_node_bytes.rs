@@ -2401,6 +2401,20 @@ fn exhausted_code_span_keeps_nested_item_separator() {
 }
 
 #[test]
+fn surviving_code_span_stays_after_nested_item_marker() {
+  let html = "<ul><li>x<ul><li><code>y</code></li></ul></li></ul>";
+  for cap in [0, 8] {
+    assert_capped_inline_code(html, cap, "- x\n  - `y`", false);
+    for chunk in [1, 2, 3, 11] {
+      assert_eq!(
+        stream_reporting(html, chunk, cap),
+        ("- x\n  - `y`".to_string(), false)
+      );
+    }
+  }
+}
+
+#[test]
 fn capped_code_in_open_link_preserves_adjacent_item() {
   {
     let html = "<blockquote><ul><li>root<ul><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ul></li></ul></blockquote>";
@@ -2425,4 +2439,29 @@ fn capped_code_in_open_link_preserves_adjacent_item() {
       );
     }
   }
+}
+
+// The link's output (~580KB) must stream out of the capped item, not wait for
+// `finish()`.
+#[test]
+fn long_link_after_code_span_streams_in_capped_item() {
+  let unit = "<span>word</span> ";
+  let words = repeat_to(unit, HUGE);
+  let html =
+    format!("<ul><li>x<ul><li><a href=\"/z\"><code>c</code>{words}</a></li></ul></li></ul>");
+  let capped = peak(&html, 8 * 1024, CAP);
+  assert!(
+    capped < (HUGE / 4) as u64,
+    "capped peak {capped} should be a window, not the link"
+  );
+  let text = "word ".repeat(words.len() / unit.len());
+  let expected = format!("- x\n  - [`c`{}](/z)", text.trim_end());
+  assert_eq!(
+    stream_reporting(&html, 8 * 1024, CAP),
+    (expected.clone(), false)
+  );
+  assert_eq!(
+    html_to_markdown_result(&html, options(CAP)).markdown,
+    expected
+  );
 }
