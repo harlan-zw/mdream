@@ -55,8 +55,8 @@ jobs:
       # releases can't break unrelated builds; they still surface locally.
       - name: Run clippy
         working-directory: crates
-        run: cargo clippy --workspace --exclude mdream-edge --locked -- -D warnings -A
-          clippy::pedantic -A clippy::nursery
+        run: cargo clippy --workspace --exclude mdream-edge --all-targets --locked --
+          -D warnings -A clippy::pedantic -A clippy::nursery
 
       # Each output format is a cargo feature. Lint every single-format build
       # so a format check that assumes the others exist fails here.
