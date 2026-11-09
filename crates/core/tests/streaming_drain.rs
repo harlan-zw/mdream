@@ -3014,6 +3014,37 @@ fn streaming_matches_one_shot_across_blockquote_quoting() {
   );
 }
 
+// Past the 8 KiB threshold a `<code>` quotes the open blockquote's completed
+// lines. Quoting through a trailing hard break anchored the quote at the buffer
+// end, so the next block read it as just opened and dropped its blank line
+// (`> x  \n> l`); a break followed by a list indent lost its offset. One-shot
+// output then depended on how much quoted content came first.
+#[test]
+fn quote_flush_at_code_matches_a_short_quote() {
+  let words = |n: usize| "w ".repeat(n);
+  let opts = HtmlToMarkdownOptions::default;
+  for template in [
+    "<blockquote><p>{W}</p>x<br><code></code><p>l</p></blockquote>",
+    "<blockquote><blockquote><p>{W}</p>x<br><code></code><p>l</p></blockquote></blockquote>",
+    "<blockquote>{W}<br><s></s><code> </code> <h2>l</h2>",
+    "<blockquote><ul><li><blockquote>{W}</blockquote><code></code><br><p>l</p></li></ul></blockquote>",
+    "<ul><li><blockquote><blockquote>{W}</blockquote><br><code></code><p>l</p></blockquote></li></ul>",
+    "<ul><li><blockquote><p>{W}</p><blockquote><p>l</p></blockquote><br><code></code><blockquote><p>l</p></blockquote></blockquote></li></ul>",
+  ] {
+    let short = html_to_markdown(&template.replace("{W}", &words(20)), opts());
+    let expected = short.replacen(words(20).trim_end(), words(4500).trim_end(), 1);
+    let html = template.replace("{W}", &words(4500));
+    assert_eq!(html_to_markdown(&html, opts()), expected, "html={template}");
+    for chunk in [1usize, 7, 64, 997, 4096, 8191] {
+      assert_eq!(
+        stream_chunks(&html, chunk, opts()),
+        expected,
+        "chunk={chunk} html={template}"
+      );
+    }
+  }
+}
+
 // A trim takes the marker's own trailing space, which leaves the marker's
 // recorded end past where the item's content now starts, so the element that
 // opens the item -- a code span's backtick, or an emphasis marker -- reads as

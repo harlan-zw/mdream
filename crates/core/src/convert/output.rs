@@ -933,8 +933,10 @@ impl ConvertState {
     }
 
     // Quoting rewrites only lines before `flush_end` and keeps the tail after
-    // it, so a hard break the output ends with still ends it afterwards.
-    let break_at_end = self.hard_break_end == self.buffer.len();
+    // it, so a hard break in the tail moves with it.
+    let break_in_tail = (self.hard_break_end != usize::MAX)
+      .then(|| self.hard_break_end.checked_sub(flush_end))
+      .flatten();
     let shared_start = self.blockquotes[0].content_start;
     if self
       .blockquotes
@@ -1000,8 +1002,8 @@ impl ConvertState {
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
       self.invalidate_line_start();
-      if break_at_end {
-        self.hard_break_end = self.buffer.len();
+      if let Some(offset) = break_in_tail {
+        self.hard_break_end = flush_end + offset;
       }
       return;
     }
@@ -1048,8 +1050,8 @@ impl ConvertState {
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
     self.invalidate_line_start();
-    if break_at_end {
-      self.hard_break_end = self.buffer.len();
+    if let Some(offset) = break_in_tail {
+      self.hard_break_end = flush_end + offset;
     }
   }
 
@@ -1960,7 +1962,8 @@ impl ConvertState {
 
     // Finalize completed quote lines before recording a new code offset. A
     // later flush must stop at that offset, but the prefix before it is safe to
-    // quote and yield now even when both arrive in one large input chunk.
+    // quote and yield now even when both arrive in one large input chunk. The
+    // trailing whitespace stays unquoted: the next block still rewrites it.
     if !plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_CODE)
@@ -1970,7 +1973,7 @@ impl ConvertState {
           && self.pre_fence_owner_depth == 0
           && !self.in_table_cell()))
     {
-      self.flush_streaming_blockquote_lines();
+      self.flush_settled_blockquote_lines();
     }
 
     // Plain text never arms a boundary. The tag is tested again after
