@@ -2460,10 +2460,8 @@ fn long_link_after_code_span_streams_in_capped_item() {
     stream_reporting(&html, 8 * 1024, CAP),
     (expected.clone(), false)
   );
-  assert_eq!(
-    html_to_markdown_result(&html, options(CAP)).markdown,
-    expected
-  );
+  let result = html_to_markdown_result(&html, options(CAP));
+  assert_eq!((result.markdown, result.truncated), (expected, false));
 }
 
 #[test]
