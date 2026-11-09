@@ -8686,6 +8686,25 @@ fn empty_inline_pre_does_not_taint_later_fences() {
 }
 
 #[test]
+fn code_fence_grows_past_runs_after_cr() {
+  assert_eq!(
+    convert("<pre>a&#13;```&#13;b</pre><p>c</p>"),
+    "````\na\r```\rb\n````\n\nc"
+  );
+  for html in [
+    "<pre>a&#13;```&#13;<h2>x #</h2></pre>",
+    "<pre><code>a&#13;```&#13;<h2>x #</h2></code></pre>",
+    "<ul><li><pre>a&#13;```&#13;<h2>x #</h2></pre></li></ul>",
+  ] {
+    let markdown = convert(html);
+    assert!(
+      markdown.contains("````") && markdown.contains("## x #"),
+      "{html:?}"
+    );
+  }
+}
+
+#[test]
 fn frontmatter_keeps_heading_fences_reliable() {
   let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {

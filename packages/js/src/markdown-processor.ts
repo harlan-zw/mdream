@@ -1111,10 +1111,13 @@ function maxLineLeadingRun(value: string, marker: number, indent: string): numbe
       run++
     if (run > max)
       max = run
-    const newline = value.indexOf('\n', lineStart)
-    if (newline === -1)
+    // A parser also ends a line at CR, so a run after one can close the fence.
+    let lineEnd = index + run
+    while (lineEnd < value.length && value.charCodeAt(lineEnd) !== 10 && value.charCodeAt(lineEnd) !== 13)
+      lineEnd++
+    if (lineEnd >= value.length)
       break
-    lineStart = newline + 1
+    lineStart = lineEnd + 1
   }
   return max
 }

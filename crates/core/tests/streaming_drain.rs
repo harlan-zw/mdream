@@ -6011,6 +6011,16 @@ fn a_drain_inside_a_line_lead_keeps_block_line_checks_like_one_shot() {
 }
 
 #[test]
+fn streaming_code_fence_after_cr() {
+  for html in [
+    "<pre>a&#13;```&#13;b</pre><p>c</p>",
+    "<pre>a&#13;```&#13;<h2>x #</h2></pre>",
+  ] {
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
 fn streaming_empty_inline_pre_fence_reliability() {
   for body in ["", " ", "\n", "<code></code>"] {
     let html = format!("<span><pre>{body}</pre></span><pre><h2>x #</h2></pre>");

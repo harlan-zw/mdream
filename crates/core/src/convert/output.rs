@@ -497,8 +497,9 @@ impl ConvertState {
   }
 
   fn max_line_leading_run(value: &str, marker: u8, indent: &str) -> usize {
+    // A parser also ends a line at CR, so a run after one can close the fence.
     value
-      .split('\n')
+      .split(['\n', '\r'])
       .map(|line| {
         let line = line.strip_prefix(indent).unwrap_or(line);
         let bytes = line.as_bytes();

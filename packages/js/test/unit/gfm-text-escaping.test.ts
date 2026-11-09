@@ -329,6 +329,24 @@ describe('heading fence reliability', () => {
       expect(await streamConvert(html, size, options)).toBe(expected)
   })
 
+  it('sizes code fences past runs after a CR', async () => {
+    expect(htmlToMarkdown('<pre>a&#13;```&#13;b</pre><p>c</p>')).toBe('````\na\r```\rb\n````\n\nc')
+    const plugin = { plugins: [createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? '\r```\r' : undefined })] }
+    const cases: [string, Partial<MdreamOptions>][] = [
+      ['<pre>a&#13;```&#13;<h2>x #</h2></pre>', {}],
+      ['<pre><code>a&#13;```&#13;<h2>x #</h2></code></pre>', {}],
+      ['<ul><li><pre>a&#13;```&#13;<h2>x #</h2></pre></li></ul>', {}],
+      ['<pre><div>a</div><h2>x #</h2></pre>', plugin],
+    ]
+    for (const [html, options] of cases) {
+      const expected = htmlToMarkdown(html, options)
+      expect(expected).toContain('````')
+      expect(expected).toContain('## x #')
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+
   it('keeps reliable fences with Tailwind delimiters', () => {
     const html = '<p><span class="line-through font-bold italic">a</span></p><pre><h2>x #</h2></pre>'
     expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toContain('## x #')
