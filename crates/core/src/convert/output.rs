@@ -781,6 +781,8 @@ impl ConvertState {
         self.code_spans[0].exhausted = true;
         self.truncated = true;
         self.blockquote_scratch = quoted;
+        // Structural growth is atomic: never retain the unquoted payload.
+        self.truncate_buffer(frame.content_start);
         return;
       }
     }
@@ -975,8 +977,10 @@ impl ConvertState {
     }
 
     // Quoting rewrites only lines before `flush_end` and keeps the tail after
-    // it, so a hard break the output ends with still ends it afterwards.
-    let break_at_end = self.hard_break_end == self.buffer.len();
+    // it, so a hard break in the tail moves with it.
+    let break_in_tail = (self.hard_break_end != usize::MAX)
+      .then(|| self.hard_break_end.checked_sub(flush_end))
+      .flatten();
     let shared_start = self.blockquotes[0].content_start;
     if self
       .blockquotes
@@ -1042,8 +1046,8 @@ impl ConvertState {
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
       self.invalidate_line_start();
-      if break_at_end {
-        self.hard_break_end = self.buffer.len();
+      if let Some(offset) = break_in_tail {
+        self.hard_break_end = flush_end + offset;
       }
       return;
     }
@@ -1090,8 +1094,8 @@ impl ConvertState {
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
     self.invalidate_line_start();
-    if break_at_end {
-      self.hard_break_end = self.buffer.len();
+    if let Some(offset) = break_in_tail {
+      self.hard_break_end = flush_end + offset;
     }
   }
 
@@ -2005,7 +2009,8 @@ impl ConvertState {
 
     // Finalize completed quote lines before recording a new code offset. A
     // later flush must stop at that offset, but the prefix before it is safe to
-    // quote and yield now even when both arrive in one large input chunk.
+    // quote and yield now even when both arrive in one large input chunk. The
+    // trailing whitespace stays unquoted: the next block still rewrites it.
     if !plain_text!(self)
       && !enter_is_literal
       && tag_id == Some(TAG_CODE)
@@ -2015,7 +2020,7 @@ impl ConvertState {
           && self.pre_fence_owner_depth == 0
           && !self.in_table_cell()))
     {
-      self.flush_streaming_blockquote_lines();
+      self.flush_settled_blockquote_lines();
     }
 
     // Plain text never arms a boundary. The tag is tested again after
@@ -6593,7 +6598,8 @@ impl ConvertState {
       return;
     }
     let mut newlines = 0;
-    for &byte in self.buffer.as_bytes().iter().rev() {
+    let mut tail_start = 0;
+    for (at, &byte) in self.buffer.as_bytes().iter().enumerate().rev() {
       if byte == b'\n' {
         newlines += 1;
         if newlines == 2 {
@@ -6601,8 +6607,21 @@ impl ConvertState {
           return;
         }
       } else if !is_whitespace(byte) {
+        tail_start = at + 1;
         break;
       }
+    }
+    // A streamed break run buffers one copy of its unit for all `count` breaks.
+    newlines += self
+      .streaming_break_runs
+      .iter()
+      .rev()
+      .take_while(|run| run.output_start >= tail_start)
+      .map(|run| (run.count - 1) * run.unit.matches('\n').count())
+      .sum::<usize>();
+    if newlines >= 2 {
+      self.pending_raw_html_boundary = false;
+      return;
     }
     let indent_len = if indent { self.list_indent.len() } else { 0 };
     // Charge the complete separator to an open code span. A rejected write
@@ -7386,7 +7405,7 @@ mod tests {
     // A drain is what puts bytes behind `buffer[0]`; yielding alone does not, and
     // the counting below may only read `flushed_tail` once one has happened.
     state.cut_line_lead = CutLineLead::Blank(0);
-    state.flushed_tail = [b'\n', b'\n'];
+    state.flushed_tail = *b"\n\n";
 
     state.write_output(true, false, 2, Some("next"), false);
 

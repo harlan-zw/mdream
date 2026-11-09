@@ -149,4 +149,6 @@ export const CONVERSION_CORPUS: string[] = [
   `a<pre> <b></b> </pre>`,
   // Rust parity: a decoded CR ends the line above a nested list's marker
   `<ul><li>a<br><em>&#13;<ol><li><blockquote><ol><li>p</li></ol></blockquote></li></ol></em></li></ul>`,
+  `<ul><li><dl><dt>l</dt></dl><br><br>l</li></ul>`,
+  `<dl><dt>l</dt></dl><br><br>l`,
 ]
