@@ -6493,7 +6493,7 @@ mod tests {
     // A drain is what puts bytes behind `buffer[0]`; yielding alone does not, and
     // the counting below may only read `flushed_tail` once one has happened.
     state.cut_line_lead = CutLineLead::Blank(0);
-    state.flushed_tail = [b'\n', b'\n'];
+    state.flushed_tail = *b"\n\n";
 
     state.write_output(true, false, 2, Some("next"), false);
 
