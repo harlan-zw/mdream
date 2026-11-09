@@ -1440,6 +1440,41 @@ fn review_caption_main() {
 }
 
 #[test]
+fn review_caption_table_cell_inline_openers() {
+  for (content, expected) in [
+    (
+      "<figure><button>A </button><figcaption><code>B</code></figcaption></figure>",
+      "| A *`B`* |\n| --- |",
+    ),
+    (
+      "<figure><button>A </button><figcaption><em>B</em></figcaption></figure>",
+      "| A **B** |\n| --- |",
+    ),
+    (
+      r#"<img src="/a.png"><button><svg></svg> </button><figcaption><em>B</em></figcaption>"#,
+      "| ![](/a.png) **B** |\n| --- |",
+    ),
+    (
+      r#"<img src="/a.png"><button><svg></svg> </button><figcaption><code>B</code></figcaption>"#,
+      "| ![](/a.png) *`B`* |\n| --- |",
+    ),
+  ] {
+    let html = format!("<table><tr><td>{content}</td></tr></table>");
+    assert_eq!(md(&html), expected, "content={content}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(&html, width), expected, "chunk width={width}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split}");
+    }
+  }
+}
+
+#[test]
 fn review_link_raw() {
   let html = r#"<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>"#;
   let expected = "D [<mark></mark>7](/x)";

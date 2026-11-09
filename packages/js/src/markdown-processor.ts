@@ -1698,9 +1698,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         let opening = flags & CAPTION_INTERNAL_BREAK
           ? ''
           : captionSpacingPrefix(frames[offset]!, true, beforeFragment)
-        // The caption boundary consumes the separator before its opener.
-        if (opening)
+        // A block prefix replaces the owed separator. With no block prefix,
+        // put the space before the caption and its anchored inline openers.
+        if (state.pendingInlineWhitespace) {
+          if (!opening) {
+            const last = lastOutputChar(state.buffer, beforeFragment)
+            if (last !== -1 && last !== 32 && last !== 10 && last !== 9 && last !== 13)
+              opening = ' '
+          }
           state.pendingInlineWhitespace = false
+        }
         flags |= CAPTION_OPEN
         if (!explicitTop || index !== captionFrameCount - 1)
           opening += MARKDOWN_EMPHASIS

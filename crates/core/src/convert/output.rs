@@ -5020,6 +5020,18 @@ impl ConvertState {
         self.last_text_node_contains_whitespace = false;
         self.has_last_text_node = false;
       }
+      // Without a block prefix the owed space belongs before the caption's
+      // opener. Keep it outside the tentative frame so empty children cannot
+      // retract the separator with their delimiters.
+      if prefix.is_none() && self.pending_inline_whitespace {
+        self.pending_inline_whitespace = false;
+        if !matches!(
+          self.last_output_byte(),
+          Some(b' ' | b'\n' | b'\t' | b'\r') | None
+        ) {
+          self.push_caption_content(" ");
+        }
+      }
       let output_start = self.buffer.len();
       if let Some(prefix) = prefix {
         // The caption boundary consumes the separator before its opener.

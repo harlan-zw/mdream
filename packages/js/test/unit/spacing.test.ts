@@ -666,6 +666,21 @@ describe('excluded-content review regressions', () => {
     for (let split = 0; split <= html.length; split++)
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
   })
+  it.each([
+    ['<figure><button>A </button><figcaption><code>B</code></figcaption></figure>', '| A *`B`* |\n| --- |'],
+    ['<figure><button>A </button><figcaption><em>B</em></figcaption></figure>', '| A **B** |\n| --- |'],
+    ['<img src="/a.png"><button><svg></svg> </button><figcaption><em>B</em></figcaption>', '| ![](/a.png) **B** |\n| --- |'],
+    ['<img src="/a.png"><button><svg></svg> </button><figcaption><code>B</code></figcaption>', '| ![](/a.png) *`B`* |\n| --- |'],
+  ])('keeps the owed separator before a table caption opener: %s', async (content, expected) => {
+    const html = `<table><tr><td>${content}</td></tr></table>`
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
   it('link-raw', async () => {
     const html = '<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>'
     const expected = 'D [<mark></mark>7](/x)'
