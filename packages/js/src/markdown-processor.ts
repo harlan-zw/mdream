@@ -1158,16 +1158,17 @@ function hasLiteralTagOverride(overrides: EngineOptions['tagOverrides']): boolea
 }
 
 // Raw plugin text is written unescaped, and a single backtick or tilde can
-// join a neighbouring fragment or event into a fence.
+// join a neighbouring fragment or event into a fence. Inside an open fence it
+// is code: the closing delimiter grows past any run in it.
 function notePluginFences(state: MarkdownState, output: string[] | undefined): void {
-  if (!state.fencesUnreliable && output?.some(part => part.includes('`') || part.includes('~')))
+  if (!state.fencesUnreliable && !state.codeFence && output?.some(part => part.includes('`') || part.includes('~')))
     state.fencesUnreliable = true
 }
 
 // Tailwind writes at most `~~`, so only a backtick or three tildes can come
 // from another plugin's fence.
 function noteGeneratedFences(state: MarkdownState, delimiters: { prefix: string, suffix: string }): void {
-  if (!state.fencesUnreliable && (mayOpenFence(delimiters.prefix) || mayOpenFence(delimiters.suffix)))
+  if (!state.fencesUnreliable && !state.codeFence && (mayOpenFence(delimiters.prefix) || mayOpenFence(delimiters.suffix)))
     state.fencesUnreliable = true
 }
 
@@ -2182,9 +2183,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.preFenceLang = language
         }
         if (pendingElement.pluginOutput?.length || literalOverride) {
-          notePluginFences(state, pendingElement.pluginOutput)
           preparePendingPreFence()
           flushPreFence(state)
+          notePluginFences(state, pendingElement.pluginOutput)
         }
         else if (consumePendingPreChild(state, node, eventType, preparePendingPreFence)) {
           return

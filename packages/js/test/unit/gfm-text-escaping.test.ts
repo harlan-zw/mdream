@@ -304,6 +304,31 @@ describe('heading fence reliability', () => {
       expect(await streamConvert(html, size, options)).toBe(expected)
   })
 
+  it.each([
+    ['<pre><div>a</div><h2>x #</h2></pre>', '~\n'],
+    ['<pre><div>a</div><h2>x #</h2></pre>', '```\n'],
+    ['<pre><code><div>a</div><h2>x #</h2></code></pre>', '~\n'],
+  ])('keeps reliable fences for plugin output inside an open fence: %s %j', async (html, marker) => {
+    const options = { plugins: [createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? marker : undefined })] }
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toContain('## x #')
+    for (let size = 1; size <= html.length; size++)
+      expect(await streamConvert(html, size, options)).toBe(expected)
+  })
+
+  it.each(['`', '```\n'])('keeps reliable fences for generated delimiters inside an open fence: %j', async (prefix) => {
+    const options = { plugins: [createPlugin({ processTextNode(node: TextNode) {
+      if (node.value === 'a')
+        node.generatedMarkdown = { prefix, suffix: '' }
+      return undefined
+    } })] }
+    const html = '<pre><span>a</span><h2>x #</h2></pre>'
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toContain('## x #')
+    for (let size = 1; size <= html.length; size++)
+      expect(await streamConvert(html, size, options)).toBe(expected)
+  })
+
   it('keeps reliable fences with Tailwind delimiters', () => {
     const html = '<p><span class="line-through font-bold italic">a</span></p><pre><h2>x #</h2></pre>'
     expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toContain('## x #')
