@@ -1771,6 +1771,9 @@ impl ConvertState {
     }
   }
 
+  // A short wrapper around the name match. As a call it saved seven registers
+  // per end tag; WASM keeps the single copy for size.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
   pub(crate) fn process_closing_tag(
     &mut self,
     html_chunk: &str,
