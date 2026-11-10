@@ -2076,54 +2076,6 @@ fn caption_delimiter_context() {
       r#"A<figcaption><br><em><br>B</em></figcaption>"#,
       "A  \n  \n**B**",
     ),
-    (
-      r#"<button>A </button><figcaption><script></script></figcaption>B"#,
-      "A B",
-    ),
-    (
-      r#"<h3><button>A </button><figcaption><script></script>B</figcaption></h3>"#,
-      "### A *B*",
-    ),
-    (
-      r#"<table><tr><td><button>A </button><figcaption><script>s</script><code>B</code></figcaption></td></tr></table>"#,
-      "| A *`B`* |\n| --- |",
-    ),
-    (
-      r#"<table><tr><td><button>A </button><figcaption><script>s</script>B</figcaption></td></tr></table>"#,
-      "| A *B* |\n| --- |",
-    ),
-    (
-      r#"<table><tr><td><button>A </button><figcaption><script>s</script><em>B</em></figcaption></td></tr></table>"#,
-      "| A **B** |\n| --- |",
-    ),
-    (
-      r#"<h2><button>A </button><figcaption><script>s</script><code>B</code></figcaption></h2>"#,
-      "## A *`B`*",
-    ),
-    (
-      r#"<button>A </button><figcaption><style></style></figcaption>B"#,
-      "A B",
-    ),
-    (
-      r#"<h3><button>A </button><figcaption><style></style>B</figcaption></h3>"#,
-      "### A *B*",
-    ),
-    (
-      r#"<table><tr><td><button>A </button><figcaption><style>s</style><code>B</code></figcaption></td></tr></table>"#,
-      "| A *`B`* |\n| --- |",
-    ),
-    (
-      r#"<table><tr><td><button>A </button><figcaption><style>s</style>B</figcaption></td></tr></table>"#,
-      "| A *B* |\n| --- |",
-    ),
-    (
-      r#"<table><tr><td><button>A </button><figcaption><style>s</style><em>B</em></figcaption></td></tr></table>"#,
-      "| A **B** |\n| --- |",
-    ),
-    (
-      r#"<h2><button>A </button><figcaption><style>s</style><code>B</code></figcaption></h2>"#,
-      "## A *`B`*",
-    ),
   ] {
     assert_eq!(md(html), expected, "{html}");
     for width in [1, 2, 3, 11] {
