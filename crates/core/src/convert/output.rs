@@ -5729,7 +5729,10 @@ impl ConvertState {
     }
   }
 
-  #[inline]
+  // Most tags reach the `None` arm. Inlined, that costs a jump; as a call it
+  // costs a six-register frame for every element. WASM keeps one copy for size.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline)]
   pub(crate) fn get_exit_output(
     &self,
     node: &ElementNode,
