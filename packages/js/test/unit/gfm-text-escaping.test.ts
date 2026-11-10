@@ -151,13 +151,13 @@ describe('gfm text escaping', () => {
   })
 
   const blockBreakCases = [['\t', '\t'], ['&#9;', '\t'], ['&#13;', '\r'], ['&#12;', '\f']].flatMap(([ws, kept]) =>
-    [['<span>', '</span>'], ['', '']].flatMap(([open, close]) => ['p', 'h4'].flatMap(block => [
+    [['<span>', '</span>'], ['', '']].flatMap(([open, close]) => ['p', 'h4'].flatMap(block => ([
       ['<table><tr><td>x</td></tr></table>', '| x |\n| --- |'],
       ['<figure><figcaption>x</figcaption></figure>', 'x'],
       ['<hr>', '---'],
       ['<ul><li>x</li></ul>', '- x'],
       ['<ol><li>x</li></ol>', '1. x'],
-    ].map(([next, following]) => [`${open}<pre><${block}>a b${ws}</${block}>${next}</pre>${close}`, `a b${kept}`, following]))))
+    ] as [string, string][]).map(([next, following]) => [`${open}<pre><${block}>a b${ws}</${block}>${next}</pre>${close}`, `a b${kept}`, following]))))
 
   it.each(blockBreakCases)('keeps the whitespace before a block break in code for %j', async (html, kept, following) => {
     // In a <pre> an inline wraps, a child block's exit writes a line break after
