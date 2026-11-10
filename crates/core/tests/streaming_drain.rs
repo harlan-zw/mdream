@@ -984,6 +984,7 @@ fn streaming_cmark_block_structure_matches_every_split() {
   for html in [
     "<ul><li>text <hr>after</li></ul>",
     "<ul><li><blockquote>text<hr></blockquote>after</li></ul>",
+    "<ul><li><hr><blockquote><p>q</p><p>r</p></blockquote>after</li></ul>",
     "<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
@@ -5659,6 +5660,213 @@ fn wrap_at_a_moved_link_separator_matches_every_partition() {
     assert_stream_matches(html, options.clone());
     assert_stream_matches_every_split(html, options.clone());
   }
+}
+
+#[test]
+fn empty_quote_after_rule_streaming() {
+  assert_stream_matches_every_split(
+    "<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+}
+
+#[test]
+fn quote_exit_override_after_rule_at_every_split() {
+  for html in [
+    "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+    "- ***\n\n  \n\n  tail",
+    "- ***\n\n  \n\n  tail",
+    "1. ***\n\n   \n\n   tail",
+    "- ***\n\n  \n\n  tail",
+    "> - ***\n>\n>   \n>\n>   tail",
+  ] {
+    assert_stream_matches_every_split(
+      html,
+      HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![(
+            "blockquote".to_string(),
+            TagOverrideConfig {
+              exit: Some("END".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    );
+  }
+}
+
+#[test]
+fn pending_rule_quote_review_boundaries_at_every_split() {
+  for html in [
+    "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
+    "> - ***\n>\n>   \n>   \n>   \n>\n>     \n>   \n>   tail",
+    "- ***\n\n  \n\n  tail",
+    "> - ***\n>\n>   \n>\n>   tail",
+    "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    "- \n  > x\n  >\n  > ---\n\n  > q",
+    "- ***\n\n  \n\n  > q",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn rule_quote_boundaries_preserve_nested_content() {
+  for (html, expected) in [
+    (
+      "<ul><li><em><blockquote>-<hr></blockquote></em>tail</li></ul>",
+      "- *\n  > \\-\n  >\n  > ---\n\n  *tail",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><div><blockquote></blockquote></div><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>",
+      "- ***\n\n  \n  > > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote></blockquote><table><tr><td>a</td></tr></table></blockquote></li></ul>",
+      "- ***\n\n  \n  >\n  >   | a |\n  > | --- |",
+    ),
+    (
+      "<ul><li><hr><blockquote><em>x<blockquote></blockquote></em>y</blockquote></li></ul>",
+      "- ***\n\n  \n  > *x\n  >\n  > *y",
+    ),
+    (
+      "<ul><li><hr><blockquote><ul><li>q<blockquote></blockquote>tail</li></ul></blockquote></li></ul>",
+      "- ***\n\n  \n  > - q\n  >\n  >   tail",
+    ),
+    (
+      "<ul><li><blockquote><hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > ---\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>   > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote>q</blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><p>q</p></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><p></p><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote><p></p></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<ol><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ol>",
+      "1. \n   > x\n   >\n   > ---\n   > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote><p>x</p><blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote>y</blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  > y",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote><p>y</p></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  > y",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote><blockquote></blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote><table><tr><td>x</td></tr></table><blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > | x |\n  > | --- |\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote>===</blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  > \\===",
+    ),
+    (
+      "<ol><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote>tail</li></ol>",
+      "1. ***\n\n   \n   > x\n   >\n   >    ---\n\n   tail",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>",
+      "- ***\n\n  \n  > > q\n  >\n  > > r",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q\n  >\n  > > r",
+    ),
+    (
+      "<ul><li><hr><blockquote><p>x</p><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  > ---",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn pending_list_rule_survives_a_long_quote_and_its_sibling() {
+  let body = "<p>quoted line</p>".repeat(650);
+  let html = format!(
+    "<ul><li><blockquote>{body}<hr></blockquote><blockquote>next</blockquote>tail</li></ul>"
+  );
+  let options = HtmlToMarkdownOptions::default();
+  let expected = html_to_markdown(&html, options.clone());
+  assert!(expected.len() > 8 * 1024);
+  assert_eq!(expected.matches("quoted line").count(), 650);
+  assert!(expected.contains("> next"));
+  assert!(expected.ends_with("tail"));
+  assert_stream_matches_every_split(&html, options);
 }
 
 #[test]

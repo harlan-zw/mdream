@@ -8555,6 +8555,222 @@ fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
 }
 
 #[test]
+fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
+  // The rule separator stays outside the quote and retains the list indent.
+  assert_eq!(
+    convert("<ul><li><hr><blockquote>q</blockquote></li></ul>"),
+    "- ***\n\n  \n  > q"
+  );
+  assert_eq!(
+    convert("<ol><li><hr><blockquote>q</blockquote></li></ol>"),
+    "1. ***\n\n   \n   > q"
+  );
+  assert_eq!(
+    convert("<ul><li><ul><li><hr><blockquote>q</blockquote></li></ul></li></ul>"),
+    "-\n  - ***\n\n    \n    > q"
+  );
+  assert_eq!(
+    convert("<ul><li>a<hr> <blockquote><p>q</p><p>r</p></blockquote></li></ul>"),
+    "- a\n\n  ---\n\n  \n  > q\n  >\n  > r"
+  );
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote></li></ul>"),
+    "- ***\n\n  \n  > > q"
+  );
+  assert_eq!(
+    convert("<blockquote><ul><li><hr><blockquote>q</blockquote></li></ul></blockquote>"),
+    "> - ***\n>\n>   \n>   > q"
+  );
+  assert_eq!(
+    convert("<ul><li><blockquote>t<hr><blockquote>q</blockquote></blockquote></li></ul>"),
+    "- \n  > t\n  >\n  > ---\n  >\n  >\n  > > q"
+  );
+  // A genuinely empty quote contributes no marker.
+  assert_eq!(
+    convert("<ul><li><hr><blockquote></blockquote></li></ul>"),
+    "- ***"
+  );
+}
+
+// A literal enter override writes the quote inline, as it does without the
+// rule, so the separator drops only that quote's marker. Outer quotes and text
+// inside an open quote keep theirs.
+#[test]
+fn a_literal_quote_enter_override_after_a_rule_stays_inline() {
+  let options = || HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("blockquote", TagOverrideConfig::wrap("X", "Y")),
+    ),
+    ..Default::default()
+  };
+  for (input, expected) in [
+    (
+      "<ul><li><blockquote><hr>text</blockquote></li></ul>",
+      "- X\n\n  > ---\n\n  > textY",
+    ),
+    (
+      "<ul><li><hr><blockquote>q</blockquote></li></ul>",
+      "- ***\n\n  XqY",
+    ),
+    (
+      "<blockquote><ol start=\"10000\"><li><hr><blockquote>q</blockquote></li></ol></blockquote>",
+      "X\n\n10000. ***\n\n>        XqY\n\nY",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(input, options()), expected, "{input}");
+    for split in 0..=input.len() {
+      let mut processor = MarkdownStreamProcessor::new(options());
+      let mut output = processor.process_chunk(&input[..split]);
+      output.push_str(&processor.process_chunk(&input[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{input} split={split}");
+    }
+  }
+}
+
+#[test]
+fn empty_quote_after_rule_restores_list_continuation() {
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>"),
+    "- ***\n\n  \n\n  tail"
+  );
+  assert_eq!(
+    convert("<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>"),
+    "1. ***\n\n   \n\n   tail"
+  );
+  assert_eq!(
+    convert("<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>"),
+    "-\n  - ***\n\n    \n\n    tail"
+  );
+  assert_eq!(
+    convert("<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>"),
+    "> - ***\n>\n>   \n>\n>   tail"
+  );
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>"),
+    "- ***\n\n  \n  > q\n\n  tail"
+  );
+}
+
+#[test]
+fn quote_exit_override_output_stays_after_the_list_rule() {
+  for (exit, html, expected) in [
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \nEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote></li></ul>",
+      "- ***\n\n  \nEND",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>",
+      "- ***\n\n  \nEND\n\n  tail",
+    ),
+    (
+      "END",
+      "<ol><li><hr><blockquote></blockquote>tail</li></ol>",
+      "1. ***\n\n   \nEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><ul><li><hr><blockquote></blockquote>tail</li></ul></li></ul>",
+      "-\n  - ***\n\n    \nEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \nEND\nEND tail",
+    ),
+    (
+      "END",
+      "<blockquote><ul><li><hr><blockquote></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   \n> END tailEND",
+    ),
+    // A quote with content, or a rule still pending inside one, keeps its order.
+    (
+      "END",
+      "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
+      "- ***\n\n  \n  > qEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><blockquote>x<hr></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---END\n\n  tail",
+    ),
+    // An empty override leaves the continuation for the next node.
+    (
+      "",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \ntail",
+    ),
+    (
+      " ",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \n tail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "blockquote".to_string(),
+          TagOverrideConfig {
+            exit: Some(exit.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options), expected, "{html}");
+  }
+}
+
+#[test]
+fn pending_rule_quote_review_boundaries() {
+  for (html, expected) in [
+    (
+      "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   \n>   \n>   \n>\n>     \n>   \n>   tail",
+    ),
+    (
+      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \n\n  tail",
+    ),
+    (
+      "<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   \n>\n>   tail",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q",
+    ),
+    (
+      "<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+      "- ***\n\n  \n\n  > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>   > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn quote_boundary_review_regressions() {
   for (id, html, expected) in [
     (

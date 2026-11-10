@@ -2375,6 +2375,16 @@ fn every_space_is_a_cut_candidate_whatever_its_phase() {
 }
 
 #[test]
+fn nested_empty_quote_rollback_obeys_inline_code_cap() {
+  assert_capped_inline_code(
+    "<code><blockquote><ul><li><hr><blockquote></blockquote></li></ul></blockquote></code>",
+    10,
+    "",
+    true,
+  );
+}
+
+#[test]
 fn exhausted_code_span_keeps_nested_item_separator() {
   for quote in [
     "",
@@ -2487,7 +2497,7 @@ fn oversized_quote_in_inline_code_drops_unquoted_content() {
   assert_capped_inline_code(
     "<ul><li><code><hr><blockquote>q</blockquote></code></li></ul>",
     16,
-    "- `\n\n  ---\n\n  > \n\n  `",
+    "- `\n\n  ---\n\n  \n\n  `",
     true,
   );
   assert_capped_inline_code(
