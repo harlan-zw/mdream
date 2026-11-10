@@ -1305,6 +1305,7 @@ impl ConvertState {
         run_len,
         // No marker opens with a newline; only a prefixed heading break does.
         restores_heading_break: emitted.starts_with('\n'),
+        vertical_tab_start: usize::MAX,
       });
     } else if !keeps_markers
       && !self.open_markers.is_empty()
@@ -1691,7 +1692,7 @@ impl ConvertState {
   #[cold]
   #[inline(never)]
   fn drop_vertical_tab_marker_pair(&mut self, open_marker: OpenMarker, is_inline: bool) {
-    let run = self.buffer[open_marker.content_start..].to_owned();
+    let tail = self.take_tail_with_breaks(open_marker.content_start);
     // An opener that took a list item's pending heading break carries it as a
     // prefix. The run is content after the heading, so only the delimiter goes.
     let target = if open_marker.restores_heading_break {
@@ -1703,19 +1704,18 @@ impl ConvertState {
     // The run is written back unchanged without the opener, so a hard break
     // ending in it still ends the same bytes. A block after it in a list item
     // reads that end to keep its blank line once trailing whitespace is trimmed.
-    let break_end = (self.hard_break_end > open_marker.content_start
-      && self.hard_break_end <= self.buffer.len())
-    .then(|| self.hard_break_end - open_marker.content_start + target);
-    let moved = self.take_break_runs_from(open_marker.content_start);
+    let break_end = tail
+      .offset(self.hard_break_end)
+      .map(|offset| offset + target);
     self.truncate_buffer(target);
     if open_marker.starts_at_hard_break {
       self.hard_break_end = open_marker.output_start;
     }
-    self.buffer.push_str(&run);
+    self.buffer.push_str(&tail.text);
     // Only the last write stays trimmable, as in JS. The whole run would let a
     // block's trim reach back past the hard breaks to the vertical tab.
-    self.last_content_cache_len = self.last_content_cache_len.min(run.len());
-    self.restore_break_runs(moved, open_marker.content_start, target);
+    self.last_content_cache_len = self.last_content_cache_len.min(tail.text.len());
+    self.restore_tail(tail, target);
     if let Some(end) = break_end {
       self.hard_break_end = end;
     }
@@ -3356,6 +3356,8 @@ impl ConvertState {
           || bytes[first..].iter().any(|&b| !is_whitespace(b) && b != 11)
         {
           self.open_markers.clear();
+        } else if self.open_markers[0].vertical_tab_start == usize::MAX {
+          self.open_markers[0].vertical_tab_start = self.buffer.len().saturating_sub(text.len());
         }
         // A tentative caption may still retract the held breaks.
         if self.held_break_bytes != 0 && self.first_tentative_caption_start().is_none() {
@@ -4536,6 +4538,9 @@ impl ConvertState {
       if marker.content_start >= at {
         marker.content_start += 1;
       }
+      if marker.vertical_tab_start >= at && marker.vertical_tab_start != usize::MAX {
+        marker.vertical_tab_start += 1;
+      }
     }
     for run in &mut self.streaming_break_runs {
       if run.output_start >= at {
@@ -4936,7 +4941,8 @@ impl ConvertState {
     }
     // Counted in one-shot conversion too, so the cap cuts both at the same tag.
     self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
-    if !self.streaming {
+    // A run per break would grow with the held tabs; the bytes are charged to the cap instead.
+    if !self.streaming || self.vertical_tab_hold_start().is_some() {
       return false;
     }
     if let Some(run) = self.streaming_break_runs.last_mut()
@@ -6386,44 +6392,71 @@ impl ConvertState {
   #[inline(never)]
   fn push_output_before_emphasis_whitespace(&mut self, output: &str, start: usize) {
     // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
-    let trailing = self.buffer[start..].to_owned();
+    let trailing = self.take_tail_with_breaks(start);
     // The run is written back unchanged, so a hard break the output ends with
     // still ends it and a following block in a list item keeps its blank line.
-    let break_at_end = self.hard_break_end == self.buffer.len();
-    let moved = self.take_break_runs_from(start);
+    let break_at_end = trailing.offset(self.hard_break_end) == Some(trailing.text.len());
     self.truncate_buffer(start);
     if !output.is_empty() {
       self.last_content_cache_len = self.push_code_span_content(output, true);
     }
     let target = self.buffer.len();
-    self.buffer.push_str(&trailing);
-    self.last_content_cache_len = trailing.len();
-    self.restore_break_runs(moved, start, target);
+    self.buffer.push_str(&trailing.text);
+    self.last_content_cache_len = trailing.text.len();
+    self.restore_tail(trailing, target);
     if break_at_end {
       self.hard_break_end = self.buffer.len();
     }
   }
 
-  /// Detach the deferred break runs at or after `start` before the bytes there
-  /// are cut and written back. `truncate_buffer` would drop them, and a run
-  /// keeps its repeats as a count, so the moved bytes hold only one break.
-  fn take_break_runs_from(&mut self, start: usize) -> Vec<StreamingBreakRun> {
-    match self
+  /// Copy the bytes from `start` on with their break runs written out, as one-shot charges them.
+  fn take_tail_with_breaks(&mut self, start: usize) -> MovedTail {
+    let mut runs = match self
       .streaming_break_runs
       .iter()
       .position(|run| run.output_start >= start)
     {
       Some(first) => self.streaming_break_runs.split_off(first),
       None => Vec::new(),
+    };
+    let mut text = String::with_capacity(self.buffer.len() - start);
+    let mut repeats = Vec::new();
+    let mut cursor = start;
+    for run in &mut runs {
+      text.push_str(&self.buffer[cursor..run.output_start]);
+      if run.count > 1 {
+        for _ in 1..run.count {
+          text.push_str(&run.unit);
+        }
+        repeats.push((run.output_start, text.len() - (run.output_start - start)));
+      }
+      let unit_start = text.len();
+      text.push_str(&self.buffer[run.output_start..run.output_end]);
+      cursor = run.output_end;
+      run.output_start = unit_start;
+      run.output_end = text.len();
+      run.count = 1;
+    }
+    text.push_str(&self.buffer[cursor..]);
+    MovedTail {
+      text,
+      runs,
+      repeats,
+      start,
+      end: self.buffer.len(),
     }
   }
 
-  /// Reattach runs detached by `take_break_runs_from` once their bytes moved
-  /// from `from` to `to`, keeping the runs ordered by offset.
-  fn restore_break_runs(&mut self, moved: Vec<StreamingBreakRun>, from: usize, to: usize) {
-    for mut run in moved {
-      run.output_start = run.output_start - from + to;
-      run.output_end = run.output_end - from + to;
+  /// Reattach the break runs and marker tab offsets of a tail written back at `to`.
+  fn restore_tail(&mut self, tail: MovedTail, to: usize) {
+    for marker in &mut self.open_markers {
+      if (tail.start..tail.end).contains(&marker.vertical_tab_start) {
+        marker.vertical_tab_start = tail.offset_from(marker.vertical_tab_start) + to;
+      }
+    }
+    for mut run in tail.runs {
+      run.output_start += to;
+      run.output_end += to;
       self.streaming_break_runs.push(run);
     }
   }
