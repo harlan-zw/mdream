@@ -81,6 +81,30 @@ describe.each(engines)('links $name', (engineConfig) => {
       '[Read more](/x " Read more")',
     ],
     [
+      '<p><a href="/x" title="Read more "><span>Read more </span><svg></svg></a></p>',
+      '[Read more](/x)',
+    ],
+    [
+      '<p><a href="/x" title="Read more ">Read more</a></p>',
+      '[Read more](/x)',
+    ],
+    [
+      '<p><a href="/x" title="Read more">Read more<i></i></a></p>',
+      '[Read more](/x "Read more")',
+    ],
+    [
+      '<p><a href="/x" title="Read more ">Read more <span></span></a></p>',
+      '[Read more](/x)',
+    ],
+    [
+      '<p><a href="/x" title="Read more "><span>Read more </span><var>  </var></a></p>',
+      '[Read more](/x "Read more ")',
+    ],
+    [
+      '<p><a href="/x" title="Read more">Read more<i></i> again</a></p>',
+      '[Read more again](/x "Read more")',
+    ],
+    [
       '<a href="x"> </a>tail',
       '[](x)tail',
     ],
