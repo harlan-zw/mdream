@@ -231,6 +231,23 @@ describe('incremental quote streams', () => {
     }
   })
 
+  it('keeps the outer quote level when a root break precedes a nested quote', async () => {
+    // The nested quote folds the break's trailing newline. Anchored after it,
+    // the outer quote used to lose its level and glue its marker to the text.
+    const cases: [string, string][] = [
+      ['<h3>y</h3><br><blockquote><blockquote>x</blockquote>y</blockquote>', '### y\n\n  \n> > x\n>\n> y'],
+      ['<br><blockquote><blockquote><blockquote>x</blockquote></blockquote></blockquote>', '> > > x'],
+      ['<pre><blockquote><br><blockquote><blockquote>x</blockquote></blockquote></blockquote></pre>', '```\n> > > x\n\n\n```'],
+    ]
+    for (const [html, expected] of cases) {
+      for (const options of [{}, { wrapWidth: 12 }, { clean: clean() }]) {
+        expect(htmlToMarkdown(html, options)).toBe(expected)
+        for (const chunkSize of [1, 2, 3, 7])
+          expect(await convertStream(html, chunkSize, options), `chunk=${chunkSize}`).toBe(expected)
+      }
+    }
+  })
+
   it('preserves a long line while later completed lines become streamable', async () => {
     const longLine = `<span>${'x'.repeat(1024)}</span>`.repeat(512)
     const html = `<blockquote>${longLine}<p>after</p><p>settled</p></blockquote>`
