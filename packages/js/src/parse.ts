@@ -73,14 +73,18 @@ import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
 // The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
 const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
 
+// Longest `<base href>` adopted, in UTF-8 bytes after resolution, as in the Rust
+// engine. Every relative URL repeats the base, so an unbounded one multiplies the output.
+const MAX_BASE_HREF_LENGTH = 2048
+
 // Keep rich element nodes to the same practical depth as browsers. One exact
 // flattened root preserves balanced recovery beyond it without allowing
 // untrusted nesting to grow memory forever.
 const MAX_ELEMENT_DEPTH = 512
 
 // The first `<base href>` replaces `origin` when it resolves to an `http(s)://host`
-// URL; anything else is ignored. A <base> inside a link is ignored too: the
-// link's open and close must resolve alike.
+// URL of at most MAX_BASE_HREF_LENGTH bytes; anything else is ignored. A <base>
+// inside a link is ignored too: the link's open and close must resolve alike.
 function captureBaseHref(state: ParseState, href: string | undefined): void {
   const target = state.urlBaseTarget
   // At MAX_ELEMENT_DEPTH the element is flattened, and so is everything below it.
@@ -100,8 +104,14 @@ function captureBaseHref(state: ParseState, href: string | undefined): void {
   while (start < end && href.charCodeAt(start) <= 0x20) start++
   while (end > start && href.charCodeAt(end - 1) <= 0x20) end--
   const base = resolveUrl(href.slice(start, end), target.options.origin)
-  if (HTTP_BASE_RE.test(base))
+  // A UTF-16 unit is at least one UTF-8 byte, so the length check bounds the encode.
+  if (
+    HTTP_BASE_RE.test(base)
+    && base.length <= MAX_BASE_HREF_LENGTH
+    && new TextEncoder().encode(base).length <= MAX_BASE_HREF_LENGTH
+  ) {
     target.options = { ...target.options, origin: base }
+  }
 }
 
 // A tag outside the dictionary with no override renders only its text, inline
