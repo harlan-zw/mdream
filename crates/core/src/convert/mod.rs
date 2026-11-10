@@ -94,6 +94,26 @@ const TYPICAL_NESTING_DEPTH: usize = 32;
 /// enormous run streams in a window instead of being held whole.
 const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
 
+/// Initial output and input capacity of a streaming converter.
+pub(crate) const STREAM_START_CAPACITY: usize = 4096;
+
+/// A drained stream buffer is shrunk once its capacity passes `SLACK_TRIGGER`
+/// times the live bytes, down to `SLACK_KEEP` times. Buffers under
+/// `SLACK_FLOOR` are left alone: a drain usually empties the buffer, and the
+/// next chunks would grow it back.
+const SLACK_TRIGGER: usize = 4;
+const SLACK_KEEP: usize = 2;
+pub(crate) const SLACK_FLOOR: usize = 64 * 1024;
+
+#[inline]
+pub(crate) fn release_stream_slack(buffer: &mut String) {
+  let len = buffer.len();
+  let capacity = buffer.capacity();
+  if capacity > SLACK_FLOOR && capacity / SLACK_TRIGGER > len {
+    buffer.shrink_to(STREAM_START_CAPACITY.max(SLACK_KEEP * len));
+  }
+}
+
 /// How much a run grows between scans for a usable word boundary. Prose offers
 /// one within a word or two; giving up keeps the scan off the hot path for
 /// input that offers none.
@@ -3383,6 +3403,7 @@ impl ConvertState {
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
+    release_stream_slack(&mut self.buffer);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;
     self.link.bracket_pos = self.link.bracket_pos.saturating_sub(drain_end);
