@@ -12,6 +12,32 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
+// A collapsed whitespace run is skipped a machine word at a time. Every run
+// length has to stop exactly on the byte after the run, before a tag and
+// before text, in one shot and when a chunk boundary cuts the run anywhere.
+#[test]
+fn whitespace_runs_of_every_length_collapse_to_one_space() {
+  let mixed = "\n        \t\t\t\t\t\t\t\t \r\n         ";
+  let mut runs: Vec<String> = vec![mixed.to_string()];
+  for filler in [' ', '\t', '\n'] {
+    for len in 1..=20 {
+      runs.push(std::iter::repeat_n(filler, len).collect());
+    }
+  }
+  for run in &runs {
+    let html = format!("<p>a{run}<b>b</b>{run}c{run}</p>{run}<p>d</p>");
+    assert_eq!(convert(&html), "a **b** c\n\nd", "run={run:?}");
+    let one_shot = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut streamed = processor.process_chunk(&html[..split]);
+      streamed.push_str(&processor.process_chunk(&html[split..]));
+      streamed.push_str(&processor.finish());
+      assert_eq!(streamed, one_shot, "run={run:?} split={split}");
+    }
+  }
+}
+
 fn transparent_override(name: &str, is_inline: bool) -> HtmlToMarkdownOptions {
   HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {

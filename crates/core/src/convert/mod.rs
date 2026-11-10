@@ -1905,13 +1905,16 @@ impl ConvertState {
           let limit = chunk_length.min(i + self.text_run_room(&text_buffer));
           i += 1;
           let mut had_space = false;
+          // Opaque, so the table address is computed once per run. Otherwise
+          // LLVM may rebuild it per byte (aarch64: +1 instruction per byte).
+          let table: &[bool; 256] = std::hint::black_box(&BATCHABLE_TEXT);
           loop {
-            while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
+            while i < limit && table[bytes[i] as usize] {
               i += 1;
             }
             // Doubled, trailing, and pre-tag spaces leave the run to the
             // general path, which keeps its collapsing semantics.
-            if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+            if i + 1 < limit && bytes[i] == SPACE_CHAR && table[bytes[i + 1] as usize] {
               had_space = true;
               i += 2;
               continue;
@@ -1983,7 +1986,13 @@ impl ConvertState {
             self.last_char_was_whitespace = false;
           }
           if !self.in_pre && self.last_char_was_whitespace {
-            i += 1;
+            // The rest of a collapsed run changes no state. Skip it here: the
+            // indentation between tags would otherwise take every byte through
+            // all the checks above.
+            i = crate::scan::whitespace_run_end(bytes, i + 1);
+            if text_buffer.is_empty() {
+              run_start = i - 1;
+            }
             continue;
           }
           if self.in_pre {
