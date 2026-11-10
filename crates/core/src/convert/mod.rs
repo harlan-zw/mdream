@@ -3698,6 +3698,9 @@ fn push_ended_reference(out: &mut String, reference: &str, scratch: &mut String)
   }
 }
 
+// Without a cap this is one `push_str`. Inlined on native, where the call
+// saved seven registers for it; WASM keeps the single copy for size.
+#[cfg_attr(not(target_arch = "wasm32"), inline(always))]
 fn push_capped_text_node(
   buffer: &mut String,
   text: &str,
@@ -3708,6 +3711,11 @@ fn push_capped_text_node(
     buffer.push_str(text);
     return false;
   }
+  push_text_under_cap(buffer, text, cap, exhausted)
+}
+
+#[inline(never)]
+fn push_text_under_cap(buffer: &mut String, text: &str, cap: usize, exhausted: &mut bool) -> bool {
   if text.is_empty() {
     return false;
   }
