@@ -450,9 +450,9 @@ pub fn get_tag_id_ci_bytes(name: &[u8]) -> Option<u8> {
 /// literals; the compiler lowers this to a length + first-byte decision tree
 /// with fixed-size `memcmp` leaves. Returns `None` for any tag not in the
 /// built-in set; callers can opt those tags into a rendering via `tagOverrides`.
-// One out-of-line copy in WASM, where each inlined match costs bundle bytes.
-#[cfg_attr(target_arch = "wasm32", inline(never))]
-fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
+#[cfg(any(test, not(target_arch = "wasm32")))]
+#[inline]
+fn get_tag_id_matched(bytes: &[u8]) -> Option<u8> {
   Some(match bytes {
     b"figcaption" => TAG_FIGCAPTION,
     b"blockquote" => TAG_BLOCKQUOTE,
@@ -569,6 +569,106 @@ fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
     b"a" => TAG_A,
     _ => return None,
   })
+}
+
+/// Hash of a tag name for [`TAG_HASH`]: first two and last two bytes, folded
+/// with the length, multiplied by an odd constant and keeping the top bits.
+/// Names of length 1 read index 0 for the missing bytes, so every length is in
+/// bounds; the empty name is rejected by the caller.
+#[cfg(any(test, target_arch = "wasm32"))]
+#[inline(always)]
+const fn tag_hash(bytes: &[u8]) -> usize {
+  let len = bytes.len();
+  let key = (bytes[0] as u32
+    | (bytes[(len > 1) as usize] as u32) << 8
+    | (bytes[len.saturating_sub(2)] as u32) << 16
+    | (bytes[len - 1] as u32) << 24)
+    ^ len as u32;
+  (key.wrapping_mul(TAG_HASH_MUL) >> (32 - TAG_HASH_BITS)) as usize
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+const TAG_HASH_BITS: u32 = 9;
+#[cfg(any(test, target_arch = "wasm32"))]
+const TAG_HASH_MUL: u32 = 0x5e43_9de7;
+#[cfg(any(test, target_arch = "wasm32"))]
+const TAG_HASH_EMPTY: u8 = u8::MAX;
+
+/// Slot -> tag ID for every built-in name. Built at compile time; a collision
+/// fails the build, so the table is exact without a fallback chain.
+#[cfg(any(test, target_arch = "wasm32"))]
+static TAG_HASH: [u8; 1 << TAG_HASH_BITS] = {
+  let mut table = [TAG_HASH_EMPTY; 1 << TAG_HASH_BITS];
+  let mut id = 0;
+  while id < MAX_TAG_ID {
+    let slot = tag_hash(TAG_NAMES[id].as_bytes());
+    assert!(table[slot] == TAG_HASH_EMPTY, "tag hash collision");
+    table[slot] = id as u8;
+    id += 1;
+  }
+  table
+};
+
+/// Hashed lookup: one probe, then a full name compare so a non-tag that lands
+/// in an occupied slot still misses.
+#[cfg(any(test, target_arch = "wasm32"))]
+#[inline]
+fn get_tag_id_hashed(bytes: &[u8]) -> Option<u8> {
+  if bytes.is_empty() {
+    return None;
+  }
+  let id = TAG_HASH[tag_hash(bytes)];
+  if id == TAG_HASH_EMPTY || TAG_NAMES[id as usize].as_bytes() != bytes {
+    return None;
+  }
+  Some(id)
+}
+
+/// Built-in tag lookup. The hashed table is used on wasm, where each inlined
+/// match arm costs bundle bytes; native keeps the match (its lowering is
+/// faster there). Both are checked against each other in tests.
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
+  get_tag_id_hashed(bytes)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[inline]
+fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
+  get_tag_id_matched(bytes)
+}
+
+#[cfg(test)]
+mod tag_hash_tests {
+  use super::*;
+
+  #[test]
+  fn hashed_lookup_matches_match_lookup() {
+    for (id, name) in TAG_NAMES.iter().enumerate() {
+      let name = name.as_bytes();
+      assert_eq!(get_tag_id_hashed(name), Some(id as u8), "{id}");
+      assert_eq!(get_tag_id_hashed(name), get_tag_id_matched(name), "{id}");
+      // Each one-byte edit of a real name: the hash may land in an occupied
+      // slot, and the full compare must still reject it.
+      let mut edited = name.to_vec();
+      for pos in 0..edited.len() {
+        let original = edited[pos];
+        for byte in b'a'..=b'z' {
+          edited[pos] = byte;
+          assert_eq!(get_tag_id_hashed(&edited), get_tag_id_matched(&edited));
+        }
+        edited[pos] = original;
+      }
+    }
+    for probe in [&b""[..], b"x", b"DIV", b"htmlx", b"my-element", b"spanspan"] {
+      assert_eq!(
+        get_tag_id_hashed(probe),
+        get_tag_id_matched(probe),
+        "{probe:?}"
+      );
+    }
+  }
 }
 
 #[cfg(test)]
