@@ -2056,3 +2056,85 @@ fn caption_emphasis_after_leading_break() {
     }
   }
 }
+
+#[test]
+fn caption_delimiter_context() {
+  for (html, expected) in [
+    (
+      r#"<code>A<br><figcaption><em><br>B</em></figcaption></code>"#,
+      "`A\n**\nB**`",
+    ),
+    (
+      r#"<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>"#,
+      "`**\nB**C`",
+    ),
+    (
+      r#"<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>"#,
+      "A   \n**B**",
+    ),
+    (
+      r#"A<figcaption><br><em><br>B</em></figcaption>"#,
+      "A  \n  \n**B**",
+    ),
+    (
+      r#"<button>A </button><figcaption><script></script></figcaption>B"#,
+      "A B",
+    ),
+    (
+      r#"<h3><button>A </button><figcaption><script></script>B</figcaption></h3>"#,
+      "### A *B*",
+    ),
+    (
+      r#"<table><tr><td><button>A </button><figcaption><script>s</script><code>B</code></figcaption></td></tr></table>"#,
+      "| A *`B`* |\n| --- |",
+    ),
+    (
+      r#"<table><tr><td><button>A </button><figcaption><script>s</script>B</figcaption></td></tr></table>"#,
+      "| A *B* |\n| --- |",
+    ),
+    (
+      r#"<table><tr><td><button>A </button><figcaption><script>s</script><em>B</em></figcaption></td></tr></table>"#,
+      "| A **B** |\n| --- |",
+    ),
+    (
+      r#"<h2><button>A </button><figcaption><script>s</script><code>B</code></figcaption></h2>"#,
+      "## A *`B`*",
+    ),
+    (
+      r#"<button>A </button><figcaption><style></style></figcaption>B"#,
+      "A B",
+    ),
+    (
+      r#"<h3><button>A </button><figcaption><style></style>B</figcaption></h3>"#,
+      "### A *B*",
+    ),
+    (
+      r#"<table><tr><td><button>A </button><figcaption><style>s</style><code>B</code></figcaption></td></tr></table>"#,
+      "| A *`B`* |\n| --- |",
+    ),
+    (
+      r#"<table><tr><td><button>A </button><figcaption><style>s</style>B</figcaption></td></tr></table>"#,
+      "| A *B* |\n| --- |",
+    ),
+    (
+      r#"<table><tr><td><button>A </button><figcaption><style>s</style><em>B</em></figcaption></td></tr></table>"#,
+      "| A **B** |\n| --- |",
+    ),
+    (
+      r#"<h2><button>A </button><figcaption><style>s</style><code>B</code></figcaption></h2>"#,
+      "## A *`B`*",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split} {html}");
+    }
+  }
+}

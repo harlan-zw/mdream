@@ -191,7 +191,9 @@ const CAPTION_INTERNAL_BREAK = 2
 // The caption took a pending heading break at its enter; dropped empty, it
 // owes the break again.
 const CAPTION_HEADING_BREAK = 4
-const CAPTION_ANCHORED_BREAK = 8
+// Match Rust's tentative opener: decide its prefix before later breaks arrive.
+// Retraction clears this decision while retaining breaks from earlier children.
+const CAPTION_BLOCK_PREFIX = 8
 const CAPTION_DEFAULT_SPACING = -1
 const CAPTION_NO_ANCHOR = -1
 INLINE_MARKER_TYPE[TAG_STRONG] = 1 // **
@@ -1052,7 +1054,7 @@ function resetRetractedCaptionFrames(frames: number[] | undefined, count: number
   for (let index = 0; index < count; index++) {
     const offset = index * CAPTION_FRAME_SIZE
     if (frames[offset + 3]! >= fragment) {
-      frames[offset + 2] = frames[offset + 2]! & ~(CAPTION_OPEN | CAPTION_ANCHORED_BREAK)
+      frames[offset + 2] = frames[offset + 2]! & ~(CAPTION_OPEN | CAPTION_BLOCK_PREFIX)
       frames[offset + 3] = CAPTION_NO_ANCHOR
     }
   }
@@ -1701,8 +1703,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           continue
         const anchor = frames[offset + 3]!
         const beforeFragment = anchor === CAPTION_NO_ANCHOR ? state.buffer.length : anchor
-        let opening = (flags & CAPTION_INTERNAL_BREAK)
-          && !((flags & CAPTION_ANCHORED_BREAK) && anchor !== CAPTION_NO_ANCHOR)
+        let opening = (flags & CAPTION_INTERNAL_BREAK) && !(flags & CAPTION_BLOCK_PREFIX)
           ? ''
           : captionSpacingPrefix(frames[offset]!, true, beforeFragment)
         // A block prefix replaces the owed separator. With no block prefix,
@@ -1794,8 +1795,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       return
     for (let index = 0; index < captionFrameCount; index++) {
       const offset = index * CAPTION_FRAME_SIZE
-      if ((frames[offset + 2]! & CAPTION_OPEN) === 0 && frames[offset + 3] === CAPTION_NO_ANCHOR)
+      if ((frames[offset + 2]! & CAPTION_OPEN) === 0 && frames[offset + 3] === CAPTION_NO_ANCHOR) {
         frames[offset + 3] = fragment
+        if (!(frames[offset + 2]! & CAPTION_INTERNAL_BREAK))
+          frames[offset + 2]! |= CAPTION_BLOCK_PREFIX
+      }
     }
   }
 
@@ -1832,11 +1836,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.buffer.length = index
       noteBufferRewrite(state)
     }
-    const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
+    const output = (gfmLifecycle.openCodeSpans.length ? '\n' : `  \n${state.listIndent}`).repeat(captionBreakRun)
     captionBreakRun = 0
     // A leading break must precede an empty emphasis opener run. Whitespace
     // immediately after its delimiter prevents CommonMark from opening it.
-    if (beforeText && openMarkerCount && (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) <= 4) {
+    // Code spans keep the original order: joining breaks can end the paragraph.
+    if (beforeText && !gfmLifecycle.openCodeSpans.length && openMarkerCount && (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) <= 4) {
       for (let frame = 0; frame < captionFrameCount; frame++) {
         const offset = frame * CAPTION_FRAME_SIZE
         const anchor = captionFrames![offset + 3]!
@@ -1866,7 +1871,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           noteBufferRewrite(state)
           return true
         }
-        break
       }
     }
     state.buffer.push(output)
@@ -2526,8 +2530,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         for (let index = 0; index < captionFrameCount; index++) {
           const offset = index * CAPTION_FRAME_SIZE + 2
           if ((captionFrames![offset]! & CAPTION_OPEN) === 0) {
-            if (captionFrames![offset + 1] !== CAPTION_NO_ANCHOR)
-              captionFrames![offset] = captionFrames![offset]! | CAPTION_ANCHORED_BREAK
             captionFrames![offset] = captionFrames![offset]! | CAPTION_INTERNAL_BREAK
           }
         }
@@ -2959,11 +2961,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       newLines = 0
 
     pendingSpaceFragment = -1
-    // Invisible children cannot consume the separator a pending caption owns.
+    // An anchored opener already owns this separator, even before a block.
+    // Invisible children also leave an unanchored caption's separator pending.
     if (state.pendingInlineWhitespace && !(captionFrameCount !== 0
       && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
-      && (captionTransition || (!output && newLines === 0
-        && (eventType === NodeEventExit || tagId === TAG_SVG || tagId === TAG_SCRIPT || tagId === TAG_STYLE))))) {
+      && (captionTransition
+        || captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 3] !== CAPTION_NO_ANCHOR
+        || (!output && newLines === 0
+          && (eventType === NodeEventExit || tagId === TAG_SVG || tagId === TAG_SCRIPT || tagId === TAG_STYLE))))) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
         // A raw `<br>` (heading, table cell) is no line end, so it keeps the

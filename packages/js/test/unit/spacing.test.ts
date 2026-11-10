@@ -951,3 +951,78 @@ it('does not count a split empty raw-text closer as body text', async () => {
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `${tag}, split=${split}`).toBe(expected)
   }
 })
+
+it.each([
+  [
+    '<code>A<br><figcaption><em><br>B</em></figcaption></code>',
+    '`A\n**\nB**`',
+  ],
+  [
+    '<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>',
+    '`**\nB**C`',
+  ],
+  [
+    '<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>',
+    'A   \n**B**',
+  ],
+  [
+    'A<figcaption><br><em><br>B</em></figcaption>',
+    'A  \n  \n**B**',
+  ],
+  [
+    '<button>A </button><figcaption><script></script></figcaption>B',
+    'A B',
+  ],
+  [
+    '<h3><button>A </button><figcaption><script></script>B</figcaption></h3>',
+    '### A *B*',
+  ],
+  [
+    '<table><tr><td><button>A </button><figcaption><script>s</script><code>B</code></figcaption></td></tr></table>',
+    '| A *`B`* |\n| --- |',
+  ],
+  [
+    '<table><tr><td><button>A </button><figcaption><script>s</script>B</figcaption></td></tr></table>',
+    '| A *B* |\n| --- |',
+  ],
+  [
+    '<table><tr><td><button>A </button><figcaption><script>s</script><em>B</em></figcaption></td></tr></table>',
+    '| A **B** |\n| --- |',
+  ],
+  [
+    '<h2><button>A </button><figcaption><script>s</script><code>B</code></figcaption></h2>',
+    '## A *`B`*',
+  ],
+  [
+    '<button>A </button><figcaption><style></style></figcaption>B',
+    'A B',
+  ],
+  [
+    '<h3><button>A </button><figcaption><style></style>B</figcaption></h3>',
+    '### A *B*',
+  ],
+  [
+    '<table><tr><td><button>A </button><figcaption><style>s</style><code>B</code></figcaption></td></tr></table>',
+    '| A *`B`* |\n| --- |',
+  ],
+  [
+    '<table><tr><td><button>A </button><figcaption><style>s</style>B</figcaption></td></tr></table>',
+    '| A *B* |\n| --- |',
+  ],
+  [
+    '<table><tr><td><button>A </button><figcaption><style>s</style><em>B</em></figcaption></td></tr></table>',
+    '| A **B** |\n| --- |',
+  ],
+  [
+    '<h2><button>A </button><figcaption><style>s</style><code>B</code></figcaption></h2>',
+    '## A *`B`*',
+  ],
+])('preserves caption delimiter context: %s', async (html, expected) => {
+  expect(htmlToMarkdown(html)).toBe(expected)
+  for (const width of [1, 2, 3, 7]) {
+    const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+    expect(await streamConvert(chunks), `width=${width}`).toBe(expected)
+  }
+  for (let split = 0; split <= html.length; split++)
+    expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+})

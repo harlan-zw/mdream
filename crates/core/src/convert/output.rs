@@ -4976,23 +4976,26 @@ impl ConvertState {
       self.trim_trailing_spaces();
       // Keep a leading break before tentative emphasis, where its whitespace
       // cannot invalidate the delimiter's CommonMark left-flanking rule.
+      // Code spans keep their order so separate breaks cannot form a blank line.
       let opener = self
         .open_markers
         .last()
         .filter(|marker| marker.kind <= 4 && marker.content_start == self.buffer.len());
-      let anchor = opener.filter(|_| before_text).and_then(|_| {
-        self.caption_frames.iter().find_map(|frame| {
-          if let CaptionState::Tentative { content_start, .. } = frame.state {
-            let start = content_start.saturating_sub(1);
-            self.buffer.as_bytes()[start..]
-              .iter()
-              .all(|byte| matches!(byte, b'*' | b'~'))
-              .then_some(start)
-          } else {
-            None
-          }
-        })
-      });
+      let anchor = opener
+        .filter(|_| before_text && self.code_spans.is_empty())
+        .and_then(|_| {
+          self.caption_frames.iter().find_map(|frame| {
+            if let CaptionState::Tentative { content_start, .. } = frame.state {
+              let start = content_start.saturating_sub(1);
+              self.buffer.as_bytes()[start..]
+                .iter()
+                .all(|byte| matches!(byte, b'*' | b'~'))
+                .then_some(start)
+            } else {
+              None
+            }
+          })
+        });
       if let Some(at) = anchor {
         let output = run.fragment.repeat(run.count);
         if self.replace_code_span_content(at..at, &output) {
@@ -6206,7 +6209,7 @@ impl ConvertState {
         || self
           .stack
           .last()
-          .is_some_and(|node| node.tag_id == Some(TAG_SVG)))
+          .is_some_and(|node| matches!(node.tag_id, Some(TAG_SVG | TAG_SCRIPT | TAG_STYLE))))
       && self
         .caption_frames
         .last()
