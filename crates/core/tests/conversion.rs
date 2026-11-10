@@ -1015,6 +1015,82 @@ fn base_href_replaces_origin_for_later_urls() {
   );
 }
 
+/// A `<base href>` of `len` bytes.
+fn long_base(len: usize) -> String {
+  let base = format!("https://cdn.example/{}/", "a".repeat(len - 21));
+  assert_eq!(base.len(), len);
+  base
+}
+
+#[test]
+fn base_href_longer_than_limit_is_ignored() {
+  let at_limit = long_base(2048);
+  assert_eq!(
+    convert(&format!(r#"<base href="{at_limit}"><a href="x">t</a>"#)),
+    format!("[t]({at_limit}x)")
+  );
+  // Past the limit the base is unusable, so it also blocks a later base.
+  let over = long_base(2049);
+  let html = format!(
+    r#"<base href="{over}"><base href="https://ignored.example/"><a href="x">t</a> <img src="y.png">"#
+  );
+  assert_eq!(convert(&html), "[t](x) ![](y.png)");
+  assert_eq!(
+    convert_with_origin(&html, "https://example.com/doc/"),
+    "[t](https://example.com/doc/x) ![](https://example.com/doc/y.png)"
+  );
+  assert_eq!(
+    html_to_text(&html, HtmlToMarkdownOptions::default()),
+    "t y.png"
+  );
+  assert_eq!(
+    html_to_html(&html, HtmlToMarkdownOptions::default()),
+    r#"<a href="x">t</a> <img src="y.png" alt="">"#
+  );
+  // The limit applies after resolution against the origin.
+  let origin = "https://example.com/doc/";
+  let path = format!("/{}/", "d".repeat(2049 - "https://example.com//".len()));
+  assert_eq!(format!("https://example.com{path}").len(), 2049);
+  assert_eq!(
+    convert_with_origin(&format!(r#"<base href="{path}"><a href="x">t</a>"#), origin),
+    "[t](https://example.com/doc/x)"
+  );
+  assert_eq!(
+    convert_with_origin(
+      &format!(r#"<base href="{}"><a href="x">t</a>"#, &path[1..]),
+      origin
+    ),
+    "[t](https://example.com/doc/x)"
+  );
+}
+
+#[test]
+fn long_base_href_does_not_multiply_output() {
+  // Each relative URL used to repeat the whole base: 64 KiB of input made 16 MiB.
+  let html = format!(
+    r#"<base href="{}">{}"#,
+    long_base(4096),
+    r#"<a href=x>t</a>"#.repeat(4096)
+  );
+  let options = HtmlToMarkdownOptions {
+    max_node_bytes: 1024 * 1024,
+    ..Default::default()
+  };
+  let one_shot = html_to_markdown_result(&html, options.clone());
+  assert!(!one_shot.truncated);
+  assert_eq!(one_shot.markdown, vec!["[t](x)"; 4096].join(" "));
+  for width in [1, 37, 4096] {
+    let mut stream = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&stream.finish());
+    assert_eq!(out, one_shot.markdown, "width {width}");
+    assert!(!stream.truncated());
+  }
+}
+
 #[test]
 fn relative_path_without_origin() {
   assert_eq!(
