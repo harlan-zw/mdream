@@ -256,7 +256,9 @@ describe('inline whitespace', () => {
       ['<p>aaaa<b>x </b><strong></strong>1. b</p>', 'aaaa**x** 1.\nb', { wrapWidth: 6 }],
       // A separator trimmed from a closed element joins the text, where it
       // stays a wrap boundary.
-      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaa<span>x </span><span>bb</span></p>', 'aaaax\nbb', { wrapWidth: 6 }],
+      // A marker that would open a list keeps its space and overflows.
+      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax 1.\nb', { wrapWidth: 6 }],
       // Delimiters a plugin generates around the text stay tight around it.
       ['<p>Read<label> <span class="font-bold">new</span></label> now</p>', 'Read **new** now', tailwind()],
       ['<p>Price<span>: </span><span class="font-bold">$5</span></p>', 'Price: **$5**', tailwind()],

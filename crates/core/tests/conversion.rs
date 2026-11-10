@@ -2213,6 +2213,32 @@ fn nested_blockquotes_after_text_quote_both_levels() {
   );
 }
 
+// A root break before an immediately nested blockquote strands the outer frame the
+// same way. The JS engine lost the outer level here; both engines keep it.
+#[test]
+fn nested_blockquotes_after_block_break_keep_every_level() {
+  for (html, expected) in [
+    (
+      "<h3>y</h3><br><blockquote><blockquote>x</blockquote>y</blockquote>",
+      "### y\n\n  \n> > x\n>\n> y",
+    ),
+    (
+      "<br><blockquote><blockquote>x</blockquote></blockquote>",
+      "> > x",
+    ),
+    (
+      "<p>a</p><br><br><blockquote><blockquote><blockquote>x</blockquote></blockquote>y</blockquote>z",
+      "a\n\n  \n  \n> > > x\n>\n> y\n\nz",
+    ),
+    (
+      "<p>a</p><br><blockquote><blockquote></blockquote>y</blockquote>",
+      "a\n\n  \n>\n> y",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 #[test]
 fn blockquote_with_paragraphs() {
   assert_eq!(
@@ -5721,6 +5747,44 @@ fn wrap_never_splits_a_long_token() {
 }
 
 #[test]
+fn wrap_distinguishes_raw_text_from_block_markers() {
+  for (marker, can_wrap) in [
+    ("**", true),
+    ("_", true),
+    ("__", true),
+    ("*", false),
+    ("***", false),
+    ("___", false),
+  ] {
+    let html = format!("<details><summary>S</summary><code>aaaaaaaa</code> {marker} x</details>");
+    let expected = if can_wrap {
+      format!(
+        "<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code>\n{marker} x</details>"
+      )
+    } else {
+      format!(
+        "<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> {marker}\nx</details>"
+      )
+    };
+    assert_eq!(convert_wrapped(&html, 12), expected, "marker {marker}");
+    for size in 1..=html.len() {
+      let mut stream =
+        MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default().with_wrap_width(12));
+      let mut out = String::new();
+      for chunk in html.as_bytes().chunks(size) {
+        out.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      out.push_str(&stream.finish());
+      assert_eq!(
+        out.trim_end(),
+        expected,
+        "marker {marker}, chunk size {size}"
+      );
+    }
+  }
+}
+
+#[test]
 fn wrap_skips_code_tables_and_headings() {
   // Fenced code is emitted verbatim.
   let code = convert_wrapped(
@@ -6289,6 +6353,150 @@ fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
     "| h |\n| --- |\n| <h3>Ends with #</h3> |"
   );
   assert_eq!(convert_text("<h2>Ends with #</h2>"), "Ends with #");
+}
+
+#[test]
+fn a_heading_in_a_code_block_keeps_its_hash_unescaped() {
+  // Nothing in a fenced code block is parsed, so a backslash before the closing
+  // hashes would show as code.
+  for (html, expected) in [
+    ("<pre><h2>x #</h2></pre>", "```\n\n## x #\n\n\n```"),
+    ("<pre><h2>x ##</h2></pre>", "```\n\n## x ##\n\n\n```"),
+    ("<pre><h1>#</h1></pre>", "```\n\n# #\n\n\n```"),
+    ("<pre><code><h2>x #</h2></code></pre>", "```\n## x #\n```"),
+    ("<pre><h2>x <b>#</b></h2></pre>", "```\n\n## x #\n\n\n```"),
+    (
+      "<ul><li><pre><h2>x #</h2></pre></li></ul>",
+      "- ```\n  ## x #\n  ```",
+    ),
+    (
+      "<blockquote><pre><h2>x #</h2></pre></blockquote>",
+      "> ```\n>\n> ## x #\n>\n>\n> ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_heading_after_a_misread_fence_keeps_its_escape() {
+  // A `<pre>` in inline content writes fences glued to that content, which a
+  // parser can read with the opposite parity, leaving the heading a heading.
+  for (html, expected) in [
+    (
+      "<span>a<pre><h2>x #</h2></pre></span>",
+      "a```\n\n## x \\#\n\n\n```",
+    ),
+    (
+      "<span><pre>x</pre>b</span><pre><h2>x #</h2></pre>",
+      "```\nx\n``` b\n\n```\n\n## x \\#\n\n\n```",
+    ),
+    (
+      "<em>a<pre>x</pre></em><pre><h2>x #</h2></pre>",
+      "*a```\nx\n```*\n\n```\n\n## x \\#\n\n\n```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Literal override text need not stay on a code line, so the escape stays.
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("sup".to_string(), TagOverrideConfig::wrap("^", "^"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown("<pre><h2>x #</h2></pre>", options),
+    "```\n\n## x \\#\n\n\n```"
+  );
+}
+
+#[test]
+fn whitespace_before_a_nested_pre_stays_in_the_code() {
+  // A `<pre>` nested in another enters inside that one's code block, so the
+  // whitespace before it is code, not a boundary to trim.
+  for (html, expected) in [
+    (
+      "<pre><code><h4>x y </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y z\n```",
+    ),
+    (
+      "<pre><code><h4>x y   </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y   z\n```",
+    ),
+    (
+      "<pre><code><h4>x # </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>&nbsp;x # </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### \u{a0}x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>x y </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### x y z\n```",
+    ),
+    (
+      "<pre><code><ul><li>x y <pre><i>z</i></pre></li></ul></code></pre>",
+      "```\n- x y z\n```",
+    ),
+    (
+      "<pre><code><ul><li><h4>x # </h4><pre><b>z</b></pre></li></ul></code></pre>",
+      "```\n- #### x # z\n```",
+    ),
+    (
+      "<pre><code><h4>&nbsp;x y&nbsp; </h4><pre><span>z</span></pre></code></pre>",
+      "```\n#### \u{a0}x y\u{a0} z\n```",
+    ),
+    (
+      "<pre><code>x y <pre><code>z</code></pre></code></pre>",
+      "```\nx y z\n```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Outside the code, the space before a `<pre>` still goes.
+  assert_eq!(convert("<span>a <pre>x</pre></span>"), "a```\nx\n```");
+}
+
+#[test]
+fn whitespace_before_a_block_break_in_code_stays() {
+  // In a `<pre>` an inline wraps, a child block's exit writes newlines after its
+  // text. The next block must not trim back across them: the tab, CR or form
+  // feed before them is code, kept as JS keeps it.
+  assert_eq!(
+    convert("<span><pre><p>a b\t</p><table><tr><td>x</td></tr></table></pre></span>"),
+    "```\n\na b\t\n\n| x |\n| --- |\n```"
+  );
+  for (ws, kept) in [
+    ("\t", '\t'),
+    ("&#9;", '\t'),
+    ("&#13;", '\r'),
+    ("&#12;", '\u{c}'),
+  ] {
+    for (open, close) in [("<span>", "</span>"), ("", "")] {
+      for block in ["p", "h4"] {
+        for (next, following) in [
+          ("<table><tr><td>x</td></tr></table>", "| x |\n| --- |"),
+          ("<figure><figcaption>x</figcaption></figure>", "x"),
+          ("<hr>", "---"),
+          ("<ul><li>x</li></ul>", "- x"),
+          ("<ol><li>x</li></ol>", "1. x"),
+        ] {
+          let html = format!("{open}<pre><{block}>a b{ws}</{block}>{next}</pre>{close}");
+          let out = convert(&html);
+          let after = out
+            .split_once(&format!("a b{kept}"))
+            .map(|(_, after)| after);
+          assert!(
+            after.is_some_and(|after| after.contains(following)),
+            "html={html:?} out={out:?}"
+          );
+        }
+      }
+    }
+  }
 }
 
 #[test]
@@ -6867,15 +7075,16 @@ fn blockquote_quoting_keeps_escaping_a_later_line() {
 // A link rewrite is anchored on the `[` the anchor itself wrote. An anchor that
 // writes none -- no href, or suppressed inside `<pre>` -- used to abort its exit
 // and let the rewrite scan reach forward into the text, which dropped a literal
-// `[` behind its own escape and left the fence's trailing whitespace untrimmed.
+// `[` behind its own escape.
 #[test]
 fn a_clean_flag_leaves_content_outside_the_link_alone() {
   for (html, expected) in [
     ("<a>[", "\\["),
     ("x <a>[", "x \\["),
     ("<p><a>[</p>", "\\["),
-    ("<pre>x\t<a>", "```\nx\n```"),
-    ("<pre>x\n<a>", "```\nx\n```"),
+    // An empty link inside `<pre>` leaves the code as `<pre>x\t</pre>` gives it.
+    ("<pre>x\t<a>", "```\nx\t\n```"),
+    ("<pre>x\n<a>", "```\nx\n\n```"),
   ] {
     assert_eq!(
       convert_with_clean(html, clean_all()),
@@ -7117,7 +7326,8 @@ fn text_runs_keep_unicode_entities_and_gfm_context_across_chunks() {
     "<table><tr><td>é|東京_🙂&amp;x</td></tr></table>",
   ] {
     // `OutputFormat` is non-exhaustive, so pair each format with its converter.
-    let converters: [(OutputFormat, fn(&str, HtmlToMarkdownOptions) -> String); 3] = [
+    type Converter = fn(&str, HtmlToMarkdownOptions) -> String;
+    let converters: [(OutputFormat, Converter); 3] = [
       (OutputFormat::Markdown, html_to_markdown),
       (OutputFormat::Text, html_to_text),
       (OutputFormat::Html, html_to_html),
@@ -7255,6 +7465,155 @@ fn builtin_blockquote_alias_uses_div_semantics() {
 }
 
 #[test]
+fn bogus_comments_end_at_the_first_gt_without_opening_elements() {
+  for (html, expected) in [
+    ("<p>a<!x>b</p>", "ab"),
+    ("<p>a<?x", "a"),
+    ("<p>a<!x", "a"),
+    ("<p>a</ x", "a"),
+    ("<p>a <?x?>b</p>", "a b"),
+    ("<p>a<?x?> b</p>", "a b"),
+    ("<p>a&amp;<?x?>b</p>", "a&b"),
+    ("<code>a<?x?>b</code>", "`ab`"),
+    ("<pre>a<!x>b</pre>", "```\nab\n```"),
+    ("<textarea>a</ x>b</textarea>", "a\\</ x>b"),
+    ("<textarea>a<!x", "a\\<!x"),
+    ("<p>a<!dud>b</p>", "ab"),
+    ("<p>a</ x>b</p>", "ab"),
+    ("<p>a<?x?>b</p>", "ab"),
+    ("<pre>a<?x?>b</pre>", "```\nab\n```"),
+    ("<textarea>a<!x>b</textarea>", "a\\<!x>b"),
+    ("<p>a</>b</p>", "ab"),
+    ("<p>a</1x>b</p>", "ab"),
+    ("<p>a</?x>b</p>", "ab"),
+    (r#"<p>a<?x y=">">b</p>"#, r#"a">b"#),
+    (r#"<p>a</ x y=">">b</p>"#, r#"a">b"#),
+    ("<p><a href=\"/c\">x<?x?> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><?x?><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x<?x y?> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><?x y?><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x<!x> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li><!x><li>b</li></ol>", "1. a\n2. b"),
+    ("<p><a href=\"/c\">x</ x> </a>Next</p>", "[x](/c) Next"),
+    ("<ol><li>a</li></ x><li>b</li></ol>", "1. a\n2. b"),
+    ("<p>before<?x y=\">after</p>", "beforeafter"),
+    ("<p>before<!x y=\">after</p>", "beforeafter"),
+    ("<p>before</ x y=\">after</p>", "beforeafter"),
+    ("<p>before<?--x>after</p>", "beforeafter"),
+    ("<p>before<?[CDATA[x>after</p>", "beforeafter"),
+    ("<p>before</p><?x", "before"),
+    ("<p>before</p><!x", "before"),
+    ("<p>before</p></ x", "before"),
+    ("<textarea>a<?x?>b</textarea>", "a\\<?x?>b"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output.trim_end(), expected, "{html} chunk width {width}");
+    }
+  }
+}
+
+fn convert_stream(html: &str, options: &HtmlToMarkdownOptions, width: usize) -> String {
+  let mut stream = MarkdownStreamProcessor::new(options.clone());
+  let mut output = String::new();
+  for chunk in html.as_bytes().chunks(width) {
+    output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+  }
+  output.push_str(&stream.finish());
+  output
+}
+
+/// A discarded token ends the DOM text node before it, so no character reference
+/// spans it. Each input converts like the HTML that spells out its DOM text.
+#[test]
+fn character_references_end_at_discarded_tokens() {
+  let zeros = "0".repeat(100);
+  for (html, dom_html) in [
+    ("<p>a&<?x?>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>a&</ x>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>a&am<!x>p;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>a&lt<!x>;b</p>".to_string(), "<p>a&lt;;b</p>"),
+    ("<p>a&#65<?x?>66;b</p>".to_string(), "<p>aA66;b</p>"),
+    (format!("<p>a&#{zeros}6<?x?>5;b</p>"), "<p>a&#6;5;b</p>"),
+    ("<p>a&#x4<?x?>1;b</p>".to_string(), "<p>a&#x4;1;b</p>"),
+    ("<p>a&#<?x?>65;b</p>".to_string(), "<p>a&amp;#65;b</p>"),
+    ("<p>a&amp<?x?>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>a&not<?x?>in;b</p>".to_string(), "<p>a&not;in;b</p>"),
+    ("<p>a&zz<?x?>z;b</p>".to_string(), "<p>a&amp;zzz;b</p>"),
+    ("<p>a&amp;<?x?>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    (
+      "<p>a&<?x?>&<?x?>amp;b</p>".to_string(),
+      "<p>a&amp;&amp;amp;b</p>",
+    ),
+    ("<p>a&<?x?><?y?>amp;b</p>".to_string(), "<p>a&amp;amp;b</p>"),
+    ("<p>&<?x?>amp; b</p>".to_string(), "<p>&amp;amp; b</p>"),
+    (
+      "<pre>a&<?x?>amp;b</pre>".to_string(),
+      "<pre>a&amp;amp;b</pre>",
+    ),
+  ] {
+    let expected = convert(dom_html);
+    assert_eq!(convert(&html), expected, "{html}");
+    assert_eq!(
+      html_to_text(&html, HtmlToMarkdownOptions::default()),
+      html_to_text(dom_html, HtmlToMarkdownOptions::default()),
+      "text {html}"
+    );
+    let options = HtmlToMarkdownOptions::default();
+    for width in 1..=html.len() {
+      assert_eq!(
+        convert_stream(&html, &options, width).trim_end(),
+        expected,
+        "{html} chunk width {width}"
+      );
+    }
+  }
+  for (html, expected) in [
+    ("<p>a&<?x?>amp;b</p>", "a\\&amp;b"),
+    ("<p>a&</ x>amp;b</p>", "a\\&amp;b"),
+    ("<p>a&am<!x>p;b</p>", "a\\&amp;b"),
+    ("<p>a&lt<!x>;b</p>", "a<;b"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+/// A run past 64 KiB is emitted in pieces. Seals before, around and after the
+/// cut must stay with their own piece, rebased into the tail.
+#[test]
+fn character_references_end_at_discarded_tokens_across_run_pieces() {
+  let filler = "lorem ipsum dolor sit amet ".repeat(2420);
+  let sealed = "x&<?x?>amp;y ".repeat(40);
+  let spelled = "x&amp;amp;y ".repeat(40);
+  let html = format!("<p>a&<?x?>amp;b {filler}{sealed}c&<?x?>amp;d</p>");
+  let dom_html = format!("<p>a&amp;amp;b {filler}{spelled}c&amp;amp;d</p>");
+  // The run crosses the 64 KiB cut inside the sealed tokens.
+  assert!(filler.len() < 64 * 1024 && filler.len() + 40 * "x&amp;y ".len() > 64 * 1024);
+  let expected = convert(&dom_html);
+  assert!(expected.starts_with("a\\&amp;b lorem"), "{:.40}", expected);
+  assert!(
+    expected.ends_with("x\\&amp;y c\\&amp;d"),
+    "{}",
+    &expected[expected.len() - 40..]
+  );
+  assert_eq!(convert(&html), expected);
+  let options = HtmlToMarkdownOptions::default();
+  for width in [1, 7, 4096, 65_536, html.len()] {
+    assert_eq!(
+      convert_stream(&html, &options, width).trim_end(),
+      expected,
+      "chunk width {width}"
+    );
+  }
+}
+
+#[test]
 fn blockquote_parent_continuation_respects_overrides() {
   for (html, override_name, config, expected) in [
     (
@@ -7295,6 +7654,35 @@ fn blockquote_parent_continuation_respects_overrides() {
       ..Default::default()
     };
     assert_eq!(html_to_markdown(html, options.clone()), expected);
+  }
+}
+
+/// The node cap counts the source text, so a reference ended at a discarded
+/// token keeps the cut where it was, whether ending it lengthens or shortens it.
+#[test]
+fn node_cap_counts_source_text_across_discarded_tokens() {
+  for (html, cap, expected) in [
+    ("<p>a&<?x?>amp;b</p>", 2, "a&"),
+    ("<p>a&<?x?>amp;b</p>", 6, "a\\&amp;"),
+    ("<p>a&<?x?>amp;b</p>", 7, "a\\&amp;b"),
+    ("<p>a&#65<?x?>66;b</p>", 4, "a\u{6}"),
+    ("<p>a&#65<?x?>66;b</p>", 5, "aA"),
+    ("<p>a&#65<?x?>66;b</p>", 7, "aA66"),
+    ("<p>a&#65<?x?>66;b</p>", 9, "aA66;b"),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_max_node_bytes(cap);
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{html} cap {cap}"
+    );
+    for width in 1..=html.len() {
+      assert_eq!(
+        convert_stream(html, &options, width).trim_end(),
+        expected,
+        "{html} cap {cap} chunk width {width}"
+      );
+    }
   }
 }
 
@@ -7409,6 +7797,428 @@ fn scout9_wrap_setext_plain_text_still_wraps() {
     ),
     "aaaaaaaaaa\n--"
   );
+}
+
+#[test]
+fn vertical_tabs_before_emphasis_closers() {
+  for (tag, marker) in [
+    ("em", "*"),
+    ("i", "*"),
+    ("strong", "**"),
+    ("b", "**"),
+    ("cite", "*"),
+    ("dfn", "**"),
+    ("del", "~~"),
+    ("s", "~~"),
+    ("strike", "~~"),
+  ] {
+    for suffix in [
+      "\u{000b}",
+      "\u{000b} ",
+      "\u{000b}\u{000b} ",
+      "\u{000b} \t",
+      " \u{000b}",
+      "\u{000b} \u{000b} ",
+    ] {
+      let html = format!("<{tag}>T{suffix}</{tag}>");
+      let expected = format!("{marker}T{marker}{}", suffix.trim_ascii_end());
+      let separator = if suffix.ends_with([' ', '\t']) {
+        " "
+      } else {
+        ""
+      };
+      for (html, expected) in [
+        (html.clone(), expected.clone()),
+        (format!("<p>{html}</p>"), expected.clone()),
+        (format!("<ul><li>{html}</li></ul>"), format!("- {expected}")),
+        (format!("{html}X"), format!("{expected}{separator}X")),
+      ] {
+        assert_eq!(convert(&html), expected, "{html:?}");
+        for width in 1..=html.len() {
+          let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+          let mut output = String::new();
+          for chunk in html.as_bytes().chunks(width) {
+            output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+          }
+          output.push_str(&stream.finish());
+          assert_eq!(output, expected, "{html:?}, width {width}");
+        }
+      }
+    }
+  }
+}
+
+#[test]
+fn non_html_whitespace_streaming_parity() {
+  for space in ['\u{000b}', '\u{00a0}', '\u{2003}'] {
+    let cases = [
+      (format!("T{space}"), format!("T{space}")),
+      (format!("<p>T</p>{space}"), format!("T\n\n{space}")),
+      (format!("<ul><li>T{space}</li></ul>"), format!("- T{space}")),
+      (
+        format!("<ul><li><h3>T</h3>{space}</li></ul>"),
+        format!("- ### T\n\n  {space}"),
+      ),
+      (
+        format!("<p>T</p>{space}<p>X</p>"),
+        format!("T\n\n{space}\n\nX"),
+      ),
+      (format!("<p>T</p>{space} "), format!("T\n\n{space}")),
+    ];
+    for (html, expected) in cases {
+      assert_eq!(convert(&html), expected);
+      let chars: Vec<char> = html.chars().collect();
+      for width in 1..=chars.len() {
+        let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = String::new();
+        for chunk in chars.chunks(width) {
+          output.push_str(&stream.process_chunk(&chunk.iter().collect::<String>()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, expected, "{html:?}, width {width}");
+      }
+    }
+  }
+}
+
+#[test]
+fn override_whitespace_streaming_parity() {
+  for space in ['\t', '\n', '\u{000c}', '\r', ' ', '\u{000b}'] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "span".to_string(),
+          TagOverrideConfig {
+            exit: Some(space.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    for html in ["<span>T</span>", "<span>T</span>X"] {
+      let expected = if html.ends_with('X') {
+        format!("T{space}X")
+      } else if space == '\u{000b}' {
+        format!("T{space}")
+      } else {
+        "T".to_string()
+      };
+      assert_eq!(html_to_markdown(html, options.clone()), expected);
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for chunk in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, expected, "{html:?}, width {width}");
+      }
+    }
+  }
+}
+
+#[test]
+fn emphasis_override_vertical_tabs() {
+  for (tag, marker) in [("em", "*"), ("cite", "*"), ("dfn", "**"), ("del", "~~")] {
+    for (html, override_tag, exit, expected) in [
+      (
+        format!("<{tag}>T&#11;</{tag}>X"),
+        tag,
+        marker,
+        format!("{marker}T\u{000b}{marker}X"),
+      ),
+      (
+        format!("<{tag}>T<span></span></{tag}>X"),
+        "span",
+        "\u{000b} ",
+        format!("{marker}T{marker}\u{000b} X"),
+      ),
+    ] {
+      let options = HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![(
+            override_tag.to_string(),
+            TagOverrideConfig {
+              exit: Some(exit.to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      };
+      assert_eq!(html_to_markdown(&html, options.clone()), expected, "{html}");
+      for width in 1..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = String::new();
+        for chunk in html.as_bytes().chunks(width) {
+          output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+        }
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "{html}, width {width}");
+      }
+    }
+  }
+}
+
+#[test]
+fn caption_vertical_tabs_keep_the_existing_marker_placement() {
+  for suffix in ["&#11;", "&#11; "] {
+    let html = format!("<figure><img src=\"a.png\"><figcaption>T{suffix}</figcaption></figure>");
+    let expected = convert(&html);
+    assert!(expected.contains("*T\u{000b}*"), "{expected:?}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_vertical_tabs_before_breaks_and_aliases() {
+  let alias = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("ex".to_string(), TagOverrideConfig::alias("em"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    (
+      "<em>T&#11;<br></em>X",
+      HtmlToMarkdownOptions::default(),
+      "*T*\u{000b}  \nX",
+    ),
+    ("<ex>T&#11;</ex>X", alias, "*T*\u{000b}X"),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(options.clone());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_vertical_tabs_stream_after_the_emphasis_closes() {
+  // Text output moves no run, and the held run must not go stale once the
+  // emphasis closes (a debug build asserts on it).
+  for (format, html, expected) in [
+    (OutputFormat::Text, "<h2><em>a&#11;</em></h2>", "a\u{000b}"),
+    (
+      OutputFormat::Text,
+      "<p><em>a&#11;&#11;</em></p>",
+      "a\u{000b}\u{000b}",
+    ),
+    (OutputFormat::Text, "<p><em>a&#11;</em>b</p>", "a\u{000b}b"),
+    (
+      OutputFormat::Markdown,
+      "<pre><em>T&#11;</em>x</pre>",
+      "```\nT\u{000b}x\n```",
+    ),
+    (
+      OutputFormat::Markdown,
+      "<pre><em>T&#11; </em>x</pre>",
+      "```\nT\u{000b} x\n```",
+    ),
+    (
+      OutputFormat::Markdown,
+      "<p><em>T&#11;</em>&#11;x</p>",
+      "*T*\u{000b}\u{000b}x",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    let one_shot = mdream::html_to_format_result(html, options.clone(), format);
+    assert_eq!(one_shot.markdown, expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new_with_format(options.clone(), format);
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{format:?} {html}, width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_holding_only_vertical_tabs_drops_its_delimiters() {
+  // The closer moves the run after itself, so the pair is empty like `<em></em>`.
+  for (html, expected) in [
+    // The document-start trim takes the run, as it does for `<p>&#11;x</p>`.
+    ("<p><em>&#11;</em>x</p>", "x"),
+    ("<p>z</p><p><em>&#11;</em>x</p>", "z\n\n\u{000b}x"),
+    ("<p>z <em>&#11; </em>x</p>", "z \u{000b} x"),
+    ("<p>z <strong><em>&#11;</em></strong>x</p>", "z \u{000b}x"),
+    ("<p><strong>a<em>&#11;</em></strong>x</p>", "**a**\u{000b}x"),
+    ("<ul><li><em>&#11;</em></li></ul>", "- \u{000b}"),
+    ("<p>z<br><em>&#11;</em>x</p>", "z  \n\u{000b}x"),
+    ("<p>z <em>&#11;<br></em>x</p>", "z \u{000b}  \nx"),
+    ("<p>a <del>&#11;</del> x</p>", "a \u{000b} x"),
+    ("<p>a <cite>&#11;&#11;</cite> x</p>", "a \u{000b}\u{000b} x"),
+    ("<p>a <dfn>&#11;</dfn>x</p>", "a \u{000b}x"),
+    (
+      "<figure><img src=\"a.png\"><figcaption><em>&#11;</em></figcaption></figure>",
+      "![](a.png)\n\n*\u{000b}*",
+    ),
+    ("<p>z <code>&#11;</code>x</p>", "z `\u{000b}`x"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_vertical_tabs_keep_repeated_breaks() {
+  // Streaming holds repeated breaks as one counted run, which moving the
+  // emphasis whitespace must carry along rather than drop.
+  for (html, expected) in [
+    ("<p><em>T&#11;<br><br></em>X</p>", "*T*\u{000b}  \n  \nX"),
+    (
+      "<p><em>T&#11;<br><br><br></em>X</p>",
+      "*T*\u{000b}  \n  \n  \nX",
+    ),
+    ("<p><em>T<br><br>&#11;</em>X</p>", "*T*  \n  \n\u{000b}X"),
+    (
+      "<p><strong>T&#11;<br><br></strong>X</p>",
+      "**T**\u{000b}  \n  \nX",
+    ),
+    (
+      "<p><em>T&#11;<br><br></em></p><p>X</p>",
+      "*T*\u{000b}  \n  \n\nX",
+    ),
+    ("<p>z<em>&#11;<br><br></em>X</p>", "z\u{000b}  \n  \nX"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_vertical_tabs_keep_list_item_block_boundaries() {
+  // The hard break still ends the output once the closer moves before it, so a
+  // block that follows inside the item keeps its blank line.
+  for (html, expected) in [
+    (
+      "<ul><li><em>T&#11;<br></em><p>X</p></li></ul>",
+      "- *T*\u{000b}  \n\n  X",
+    ),
+    (
+      "<ul><li><em>T&#11;<br></em><div>X</div></li></ul>",
+      "- *T*\u{000b}  \n\n  X",
+    ),
+    (
+      "<ul><li><em>T&#11;<br></em><pre>X</pre></li></ul>",
+      "- *T*\u{000b}  \n\n  ```\n  X\n  ```",
+    ),
+    (
+      "<ul><li><em>T&#11;<br></em><table><tr><td>X</td></tr></table></li></ul>",
+      "- *T*\u{000b}  \n\n  | X |\n  | --- |",
+    ),
+    (
+      "<ol><li><em>T&#11;<br></em><ol start=\"3\"><li>X</li></ol></li></ol>",
+      "1. *T*\u{000b}  \n\n   3. X",
+    ),
+    (
+      "<ul><li><strong>T&#11;<br></strong><p>X</p></li></ul>",
+      "- **T**\u{000b}  \n\n  X",
+    ),
+    (
+      "<ul><li><em>T&#11;<br><br></em><p>X</p></li></ul>",
+      "- *T*\u{000b}  \n    \n\n  X",
+    ),
+    (
+      "<ul><li><em>&#11;<br></em><p>X</p></li></ul>",
+      "- \u{000b}  \n\n  X",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
+}
+
+#[test]
+fn emphasis_holding_only_vertical_tabs_keeps_breaks_before_list_item_blocks() {
+  // Dropping the pair leaves the run as it was without the emphasis, so the
+  // block after it trims only the trailing whitespace and keeps every break.
+  for (html, expected) in [
+    (
+      "<ul><li>z<em>&#11;<br><br> &#9;</em><p>X</p></li></ul>",
+      "- z\u{000b}  \n    \n  \n\n  X",
+    ),
+    (
+      "<ul><li>z<em>&#11;<br><br><br> &#9;</em><p>X</p></li></ul>",
+      "- z\u{000b}  \n    \n    \n  \n\n  X",
+    ),
+    (
+      "<ul><li>z<em>&#11;<br><br>&#9; </em><p>X</p></li></ul>",
+      "- z\u{000b}  \n    \n  X",
+    ),
+    (
+      "<ul><li>z<strong>&#11;<br><br> &#9;</strong><pre>X</pre></li></ul>",
+      "- z\u{000b}  \n    \n  ```\n  X\n  ```",
+    ),
+    (
+      "<ul><li>z<em>&#11;<br><br> &#9;</em></li><li>X</li></ul>",
+      "- z\u{000b}  \n    \n- X",
+    ),
+    (
+      "<ol><li>z<em>&#11;<br> &#9;</em><ol start=\"3\"><li>X</li></ol></li></ol>",
+      "1. z\u{000b}  \n\n   3. X",
+    ),
+    (
+      "<ol><li>z<em>&#11;<br><br> &#9;</em><ol start=\"3\"><li>X</li></ol></li></ol>",
+      "1. z\u{000b}  \n     \n\n   3. X",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{html}, width {width}");
+    }
+  }
 }
 
 #[test]
@@ -8074,6 +8884,225 @@ fn unconfigured_tag_path_matches_empty_overrides_in_all_formats() {
 }
 
 #[test]
+fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
+  // The rule separator stays outside the quote and retains the list indent.
+  assert_eq!(
+    convert("<ul><li><hr><blockquote>q</blockquote></li></ul>"),
+    "- ***\n\n  \n  > q"
+  );
+  assert_eq!(
+    convert("<ol><li><hr><blockquote>q</blockquote></li></ol>"),
+    "1. ***\n\n   \n   > q"
+  );
+  assert_eq!(
+    convert("<ul><li><ul><li><hr><blockquote>q</blockquote></li></ul></li></ul>"),
+    "-\n  - ***\n\n    \n    > q"
+  );
+  assert_eq!(
+    convert("<ul><li>a<hr> <blockquote><p>q</p><p>r</p></blockquote></li></ul>"),
+    "- a\n\n  ---\n\n  \n  > q\n  >\n  > r"
+  );
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><blockquote>q</blockquote></blockquote></li></ul>"),
+    "- ***\n\n  \n  > > q"
+  );
+  assert_eq!(
+    convert("<blockquote><ul><li><hr><blockquote>q</blockquote></li></ul></blockquote>"),
+    "> - ***\n>\n>   \n>   > q"
+  );
+  assert_eq!(
+    convert("<ul><li><blockquote>t<hr><blockquote>q</blockquote></blockquote></li></ul>"),
+    "- \n  > t\n  >\n  > ---\n  >\n  >\n  > > q"
+  );
+  // A genuinely empty quote contributes no marker.
+  assert_eq!(
+    convert("<ul><li><hr><blockquote></blockquote></li></ul>"),
+    "- ***"
+  );
+}
+
+// Literal enter overrides replace quote markers, including around list rules.
+#[test]
+fn literal_quote_overrides_replace_markers_around_list_rules() {
+  let options = || HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("blockquote", TagOverrideConfig::wrap("X", "Y")),
+    ),
+    ..Default::default()
+  };
+  for (input, expected) in [
+    ("<blockquote>text</blockquote>", "XtextY"),
+    (
+      "<ul><li><blockquote>text</blockquote></li></ul>",
+      "- XtextY",
+    ),
+    (
+      "<ul><li><blockquote><hr>text</blockquote></li></ul>",
+      "- X\n\n  ---\n\n  textY",
+    ),
+    (
+      "<ul><li><hr><blockquote>q</blockquote></li></ul>",
+      "- ***\n\n  XqY",
+    ),
+    (
+      "<blockquote><ol start=\"10000\"><li><hr><blockquote>q</blockquote></li></ol></blockquote>",
+      "X\n\n10000. ***\n\n       XqY\n\nY",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(input, options()), expected, "{input}");
+    for split in 0..=input.len() {
+      let mut processor = MarkdownStreamProcessor::new(options());
+      let mut output = processor.process_chunk(&input[..split]);
+      output.push_str(&processor.process_chunk(&input[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "{input} split={split}");
+    }
+  }
+}
+
+#[test]
+fn empty_quote_after_rule_restores_list_continuation() {
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>"),
+    "- ***\n\n  \n\n  tail"
+  );
+  assert_eq!(
+    convert("<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>"),
+    "1. ***\n\n   \n\n   tail"
+  );
+  assert_eq!(
+    convert("<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>"),
+    "-\n  - ***\n\n    \n\n    tail"
+  );
+  assert_eq!(
+    convert("<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>"),
+    "> - ***\n>\n>   \n>\n>   tail"
+  );
+  assert_eq!(
+    convert("<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>"),
+    "- ***\n\n  \n  > q\n\n  tail"
+  );
+}
+
+#[test]
+fn quote_exit_override_output_stays_after_the_list_rule() {
+  for (exit, html, expected) in [
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \nEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote></li></ul>",
+      "- ***\n\n  \nEND",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote><p></p></blockquote><p>tail</p></li></ul>",
+      "- ***\n\n  \nEND\n\n  tail",
+    ),
+    (
+      "END",
+      "<ol><li><hr><blockquote></blockquote>tail</li></ol>",
+      "1. ***\n\n   \nEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><ul><li><hr><blockquote></blockquote>tail</li></ul></li></ul>",
+      "-\n  - ***\n\n    \nEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \nEND\nEND tail",
+    ),
+    (
+      "END",
+      "<blockquote><ul><li><hr><blockquote></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   \n> END tailEND",
+    ),
+    // A quote with content, or a rule still pending inside one, keeps its order.
+    (
+      "END",
+      "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
+      "- ***\n\n  \n  > qEND tail",
+    ),
+    (
+      "END",
+      "<ul><li><blockquote>x<hr></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---END\n\n  tail",
+    ),
+    // An empty override leaves the continuation for the next node.
+    (
+      "",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \ntail",
+    ),
+    (
+      " ",
+      "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \n tail",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "blockquote".to_string(),
+          TagOverrideConfig {
+            exit: Some(exit.to_string()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(html, options), expected, "{html}");
+  }
+}
+
+#[test]
+fn pending_rule_quote_review_boundaries() {
+  for (html, expected) in [
+    (
+      "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   \n>   \n>   \n>\n>     \n>   \n>   tail",
+    ),
+    (
+      "<ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul>",
+      "- ***\n\n  \n\n  tail",
+    ),
+    (
+      "<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>",
+      "> - ***\n>\n>   \n>\n>   tail",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote>q</blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q",
+    ),
+    (
+      "<ul><li><hr><blockquote></blockquote><blockquote>q</blockquote></li></ul>",
+      "- ***\n\n  \n\n  > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>   > q",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
 fn quote_boundary_review_regressions() {
   for (id, html, expected) in [
     (
@@ -8711,5 +9740,55 @@ fn text_after_a_closed_nested_item_stays_escaped() {
   assert_eq!(
     convert("<ul><li>a<ul><li></li></ul># t</li></ul>"),
     "- a\n\n  - \\# t"
+  );
+}
+
+#[test]
+fn empty_inline_pre_does_not_taint_later_fences() {
+  for body in ["", " ", "\n", "<code></code>"] {
+    let html = format!("<span><pre>{body}</pre></span><pre><h2>x #</h2></pre>");
+    let expected = if body.contains("code") {
+      "## x \\#"
+    } else {
+      "## x #"
+    };
+    assert!(convert(&html).contains(expected), "{html:?}");
+  }
+}
+
+#[test]
+fn code_fence_grows_past_runs_after_cr() {
+  assert_eq!(
+    convert("<pre>a&#13;```&#13;b</pre><p>c</p>"),
+    "````\na\r```\rb\n````\n\nc"
+  );
+  for html in [
+    "<pre>a&#13;```&#13;<h2>x #</h2></pre>",
+    "<pre><code>a&#13;```&#13;<h2>x #</h2></code></pre>",
+    "<ul><li><pre>a&#13;```&#13;<h2>x #</h2></pre></li></ul>",
+  ] {
+    let markdown = convert(html);
+    assert!(
+      markdown.contains("````") && markdown.contains("## x #"),
+      "{html:?}"
+    );
+  }
+}
+
+#[test]
+fn frontmatter_keeps_heading_fences_reliable() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      frontmatter: Some(FrontmatterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert!(
+    html_to_markdown(
+      "<head><title>Title</title></head><pre><h2>x #</h2></pre>",
+      options
+    )
+    .contains("## x #")
   );
 }

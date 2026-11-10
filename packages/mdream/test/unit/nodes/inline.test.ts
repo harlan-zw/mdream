@@ -438,7 +438,8 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
     const tailwind = { plugins: { tailwind: true } }
     const cases: [string, string, Parameters<typeof htmlToMarkdown>[1]][] = [
       ['<p>aaaa<span> <span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
-      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax\n1. b', { wrapWidth: 6 }],
+      ['<p>aaaa<span>x </span><span>bb</span></p>', 'aaaax\nbb', { wrapWidth: 6 }],
+      ['<p>aaaa<span>x </span><span>1. b</span></p>', 'aaaax 1.\nb', { wrapWidth: 6 }],
       ['<p>aaaaaa<span> <span>b</span></span></p>', 'aaaaaa b', { wrapWidth: 6 }],
       ['<ul><li>aaaa<span> <span>1. b</span></span></li></ul>', '- aaaa 1.\n  b', { wrapWidth: 8 }],
       ['<p>aaaa<span> <strong></strong><span>1. b</span></span></p>', 'aaaa 1.\nb', { wrapWidth: 6 }],
