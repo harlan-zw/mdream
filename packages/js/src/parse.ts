@@ -854,6 +854,7 @@ function scanScriptChunk(html: string, start: number, state: ParseState): number
     if (end > start) {
       state.lastCharWasWhitespace = false
       state.justClosedTag = false
+      state.textBufferContainsWhitespace = false
     }
     return result
   }

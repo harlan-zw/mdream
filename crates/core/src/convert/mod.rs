@@ -186,6 +186,8 @@ struct OpenMarker {
   /// a pending one. When the pair turns out empty it goes with the opener and
   /// is owed to the content after it.
   follows_separator: bool,
+  /// That separator was trimmed from a closed inline element.
+  separator_trimmed: bool,
   /// Openers in the contiguous emphasis run this one ends, itself included.
   /// An index count, so drains and shifts that move both offsets keep it.
   run_len: u32,
@@ -194,6 +196,10 @@ struct OpenMarker {
   restores_heading_break: bool,
   /// Where vertical-tab-only text first kept it open (`usize::MAX` if never); charged to the cap.
   vertical_tab_start: usize,
+  /// An entity-decoded blank is all this code-like span holds so far.
+  decoded_blank: bool,
+  /// A block that writes nothing closed inside the span.
+  silent_block: bool,
 }
 
 struct LiteralOpener {
@@ -1014,6 +1020,13 @@ pub struct ConvertState {
   /// That separator is a blank that opened an inline element, or one an empty
   /// pair took along and gave back, so it is written on its own.
   pending_leading_blank: bool,
+  /// The pending separator was trimmed from a closed inline element, written
+  /// in front of a pair, and given back when the pair turned out empty. It
+  /// stood in the output, so only a line end takes it.
+  pending_pair_separator: bool,
+  /// The separator at `pending_space_end` was trimmed from a closed inline
+  /// element, or given back as one that was.
+  pending_space_trimmed: bool,
   /// Stream position (see `drained`) after the space the current element's
   /// enter wrote for a pending separator, so an opener written right after it
   /// can take it along.
@@ -1390,6 +1403,8 @@ impl ConvertState {
       last_node_is_inline: false,
       pending_inline_whitespace: false,
       pending_leading_blank: false,
+      pending_pair_separator: false,
+      pending_space_trimmed: false,
       pending_space_end: usize::MAX,
       separator_end: usize::MAX,
       cache_follows_separator: false,

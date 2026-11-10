@@ -2595,3 +2595,101 @@ fn caption_delimiter_context() {
     }
   }
 }
+
+#[test]
+fn trimmed_separator_survives_an_empty_pair_before_a_block_on_the_same_line() {
+  for (html, expected) in [
+    (
+      r#"<ul><li><div><span>Aa </span><i></i></div><span>Bb</span></li></ul>"#,
+      "- Aa Bb",
+    ),
+    (
+      r#"<ul><li><a href="/x">Aa </a><i></i><div></div><span>Bb</span></li></ul>"#,
+      "- [Aa](/x) Bb",
+    ),
+    (
+      r#"<h2><span>Aa </span><b><i></i></b><section></section><span>Bb</span></h2>"#,
+      "## Aa Bb",
+    ),
+    (
+      r#"<table><tr><td><span>Aa </span><i></i><div></div><b>Bb</b></td></tr></table>"#,
+      "| Aa **Bb** |\n| --- |",
+    ),
+    (
+      r#"<table><tr><td><span>Aa </span><q></q><ul><b>Bb</b></ul> Cc</td></tr></table>"#,
+      "| Aa <ul>**Bb**</ul> Cc |\n| --- |",
+    ),
+    (
+      r#"<strong><button><span>Aa</span> </button><b><svg></svg></b><span><script>s</script><code></code></span>Bb</strong>"#,
+      "**Aa Bb**",
+    ),
+    // A line end still takes it.
+    (
+      r#"<ul><li><span>Aa </span><i></i><div></div></li><li>x</li></ul>"#,
+      "- Aa\n- x",
+    ),
+    (
+      r#"<ul><li><span>Aa </span><i></i><hr>Bb</li></ul>"#,
+      "- Aa\n\n  ---\n\n  Bb",
+    ),
+    // So does the block when no pair took the separator along, or when the
+    // separator is a blank that opened an inline element.
+    (
+      r#"<ul><li><span>Aa </span><div></div><span>Bb</span></li></ul>"#,
+      "- AaBb",
+    ),
+    (
+      r#"<ul><li>Aa<span> <div></div></span>Bb</li></ul>"#,
+      "- AaBb",
+    ),
+    (
+      r#"<ul><li>Aa<span> <i></i><div></div></span>Bb</li></ul>"#,
+      "- AaBb",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split} {html}");
+    }
+  }
+}
+
+#[test]
+fn decoded_blank_keeps_a_code_span_beside_a_dropped_element() {
+  for (html, expected) in [
+    (r#"<p>h<kbd>&#32;<svg></svg></kbd>B</p>"#, "h` `B"),
+    (r#"<p>h<code><svg></svg>&#32;</code>B</p>"#, "h` `B"),
+    (r#"<p>h<q>&#32;<svg></svg></q>B</p>"#, "h \" \"B"),
+    (r#"<p><code><script>x</script>&#32;</code></p>"#, "` `"),
+    (
+      r#"<ul><li><kbd>&#32;<svg></svg></kbd>B</li></ul>"#,
+      "- ` `B",
+    ),
+    (r#"<p><b><kbd><svg></svg>&#32;</kbd></b>B</p>"#, "**` `**B"),
+    (r#"<p>h<kbd>&#32;<b><svg></svg></b></kbd>B</p>"#, "h` `B"),
+    // No text, literal whitespace, or an emphasis pair still leave it empty.
+    (r#"<p>a<code><svg></svg></code>b</p>"#, "ab"),
+    (r#"<p>a<kbd><svg></svg> </kbd>b</p>"#, "ab"),
+    (r#"<p><code>&#32;</code></p>"#, ""),
+    (r#"<p>h<em>&#32;<svg></svg></em>B</p>"#, "h B"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split} {html}");
+    }
+  }
+}

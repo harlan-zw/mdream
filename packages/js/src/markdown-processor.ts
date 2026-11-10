@@ -87,6 +87,12 @@ export interface MarkdownState {
   pendingInlineWhitespace?: boolean
   /** That separator is a blank that opened an inline element, or one an empty pair took along and gave back. */
   pendingLeadingBlank?: boolean
+  /**
+   * The pending separator was trimmed from a closed inline element, written in
+   * front of a pair, and given back when the pair turned out empty. It stood in
+   * the output, so only a line end takes it.
+   */
+  pendingPairSeparator?: boolean
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
@@ -1665,6 +1671,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     headingBreakPending: false,
     emptyItemAfterCr: false,
     pendingLeadingBlank: false,
+    pendingPairSeparator: false,
     separatorPending: false,
     cacheFollowsSeparator: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
@@ -1687,10 +1694,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let openMarkerCount = 0
   // Per open marker: the opener follows the space a pending separator wrote.
   const openMarkerFollowsSpace: boolean[] = []
+  // Per open marker: that separator was trimmed from a closed inline element.
+  const openMarkerSeparatorTrimmed: boolean[] = []
   // Number of contiguous emphasis fragments ending at each open marker.
   const openMarkerRunLength: number[] = []
+  // Open markers, counted from the outermost, that a block writing nothing
+  // closed inside.
+  let silentMarkerCount = 0
+  // Open markers up to the code-like one whose only text is the document's
+  // first, an entity-decoded blank. That node has no whitespace flag yet, so
+  // it is not visible text on its own (0 when there is none).
+  let blankMarkerCount = 0
   // The fragment holding the space the current event's pending separator wrote.
   let pendingSpaceFragment = -1
+  // That separator was trimmed from a closed inline element, or given back as
+  // one that was.
+  let pendingSpaceTrimmed = false
   // Depth and buffer length right after each open inline element's literal
   // `tagOverrides` opener, in pairs. A length of -1 marks one that output
   // has already followed.
@@ -2126,6 +2145,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && !(literalOpeners.length && followsLiteralOpener(end + 1))) {
       state.pendingInlineWhitespace = true
       state.pendingLeadingBlank = true
+      state.pendingPairSeparator = false
     }
   }
 
@@ -2393,6 +2413,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             openMarkerCount = 0
           }
           commitCaptionFrames()
+        }
+        else if (openMarkerCount && textNode.containsWhitespace === undefined && textNode.value
+          && (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) > 4) {
+          // Only a block closing inside the span settles the blank as content.
+          if (silentMarkerCount >= openMarkerCount)
+            openMarkerCount = 0
+          else
+            blankMarkerCount = openMarkerCount
         }
       }
     }
@@ -2794,6 +2822,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
               state.lastContentCache = cache.slice(0, Math.max(0, cache.length - removed))
             state.pendingInlineWhitespace = true
             state.pendingLeadingBlank = false
+            state.pendingPairSeparator = false
             lastBuffEntry = buff.at(-1)!
             lastChar = String.fromCharCode(lastOutputChar(buff))
           }
@@ -3029,16 +3058,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         let idx = dropEmptyMarker(buff, marker, markerType, state.outputPositions)
         if (idx >= 0) {
           noteBufferRewrite(state)
+          if (hoisted) {
+            state.pendingInlineWhitespace = true
+            state.pendingLeadingBlank = true
+            state.pendingPairSeparator = false
+          }
           if (openMarkerFollowsSpace[slot] && buff[idx - 1] === ' ') {
             idx--
             state.outputPositions?.replace(idx, buff.length, [])
             buff.length = idx
             state.pendingInlineWhitespace = true
             state.pendingLeadingBlank = true
-          }
-          if (hoisted) {
-            state.pendingInlineWhitespace = true
-            state.pendingLeadingBlank = true
+            state.pendingPairSeparator = openMarkerSeparatorTrimmed[slot]
           }
           if (restoresHeadingBreak)
             state.headingBreakPending = true
@@ -3138,10 +3169,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         || (!output && newLines === 0
           && (eventType === NodeEventExit || tagId === TAG_SVG || tagId === TAG_SCRIPT || tagId === TAG_STYLE))))) {
       const firstOutput = output?.[0]?.[0] || ''
+      // A trimmed separator an empty pair gave back stood in the output, so a
+      // block that starts no line does not take it. A quote does: it writes its
+      // `>` where it opens, which the separator would end up behind.
+      const owed = !!state.pendingPairSeparator && !(eventType === NodeEventEnter && tagId === TAG_BLOCKQUOTE)
       if (eventType === NodeEventEnter) {
         // A raw `<br>` (heading, table cell) is no line end, so it keeps the
         // separator like any inline output, as in Rust.
-        if ((!isInlineElement && (tagId !== TAG_DIV || firstOutput)) || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+        if ((!isInlineElement && (tagId !== TAG_DIV || firstOutput) && !owed) || newLines > 0 || firstOutput === '\n' || firstOutput === '\r') {
           state.pendingInlineWhitespace = false
         }
         else if (firstOutput) {
@@ -3153,11 +3188,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.lastContentCache = ' '
             lastChar = ' '
             pendingSpaceFragment = state.buffer.length - 1
+            pendingSpaceTrimmed = !state.pendingLeadingBlank || owed
           }
           state.pendingInlineWhitespace = false
         }
       }
-      else if (!isInlineElement || newLines > 0) {
+      else if ((!isInlineElement && !owed) || newLines > 0) {
         state.pendingInlineWhitespace = false
       }
     }
@@ -3261,6 +3297,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
               if (eventType === NodeEventExit && isInlineElement) {
                 state.pendingInlineWhitespace = true
                 state.pendingLeadingBlank = false
+                state.pendingPairSeparator = false
               }
             }
           }
@@ -3477,7 +3514,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           && (previous! & MARKER_TYPE_MASK) <= 4 && previous! >> 3 === buff.length - 2
           ? openMarkerRunLength[openMarkerCount - 1]! + 1
           : 1
-        openMarkerFollowsSpace[openMarkerCount] = pendingSpaceFragment === buff.length - 2
+        const followsSpace = pendingSpaceFragment === buff.length - 2
+        openMarkerFollowsSpace[openMarkerCount] = followsSpace
+        openMarkerSeparatorTrimmed[openMarkerCount] = followsSpace && pendingSpaceTrimmed
+        if (silentMarkerCount > openMarkerCount)
+          silentMarkerCount = openMarkerCount
+        if (blankMarkerCount > openMarkerCount)
+          blankMarkerCount = 0
         openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
       }
       else if (openMarkerCount
@@ -3494,6 +3537,23 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // markers permanent, allowing streaming to release buffered content. An
       // element that writes nothing, like a dropped <svg>, is no boundary.
       openMarkerCount = 0
+    }
+    else if (openMarkerCount && eventType === NodeEventExit && tagId !== -1 && !isInlineElement) {
+      // A block that writes nothing leaves an empty pair empty, but a
+      // code-like span holding a decoded blank has content, so it and the
+      // spans around it stop being droppable.
+      if (blankMarkerCount && blankMarkerCount <= openMarkerCount) {
+        const kept = openMarkerCount - blankMarkerCount
+        for (let i = 0; i < kept; i++) {
+          openMarkers[i] = openMarkers[i + blankMarkerCount]!
+          openMarkerFollowsSpace[i] = openMarkerFollowsSpace[i + blankMarkerCount]!
+          openMarkerSeparatorTrimmed[i] = openMarkerSeparatorTrimmed[i + blankMarkerCount]!
+          openMarkerRunLength[i] = openMarkerRunLength[i + blankMarkerCount]!
+        }
+        openMarkerCount = kept
+        blankMarkerCount = 0
+      }
+      silentMarkerCount = openMarkerCount
     }
 
     if (eventType === NodeEventExit && tagId === TAG_A) {

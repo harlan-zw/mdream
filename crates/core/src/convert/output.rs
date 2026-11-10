@@ -527,6 +527,7 @@ impl ConvertState {
     if !follows_opener {
       self.pending_inline_whitespace = true;
       self.pending_leading_blank = true;
+      self.pending_pair_separator = false;
     }
   }
 
@@ -1302,10 +1303,13 @@ impl ConvertState {
         kind: inline_marker_type,
         starts_at_hard_break: self.hard_break_end == marker_start,
         follows_separator,
+        separator_trimmed: follows_separator && self.pending_space_trimmed,
         run_len,
         // No marker opens with a newline; only a prefixed heading break does.
         restores_heading_break: emitted.starts_with('\n'),
         vertical_tab_start: usize::MAX,
+        decoded_blank: false,
+        silent_block: false,
       });
     } else if !keeps_markers
       && !self.open_markers.is_empty()
@@ -1662,6 +1666,7 @@ impl ConvertState {
           end -= 1;
           self.pending_inline_whitespace = true;
           self.pending_leading_blank = true;
+          self.pending_pair_separator = open_marker.separator_trimmed;
         }
         self.truncate_buffer(end);
         if open_marker.starts_at_hard_break {
@@ -1761,7 +1766,11 @@ impl ConvertState {
 
     if !self.open_markers.is_empty() {
       let writes = configured_new_lines > 0 || output.as_deref().is_some_and(|o| !o.is_empty());
-      self.release_markers_on_exit(!is_inline && writes, output.as_deref());
+      if is_inline || writes {
+        self.release_markers_on_exit(!is_inline, output.as_deref());
+      } else {
+        self.note_silent_block();
+      }
     }
 
     let output_start = self.buffer.len();
@@ -2613,6 +2622,7 @@ impl ConvertState {
       self.truncate_buffer(text_end);
       self.pending_inline_whitespace = true;
       self.pending_leading_blank = false;
+      self.pending_pair_separator = false;
     }
 
     let link_text_end = self.buffer.len();
@@ -3034,10 +3044,14 @@ impl ConvertState {
 
     if !self.open_markers.is_empty() {
       let writes = configured_new_lines > 0 || output.as_deref().is_some_and(|o| !o.is_empty());
-      self.release_markers_on_exit(
-        has_override || (tag_id.is_some() && !is_inline && writes),
-        output.as_deref(),
-      );
+      if has_override || tag_id.is_none() || is_inline || writes {
+        self.release_markers_on_exit(
+          has_override || (tag_id.is_some() && !is_inline),
+          output.as_deref(),
+        );
+      } else {
+        self.note_silent_block();
+      }
     }
 
     if let Some(span) = closing_code_span {
@@ -3277,6 +3291,22 @@ impl ConvertState {
     }
   }
 
+  /// A block that writes nothing closed inside the open spans. That leaves an
+  /// empty pair empty, but a code-like span holding a decoded blank has
+  /// content, so it and the spans around it stop being droppable.
+  fn note_silent_block(&mut self) {
+    let mut kept = None;
+    for (index, marker) in self.open_markers.iter_mut().enumerate() {
+      marker.silent_block = true;
+      if marker.decoded_blank {
+        kept = Some(index);
+      }
+    }
+    if let Some(index) = kept {
+      self.open_markers.drain(..=index);
+    }
+  }
+
   /// Settle a pending empty-text link once visible text follows it.
   #[inline(always)]
   fn settle_empty_text_pending(
@@ -3362,6 +3392,24 @@ impl ConvertState {
         // A tentative caption may still retract the held breaks.
         if self.held_break_bytes != 0 && self.first_tentative_caption_start().is_none() {
           self.held_break_bytes = 0;
+        }
+      } else if !contains_whitespace
+        && !bytes.is_empty()
+        && self
+          .open_markers
+          .last()
+          .is_some_and(|marker| marker.kind > 4)
+      {
+        // An entity-decoded blank is content to a code-like span, but alone it
+        // still leaves the pair droppable: only a block closing inside settles it.
+        if self
+          .open_markers
+          .last()
+          .is_some_and(|marker| marker.silent_block)
+        {
+          self.open_markers.clear();
+        } else if let Some(marker) = self.open_markers.last_mut() {
+          marker.decoded_blank = true;
         }
       }
     }
@@ -6629,6 +6677,15 @@ impl ConvertState {
         .caption_frames
         .last()
         .is_some_and(|frame| matches!(frame.state, CaptionState::Pending));
+    // A trimmed separator an empty pair gave back stood in the output, so a
+    // block that starts no line does not take it. A quote does: it writes its
+    // `>` where it opens, which the separator would end up behind.
+    let owed = self.pending_pair_separator
+      && !(is_enter
+        && self
+          .stack
+          .last()
+          .is_some_and(|node| node.tag_id == Some(TAG_BLOCKQUOTE)));
     if self.pending_inline_whitespace && is_enter && !pending_caption {
       // A div enter with no output only groups content on the same line.
       let transparent_div = output_str.is_empty()
@@ -6637,7 +6694,7 @@ impl ConvertState {
           .last()
           .is_some_and(|node| node.tag_id == Some(TAG_DIV));
       let first_output = output_str.as_bytes().first().copied();
-      if (!is_inline && !transparent_div)
+      if (!is_inline && !transparent_div && !owed)
         || is_line_boundary()
         || configured_new_lines > 0
         || matches!(first_output, Some(b'\n' | b'\r'))
@@ -6656,13 +6713,14 @@ impl ConvertState {
           // Only Markdown drops an empty pair with the separator in front of it.
           if self.is_markdown() {
             self.pending_space_end = self.separator_end;
+            self.pending_space_trimmed = !self.pending_leading_blank || owed;
           }
         }
         self.pending_inline_whitespace = false;
       }
     } else if self.pending_inline_whitespace
       && !pending_caption
-      && (!is_inline || configured_new_lines > 0)
+      && ((!is_inline && !owed) || configured_new_lines > 0)
     {
       self.pending_inline_whitespace = false;
     }
@@ -6864,6 +6922,7 @@ impl ConvertState {
               if !is_enter && is_inline {
                 self.pending_inline_whitespace = true;
                 self.pending_leading_blank = false;
+                self.pending_pair_separator = false;
               }
             }
           }
