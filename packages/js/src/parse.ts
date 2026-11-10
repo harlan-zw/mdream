@@ -687,8 +687,8 @@ export interface ParseState {
   trailingText?: string
   /** The trailing run is an unfinished end tag of the open rawtext element. */
   rawtextEndTagPending?: boolean
-  /** An unread raw-text body left the previous chunk on a whitespace character. */
-  unreadBodyBlankPending?: boolean
+  /** A raw-text body the output drops left the previous chunk on a whitespace character. */
+  inertBodyBlankPending?: boolean
   /** The last token was an end tag that closed nothing; the next text joins. */
   endTagClosedNothing?: boolean
 }
@@ -727,13 +727,12 @@ function scriptSequenceEnd(html: string, nameStart: number): number {
     : SCRIPT_SEQUENCE_NO_MATCH
 }
 
-// Raw text its element drops and no plugin reads. Script data has its own
-// scanner, and `<title>` text is metadata the parser still reads.
-function hasUnreadRawTextBody(state: ParseState): boolean {
+// Raw text the output drops, whether or not a plugin reads it. Script data
+// has its own scanner, and `<title>` text is metadata, not dropped text.
+function inInertRawText(state: ParseState): boolean {
   const node = state.currentNode
   const handler = node?.tagHandler
-  return !!handler?.isNonNesting && !!handler.excludesTextNodes && node!.tagId !== TAG_TITLE
-    && !state.resolvedPlugins?.length && !isScriptElement(node!)
+  return !!handler?.isNonNesting && !!handler.excludesTextNodes && node!.tagId !== TAG_TITLE && !isScriptElement(node!)
 }
 
 function isScriptElement(node: ElementNode): boolean {
@@ -1215,13 +1214,13 @@ function parseHtmlInternal(
           textBuffer += htmlChunk[i++]
           continue
         }
-        // A body nothing reads ends the whitespace run before it even when it
-        // is all whitespace, as script data does. The byte before its end tag
-        // is body, or the `>` of its start tag when the body is empty.
-        if (hasUnreadRawTextBody(state)) {
-          if (state.unreadBodyBlankPending || (i > 0 && isWhitespace(htmlChunk.charCodeAt(i - 1))))
+        // A body the output drops ends the whitespace run before it even when
+        // it is all whitespace, as script data does. The byte before its end
+        // tag is body, or the `>` of its start tag when the body is empty.
+        if (inInertRawText(state)) {
+          if (state.inertBodyBlankPending || (i > 0 && isWhitespace(htmlChunk.charCodeAt(i - 1))))
             state.lastCharWasWhitespace = false
-          state.unreadBodyBlankPending = false
+          state.inertBodyBlankPending = false
         }
       }
 
@@ -1372,10 +1371,10 @@ function parseHtmlInternal(
   if (remainingHtml.length > 0 && isWhitespace(remainingHtml.charCodeAt(0)))
     state.lastCharWasWhitespace = false
   // The next chunk cannot look back at the body byte before its end tag.
-  if (hasUnreadRawTextBody(state)) {
+  if (inInertRawText(state)) {
     const last = chunkLength - remainingHtml.length - 1
     if (last >= 0 && isWhitespace(htmlChunk.charCodeAt(last)))
-      state.unreadBodyBlankPending = true
+      state.inertBodyBlankPending = true
   }
   state.trailingText = textBuffer
 

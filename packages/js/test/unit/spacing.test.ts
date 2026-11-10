@@ -958,6 +958,28 @@ it('ends the whitespace run after an unread raw-text body of blanks', async () =
     expect(await streamConvert([title.slice(0, split), title.slice(split)]), `split=${split}`).toBe('a**D**')
 })
 
+it('ends the whitespace run after dropped raw text when plugins read it', async () => {
+  const modes = [
+    () => [filterPlugin({ exclude: ['nav'] })],
+    () => [tailwindPlugin()],
+    () => [extractionPlugin({ 'a[href]': () => {} })],
+    () => [extractionPlugin({ span: () => {} })],
+  ]
+  for (const plugins of modes) {
+    for (const tag of ['style', 'iframe', 'noscript', 'noembed', 'datalist', 'noframes']) {
+      for (const [body, expected] of [[' ', 'a **D**'], ['s ', 'a **D**'], ['', 'a**D**']] as [string, string][]) {
+        const html = `<p>a<span> <${tag}>${body}</${tag}><span> <b>D</b></span></span></p>`
+        expect(htmlToMarkdown(html, { plugins: plugins() }), html).toBe(expected)
+        // With plugins, a split end tag of an empty body still reads as text.
+        if (!body)
+          continue
+        for (let split = 0; split <= html.length; split++)
+          expect(await streamConvert([html.slice(0, split), html.slice(split)], { plugins: plugins() }), `${html}, split=${split}`).toBe(expected)
+      }
+    }
+  }
+})
+
 it('does not count a split empty raw-text closer as body text', async () => {
   for (const tag of ['script', 'style']) {
     const html = `<p>a<span> <${tag}></${tag}><span> <b>D</b></span></span></p>`

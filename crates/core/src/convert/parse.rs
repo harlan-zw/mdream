@@ -1605,6 +1605,7 @@ impl ConvertState {
 
     if self.stack.last().is_some_and(|n| n.is_non_nesting) && !self_closing {
       self.in_non_nesting = true;
+      self.raw_text_body_read = false;
     }
 
     if !self_closing {

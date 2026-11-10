@@ -1,6 +1,7 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{
-  CleanConfig, FilterConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+  CleanConfig, ExtractionConfig, FilterConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig,
+  TagOverrideConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
@@ -1585,6 +1586,39 @@ fn unread_raw_text_of_blanks_ends_the_whitespace_run() {
     &HtmlToMarkdownOptions::default(),
     "a**D**",
   );
+}
+
+#[test]
+fn dropped_raw_text_ends_the_whitespace_run_in_every_mode() {
+  // Whether the body is skipped or an extraction selector reads it, the
+  // Markdown is the same: it must not depend on the selectors.
+  for plugins in [
+    PluginConfig {
+      filter: Some(FilterConfig::exclude(&["nav"])),
+      ..Default::default()
+    },
+    PluginConfig {
+      extraction: Some(ExtractionConfig::new(&["a[href]"])),
+      ..Default::default()
+    },
+    PluginConfig {
+      extraction: Some(ExtractionConfig::new(&["span"])),
+      ..Default::default()
+    },
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    for tag in [
+      "style", "iframe", "noscript", "noembed", "datalist", "noframes",
+    ] {
+      for (body, expected) in [(" ", "a **D**"), ("s ", "a **D**"), ("", "a**D**")] {
+        let html = format!("<p>a<span> <{tag}>{body}</{tag}><span> <b>D</b></span></span></p>");
+        assert_every_split(&html, &options, expected);
+      }
+    }
+  }
 }
 
 #[test]

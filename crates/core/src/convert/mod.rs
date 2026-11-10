@@ -768,6 +768,9 @@ pub struct ConvertState {
   is_first_text_in_element: bool,
   in_non_nesting: bool,
   rawtext_end_tag_pending: bool,
+  /// Body bytes of the open raw-text element took the general text path,
+  /// which leaves the whitespace run open after a whitespace byte.
+  raw_text_body_read: bool,
   script_data_state: u8,
   in_pre: bool,
   overflow_tag_id: Option<u8>,
@@ -1180,6 +1183,7 @@ impl ConvertState {
       is_first_text_in_element: false,
       in_non_nesting: false,
       rawtext_end_tag_pending: false,
+      raw_text_body_read: false,
       script_data_state: SCRIPT_DATA,
       in_pre: false,
       overflow_tag_id: None,
@@ -1842,6 +1846,10 @@ impl ConvertState {
           continue;
         }
 
+        if self.in_non_nesting {
+          self.raw_text_body_read = true;
+        }
+
         if cc == AMPERSAND_CHAR {
           self.has_encoded_html_entity = true;
         }
@@ -2004,6 +2012,17 @@ impl ConvertState {
           if current_name.is_some_and(|name| name.eq_ignore_ascii_case(peek_name)) {
             // Matching closing tag: fall through to normal closing tag processing
             self.complete_text_node(&mut text_buffer);
+            // Skipped raw text ends the whitespace run before it. Text an
+            // extraction read instead ends it too, so the output does not
+            // depend on the selectors.
+            if self.raw_text_body_read
+              && self
+                .stack
+                .last()
+                .is_some_and(|node| node.excludes_text_nodes)
+            {
+              self.last_char_was_whitespace = false;
+            }
             if self.held_output_exceeded {
               return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
             }
