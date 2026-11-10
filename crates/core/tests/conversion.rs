@@ -12,6 +12,26 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
+// An anchor is dropped as a whole: no half-written tag when its href is
+// missing or unsafe, and no closing tag either.
+#[test]
+fn html_output_drops_a_rejected_anchor_without_a_partial_tag() {
+  let html = "<p><a href=\"javascript:alert(1)\" title=\"t\">x</a><a title=\"t\">y</a><a href=\"/ok\">z</a></p><h2>Head <a>in</a> <img alt=\"no src\"></h2>";
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    "<p>xy<a href=\"/ok\">z</a></p><h2 id=\"head-in\">Head in </h2>"
+  );
+}
+
+#[test]
+fn html_output_writes_numeric_attributes_and_heading_levels() {
+  let html = "<h6>Deep title</h6><h2>!!!</h2><ol start=\"120\"><li>a</li></ol><table><tr><td colspan=\"12\">w</td></tr></table>";
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    "<h6 id=\"deep-title\">Deep title</h6><h2>!!!</h2><ol start=\"120\"><li>a</li></ol><table><tr><td colspan=\"12\">w</td></tr></table>"
+  );
+}
+
 // A collapsed whitespace run is skipped a machine word at a time. Every run
 // length has to stop exactly on the byte after the run, before a tag and
 // before text, in one shot and when a chunk boundary cuts the run anywhere.

@@ -79,17 +79,20 @@ fn push_raw_anchor_attribute(output: &mut String, value: &str) {
   push_escaped_inner::<true>(output, value, true);
 }
 
-fn html_tag_name(tag_id: u8) -> Option<&'static str> {
-  let canonical = match tag_id {
-    TAG_B => "strong",
-    TAG_I => "em",
-    TAG_S | TAG_STRIKE => "del",
-    _ => "",
-  };
-  if !canonical.is_empty() {
-    return Some(canonical);
+/// Elements the HTML output renames to their semantic equivalent.
+const fn canonical_name(tag_id: u8) -> Option<&'static str> {
+  match tag_id {
+    TAG_B => Some("strong"),
+    TAG_I => Some("em"),
+    TAG_S | TAG_STRIKE => Some("del"),
+    _ => None,
   }
-  let safe = matches!(
+}
+
+/// Elements the HTML output keeps under their own name.
+const fn keeps_own_name(tag_id: u8) -> bool {
+  canonical_name(tag_id).is_none()
+    && matches!(
     tag_id,
     TAG_DETAILS
       | TAG_SUMMARY
@@ -102,27 +105,184 @@ fn html_tag_name(tag_id: u8) -> Option<&'static str> {
       | TAG_SECTION
       | TAG_ABBR..=TAG_SMALL
       | TAG_ASIDE..=TAG_TIME
-      | TAG_RUBY..=TAG_FIGURE
-      | TAG_MAIN..=TAG_CAPTION
-  );
-  safe.then_some(TAG_NAMES[tag_id as usize])
+        | TAG_RUBY..=TAG_FIGURE
+        | TAG_MAIN..=TAG_CAPTION
+    )
 }
 
-impl ConvertState {
-  fn resolve_html_url<'a>(&self, url: &'a str, image: bool) -> Option<Cow<'a, str>> {
-    if !is_safe_html_url(url, image) {
-      return None;
-    }
-    let resolved = resolve_url(url, self.options.origin.as_deref(), self.clean_urls);
-    is_safe_html_url(resolved.as_ref(), image).then_some(resolved)
-  }
+/// Bits in one word of a tag set.
+const TAG_SET_WORD_BITS: u8 = 64;
 
+/// One bit per tag id: every element opens and closes through
+/// `html_tag_name`, and a bit test is cheaper there than the range chain.
+static KEEPS_OWN_NAME: [u64; (u8::MAX as usize + 1) / TAG_SET_WORD_BITS as usize] = {
+  let mut set = [0u64; (u8::MAX as usize + 1) / TAG_SET_WORD_BITS as usize];
+  let mut tag_id = 0u8;
+  loop {
+    if keeps_own_name(tag_id) {
+      set[(tag_id / TAG_SET_WORD_BITS) as usize] |= 1 << (tag_id % TAG_SET_WORD_BITS);
+    }
+    if tag_id == u8::MAX {
+      break;
+    }
+    tag_id += 1;
+  }
+  set
+};
+
+fn html_tag_name(tag_id: u8) -> Option<&'static str> {
+  if KEEPS_OWN_NAME[(tag_id / TAG_SET_WORD_BITS) as usize] >> (tag_id % TAG_SET_WORD_BITS) & 1 != 0
+  {
+    return Some(TAG_NAMES[tag_id as usize]);
+  }
+  canonical_name(tag_id)
+}
+
+fn resolve_html_url<'a>(
+  url: &'a str,
+  image: bool,
+  origin: Option<&str>,
+  clean_urls: bool,
+) -> Option<Cow<'a, str>> {
+  if !is_safe_html_url(url, image) {
+    return None;
+  }
+  let resolved = resolve_url(url, origin, clean_urls);
+  is_safe_html_url(resolved.as_ref(), image).then_some(resolved)
+}
+
+/// Where HTML output goes: the innermost open heading or `<pre>`, else the
+/// document buffer. Takes the fields apart so a caller can keep reading the
+/// node stack while it writes.
+#[cfg(feature = "html")]
+fn html_sink<'a>(frames: &'a mut [HtmlFrame], buffer: &'a mut String) -> &'a mut String {
+  match frames.last_mut() {
+    Some(HtmlFrame::Heading { output, .. } | HtmlFrame::Pre { output, .. }) => output,
+    None => buffer,
+  }
+}
+
+/// Writes the opening or closing tag of an allowlisted element. Returns false,
+/// with nothing written, for an element the HTML output does not keep.
+fn write_html_element(
+  output: &mut String,
+  node: &ElementNode,
+  entering: bool,
+  protect_markdown: bool,
+  origin: Option<&str>,
+  clean_urls: bool,
+) -> bool {
+  let Some((tag_id, name)) = node
+    .tag_id
+    .and_then(|tag_id| Some((tag_id, html_tag_name(tag_id)?)))
+  else {
+    return false;
+  };
+  // An anchor is kept only with a safe href, on both of its tags. Decide
+  // before the first byte is written so a rejected one leaves no partial tag.
+  let href = if tag_id == TAG_A {
+    let resolved = node
+      .attributes
+      .get_bit(ATTR_HREF)
+      .and_then(|href| resolve_html_url(href, false, origin, clean_urls));
+    if resolved.is_none() {
+      return false;
+    }
+    resolved
+  } else {
+    None
+  };
+  if !entering {
+    output.push_str("</");
+    output.push_str(name);
+    output.push('>');
+    return true;
+  }
+  output.push('<');
+  output.push_str(name);
+  match tag_id {
+    TAG_A => {
+      // `href` is set for every anchor that reaches this point.
+      let resolved = href.as_deref().unwrap_or_default();
+      output.push_str(" href=\"");
+      if protect_markdown {
+        push_raw_anchor_attribute(output, resolved);
+      } else {
+        push_escaped(output, resolved, true);
+      }
+      output.push('"');
+      if let Some(title) = node.attributes.get_bit(ATTR_TITLE) {
+        output.push_str(" title=\"");
+        if protect_markdown {
+          push_raw_anchor_attribute(output, title);
+        } else {
+          push_escaped(output, title, true);
+        }
+        output.push('"');
+      }
+    }
+    TAG_OL => {
+      if let Some(start) = node
+        .attributes
+        .get_bit(ATTR_START)
+        .and_then(|value| parse_bounded_u32(value, u32::MAX))
+      {
+        output.push_str(" start=\"");
+        super::output::push_decimal(output, start);
+        output.push('"');
+      }
+    }
+    TAG_CODE => {
+      let language = ConvertState::get_language_from_attributes(node);
+      if !language.is_empty() {
+        output.push_str(" class=\"language-");
+        push_escaped(output, language, true);
+        output.push('"');
+      }
+    }
+    TAG_TH | TAG_TD => {
+      if let Some(colspan) = node
+        .attributes
+        .get_bit(ATTR_COLSPAN)
+        .and_then(|value| parse_bounded_u32(value, u32::MAX))
+        && colspan > 0
+      {
+        output.push_str(" colspan=\"");
+        super::output::push_decimal(output, colspan);
+        output.push('"');
+      }
+      if tag_id == TAG_TH
+        && let Some(align) = node.attributes.get_bit(ATTR_ALIGN)
+      {
+        let normalized = if align.eq_ignore_ascii_case("left") {
+          "left"
+        } else if align.eq_ignore_ascii_case("center") {
+          "center"
+        } else if align.eq_ignore_ascii_case("right") {
+          "right"
+        } else {
+          ""
+        };
+        if !normalized.is_empty() {
+          output.push_str(" align=\"");
+          output.push_str(normalized);
+          output.push('"');
+        }
+      }
+    }
+    _ => {}
+  }
+  output.push('>');
+  true
+}
+
+/// Bytes of `<a href="…">` around a typical URL.
+const RAW_ANCHOR_OPEN_CAPACITY: usize = 64;
+
+impl ConvertState {
   #[cfg(feature = "html")]
   fn html_output_mut(&mut self) -> &mut String {
-    match self.html_frames.last_mut() {
-      Some(HtmlFrame::Heading { output, .. } | HtmlFrame::Pre { output, .. }) => output,
-      None => &mut self.buffer,
-    }
+    html_sink(&mut self.html_frames, &mut self.buffer)
   }
 
   #[cfg(feature = "html")]
@@ -149,102 +309,34 @@ impl ConvertState {
     push_escaped(self.html_output_mut(), value, false);
   }
 
+  /// The tag as an owned string, for the Markdown path's raw-HTML anchors.
   pub(super) fn html_element_output(
     &self,
     node: &ElementNode,
     entering: bool,
     protect_markdown: bool,
   ) -> Option<String> {
-    let tag_id = node.tag_id?;
-    let name = html_tag_name(tag_id)?;
-    if !entering {
-      if tag_id == TAG_A {
-        let href = node.attributes.get_bit(ATTR_HREF)?;
-        self.resolve_html_url(href, false)?;
-      }
-      return Some(format!("</{name}>"));
-    }
-
-    let mut output = String::with_capacity(name.len() + 24);
-    output.push('<');
-    output.push_str(name);
-    match tag_id {
-      TAG_A => {
-        let href = node.attributes.get_bit(ATTR_HREF)?;
-        let resolved = self.resolve_html_url(href, false)?;
-        output.push_str(" href=\"");
-        if protect_markdown {
-          push_raw_anchor_attribute(&mut output, resolved.as_ref());
-        } else {
-          push_escaped(&mut output, resolved.as_ref(), true);
-        }
-        output.push('"');
-        if let Some(title) = node.attributes.get_bit(ATTR_TITLE) {
-          output.push_str(" title=\"");
-          if protect_markdown {
-            push_raw_anchor_attribute(&mut output, title);
-          } else {
-            push_escaped(&mut output, title, true);
-          }
-          output.push('"');
-        }
-      }
-      TAG_OL => {
-        if let Some(start) = node
-          .attributes
-          .get_bit(ATTR_START)
-          .and_then(|value| parse_bounded_u32(value, u32::MAX))
-        {
-          output.push_str(" start=\"");
-          output.push_str(&start.to_string());
-          output.push('"');
-        }
-      }
-      TAG_CODE => {
-        let language = Self::get_language_from_attributes(node);
-        if !language.is_empty() {
-          output.push_str(" class=\"language-");
-          push_escaped(&mut output, language, true);
-          output.push('"');
-        }
-      }
-      TAG_TH | TAG_TD => {
-        if let Some(colspan) = node
-          .attributes
-          .get_bit(ATTR_COLSPAN)
-          .and_then(|value| parse_bounded_u32(value, u32::MAX))
-          && colspan > 0
-        {
-          output.push_str(" colspan=\"");
-          output.push_str(&colspan.to_string());
-          output.push('"');
-        }
-        if tag_id == TAG_TH
-          && let Some(align) = node.attributes.get_bit(ATTR_ALIGN)
-        {
-          let normalized = if align.eq_ignore_ascii_case("left") {
-            "left"
-          } else if align.eq_ignore_ascii_case("center") {
-            "center"
-          } else if align.eq_ignore_ascii_case("right") {
-            "right"
-          } else {
-            ""
-          };
-          if !normalized.is_empty() {
-            output.push_str(" align=\"");
-            output.push_str(normalized);
-            output.push('"');
-          }
-        }
-      }
-      _ => {}
-    }
-    output.push('>');
-    Some(output)
+    // An opening tag gets its room up front: growing from empty reallocates
+    // once per attribute.
+    let mut output = String::with_capacity(if entering {
+      RAW_ANCHOR_OPEN_CAPACITY
+    } else {
+      0
+    });
+    write_html_element(
+      &mut output,
+      node,
+      entering,
+      protect_markdown,
+      self.options.origin.as_deref(),
+      self.clean_urls,
+    )
+    .then_some(output)
   }
 
+  // Out of line: the Markdown path shares the caller and must not grow with it.
   #[cfg(feature = "html")]
+  #[inline(never)]
   pub(super) fn emit_html_enter(&mut self) {
     let Some(node) = self.stack.last() else {
       return;
@@ -301,40 +393,39 @@ impl ConvertState {
       self.push_html("<hr>");
       return;
     }
+    let origin = self.options.origin.as_deref();
+    let output = html_sink(&mut self.html_frames, &mut self.buffer);
     if tag_id == Some(TAG_IMG) {
-      let rendered = node.attributes.get_bit(ATTR_SRC).and_then(|src| {
-        let resolved = self.resolve_html_url(src, true)?;
-        let mut output = String::with_capacity(resolved.len() + 32);
+      let resolved = node
+        .attributes
+        .get_bit(ATTR_SRC)
+        .and_then(|src| resolve_html_url(src, true, origin, self.clean_urls));
+      if let Some(resolved) = resolved {
         output.push_str("<img src=\"");
-        push_escaped(&mut output, resolved.as_ref(), true);
+        push_escaped(output, resolved.as_ref(), true);
         output.push_str("\" alt=\"");
         push_escaped(
-          &mut output,
+          output,
           node.attributes.get_bit(ATTR_ALT).unwrap_or(""),
           true,
         );
         output.push('"');
         if let Some(title) = node.attributes.get_bit(ATTR_TITLE) {
           output.push_str(" title=\"");
-          push_escaped(&mut output, title, true);
+          push_escaped(output, title, true);
           output.push('"');
         }
         output.push('>');
-        Some(output)
-      });
-      if let Some(rendered) = rendered {
-        self.push_html(&rendered);
         self.mark_rendered_child_content();
       }
       return;
     }
-    let rendered = self.html_element_output(node, true, false);
-    if let Some(rendered) = rendered {
-      self.push_html(&rendered);
-    }
+    write_html_element(output, node, true, false, origin, self.clean_urls);
   }
 
+  // Out of line: the Markdown path shares the caller and must not grow with it.
   #[cfg(feature = "html")]
+  #[inline(never)]
   pub(super) fn emit_html_exit(&mut self, node: &ElementNode) {
     if let Some(frame) = self.html_frames.last() {
       let in_pre = matches!(frame, HtmlFrame::Pre { .. });
@@ -344,7 +435,9 @@ impl ConvertState {
       };
       if closes_frame {
         let frame = self.html_frames.pop().unwrap();
-        let rendered = match frame {
+        // The frame is off the stack, so this is the enclosing sink.
+        let sink = self.html_output_mut();
+        match frame {
           HtmlFrame::Heading {
             level,
             output,
@@ -352,29 +445,34 @@ impl ConvertState {
             ..
           } => {
             let slug = slugify_heading(&text);
-            if slug.is_empty() {
-              format!("<h{level}>{output}</h{level}>")
-            } else {
-              format!("<h{level} id=\"{slug}\">{output}</h{level}>")
+            let level = u32::from(level);
+            sink.push_str("<h");
+            super::output::push_decimal(sink, level);
+            if !slug.is_empty() {
+              sink.push_str(" id=\"");
+              sink.push_str(&slug);
+              sink.push('"');
             }
+            sink.push('>');
+            sink.push_str(&output);
+            sink.push_str("</h");
+            super::output::push_decimal(sink, level);
+            sink.push('>');
           }
           HtmlFrame::Pre {
             language, output, ..
           } => {
-            let mut rendered = String::with_capacity(output.len() + language.len() + 48);
-            rendered.push_str("<pre tabindex=\"0\"><code");
+            sink.push_str("<pre tabindex=\"0\"><code");
             if !language.is_empty() {
-              rendered.push_str(" class=\"language-");
-              push_escaped(&mut rendered, &language, true);
-              rendered.push('"');
+              sink.push_str(" class=\"language-");
+              push_escaped(sink, &language, true);
+              sink.push('"');
             }
-            rendered.push('>');
-            rendered.push_str(&output);
-            rendered.push_str("</code></pre>");
-            rendered
+            sink.push('>');
+            sink.push_str(&output);
+            sink.push_str("</code></pre>");
           }
-        };
-        self.push_html(&rendered);
+        }
         return;
       }
       if in_pre {
@@ -384,10 +482,9 @@ impl ConvertState {
     if matches!(node.tag_id, Some(TAG_BR | TAG_HR | TAG_IMG | TAG_PRE)) {
       return;
     }
-    let rendered = self.html_element_output(node, false, false);
-    if let Some(rendered) = rendered {
-      self.push_html(&rendered);
-    }
+    let origin = self.options.origin.as_deref();
+    let output = html_sink(&mut self.html_frames, &mut self.buffer);
+    write_html_element(output, node, false, false, origin, self.clean_urls);
   }
 
   #[cfg(feature = "html")]
