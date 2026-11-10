@@ -482,6 +482,91 @@ pub(crate) fn process_tag_attributes(
   }
 }
 
+/// How far [`walk_plain_attributes`] got.
+enum PlainWalk {
+  /// The tag ended just before `end`, on `/>` when `slash`.
+  Done { end: usize, slash: bool },
+  /// Not a shape the walk handles: rescan from here, where the tokenizer is in
+  /// `State::Gap`.
+  Resume(usize),
+}
+
+/// Walk well-formed attributes (`name`, `name="value"`) in a straight line, for
+/// the scan that extracts nothing. Anything else (an unquoted value, a `=` with
+/// no name before it, a tag cut by the chunk) is left to the general loop.
+// Out of line: inlined, it grows the frame every start tag pays for.
+#[inline(never)]
+fn walk_plain_attributes(bytes: &[u8], from: usize) -> PlainWalk {
+  let mut i = from;
+  // Always a position where the tokenizer is in `State::Gap`. A bare name
+  // followed by whitespace leaves `AfterName`, which differs from `Gap` only on
+  // `=`; that byte restarts from the name, so the walk may treat both alike.
+  let mut boundary = i;
+  loop {
+    while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & NON_WHITESPACE_STOP == 0 {
+      i += 1;
+    }
+    let Some(&c) = bytes.get(i) else {
+      break;
+    };
+    if c == GT_CHAR {
+      return PlainWalk::Done {
+        end: i + 1,
+        slash: false,
+      };
+    }
+    if c == SLASH_CHAR || c == EQUALS_CHAR {
+      if c == SLASH_CHAR && bytes.get(i + 1) == Some(&GT_CHAR) {
+        return PlainWalk::Done {
+          end: i + 2,
+          slash: true,
+        };
+      }
+      break;
+    }
+    boundary = i;
+    i += 1;
+    while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & ATTR_NAME_STOP == 0 {
+      i += 1;
+    }
+    match bytes.get(i) {
+      Some(&EQUALS_CHAR) => {
+        let Some(&quote) = bytes
+          .get(i + 1)
+          .filter(|&&next| next == QUOTE_CHAR || next == APOS_CHAR)
+        else {
+          break;
+        };
+        let value_start = i + 2;
+        let Some(offset) = find_byte(&bytes[value_start..], quote) else {
+          break;
+        };
+        i = value_start + offset + 1;
+        boundary = i;
+      }
+      Some(&GT_CHAR) => {
+        return PlainWalk::Done {
+          end: i + 1,
+          slash: false,
+        };
+      }
+      Some(&SLASH_CHAR) => {
+        if bytes.get(i + 1) == Some(&GT_CHAR) {
+          return PlainWalk::Done {
+            end: i + 2,
+            slash: true,
+          };
+        }
+        break;
+      }
+      // Whitespace: the name stands alone unless a `=` follows it.
+      Some(_) => {}
+      None => break,
+    }
+  }
+  PlainWalk::Resume(boundary)
+}
+
 /// Walk a start tag to its `>`, extracting attributes on the way when
 /// `EXTRACT`. Finding `>` needs the same quote tracking the extraction does, so
 /// both come from one pass; the flag is a const so the `ATTR_NONE`
@@ -501,6 +586,21 @@ fn scan_tag<const EXTRACT: bool>(
   // state to distinguish a quoted value from a quote inside an unquoted one.
   let mut state = State::Gap;
   let mut i = position;
+
+  // Most tags end right after the name. Attributes follow it only after
+  // whitespace, and well-formed ones need none of the state dispatch below.
+  if !EXTRACT {
+    match bytes.get(i) {
+      Some(&GT_CHAR) => return TagScan::done(i + 1, self_closing, scan.budget.overflow),
+      Some(&next) if is_whitespace(next) => match walk_plain_attributes(bytes, i) {
+        PlainWalk::Done { end, slash } => {
+          return TagScan::done(end, slash || self_closing, scan.budget.overflow);
+        }
+        PlainWalk::Resume(boundary) => i = boundary,
+      },
+      _ => {}
+    }
+  }
 
   while i < chunk_length {
     let c = bytes[i];
@@ -551,12 +651,18 @@ fn scan_tag<const EXTRACT: bool>(
         return TagScan::suspended(chunk_length, carry);
       }
       if bytes[i + 1] == GT_CHAR {
-        scan.finish(html_chunk, i);
+        // Without extraction no attribute is ever open. Skipping the call also
+        // lets the compiler drop `scan` from this instantiation.
+        if EXTRACT {
+          scan.finish(html_chunk, i);
+        }
         return TagScan::done(i + 2, true, scan.budget.overflow);
       }
     }
     if c == GT_CHAR {
-      scan.finish(html_chunk, i);
+      if EXTRACT {
+        scan.finish(html_chunk, i);
+      }
       return TagScan::done(i + 1, self_closing, scan.budget.overflow);
     }
 
@@ -1184,6 +1290,67 @@ fn scan_attrs(html: &str, position: usize, mask: u16) -> (bool, usize, Attribute
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The tokenizer one byte at a time, with no run and no jump: what the tag
+  /// scan has to agree with. Returns the tag end and self-closing flag, or the
+  /// state the chunk ended in and whether it ended on a pending `/`.
+  fn reference_tag_end(bytes: &[u8]) -> Result<(usize, bool), (State, bool)> {
+    let mut state = State::Gap;
+    for (i, &c) in bytes.iter().enumerate() {
+      if !matches!(state, State::Quoted(_)) {
+        if state != State::UnquotedValue && c == SLASH_CHAR {
+          match bytes.get(i + 1) {
+            None => return Err((state, true)),
+            Some(&GT_CHAR) => return Ok((i + 2, true)),
+            Some(_) => {}
+          }
+        }
+        if c == GT_CHAR {
+          return Ok((i + 1, false));
+        }
+      }
+      state = state.step_without_extraction(c);
+    }
+    Err((state, false))
+  }
+
+  // Every tag body up to seven bytes over the bytes the tokenizer tells
+  // apart, so each state meets each byte at a chunk end, at a `>` and mid-run.
+  #[test]
+  fn tag_scan_without_extraction_matches_the_tokenizer() {
+    const ALPHABET: [u8; 7] = *b"a =\"'/>";
+    const MAX_LEN: usize = 7;
+    let mut attrs = Attributes::new();
+    let mut buf = [0u8; MAX_LEN];
+    for len in 0..=MAX_LEN {
+      for mut code in 0..ALPHABET.len().pow(len as u32) {
+        for slot in &mut buf[..len] {
+          *slot = ALPHABET[code % ALPHABET.len()];
+          code /= ALPHABET.len();
+        }
+        let html = std::str::from_utf8(&buf[..len]).unwrap();
+        let scan = process_tag_attributes(html, 0, None, ATTR_NONE, AttrBudget::new(0), &mut attrs);
+        match reference_tag_end(&buf[..len]) {
+          Ok((end, self_closing)) => assert!(
+            scan.complete && scan.new_position == end && scan.self_closing == self_closing,
+            "{html:?}: got ({}, {}, {}), want ({end}, {self_closing})",
+            scan.complete,
+            scan.new_position,
+            scan.self_closing
+          ),
+          Err((state, slash)) => {
+            let carry = scan.carry.as_deref();
+            assert!(
+              !scan.complete
+                && scan.new_position == len
+                && carry.is_some_and(|carry| carry.state == state && carry.slash == slash),
+              "{html:?}: suspended scan disagrees"
+            );
+          }
+        }
+      }
+    }
+  }
 
   #[test]
   fn whitespace_detection() {
