@@ -1981,7 +1981,7 @@ impl ConvertState {
         && self.last_output_byte().is_some_and(|byte| byte != b'\n');
       caption_heading_enter = visible_output && self.caption_heading_enter(tag_id);
       if visible_output || structural_quote {
-        self.expand_deferred_caption_breaks();
+        self.expand_deferred_caption_breaks(false);
       }
       consumes_caption_boundary = if visible_output || structural_quote {
         // An anchor without an href writes nothing, so it cannot carry the boundary.
@@ -2753,7 +2753,7 @@ impl ConvertState {
 
     let caption_exit = tag_id == Some(TAG_FIGCAPTION) && self.depth_map[TAG_PRE as usize] == 0;
     if tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT == 0 {
-      self.expand_deferred_caption_breaks();
+      self.expand_deferred_caption_breaks(false);
     }
     let caption_active = caption_exit
       || self.caption_boundary != CaptionBoundary::None
@@ -2768,7 +2768,7 @@ impl ConvertState {
     let mut consumes_caption_boundary = false;
     if !caption_exit {
       if visible_output {
-        self.expand_deferred_caption_breaks();
+        self.expand_deferred_caption_breaks(false);
         consumes_caption_boundary = if is_inline && self.quote_boundary_pending() {
           self.prepare_inline_quote_boundary(has_override)
         } else {
@@ -2781,7 +2781,7 @@ impl ConvertState {
         });
       }
     } else if has_override && visible_output {
-      self.expand_deferred_caption_breaks();
+      self.expand_deferred_caption_breaks(false);
       consumes_caption_boundary = self.prepare_caption_boundary(true);
       self.materialize_caption_frames(CaptionMaterialization::Commit);
     }
@@ -2789,7 +2789,7 @@ impl ConvertState {
     let mut caption_exit_spacing = 0;
     if caption_exit {
       let top = self.caption_frames.len().saturating_sub(1);
-      self.expand_deferred_caption_breaks_until(top);
+      self.expand_deferred_caption_breaks_until(top, false);
     }
     if caption_exit && let Some(frame) = self.caption_frames.pop() {
       let deferred_breaks = frame.deferred_breaks;
@@ -2837,7 +2837,7 @@ impl ConvertState {
           caption_exit_spacing = frame.spacing[1];
         }
       }
-      self.write_deferred_break_run(deferred_breaks);
+      self.write_deferred_break_run(deferred_breaks, false);
       // A break the dropped caption left behind already ends the heading's line.
       if restores_heading_break && !self.caption_exit_opens_block_line() {
         self.heading_break_pending = true;
@@ -3413,7 +3413,7 @@ impl ConvertState {
         return;
       }
       if visible {
-        self.expand_deferred_caption_breaks();
+        self.expand_deferred_caption_breaks(true);
         self.prepare_caption_boundary(true);
         self.materialize_caption_frames(CaptionMaterialization::Commit);
         self.caption_boundary = CaptionBoundary::None;
@@ -4953,7 +4953,7 @@ impl ConvertState {
         .as_ref()
         .is_some_and(|run| run.fragment != fragment)
     }) {
-      self.expand_deferred_caption_breaks();
+      self.expand_deferred_caption_breaks(false);
     }
     let frame = self
       .caption_frames
@@ -4971,9 +4971,38 @@ impl ConvertState {
     true
   }
 
-  fn write_deferred_break_run(&mut self, run: Option<DeferredBreakRun>) {
+  fn write_deferred_break_run(&mut self, run: Option<DeferredBreakRun>, before_text: bool) {
     if let Some(run) = run {
       self.trim_trailing_spaces();
+      // Keep a leading break before tentative emphasis, where its whitespace
+      // cannot invalidate the delimiter's CommonMark left-flanking rule.
+      let opener = self
+        .open_markers
+        .last()
+        .filter(|marker| marker.kind <= 4 && marker.content_start == self.buffer.len());
+      let anchor = opener.filter(|_| before_text).and_then(|_| {
+        self.caption_frames.iter().find_map(|frame| {
+          if let CaptionState::Tentative { content_start, .. } = frame.state {
+            let start = content_start.saturating_sub(1);
+            self.buffer.as_bytes()[start..]
+              .iter()
+              .all(|byte| matches!(byte, b'*' | b'~'))
+              .then_some(start)
+          } else {
+            None
+          }
+        })
+      });
+      if let Some(at) = anchor {
+        let output = run.fragment.repeat(run.count);
+        if self.replace_code_span_content(at..at, &output) {
+          for _ in 0..output.len() {
+            self.shift_offsets_at_or_after(at);
+          }
+          self.last_content_cache_len = 0;
+        }
+        return;
+      }
       for _ in 0..run.count {
         if run.fragment == "\n" && self.buffer.ends_with("\n\n") {
           continue;
@@ -4983,15 +5012,15 @@ impl ConvertState {
     }
   }
 
-  fn expand_deferred_caption_breaks_until(&mut self, end: usize) {
+  fn expand_deferred_caption_breaks_until(&mut self, end: usize, before_text: bool) {
     for index in 0..end.min(self.caption_frames.len()) {
       let run = self.caption_frames[index].deferred_breaks.take();
-      self.write_deferred_break_run(run);
+      self.write_deferred_break_run(run, before_text);
     }
   }
 
-  fn expand_deferred_caption_breaks(&mut self) {
-    self.expand_deferred_caption_breaks_until(self.caption_frames.len());
+  fn expand_deferred_caption_breaks(&mut self, before_text: bool) {
+    self.expand_deferred_caption_breaks_until(self.caption_frames.len(), before_text);
   }
 
   fn materialize_caption_frames(&mut self, mode: CaptionMaterialization) {

@@ -1810,7 +1810,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
-  function flushCaptionBreakRun(): boolean {
+  function flushCaptionBreakRun(beforeText = false): boolean {
     if (captionBreakRun === 0)
       return false
     let index = state.buffer.length
@@ -1834,6 +1834,41 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     const output = `  \n${state.listIndent}`.repeat(captionBreakRun)
     captionBreakRun = 0
+    // A leading break must precede an empty emphasis opener run. Whitespace
+    // immediately after its delimiter prevents CommonMark from opening it.
+    if (beforeText && openMarkerCount && (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) <= 4) {
+      for (let frame = 0; frame < captionFrameCount; frame++) {
+        const offset = frame * CAPTION_FRAME_SIZE
+        const anchor = captionFrames![offset + 3]!
+        if ((captionFrames![offset + 2]! & CAPTION_OPEN) || anchor === CAPTION_NO_ANCHOR)
+          continue
+        let onlyOpeners = true
+        for (let index = anchor; index < state.buffer.length && onlyOpeners; index++) {
+          const fragment = state.buffer[index]!
+          for (let at = 0; at < fragment.length; at++) {
+            const code = fragment.charCodeAt(at)
+            if (code !== 42 && code !== 126) {
+              onlyOpeners = false
+              break
+            }
+          }
+        }
+        if (onlyOpeners) {
+          prepareCaptionOutput(false)
+          const fragment = state.buffer[anchor]!
+          let at = fragment.length
+          while (at > 0 && (fragment.charCodeAt(at - 1) === 42 || fragment.charCodeAt(at - 1) === 126))
+            at--
+          const replacement = fragment.slice(0, at) + output + fragment.slice(at)
+          state.outputPositions?.replace(anchor, anchor + 1, [replacement], position => position >= at ? position + output.length : position)
+          state.buffer[anchor] = replacement
+          state.lastContentCache = state.buffer.at(-1)
+          noteBufferRewrite(state)
+          return true
+        }
+        break
+      }
+    }
     state.buffer.push(output)
     state.lastContentCache = output
     return true
@@ -2082,7 +2117,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           textNode.value = textNode.value.slice(1)
         if (!hasNonWhitespace(textNode.value))
           return
-        flushCaptionBreakRun()
+        flushCaptionBreakRun(true)
         prepareCaptionOutput(false)
         commitCaptionFrames()
         captionBoundary = 0

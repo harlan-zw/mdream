@@ -1860,7 +1860,7 @@ fn review_caption_additional_3() {
 #[test]
 fn review_caption_additional_4() {
   let html = r#"<button>A </button><figcaption><em><br>B</em></figcaption>"#;
-  let expected = "A\n\n**  \nB**";
+  let expected = "A\n\n  \n**B**";
   assert_eq!(md(html), expected);
   for width in [1, 2, 3, 11] {
     assert_eq!(md_streamed(html, width), expected);
@@ -2003,5 +2003,56 @@ fn caption_excluded_wrapper_3() {
     out.push_str(&p.process_chunk(&html[split..]));
     out.push_str(&p.finish());
     assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn caption_emphasis_after_leading_break() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("code", TagOverrideConfig::wrap("^", "^")),
+    ),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      r#"<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>
+<br></ul> </a></figcaption></kbd>"#,
+      "```Kilo![](/n)Kilo`\" [Lima](/f)\"`   \n***Kilo**[  \nLima](/f)*`",
+    ),
+    (
+      r#"<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite></figcaption>"#,
+      "**Kilo**",
+    ),
+    (
+      r#"<figcaption><cite><kbd><svg></svg></kbd><br><br>Kilo</cite></figcaption>"#,
+      "**Kilo**",
+    ),
+    (
+      r#"<figcaption><cite><kbd><svg></svg></kbd><br></cite></figcaption>"#,
+      "",
+    ),
+    (
+      r#"<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite> Lima</figcaption>"#,
+      "**Kilo* Lima*",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      let mut p = MarkdownStreamProcessor::new(options.clone());
+      let mut out = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "width={width} {html}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(options.clone());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split} {html}");
+    }
   }
 }

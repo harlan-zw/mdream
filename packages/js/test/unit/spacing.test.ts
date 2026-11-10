@@ -736,7 +736,7 @@ describe('excluded-content review regressions', () => {
     ['<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>', '[Lima](/f) *<mark></mark>*'],
     ['<figcaption><s>1. Lima </s><figcaption><svg></svg> Lima</figcaption></figcaption>', '*~~1. Lima~~ *Lima**'],
     ['<code><a href="/f" title="Lima "></a></code>', '`[Lima ](/f "Lima ")`'],
-    ['<button>A </button><figcaption><em><br>B</em></figcaption>', 'A\n\n**  \nB**'],
+    ['<button>A </button><figcaption><em><br>B</em></figcaption>', 'A\n\n  \n**B**'],
   ])('caption separator rollback and link fallback: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
     for (const width of [1, 2, 3, 7]) {
@@ -789,6 +789,35 @@ describe('excluded-content review regressions', () => {
       },
     ],
   ])('keeps caption separators across excluded wrappers: %s', async (html, expected, options) => {
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks, options), `width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)], options), `split=${split}`).toBe(expected)
+  })
+
+  it.each([
+    [
+      '<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite></figcaption>',
+      '**Kilo**',
+    ],
+    [
+      '<figcaption><cite><kbd><svg></svg></kbd><br><br>Kilo</cite></figcaption>',
+      '**Kilo**',
+    ],
+    [
+      '<figcaption><cite><kbd><svg></svg></kbd><br></cite></figcaption>',
+      '',
+    ],
+    [
+      '<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite> Lima</figcaption>',
+      '**Kilo* Lima*',
+    ],
+    ['<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>\n<br></ul> </a></figcaption></kbd>', '```Kilo![](/n)Kilo`" [Lima](/f)"`   \n***Kilo**[  \nLima](/f)*`'],
+  ])('keeps caption emphasis after a leading break: %s', async (html, expected) => {
+    const options = { tagOverrides: { code: { enter: '^', exit: '^' } } }
     expect(htmlToMarkdown(html, options)).toBe(expected)
     for (const width of [1, 2, 3, 7]) {
       const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
