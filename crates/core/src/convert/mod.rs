@@ -185,6 +185,8 @@ struct OpenMarker {
   /// The opener carries the block break a heading in a list item owed, so
   /// dropping the empty pair owes it again.
   restores_heading_break: bool,
+  /// Where vertical-tab-only text first kept it open (`usize::MAX` if never); charged to the cap.
+  vertical_tab_start: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -208,6 +210,37 @@ struct StreamingBreakRun {
   output_end: usize,
   unit: String,
   count: usize,
+}
+
+/// Output cut by a rewrite that writes it back, from `take_tail_with_breaks`.
+struct MovedTail {
+  text: String,
+  /// The break runs, one break each, at offsets into `text`.
+  runs: Vec<StreamingBreakRun>,
+  /// Per written-out run: its buffer offset and the repeats added up to it.
+  repeats: Vec<(usize, usize)>,
+  start: usize,
+  end: usize,
+}
+
+impl MovedTail {
+  /// Where the span ending at buffer offset `at` ends in `text`, if it ends in the cut bytes.
+  fn offset(&self, at: usize) -> Option<usize> {
+    if at <= self.start || at > self.end {
+      return None;
+    }
+    Some(self.offset_from(at))
+  }
+
+  fn offset_from(&self, at: usize) -> usize {
+    let added = self
+      .repeats
+      .iter()
+      .take_while(|&&(run_start, _)| run_start < at)
+      .last()
+      .map_or(0, |&(_, added)| added);
+    at - self.start + added
+  }
 }
 
 #[derive(Clone, Copy)]
@@ -391,6 +424,60 @@ impl TailRun {
   fn note_drain(&mut self, removed: usize) {
     self.start = self.start.saturating_sub(removed);
     self.end = self.end.saturating_sub(removed);
+  }
+}
+
+/// The first vertical tab in the trailing whitespace run, carried between calls like [`TailRun`].
+#[derive(Clone, Copy, Debug, Default)]
+struct VerticalTabRun {
+  end: usize,
+  start: usize,
+  first_tab: Option<usize>,
+}
+
+impl VerticalTabRun {
+  fn first_tab(&mut self, bytes: &[u8]) -> Option<usize> {
+    let end = bytes.len();
+    let floor = if self.end <= end { self.end } else { 0 };
+    let mut start = end;
+    let mut first_tab = None;
+    while start > floor && (bytes[start - 1].is_ascii_whitespace() || bytes[start - 1] == 11) {
+      start -= 1;
+      if bytes[start] == 11 {
+        first_tab = Some(start);
+      }
+    }
+    if start == floor && floor != 0 {
+      start = self.start;
+      first_tab = self.first_tab.or(first_tab);
+    }
+    debug_assert!(
+      start == 0 || !(bytes[start - 1].is_ascii_whitespace() || bytes[start - 1] == 11)
+    );
+    debug_assert!(first_tab.is_none_or(|at| bytes[at] == 11));
+    self.end = end;
+    self.start = start;
+    self.first_tab = first_tab;
+    first_tab
+  }
+
+  fn note_rewrite(&mut self, offset: usize) {
+    if offset < self.start {
+      *self = Self::default();
+    } else {
+      self.end = self.end.min(offset);
+      self.first_tab = self.first_tab.filter(|&at| at < offset);
+    }
+  }
+
+  fn note_drain(&mut self, removed: usize) {
+    if removed > self.start {
+      *self = Self::default();
+    } else {
+      self.start -= removed;
+      self.end -= removed;
+      self.first_tab = self.first_tab.map(|at| at - removed);
+    }
   }
 }
 
@@ -1189,7 +1276,10 @@ pub struct ConvertState {
   /// The trailing whitespace, `<pre>` space and heading `#` runs `get_markdown_chunk`
   /// holds back.
   held_whitespace: TailRun,
+  held_emphasis_blank: TailRun,
   held_emphasis_whitespace: TailRun,
+  /// The vertical tab run `max_node_bytes` charges while emphasis is open.
+  charged_vertical_tabs: VerticalTabRun,
   held_spaces: TailRun,
   held_heading_run: TailRun,
   /// The line a dropped caption hands its heading break back to. Empty captions
@@ -1603,7 +1693,9 @@ impl ConvertState {
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
       held_whitespace: TailRun::default(),
+      held_emphasis_blank: TailRun::default(),
       held_emphasis_whitespace: TailRun::default(),
+      charged_vertical_tabs: VerticalTabRun::default(),
       held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
       caption_line: BlockLineMemo::default(),
@@ -3230,7 +3322,9 @@ impl ConvertState {
     self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
+    self.held_emphasis_blank.note_rewrite(offset);
     self.held_emphasis_whitespace.note_rewrite(offset);
+    self.charged_vertical_tabs.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
     self.caption_line.note_rewrite(offset);
@@ -3269,7 +3363,9 @@ impl ConvertState {
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
     self.held_whitespace.note_drain(removed);
+    self.held_emphasis_blank.note_drain(removed);
     self.held_emphasis_whitespace.note_drain(removed);
+    self.charged_vertical_tabs.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
     self.caption_line.note_drain(removed);
@@ -3304,6 +3400,13 @@ impl ConvertState {
     if len <= cap {
       return false;
     }
+    // A closing delimiter moves this whole run, so streaming holds all of it.
+    if self
+      .vertical_tab_hold_start()
+      .is_some_and(|start| len.saturating_sub(start) > cap)
+    {
+      return true;
+    }
     let mut floor = len;
     // A link holds while its text is blank, since its close may still drop it.
     // Other link holds end within the link's URL length.
@@ -3327,6 +3430,48 @@ impl ConvertState {
       floor = floor.min(content_start.max(reach));
     }
     len - floor > cap
+  }
+
+  /// Whether a closer may still move trailing vertical tabs out, as `write_emphasis_exit` does.
+  #[inline]
+  fn emphasis_moves_vertical_tabs(&self) -> bool {
+    !plain_text!(self)
+      && (self.depth_map[TAG_PRE as usize] == 0 || self.pre_fence_owner_depth == 0)
+      && (self.depth_map[TAG_EM as usize] != 0
+        || self.depth_map[TAG_I as usize] != 0
+        || self.depth_map[TAG_STRONG as usize] != 0
+        || self.depth_map[TAG_B as usize] != 0
+        || self.depth_map[TAG_CITE as usize] != 0
+        || self.depth_map[TAG_DFN as usize] != 0
+        || self.depth_map[TAG_DEL as usize] != 0
+        || self.depth_map[TAG_S as usize] != 0
+        || self.depth_map[TAG_STRIKE as usize] != 0)
+  }
+
+  /// Start of held output a closer may move: the trailing run's first tab or a marker's tab text.
+  pub(super) fn vertical_tab_hold_start(&mut self) -> Option<usize> {
+    if !self.emphasis_moves_vertical_tabs() {
+      return None;
+    }
+    let marker = self
+      .open_markers
+      .first()
+      .map(|marker| marker.vertical_tab_start)
+      .filter(|&start| start != usize::MAX);
+    let run = if self
+      .buffer
+      .as_bytes()
+      .last()
+      .is_some_and(|&byte| byte.is_ascii_whitespace() || byte == 11)
+    {
+      self.charged_vertical_tabs.first_tab(self.buffer.as_bytes())
+    } else {
+      None
+    };
+    match (marker, run) {
+      (Some(marker), Some(run)) => Some(marker.min(run)),
+      (marker, run) => marker.or(run),
+    }
   }
 
   /// Quote only what a chunk could already hand out. The tail past here is
@@ -3380,26 +3525,6 @@ impl ConvertState {
     let mut stable_end = self
       .held_whitespace
       .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
-    // Separate predicates keep cached runs valid when emphasis closes.
-    if stable_end > 0
-      && self.buffer.as_bytes()[stable_end - 1] == 11
-      && !plain_text!(self)
-      && (self.depth_map[TAG_EM as usize] != 0
-        || self.depth_map[TAG_I as usize] != 0
-        || self.depth_map[TAG_STRONG as usize] != 0
-        || self.depth_map[TAG_B as usize] != 0
-        || self.depth_map[TAG_CITE as usize] != 0
-        || self.depth_map[TAG_DFN as usize] != 0
-        || self.depth_map[TAG_DEL as usize] != 0
-        || self.depth_map[TAG_S as usize] != 0
-        || self.depth_map[TAG_STRIKE as usize] != 0)
-    {
-      stable_end = self
-        .held_emphasis_whitespace
-        .start(self.buffer.as_bytes(), buf_len, |byte| {
-          byte.is_ascii_whitespace() || byte == 11
-        });
-    }
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
       // line-leading run is the exception: list continuation indentation is
@@ -3458,6 +3583,21 @@ impl ConvertState {
     }
     if self.list_tail_start != usize::MAX {
       stable_end = stable_end.min(self.list_tail_start);
+    }
+    // After the holds above: a droppable opener or link after the run can leave it trailing.
+    if self.emphasis_moves_vertical_tabs() {
+      let blank = self
+        .held_emphasis_blank
+        .start(self.buffer.as_bytes(), stable_end, |b| {
+          b.is_ascii_whitespace()
+        });
+      if blank > 0 && self.buffer.as_bytes()[blank - 1] == 11 {
+        stable_end = self
+          .held_emphasis_whitespace
+          .start(self.buffer.as_bytes(), blank, |byte| {
+            byte.is_ascii_whitespace() || byte == 11
+          });
+      }
     }
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
@@ -3735,6 +3875,9 @@ impl ConvertState {
     for marker in &mut self.open_markers {
       marker.output_start -= drain_end;
       marker.content_start -= drain_end;
+      if marker.vertical_tab_start != usize::MAX {
+        marker.vertical_tab_start = marker.vertical_tab_start.saturating_sub(drain_end);
+      }
     }
     for frame in &mut self.caption_frames {
       if let CaptionState::Tentative {

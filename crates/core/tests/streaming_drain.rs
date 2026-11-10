@@ -7444,3 +7444,95 @@ fn streaming_empty_inline_pre_fence_reliability() {
     assert_stream_matches_every_split(&html, HtmlToMarkdownOptions::default());
   }
 }
+
+fn vertical_tab_options(max_node_bytes: usize) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_images: false,
+      fragments: false,
+      urls: false,
+      ..CleanConfig::all()
+    }),
+    max_node_bytes,
+    ..Default::default()
+  }
+}
+
+#[test]
+fn vertical_tab_before_a_droppable_opener_streams_like_one_shot() {
+  // The empty element can drop and leave the tab trailing for the bold closer to move.
+  let opts = vertical_tab_options(1 << 20);
+  for (html, expected) in [
+    (
+      "<p><b>Note\u{b}<em></em></b> text</p>",
+      "**Note**\u{b} text",
+    ),
+    ("<p><b>Note\u{b}<s></s></b> text</p>", "**Note**\u{b}  text"),
+    (
+      "<p><b>Note\u{b}<code></code></b> text</p>",
+      "**Note**\u{b} text",
+    ),
+    (
+      "<p><b>Note\u{b}<a href=\"/x\"></a></b> text</p>",
+      "**Note**\u{b}  text",
+    ),
+    (
+      "<p><b>Note\u{b}<br><i></i>\u{b}<br></b> text</p>",
+      "**Note**\u{b}  \n\u{b}  \n text",
+    ),
+    ("<del>\u{b}<pre>", "~~~~\u{b}"),
+  ] {
+    assert_eq!(html_to_markdown(html, opts.clone()), expected);
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+  // The opener is still open when the input ends.
+  let mut stream = MarkdownStreamProcessor::new(opts.clone());
+  let mut actual = stream.process_chunk("<p><b>Note\u{b}<em>");
+  actual.push_str(&stream.finish());
+  assert_eq!(actual, "**Note**\u{b}");
+  assert_eq!(html_to_markdown("<p><b>Note\u{b}<em>", opts), actual);
+}
+
+#[test]
+fn vertical_tab_hold_inside_emphasis_is_charged_to_the_node_cap() {
+  // Streaming holds the whole run for the closer, so the cap cuts it where one-shot does.
+  const CAP: usize = 64 * 1024;
+  let opts = vertical_tab_options(CAP);
+  for unit in [
+    "\u{b}<br>",
+    "&#11;<br>",
+    "\u{b} ",
+    "\u{b}<br><br>",
+    "\u{b}<span></span>",
+    "\u{b}<i>",
+  ] {
+    for (open, close) in [("<p><b>a", ""), ("<p><b>a", "</b>c</p>"), ("<p>a<b>", "")] {
+      let html = format!("{open}{}{close}", unit.repeat(2 * CAP));
+      let expected = html_to_format_result(&html, opts.clone(), OutputFormat::Markdown);
+      assert!(expected.truncated, "unit={unit:?} open={open:?}");
+      let (peak, total_out) = measure_peak(&html, 4096, opts.clone());
+      assert_eq!(total_out, expected.markdown.len() as u64, "unit={unit:?}");
+      assert!(
+        peak < 5 * CAP as u64,
+        "peak {peak} should stay within the {CAP} byte cap for {unit:?} after {open:?}"
+      );
+      let mut stream = MarkdownStreamProcessor::new(opts.clone());
+      let mut actual = String::new();
+      for chunk in html.as_bytes().chunks(4096) {
+        actual.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      actual.push_str(&stream.finish());
+      assert!(stream.truncated(), "unit={unit:?} open={open:?}");
+      assert_eq!(actual, expected.markdown, "unit={unit:?} open={open:?}");
+    }
+  }
+  // Below the cap the run streams out whole once the closer has moved it.
+  let html = format!("<p><b>a{}</b>c</p>", "\u{b}<br>".repeat(1000));
+  let expected = html_to_format_result(&html, opts.clone(), OutputFormat::Markdown);
+  assert!(!expected.truncated);
+  assert!(expected.markdown.starts_with("**a**\u{b}  \n"));
+  for width in [1, 7, 4096] {
+    assert_eq!(stream_chunks(&html, width, opts.clone()), expected.markdown);
+  }
+}

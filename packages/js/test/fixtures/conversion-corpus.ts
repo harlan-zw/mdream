@@ -151,4 +151,5 @@ export const CONVERSION_CORPUS: string[] = [
   `<ul><li>a<br><em>&#13;<ol><li><blockquote><ol><li>p</li></ol></blockquote></li></ol></em></li></ul>`,
   `<ul><li><dl><dt>l</dt></dl><br><br>l</li></ul>`,
   `<dl><dt>l</dt></dl><br><br>l`,
+  `<p><b>Note\v<em></em></b> text</p>`,
 ]
