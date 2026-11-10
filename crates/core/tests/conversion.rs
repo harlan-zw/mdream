@@ -6413,17 +6413,20 @@ fn whitespace_before_a_block_break_in_code_stays() {
   ] {
     for (open, close) in [("<span>", "</span>"), ("", "")] {
       for block in ["p", "h4"] {
-        for next in [
-          "<table><tr><td>x</td></tr></table>",
-          "<figure><figcaption>x</figcaption></figure>",
-          "<hr>",
-          "<ul><li>x</li></ul>",
-          "<ol><li>x</li></ol>",
+        for (next, following) in [
+          ("<table><tr><td>x</td></tr></table>", "| x |\n| --- |"),
+          ("<figure><figcaption>x</figcaption></figure>", "x"),
+          ("<hr>", "---"),
+          ("<ul><li>x</li></ul>", "- x"),
+          ("<ol><li>x</li></ol>", "1. x"),
         ] {
           let html = format!("{open}<pre><{block}>a b{ws}</{block}>{next}</pre>{close}");
           let out = convert(&html);
+          let after = out
+            .split_once(&format!("a b{kept}"))
+            .map(|(_, after)| after);
           assert!(
-            out.contains(&format!("a b{kept}")),
+            after.is_some_and(|after| after.contains(following)),
             "html={html:?} out={out:?}"
           );
         }

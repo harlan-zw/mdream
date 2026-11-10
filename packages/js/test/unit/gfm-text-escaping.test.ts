@@ -152,18 +152,19 @@ describe('gfm text escaping', () => {
 
   const blockBreakCases = [['\t', '\t'], ['&#9;', '\t'], ['&#13;', '\r'], ['&#12;', '\f']].flatMap(([ws, kept]) =>
     [['<span>', '</span>'], ['', '']].flatMap(([open, close]) => ['p', 'h4'].flatMap(block => [
-      '<table><tr><td>x</td></tr></table>',
-      '<figure><figcaption>x</figcaption></figure>',
-      '<hr>',
-      '<ul><li>x</li></ul>',
-      '<ol><li>x</li></ol>',
-    ].map(next => [`${open}<pre><${block}>a b${ws}</${block}>${next}</pre>${close}`, `a b${kept}`]))))
+      ['<table><tr><td>x</td></tr></table>', '| x |\n| --- |'],
+      ['<figure><figcaption>x</figcaption></figure>', 'x'],
+      ['<hr>', '---'],
+      ['<ul><li>x</li></ul>', '- x'],
+      ['<ol><li>x</li></ol>', '1. x'],
+    ].map(([next, following]) => [`${open}<pre><${block}>a b${ws}</${block}>${next}</pre>${close}`, `a b${kept}`, following]))))
 
-  it.each(blockBreakCases)('keeps the whitespace before a block break in code for %j', async (html, kept) => {
+  it.each(blockBreakCases)('keeps the whitespace before a block break in code for %j', async (html, kept, following) => {
     // In a <pre> an inline wraps, a child block's exit writes a line break after
     // its text; the tab, CR or form feed before it is code.
     const out = htmlToMarkdown(html)
     expect(out).toContain(kept)
+    expect(out.slice(out.indexOf(kept) + kept.length)).toContain(following)
     for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
       expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(out)
   })
@@ -305,13 +306,12 @@ describe('heading fence reliability', () => {
   })
 
   it.each([
-    ['<pre><div>a</div><h2>x #</h2></pre>', '~\n'],
-    ['<pre><div>a</div><h2>x #</h2></pre>', '```\n'],
-    ['<pre><code><div>a</div><h2>x #</h2></code></pre>', '~\n'],
-  ])('keeps reliable fences for plugin output inside an open fence: %s %j', async (html, marker) => {
+    ['<pre><div>a</div><h2>x #</h2></pre>', '~\n', '```\n\n~\na\n\n## x #\n\n\n```'],
+    ['<pre><div>a</div><h2>x #</h2></pre>', '```\n', '````\n\n```\na\n\n## x #\n\n\n````'],
+    ['<pre><code><div>a</div><h2>x #</h2></code></pre>', '~\n', '```\n~\na ## x #\n```'],
+  ])('keeps reliable fences for plugin output inside an open fence: %s %j', async (html, marker, expected) => {
     const options = { plugins: [createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? marker : undefined })] }
-    const expected = htmlToMarkdown(html, options)
-    expect(expected).toContain('## x #')
+    expect(htmlToMarkdown(html, options)).toBe(expected)
     for (let size = 1; size <= html.length; size++)
       expect(await streamConvert(html, size, options)).toBe(expected)
   })
