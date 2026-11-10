@@ -60,8 +60,7 @@ pub fn html_to_text_result(html: &str, options: HtmlToMarkdownOptions) -> Mdream
 
 /// Input bytes per reserved output byte for a one-shot conversion.
 const OUTPUT_RESERVE_DIVISOR: usize = 3;
-/// Initial output and input capacity of a streaming converter.
-const STREAM_START_CAPACITY: usize = 4096;
+use convert::STREAM_START_CAPACITY;
 const MIN_ONE_SHOT_CAPACITY: usize = 1024;
 const MAX_ONE_SHOT_CAPACITY: usize = 256 * 1024;
 
@@ -161,6 +160,7 @@ impl MarkdownStreamProcessor {
       // terminator in place, rather than recopying it every chunk.
       let consumed = self.state.process_html(&self.buffer);
       self.buffer.drain(..consumed);
+      convert::release_stream_slack(&mut self.buffer);
     }
     self.state.get_markdown_chunk()
   }
@@ -243,6 +243,75 @@ pub mod fuzz_bridge {
     let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
     processor.state.disable_drain = true;
     processor
+  }
+}
+
+#[cfg(test)]
+mod stream_slack {
+  //! An idle stream holds about what it still owes, not its high-water mark.
+  use super::MarkdownStreamProcessor;
+  use crate::convert::{SLACK_FLOOR, STREAM_START_CAPACITY};
+
+  #[test]
+  fn output_buffer_shrinks_after_held_block_drains() {
+    let mut processor = MarkdownStreamProcessor::new(Default::default());
+    let mut out = processor.process_chunk(&format!("<p><strong>{}", "x ".repeat(160_000)));
+    assert!(
+      processor.state.buffer.capacity() > SLACK_FLOOR,
+      "{}",
+      processor.state.buffer.capacity()
+    );
+    out.push_str(&processor.process_chunk("</strong></p><p>after</p>"));
+    assert!(
+      processor.state.buffer.capacity()
+        <= STREAM_START_CAPACITY.max(2 * processor.state.buffer.len()),
+      "capacity {} for {} live bytes",
+      processor.state.buffer.capacity(),
+      processor.state.buffer.len()
+    );
+    out.push_str(&processor.finish());
+    assert!(out.ends_with("x**\n\nafter"), "{}", &out[out.len() - 20..]);
+  }
+
+  #[test]
+  fn carry_buffer_shrinks_after_appended_chunk() {
+    let mut processor = MarkdownStreamProcessor::new(Default::default());
+    processor.process_chunk("<p>a</p><di");
+    assert_eq!(processor.buffer, "<di");
+    processor.process_chunk(&format!("v>{}</div><sp", "y".repeat(256 * 1024)));
+    assert_eq!(processor.buffer, "<sp");
+    assert!(
+      processor.buffer.capacity() <= STREAM_START_CAPACITY.max(2 * processor.buffer.len()),
+      "{}",
+      processor.buffer.capacity()
+    );
+  }
+
+  /// A working set under the floor is not shrunk and regrown on every drain.
+  #[test]
+  fn small_working_set_keeps_capacity_across_drains() {
+    let html = format!(
+      "<h2>Intro</h2><blockquote>{}</blockquote>",
+      "<p>Words in a paragraph.</p>".repeat(4096)
+    );
+    let mut processor = MarkdownStreamProcessor::new(Default::default());
+    let (mut out, mut peak) = (String::new(), 0);
+    for chunk in html.as_bytes().chunks(1024) {
+      out.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      let capacity = processor.state.buffer.capacity();
+      assert!(capacity >= peak, "capacity fell from {peak} to {capacity}");
+      peak = capacity;
+    }
+    assert!(
+      peak > 4096,
+      "the held quote never outgrew the start capacity: {peak}"
+    );
+    out.push_str(&processor.finish());
+    assert!(
+      out.ends_with("> Words in a paragraph."),
+      "{}",
+      &out[out.len() - 30..]
+    );
   }
 }
 
