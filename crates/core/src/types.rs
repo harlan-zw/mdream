@@ -364,7 +364,7 @@ impl NodeStack {
 
   /// Drop a retired node's large values and extras once its exit is emitted.
   /// Otherwise a slot above the live depth holds them until the document ends.
-  #[inline]
+  #[inline(always)]
   pub fn release_retired(&mut self) {
     let node = &mut self.nodes[self.len];
     node.attributes.clear();
