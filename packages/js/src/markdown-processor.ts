@@ -1267,13 +1267,6 @@ export function trimAsciiWhitespaceEnd(value: string, inlineClose = false): stri
   return end === value.length ? value : value.slice(0, end)
 }
 
-function textInPre(node: TextNode): boolean {
-  let parent = node.parent
-  while (parent && parent.tagId !== TAG_PRE)
-    parent = parent.parent
-  return !!parent
-}
-
 /** Drop the top marker when every following fragment is whitespace. */
 function dropEmptyMarker(buffer: string[], packed: number, markerType: number, positions?: OutputPositions): number {
   const idx = packed >> 3
@@ -2366,17 +2359,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
 
       const wrapWidth = state.options?.wrapWidth
-      if (lastChar === '\u000B' && state.lastTextNode?.containsWhitespace && !state.depthMap[TAG_PRE]
-        && state.lastContentCache && state.lastContentCache === state.buffer.at(-1)
-        && trimAsciiWhitespaceEnd(textNode.value).length === 0 && !textInPre(state.lastTextNode)) {
-        // Transparent wrappers can separate a mutable tail from its final source space.
-        const joined = state.lastContentCache + textNode.value
-        state.outputPositions?.replace(state.buffer.length - 1, state.buffer.length, [joined])
-        state.buffer[state.buffer.length - 1] = joined
-        state.lastContentCache = joined
-        noteBufferRewrite(state)
-      }
-      else if (wrapWidth && canWrapHere(state.depthMap)) {
+      if (wrapWidth && canWrapHere(state.depthMap)) {
         // Past both the width and the prefix every word breaks or overflows.
         const column = currentColumn(state.buffer, Math.max(wrapWidth, state.listIndent.length + 1))
         const wrapped = wrapText(textNode.value, column, wrapWidth, state.listIndent)
