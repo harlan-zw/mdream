@@ -1,11 +1,36 @@
 //! CSS selector parsing and element matching.
 
+use crate::consts::{ATTR_ALL, ATTR_CLASS, ATTR_NONE};
 use crate::types::{ElementNode, ParsedSelector};
 
 #[derive(Debug, Clone)]
 pub(crate) enum ParsedSelectorList {
   Single(ParsedSelector),
   Multiple(Vec<ParsedSelector>),
+}
+
+/// Attribute bits a filter selector reads. A class selector needs `class`;
+/// an id or attribute selector can read any attribute, so it asks for `ATTR_ALL`.
+pub(crate) fn selector_attr_bits(selector: &ParsedSelector) -> u16 {
+  match selector {
+    ParsedSelector::Tag(_) => ATTR_NONE,
+    ParsedSelector::Class(_) => ATTR_CLASS,
+    ParsedSelector::Id(_) | ParsedSelector::Attribute { .. } => ATTR_ALL,
+    ParsedSelector::Compound(parts) => parts
+      .iter()
+      .fold(ATTR_NONE, |bits, part| bits | selector_attr_bits(part)),
+  }
+}
+
+pub(crate) fn selector_list_attr_bits(list: &ParsedSelectorList) -> u16 {
+  match list {
+    ParsedSelectorList::Single(selector) => selector_attr_bits(selector),
+    ParsedSelectorList::Multiple(selectors) => {
+      selectors.iter().fold(ATTR_NONE, |bits, selector| {
+        bits | selector_attr_bits(selector)
+      })
+    }
+  }
 }
 
 fn attribute_end(selector: &str, open: usize) -> Option<usize> {

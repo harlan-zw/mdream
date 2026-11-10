@@ -922,6 +922,9 @@ pub struct ConvertState {
   has_isolate_main: bool,
   pub has_frontmatter: bool,
   has_filter: bool,
+  /// Attribute bits the filter reads (`style`, `hidden`, and `class` for class
+  /// selectors); merged into every element's attribute mask.
+  filter_attr_bits: u16,
   pub has_extraction: bool,
   has_tag_overrides: bool,
   /// Some plugin reads arbitrary attributes, so every tag captures all of them.
@@ -1318,6 +1321,7 @@ impl ConvertState {
       has_frontmatter: false,
       has_filter: false,
       has_extraction: false,
+      filter_attr_bits: ATTR_NONE,
       has_tag_overrides: false,
       override_idx: None,
       attrs_force_all: false,
@@ -1535,10 +1539,24 @@ impl ConvertState {
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);
       }
-      // Capped parsing keeps its existing attribute budget, including names
-      // that Tailwind does not read.
+      // Filter selectors without id or attribute parts read only the bits the
+      // filter needs. HTML and text output read other attributes, so they keep
+      // every attribute. Capped parsing keeps its existing attribute budget,
+      // including names that the filter and Tailwind do not read.
+      let filter_selector_bits = s
+        .filter_exclude_parsed
+        .iter()
+        .chain(&s.filter_include_parsed)
+        .fold(ATTR_NONE, |bits, (_, parsed)| {
+          bits | crate::selector::selector_list_attr_bits(parsed)
+        });
+      let filter_needs_all = s.has_filter
+        && (s.options.max_node_bytes != 0 || !s.is_markdown() || filter_selector_bits == ATTR_ALL);
+      if s.has_filter {
+        s.filter_attr_bits = ATTR_STYLE | ATTR_HIDDEN | (filter_selector_bits & ATTR_CLASS);
+      }
       s.attrs_force_all =
-        s.has_filter || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
+        filter_needs_all || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
     }
     s
   }

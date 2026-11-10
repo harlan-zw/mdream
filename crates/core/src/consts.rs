@@ -269,6 +269,13 @@ pub const ATTR_START: u16 = 1 << 10;
 pub const ATTR_COLSPAN: u16 = 1 << 11;
 pub const ATTR_DATA_LANGUAGE: u16 = 1 << 12;
 pub const ATTR_DATA_LANG: u16 = 1 << 13;
+/// `style`, read by the filter's `display:none` / `visibility:hidden` check.
+pub const ATTR_STYLE: u16 = 1 << 14;
+/// `hidden`, read by the filter's hidden-element check.
+pub const ATTR_HIDDEN: u16 = 1 << 15;
+/// Every attribute, including names with no bit. A mask built from known bits
+/// reaches it only by naming all sixteen, which no mask does; doing so would
+/// keep extra names, never drop one.
 pub const ATTR_ALL: u16 = u16::MAX;
 
 /// Reverse of [`attr_bit`], for re-serialisation and extraction output.
@@ -289,6 +296,8 @@ pub(crate) const fn attr_name(bit: u16) -> &'static str {
     ATTR_COLSPAN => "colspan",
     ATTR_DATA_LANGUAGE => "data-language",
     ATTR_DATA_LANG => "data-lang",
+    ATTR_STYLE => "style",
+    ATTR_HIDDEN => "hidden",
     _ => "",
   }
 }
@@ -348,6 +357,8 @@ pub(crate) fn attr_bit(name: &[u8]) -> u16 {
   const CONTENT: u64 = literal_word(b"content");
   const COLSPAN: u64 = literal_word(b"colspan");
   const PROPERTY: u64 = literal_word(b"property");
+  const STYLE: u64 = literal_word(b"style");
+  const HIDDEN: u64 = literal_word(b"hidden");
   match name.len() {
     3..=WORD_BYTES => match (name.len(), folded_word(name)) {
       (3, ALT) => ATTR_ALT,
@@ -358,6 +369,8 @@ pub(crate) fn attr_bit(name: &[u8]) -> u16 {
       (5, CLASS) => ATTR_CLASS,
       (5, ALIGN) => ATTR_ALIGN,
       (5, START) => ATTR_START,
+      (5, STYLE) => ATTR_STYLE,
+      (6, HIDDEN) => ATTR_HIDDEN,
       (7, CONTENT) => ATTR_CONTENT,
       (7, COLSPAN) => ATTR_COLSPAN,
       (8, PROPERTY) => ATTR_PROPERTY,
@@ -692,6 +705,8 @@ mod attr_bit_tests {
       (b"data-lang", ATTR_DATA_LANG),
       (b"aria-label", ATTR_ARIA_LABEL),
       (b"data-language", ATTR_DATA_LANGUAGE),
+      (b"style", ATTR_STYLE),
+      (b"hidden", ATTR_HIDDEN),
     ];
     KNOWN
       .iter()
@@ -719,6 +734,8 @@ mod attr_bit_tests {
       b"data-lang",
       b"aria-label",
       b"data-language",
+      b"style",
+      b"hidden",
       b"data-x",
     ];
     for name in names {
