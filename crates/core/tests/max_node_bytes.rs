@@ -2385,6 +2385,96 @@ fn nested_empty_quote_rollback_obeys_inline_code_cap() {
 }
 
 #[test]
+fn exhausted_code_span_keeps_nested_item_separator() {
+  for quote in [
+    "",
+    "q",
+    "<p>q</p><p>r</p>",
+    "<blockquote>q</blockquote>",
+    "q<br>r",
+    "<pre>q</pre>",
+    "<p>q</p>",
+  ] {
+    for cap in [4, 8] {
+      let html = format!(
+        "<ul><li>x<ul><li><code><hr><blockquote>{quote}</blockquote>t</code></li></ul></li></ul>"
+      );
+      assert_capped_inline_code(&html, cap, "- x\n\n  -", true);
+      for chunk in [1, 2, 3, 11] {
+        assert_eq!(
+          stream_reporting(&html, chunk, cap),
+          ("- x\n\n  -".to_string(), true)
+        );
+      }
+    }
+  }
+}
+
+#[test]
+fn surviving_code_span_stays_after_nested_item_marker() {
+  let html = "<ul><li>x<ul><li><code>y</code></li></ul></li></ul>";
+  for cap in [0, 8] {
+    assert_capped_inline_code(html, cap, "- x\n  - `y`", false);
+    for chunk in [1, 2, 3, 11] {
+      assert_eq!(
+        stream_reporting(html, chunk, cap),
+        ("- x\n  - `y`".to_string(), false)
+      );
+    }
+  }
+}
+
+#[test]
+fn capped_code_in_open_link_preserves_adjacent_item() {
+  {
+    let html = "<blockquote><ul><li>root<ul><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ul></li></ul></blockquote>";
+    let expected =
+      "> - root\n>   - [`\n>\n>     ---\n>\n>     \n>     > z\n>\n>     end`](/z)\n>   - adj";
+    assert_capped_inline_code(html, 38, expected, false);
+    for chunk in [1, 2, 3, 11] {
+      assert_eq!(
+        stream_reporting(html, chunk, 38),
+        (expected.to_string(), false)
+      );
+    }
+  }
+  {
+    let html = "<blockquote><ol><li>root<ol><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ol></li></ol></blockquote>";
+    let expected = "> 1. root\n>    1. [`\n>\n>       ---\n>\n>       \n>       > z\n>\n>       end`](/z)\n>    2. adj";
+    assert_capped_inline_code(html, 48, expected, false);
+    for chunk in [1, 2, 3, 11] {
+      assert_eq!(
+        stream_reporting(html, chunk, 48),
+        (expected.to_string(), false)
+      );
+    }
+  }
+}
+
+// The link's output (~580KB) must stream out of the capped item, not wait for
+// `finish()`.
+#[test]
+fn long_link_after_code_span_streams_in_capped_item() {
+  let unit = "<span>word</span> ";
+  let words = repeat_to(unit, HUGE);
+  let html =
+    format!("<ul><li>x<ul><li><a href=\"/z\"><code>c</code>{words}</a></li></ul></li></ul>");
+  let capped = peak(&html, 8 * 1024, CAP);
+  assert!(
+    capped < (HUGE / 4) as u64,
+    "capped peak {capped} should be a window, not the link"
+  );
+  let text = "word ".repeat(words.len() / unit.len());
+  let expected = format!("- x\n  - [`c`{}](/z)", text.trim_end());
+  assert_eq!(
+    stream_reporting(&html, 8 * 1024, CAP),
+    (expected.clone(), false)
+  );
+  let result = html_to_markdown_result(&html, options(CAP));
+  assert_eq!((result.markdown, result.truncated), (expected, false));
+}
+
+#[test]
 fn oversized_quote_in_inline_code_drops_unquoted_content() {
   assert_capped_inline_code(
     "<ul><li><code>aaaa<blockquote>q</blockquote></code></li></ul>",

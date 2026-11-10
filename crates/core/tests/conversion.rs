@@ -2213,6 +2213,32 @@ fn nested_blockquotes_after_text_quote_both_levels() {
   );
 }
 
+// A root break before an immediately nested blockquote strands the outer frame the
+// same way. The JS engine lost the outer level here; both engines keep it.
+#[test]
+fn nested_blockquotes_after_block_break_keep_every_level() {
+  for (html, expected) in [
+    (
+      "<h3>y</h3><br><blockquote><blockquote>x</blockquote>y</blockquote>",
+      "### y\n\n  \n> > x\n>\n> y",
+    ),
+    (
+      "<br><blockquote><blockquote>x</blockquote></blockquote>",
+      "> > x",
+    ),
+    (
+      "<p>a</p><br><br><blockquote><blockquote><blockquote>x</blockquote></blockquote>y</blockquote>z",
+      "a\n\n  \n  \n> > > x\n>\n> y\n\nz",
+    ),
+    (
+      "<p>a</p><br><blockquote><blockquote></blockquote>y</blockquote>",
+      "a\n\n  \n>\n> y",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 #[test]
 fn blockquote_with_paragraphs() {
   assert_eq!(

@@ -911,6 +911,31 @@ fn streaming_nested_blockquote_separator_collapse_matches_one_shot() {
   }
 }
 
+// A root break before a nested quote strands the outer frame like leading text.
+#[test]
+fn streaming_nested_blockquote_after_block_break_matches_one_shot() {
+  for html in [
+    "<h3>y</h3><br><blockquote><blockquote>x</blockquote>y</blockquote>",
+    "<p>a</p><br><br><blockquote><blockquote><blockquote>x</blockquote></blockquote>y</blockquote>z",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches(
+      html,
+      HtmlToMarkdownOptions {
+        wrap_width: 12,
+        ..Default::default()
+      },
+    );
+    assert_stream_matches(
+      html,
+      HtmlToMarkdownOptions {
+        clean: Some(safe_clean()),
+        ..Default::default()
+      },
+    );
+  }
+}
+
 #[test]
 fn streaming_large_nested_blockquote_drains_without_changing_output() {
   let mut html = String::from("<blockquote><blockquote><blockquote>");
@@ -2464,6 +2489,53 @@ fn streaming_raw_html_blank_line_drained_matches_one_shot() {
   }
 }
 
+// Streaming buffers one copy of a run of identical breaks. The blank line those
+// breaks already write after a raw HTML block must count every copy, or the
+// stream adds a second separator.
+#[test]
+fn streaming_raw_html_separator_counts_a_break_run() {
+  for (html, expected) in [
+    (
+      "<ul><li><dl><dt>l</dt></dl><br><br>l</li></ul>",
+      "- <dl><dt>l</dt></dl>  \n    \n  l",
+    ),
+    (
+      "<ul><li><dl><dt>l</dt></dl><br><br><br>l</li></ul>",
+      "- <dl><dt>l</dt></dl>  \n    \n    \n  l",
+    ),
+    (
+      "<ol><li><dl><dt>l</dt></dl><br><br>l</li></ol>",
+      "1. <dl><dt>l</dt></dl>  \n     \n   l",
+    ),
+    (
+      "<ul><li><ul><li><dl><dd>l</dd></dl><br><br>l</li></ul></li></ul>",
+      "-\n  - <dl><dd>l</dd></dl>  \n      \n    l",
+    ),
+    (
+      "<dl><dt>l</dt></dl><br><br>l",
+      "<dl><dt>l</dt>\n</dl>  \n  \nl",
+    ),
+    (
+      "<address>a</address><br><br><b>l</b>",
+      "<address>a</address>  \n  \n**l**",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+    let long = format!("<p>{}</p>{html}", "lead ".repeat(1000));
+    let long_expected = html_to_markdown(&long, opts.clone());
+    for width in [1, 7, 4096] {
+      assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+    }
+  }
+}
+
 #[test]
 fn streaming_raw_html_ignores_rewritable_blockquote_separator() {
   let html = "<dd>*<blockquote><blockquote>_";
@@ -3013,6 +3085,37 @@ fn streaming_matches_one_shot_across_blockquote_quoting() {
     "<dd><h2><li><blockquote>a<p><code><p>>aa<<a><<li>`",
     HtmlToMarkdownOptions::default(),
   );
+}
+
+// Past the 8 KiB threshold a `<code>` quotes the open blockquote's completed
+// lines. Quoting through a trailing hard break anchored the quote at the buffer
+// end, so the next block read it as just opened and dropped its blank line
+// (`> x  \n> l`); a break followed by a list indent lost its offset. One-shot
+// output then depended on how much quoted content came first.
+#[test]
+fn quote_flush_at_code_matches_a_short_quote() {
+  let words = |n: usize| "w ".repeat(n);
+  let opts = HtmlToMarkdownOptions::default;
+  for template in [
+    "<blockquote><p>{W}</p>x<br><code></code><p>l</p></blockquote>",
+    "<blockquote><blockquote><p>{W}</p>x<br><code></code><p>l</p></blockquote></blockquote>",
+    "<blockquote>{W}<br><s></s><code> </code> <h2>l</h2>",
+    "<blockquote><ul><li><blockquote>{W}</blockquote><code></code><br><p>l</p></li></ul></blockquote>",
+    "<ul><li><blockquote><blockquote>{W}</blockquote><br><code></code><p>l</p></blockquote></li></ul>",
+    "<ul><li><blockquote><p>{W}</p><blockquote><p>l</p></blockquote><br><code></code><blockquote><p>l</p></blockquote></blockquote></li></ul>",
+  ] {
+    let short = html_to_markdown(&template.replace("{W}", &words(20)), opts());
+    let expected = short.replacen(words(20).trim_end(), words(4500).trim_end(), 1);
+    let html = template.replace("{W}", &words(4500));
+    assert_eq!(html_to_markdown(&html, opts()), expected, "html={template}");
+    for chunk in [1usize, 7, 64, 997, 4096, 8191] {
+      assert_eq!(
+        stream_chunks(&html, chunk, opts()),
+        expected,
+        "chunk={chunk} html={template}"
+      );
+    }
+  }
 }
 
 // A trim takes the marker's own trailing space, which leaves the marker's

@@ -547,4 +547,39 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
       expect(actual, `split ${split}`).toBe(expected)
     }
   })
+
+  // A root break leaves a lone newline before an outer quote whose first child
+  // is another quote. The nested quote folds that newline away, so the outer
+  // quote must still start inside the output or it loses its level.
+  it.each<[string, string, string, { clean?: boolean, wrapWidth?: number }?]>([
+    ['heading', '<h3>y</h3><br><blockquote><blockquote>x</blockquote>y</blockquote>', '### y\n\n  \n> > x\n>\n> y'],
+    ['bare', '<br><blockquote><blockquote>x</blockquote></blockquote>', '> > x'],
+    ['three levels', '<p>a</p><br><blockquote><blockquote><blockquote>x</blockquote></blockquote>y</blockquote>', 'a\n\n  \n> > > x\n>\n> y'],
+    ['several breaks', '<p>a</p><br><br><blockquote><blockquote>x</blockquote>y</blockquote>z', 'a\n\n  \n  \n> > x\n>\n> y\n\nz'],
+    ['text around', 'a<br><br><blockquote><blockquote>x</blockquote>y</blockquote>z', 'a  \n  \n> > x\n>\n> y\n\nz'],
+    ['after a list', '<ul><li>a</li></ul><br><blockquote><blockquote>x</blockquote></blockquote>', '- a\n\n  \n> > x'],
+    ['in a div', '<div><p>a</p><br><blockquote><blockquote>x</blockquote>y</blockquote></div>', 'a\n\n  \n> > x\n>\n> y'],
+    ['in a pre', '<pre><blockquote><br><blockquote><blockquote>x</blockquote></blockquote></blockquote></pre>', '```\n> > > x\n\n\n```'],
+    ['empty inner quote', '<p>a</p><br><blockquote><blockquote></blockquote>y</blockquote>', 'a\n\n  \n>\n> y'],
+    ['in an item', '<ul><li><p>a</p><br><blockquote><blockquote>x</blockquote>y</blockquote></li></ul>', '- a  \n  \n  > > x\n  >\n  > y'],
+    ['in a quote', '<blockquote><p>a</p><br><blockquote><blockquote>x</blockquote>y</blockquote></blockquote>', '> a\n>\n>   \n> > > x\n> >\n> > y'],
+    ['clean', '<p>a</p><br><blockquote><blockquote><a href="#top">x</a></blockquote>y</blockquote>', 'a\n\n  \n> > x\n>\n> y', { clean: true }],
+    ['wrapped', '<p>a</p><br><blockquote><blockquote>one two three four five</blockquote>six seven eight</blockquote>', 'a\n\n  \n> > one two\n> > three four\n> > five\n>\n> six seven\n> eight', { wrapWidth: 12 }],
+  ])('keeps every quote level after a block break: %s', async (_id, html, expected, options) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { ...options, engine })).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of engine.streamHtmlToMarkdown(input, options))
+        actual += chunk
+      expect(actual, `width ${width}`).toBe(expected)
+    }
+  })
 })
