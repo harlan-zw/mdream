@@ -1362,7 +1362,7 @@ impl ConvertState {
       return;
     }
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule(false);
+      self.flush_list_rule();
     }
 
     let tag_id: Option<u8>;
@@ -1661,7 +1661,7 @@ impl ConvertState {
     }
 
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule(true);
+      self.flush_list_rule();
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -3353,7 +3353,7 @@ impl ConvertState {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_list_rule(false);
+      self.flush_list_rule();
     }
 
     let mut wrap_separator = false;
@@ -5227,21 +5227,8 @@ impl ConvertState {
     p
   }
 
-  fn flush_list_rule(&mut self, entering: bool) {
-    let mut prefix = self.continuation_prefix();
-    // An entering quote is already on the stack, but its marker does not
-    // belong on this line: a buffered frame writes it on exit, and a literal
-    // enter override writes the quote inline, as it does without the rule.
-    // Only its own trailing marker leaves; unbuffered outer quotes keep theirs.
-    if entering
-      && prefix.ends_with("> ")
-      && self
-        .stack
-        .last()
-        .is_some_and(|node| node.tag_id == Some(TAG_BLOCKQUOTE))
-    {
-      prefix.truncate(prefix.len() - 2);
-    }
+  fn flush_list_rule(&mut self) {
+    let prefix = self.continuation_prefix();
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
       self.buffer.reserve(2 + prefix.len());
       self.buffer.push_str("\n\n");
