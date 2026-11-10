@@ -6168,8 +6168,33 @@ impl ConvertState {
         && self.stack[len - 2].tag_id == Some(TAG_PRE)
   }
 
-  #[inline]
+  // An element that writes nothing and asks for no line break only records
+  // whether it is inline. Answering that in the caller skips the frame of
+  // `write_output_general`. WASM keeps one copy, since the test at every call
+  // site costs more bytes than the call.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
   pub(crate) fn write_output(
+    &mut self,
+    is_enter: bool,
+    is_inline: bool,
+    configured_new_lines: u8,
+    output: Option<&str>,
+    literal: bool,
+  ) {
+    if configured_new_lines == 0
+      && output.is_none_or(str::is_empty)
+      && !self.pending_inline_whitespace
+      && !self.last_text_node_contains_whitespace
+    {
+      self.last_node_is_inline = is_inline;
+      return;
+    }
+    self.write_output_general(is_enter, is_inline, configured_new_lines, output, literal);
+  }
+
+  #[inline(never)]
+  fn write_output_general(
     &mut self,
     is_enter: bool,
     is_inline: bool,
