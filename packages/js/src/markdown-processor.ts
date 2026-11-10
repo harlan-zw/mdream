@@ -59,7 +59,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, outputLeadLength, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -138,6 +138,12 @@ export interface MarkdownState {
   onCodeFenceOpen?: (language: string) => void
   /** Open blockquotes buffered until every child line can receive its prefix. */
   blockquotes: BlockquoteFrame[]
+  /**
+   * Whether the stream has dropped emitted output from the buffer. Dropping
+   * only document-leading whitespace, which the start trim never emits, leaves
+   * the buffer at the output start still.
+   */
+  drainedContent?: boolean
   /** Public runtime view used by tag handlers without exposing frame internals. */
   bufferedBlockquoteDepth: number
   /** Fragment for a marker line at risk of becoming a setext underline. */
@@ -665,7 +671,9 @@ const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
  * counts, as it does for a marker inside one text node. Parity with the Rust
  * `line_start_digits`.
  */
-function lineStartDigits(buffer: string[], indent: string, value: string): number {
+function lineStartDigits(state: MarkdownState, value: string): number {
+  const buffer = state.buffer
+  const indent = state.listIndent
   let lead = 0
   while (value.charCodeAt(lead) >= 48 && value.charCodeAt(lead) <= 57)
     lead++
@@ -686,8 +694,12 @@ function lineStartDigits(buffer: string[], indent: string, value: string): numbe
     const code = fragment >= 0 ? buffer[fragment]!.charCodeAt(--offset) : -1
     // A blank line or the spaces or backslash of a hard break; any other
     // character ends the line at a soft break.
-    if (newline)
-      return code === -1 || code === 10 || code === 32 || code === 9 || code === 92 ? digits : 0
+    if (newline) {
+      return code === -1 || code === 10 || code === 32 || code === 9 || code === 92
+        || outputStartsAt(state, fragment, offset + 1)
+        ? digits
+        : 0
+    }
     if (spaces === 0 && code >= 48 && code <= 57) {
       if (++digits > 9)
         return 0
@@ -698,7 +710,7 @@ function lineStartDigits(buffer: string[], indent: string, value: string): numbe
       return 0
     if (code === 32) {
       if (++spaces > indent.length + 3)
-        return 0
+        return outputStartsAt(state, fragment, offset) ? digits : 0
       continue
     }
     if (code === -1 || code === 10) {
@@ -710,8 +722,55 @@ function lineStartDigits(buffer: string[], indent: string, value: string): numbe
       continue
     }
     // A list item's content opens a block, so `- 1` + `. x` nests a list.
-    return spaces > 0 && spaces <= 3 && listMarkerLineStart(buffer, fragment, offset) ? digits : 0
+    return (spaces > 0 && spaces <= 3 && listMarkerLineStart(buffer, fragment, offset))
+      || outputStartsAt(state, fragment, offset + 1)
+      ? digits
+      : 0
   }
+}
+
+/**
+ * Whether the output trim removes everything before `offset` in fragment
+ * `fragment`: only whitespace is there, with no output drained before it. An
+ * open blockquote writes its `>` ahead of that whitespace later, which keeps
+ * it. Read from the end back, so the content closest to it ends the scan.
+ * Parity with the Rust `output_starts_at`.
+ */
+function outputStartsAt(state: MarkdownState, fragment: number, offset: number): boolean {
+  if (state.drainedContent || state.blockquotes.length !== 0)
+    return false
+  for (let index = fragment; index >= 0; index--) {
+    const value = state.buffer[index]!
+    if (outputLeadLength(value) < (index === fragment ? offset : value.length))
+      return false
+  }
+  return true
+}
+
+/**
+ * Index in `value` of a block marker that the output trim leaves first in the
+ * document, or -1: the trim removes all the whitespace before it, in `value`
+ * and in the buffer alike, so no amount of it works as indentation there. The
+ * marker test goes first, keeping the buffer scan to text that ends the blank
+ * output it reads. Parity with the Rust `output_start_marker`.
+ */
+function outputStartMarker(value: string, state: MarkdownState): number {
+  const lead = outputLeadLength(value)
+  const marker = value.charCodeAt(lead)
+  if (marker !== 35 && marker !== 43 && marker !== 45 && marker !== 61 && marker !== 62 // # + - = >
+    && !(marker >= 48 && marker <= 57)) {
+    return -1
+  }
+  // A table writes a line ending as a character reference, which is content.
+  if (state.depthMap[TAG_TABLE]) {
+    for (let index = 0; index < lead; index++) {
+      const code = value.charCodeAt(index)
+      if (code === 10 || code === 13)
+        return -1
+    }
+  }
+  const last = state.buffer.length - 1
+  return outputStartsAt(state, last, last < 0 ? 0 : state.buffer[last]!.length) ? lead : -1
 }
 
 /**
@@ -757,15 +816,15 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number, orderedDigits = 0): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number, orderedDigits = 0, outputStart = -1): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
-  let lineIndent = markdownLineIndent(buffer, structuralIndent)
+  let lineIndent = outputStart === -1 ? markdownLineIndent(buffer, structuralIndent) : 0
   let copiedUntil = 0
   let escaped = ''
 
-  for (let index = 0; index < value.length; index++) {
+  for (let index = Math.max(0, outputStart); index < value.length; index++) {
     const code = value.charCodeAt(index)
     const character = value[index]!
 
@@ -2127,17 +2186,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const first = last >= 48 && last <= 57 ? textNode.value.charCodeAt(0) : 0
       const orderedDigits = ((first >= 48 && first <= 57) || first === 46 || first === 41)
         && !textNode.generatedMarkdown?.prefix
-        ? lineStartDigits(state.buffer, state.listIndent, textNode.value)
+        ? lineStartDigits(state, textNode.value)
         : 0
+      // A generated prefix goes ahead of the text and keeps its whitespace.
+      const outputStart = textNode.generatedMarkdown?.prefix ? -1 : outputStartMarker(textNode.value, state)
       if (!state.depthMap[TAG_PRE]
         && !state.depthMap[TAG_CODE]
         // Inside a raw-HTML region only text past a blank line is Markdown
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && (orderedDigits > 0 || mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length))
+        && (orderedDigits > 0 || outputStart !== -1 || mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length))
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length, orderedDigits)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length, orderedDigits, outputStart)
       }
 
       if (textNode.generatedMarkdown && textNode.value) {

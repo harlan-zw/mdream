@@ -238,6 +238,34 @@ describe('streaming parity with the Rust core', () => {
     await expectEverySplitParity(html)
   })
 
+  // The output trim removes the whitespace that leads the document, so a block
+  // marker behind any amount of it starts the document and is escaped. The
+  // same whitespace is kept anywhere else, where four spaces of it make the
+  // marker inert.
+  it.each([
+    ['<p>&#32;&#32;&#32;&#32;# x</p>', '\\# x'],
+    ['&#32;&#32;&#32;&#32;# x', '\\# x'],
+    ['<p>&#9;- x</p>', '\\- x'],
+    ['<p>&nbsp;&gt; x</p>', '\\> x'],
+    ['<p>&#10;&#32;&#32;&#32;&#32;1. x</p>', '1\\. x'],
+    ['<p>&#32;&#32;&#32;&#32;---</p>', '\\---'],
+    ['<p>&#32;&#32;&#32;&#32;<b></b># x</p>', '\\# x'],
+    ['<p>&#32;&#32;&#32;&#32;1<b></b>. x</p>', '1\\. x'],
+    [`<p>${'&#32;'.repeat(40)}1<b></b>. x</p>`, '1\\. x'],
+    ['<p>&#13;&#10;5<b></b>. x</p>', '5\\. x'],
+    // The compaction takes `abc` with it, so what stays buffered is not the document's start.
+    [`<p>abc${'&#32;'.repeat(40)}1<b></b>. x</p>`, `abc${' '.repeat(40)}1. x`],
+    ['<p>&#32;&#32;&#32;&#32;x # y</p>', 'x # y'],
+    ['<p>a</p><p>&#32;&#32;&#32;&#32;# x</p>', 'a\n\n    # x'],
+    ['<blockquote>&#32;&#32;&#32;&#32;# x</blockquote>', '>     # x'],
+    ['<ul><li>&#32;&#32;&#32;&#32;# x</li></ul>', '-     # x'],
+    ['<table><caption>&#10;# x</caption><tr><td>c</td></tr></table>', '&#10;\\# x\n\n| c |\n| --- |'],
+  ])('escapes a block marker behind trimmed leading whitespace across every split for %s', async (html, expected) => {
+    expect(convertOnce(html)).toBe(expected)
+    await expectStreamingParity(html)
+    await expectEverySplitParity(html)
+  })
+
   // A `<pre>` fence opened by its first child pays the break a heading in the
   // list item owes, so that break never lands inside the code.
   it.each([

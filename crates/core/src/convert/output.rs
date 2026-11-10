@@ -3124,6 +3124,7 @@ impl ConvertState {
     inside_raw_html_block: bool,
     scratch: &mut String,
     ordered_digits: u8,
+    output_start: Option<usize>,
   ) -> bool {
     if !hazard
       || (inside_raw_html_block && !(self.raw_html_markdown && !self.line_opens_raw_html_block()))
@@ -3134,7 +3135,7 @@ impl ConvertState {
     {
       self.gfm_escape_slow_path_calls += 1;
     }
-    self.escape_gfm_text_into(text, scratch, ordered_digits)
+    self.escape_gfm_text_into(text, scratch, ordered_digits, output_start)
   }
 
   #[inline(always)]
@@ -3235,9 +3236,11 @@ impl ConvertState {
     } else {
       0
     };
+    let output_start = self.output_start_marker(text);
     let hazard = ordered_digits > 0
       || has_inline_gfm_hazard
       || context_hazard
+      || output_start.is_some()
       || self.starts_with_gfm_block_candidate(text);
     let text = if self.escape_text_node(
       text,
@@ -3245,6 +3248,7 @@ impl ConvertState {
       inside_raw_html_block,
       &mut escape_scratch,
       ordered_digits,
+      output_start,
     ) {
       escape_scratch.as_str()
     } else {
@@ -3514,12 +3518,19 @@ impl ConvertState {
     };
     // Spacing was decided on the raw text; the escape may put `\` first.
     let owns_leading_space = owns_leading_space || ordered_digits > 0;
+    // A generated prefix goes ahead of the text and keeps its whitespace.
+    let output_start = if generated_prefix.is_none_or(str::is_empty) {
+      self.output_start_marker(text)
+    } else {
+      None
+    };
     let hazard = !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
       && (ordered_digits > 0
         || has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
+        || output_start.is_some()
         || self.starts_with_gfm_block_candidate(text));
     let text = if self.escape_text_node(
       text,
@@ -3527,6 +3538,7 @@ impl ConvertState {
       inside_raw_html_block,
       &mut escape_scratch,
       ordered_digits,
+      output_start,
     ) {
       escape_scratch.as_str()
     } else {
@@ -3615,7 +3627,11 @@ impl ConvertState {
       if byte == b' ' {
         spaces += 1;
         if spaces > self.list_indent.len() + 3 {
-          return 0;
+          return if self.output_starts_at(offset) {
+            digits
+          } else {
+            0
+          };
         }
         continue;
       }
@@ -3627,11 +3643,13 @@ impl ConvertState {
           0 => b'\n',
           _ => bytes[offset - 1],
         };
-        (spaces <= 3 || spaces >= self.list_indent.len())
-          && (one || matches!(before, b'\n' | b' ' | b'\t' | b'\\'))
+        ((spaces <= 3 || spaces >= self.list_indent.len())
+          && (one || matches!(before, b'\n' | b' ' | b'\t' | b'\\')))
+          || self.output_starts_at(offset)
       } else {
         // A list item's content opens a block, so `- 1` + `. x` nests a list.
-        (1..=3).contains(&spaces) && self.list_marker_line_start(bytes, offset + 1, 3)
+        ((1..=3).contains(&spaces) && self.list_marker_line_start(bytes, offset + 1, 3))
+          || self.output_starts_at(offset + 1)
       };
       return if opens { digits } else { 0 };
     }
@@ -3647,7 +3665,13 @@ impl ConvertState {
 
   /// Escape GFM syntax into `out`; returns false and leaves `out` alone if none is needed.
   #[inline]
-  fn escape_gfm_text_into(&self, text: &str, out: &mut String, mut ordered_digits: u8) -> bool {
+  fn escape_gfm_text_into(
+    &self,
+    text: &str,
+    out: &mut String,
+    mut ordered_digits: u8,
+    output_start: Option<usize>,
+  ) -> bool {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
     let in_link = self.depth_map[TAG_A as usize] > 0;
     let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
@@ -3655,6 +3679,7 @@ impl ConvertState {
     // Only a leading active byte reads the line's indent: an inactive first run
     // resets it before any use, so most text nodes skip the buffer scan.
     let mut line_indent = match bytes.first() {
+      _ if output_start.is_some() => Some(0),
       Some(&byte) if GFM_BYTE_FLAGS[byte as usize] & GFM_TEXT_ACTIVE_BIT != 0 => {
         self.markdown_line_indent()
       }
@@ -3662,7 +3687,7 @@ impl ConvertState {
     };
     let mut escaped = false;
     let mut copied_until = 0usize;
-    let mut index = 0usize;
+    let mut index = output_start.unwrap_or(0);
 
     while index < bytes.len() {
       let byte = bytes[index];
@@ -3799,6 +3824,45 @@ impl ConvertState {
       return matches!(byte, b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9');
     }
     false
+  }
+
+  /// Offset in `text` of a block marker that the output trim leaves first in
+  /// the document: the trim removes all the whitespace before it, in `text`
+  /// and in the buffer alike, so no amount of it works as indentation there.
+  /// The marker test goes first, keeping the buffer scan to text that ends
+  /// the blank output it reads.
+  #[inline]
+  fn output_start_marker(&self, text: &str) -> Option<usize> {
+    if self.has_streamed_output {
+      return None;
+    }
+    let bytes = text.as_bytes();
+    let lead = text.len() - text.trim_start().len();
+    if !matches!(
+      bytes.get(lead),
+      Some(b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9')
+    ) {
+      return None;
+    }
+    // A table writes a line ending as a character reference, which is content.
+    if self.depth_map[TAG_TABLE as usize] > 0
+      && bytes[..lead].iter().any(|b| matches!(b, b'\n' | b'\r'))
+    {
+      return None;
+    }
+    self.output_starts_at(self.buffer.len()).then_some(lead)
+  }
+
+  /// Whether the output trim removes all of `buffer[..end]`: only whitespace
+  /// is there, with no output drained before it. An open blockquote writes its
+  /// `>` ahead of that whitespace later, which keeps it. Read from `end` back,
+  /// so the content closest to it ends the scan.
+  #[inline]
+  fn output_starts_at(&self, end: usize) -> bool {
+    !self.drained_content
+      && !self.preserve_leading_whitespace
+      && self.blockquotes.is_empty()
+      && self.buffer[..end].trim_end().is_empty()
   }
 
   /// GFM reads a heading's trailing `#` run as an ATX closing sequence and drops
@@ -6961,6 +7025,7 @@ mod tests {
     assert_eq!(state.line_start_digits(". x"), 1);
 
     state.has_streamed_output = true;
+    state.drained_content = true;
     state.cut_line_lead = CutLineLead::Content;
     for (tail, buffer, digits) in [
       (*b"\n\n", "2", 1),
