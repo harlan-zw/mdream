@@ -1416,6 +1416,10 @@ function commitGfmAction(
       if (state.blockquotes.length > 0 && !keepsQuoteSeparator
         && (!rawHtmlQuoteBoundary || newlineRunBefore(state.buffer, state.buffer.length) > 2)) {
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
+        // Frames anchored at the old end move with the popped fragment. Siblings
+        // can share a fragment, so this is not only the innermost.
+        for (const frame of state.blockquotes)
+          frame.fragment = Math.min(frame.fragment, state.buffer.length)
         noteBufferRewrite(state)
       }
       const before = lastOutputChar(state.buffer)
