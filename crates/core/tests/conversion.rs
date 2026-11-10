@@ -12,6 +12,39 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
+fn filter_exclude(selectors: &[&str]) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig {
+        exclude: Some(selectors.iter().map(|s| (*s).to_string()).collect()),
+        ..Default::default()
+      }),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
+// The filter reads `style` and `hidden` (and `class` for class selectors)
+// without keeping every attribute. A hidden element, or a class-excluded one,
+// must still drop its subtree, in any letter case.
+#[test]
+fn filter_drops_hidden_and_class_excluded_without_other_attributes() {
+  let html = "<p>a</p><div style=\"display: none\">gone</div><div HIDDEN>gone2</div><div STYLE=\"visibility:hidden\">gone3</div><div class=\"ad\">ad</div><p>b</p>";
+  assert_eq!(html_to_markdown(html, filter_exclude(&[".ad"])), "a\n\nb");
+}
+
+// An id or attribute selector can read any attribute, so the filter keeps
+// them all.
+#[test]
+fn filter_id_and_attribute_selectors_still_match() {
+  let html = "<p>a</p><div id=\"promo\">promo</div><div data-x=\"1\">x</div><p>b</p>";
+  assert_eq!(
+    html_to_markdown(html, filter_exclude(&["#promo", "[data-x]"])),
+    "a\n\nb"
+  );
+}
+
 // An anchor is dropped as a whole: no half-written tag when its href is
 // missing or unsafe, and no closing tag either.
 #[test]

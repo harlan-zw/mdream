@@ -1015,6 +1015,7 @@ impl ConvertState {
         } else {
           ATTR_NONE
         }
+        | self.filter_attr_bits
     }
   }
 
