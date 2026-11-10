@@ -1575,7 +1575,8 @@ impl ConvertState {
   }
 
   /// Simple-tag exit; `link` selects the `<a>` variant.
-  #[inline(never)]
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
   pub(crate) fn emit_exit_simple(&mut self, link: bool) {
     let node = self.stack.retired();
     debug_assert!(if link {
