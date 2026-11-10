@@ -8737,27 +8737,32 @@ fn a_quote_after_a_rule_in_a_list_item_starts_on_its_own_line() {
   );
 }
 
-// Literal overrides replace quote markers, including around list rules.
+// Literal enter overrides replace quote markers, including around list rules.
 #[test]
-fn literal_quote_overrides_replace_quote_markers_after_list_rules() {
+fn literal_quote_overrides_replace_markers_around_list_rules() {
   let options = || HtmlToMarkdownOptions {
     plugins: Some(
-      PluginConfig::default().with_tag_override("blockquote", TagOverrideConfig::wrap("[", "]")),
+      PluginConfig::default().with_tag_override("blockquote", TagOverrideConfig::wrap("X", "Y")),
     ),
     ..Default::default()
   };
   for (input, expected) in [
+    ("<blockquote>text</blockquote>", "XtextY"),
+    (
+      "<ul><li><blockquote>text</blockquote></li></ul>",
+      "- XtextY",
+    ),
     (
       "<ul><li><blockquote><hr>text</blockquote></li></ul>",
-      "- [\n\n  ---\n\n  text]",
+      "- X\n\n  ---\n\n  textY",
     ),
     (
       "<ul><li><hr><blockquote>q</blockquote></li></ul>",
-      "- ***\n\n  [q]",
+      "- ***\n\n  XqY",
     ),
     (
       "<blockquote><ol start=\"10000\"><li><hr><blockquote>q</blockquote></li></ol></blockquote>",
-      "[\n\n10000. ***\n\n       [q]\n\n]",
+      "X\n\n10000. ***\n\n       XqY\n\nY",
     ),
   ] {
     assert_eq!(html_to_markdown(input, options()), expected, "{input}");

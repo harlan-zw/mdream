@@ -118,12 +118,14 @@ describe.each(engines)('horizontal Rules $name', (engineConfig) => {
   })
 
   it.each([
-    ['<ul><li><blockquote><hr>text</blockquote></li></ul>', '- [\n\n  ---\n\n  text]'],
-    ['<ul><li><hr><blockquote>q</blockquote></li></ul>', '- ***\n\n  [q]'],
-    ['<blockquote><ol start="10000"><li><hr><blockquote>q</blockquote></li></ol></blockquote>', '[\n\n10000. ***\n\n       [q]\n\n]'],
-  ])('keeps literal quote overrides free of generated quote markers: %s', async (html, expected) => {
+    ['<blockquote>text</blockquote>', 'X textY'],
+    ['<ul><li><blockquote>text</blockquote></li></ul>', '- X textY'],
+    ['<ul><li><blockquote><hr>text</blockquote></li></ul>', '- X\n\n  ---\n\n  textY'],
+    ['<ul><li><hr><blockquote>q</blockquote></li></ul>', '- ***\n\n  X qY'],
+    ['<blockquote><ol start="10000"><li><hr><blockquote>q</blockquote></li></ol></blockquote>', 'X\n\n10000. ***\n\n       X qY\n\nY'],
+  ])('replaces quote markers with literal overrides around list rules: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
-    const options = { engine, plugins: { tagOverrides: { blockquote: { enter: '[', exit: ']' } } } }
+    const options = { engine, plugins: { tagOverrides: { blockquote: { enter: 'X', exit: 'Y' } } } }
     expect(htmlToMarkdown(html, options)).toBe(expected)
     for (let split = 0; split <= html.length; split++) {
       const stream = new ReadableStream<string>({
