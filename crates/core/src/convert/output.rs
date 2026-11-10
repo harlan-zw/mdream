@@ -6516,7 +6516,9 @@ impl ConvertState {
     true
   }
 
-  #[inline]
+  // The inline-tag answer stays in the caller: the rest saves seven registers
+  // on entry, which an inline element would pay twice for a constant.
+  #[inline(always)]
   pub(crate) fn calculate_new_line_config(
     &self,
     tag_id: Option<u8>,
@@ -6528,6 +6530,16 @@ impl ConvertState {
     if node_spacing == Some(NO_SPACING) && !matches!(tag_id, Some(TAG_PRE | TAG_LI)) {
       return NO_SPACING;
     }
+    self.block_new_line_config(tag_id, node_spacing, is_enter)
+  }
+
+  #[inline(never)]
+  fn block_new_line_config(
+    &self,
+    tag_id: Option<u8>,
+    node_spacing: Option<[u8; 2]>,
+    is_enter: bool,
+  ) -> [u8; 2] {
     if plain_text!(self)
       && tag_id == Some(TAG_PRE)
       && (self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
