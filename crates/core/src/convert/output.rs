@@ -1641,6 +1641,8 @@ impl ConvertState {
   }
 
   /// Emit markdown for entering the element currently on top of self.stack.
+  // The excluded and HTML cases are answered here, so they never pay the
+  // Markdown enter's frame.
   #[inline]
   pub(crate) fn emit_enter_element(&mut self) {
     let stack_len = self.stack.len();
@@ -1660,7 +1662,11 @@ impl ConvertState {
       self.emit_html_enter();
       return;
     }
+    self.emit_markdown_enter(stack_len);
+  }
 
+  #[inline(never)]
+  fn emit_markdown_enter(&mut self, stack_len: usize) {
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
       self.flush_list_rule();
     }
@@ -5357,7 +5363,9 @@ impl ConvertState {
     }
   }
 
-  #[inline]
+  // Inlined on native for the same reason as `get_exit_output`.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline)]
   pub(crate) fn get_enter_output(
     &self,
     node: &ElementNode,
