@@ -2693,3 +2693,50 @@ fn decoded_blank_keeps_a_code_span_beside_a_dropped_element() {
     }
   }
 }
+
+#[test]
+fn quote_after_an_opener_run_keeps_its_own_space() {
+  for (html, expected) in [
+    (
+      r#"<em><strong><blockquote>L</blockquote></strong></em>"#,
+      "***>  L***",
+    ),
+    (
+      r#"<cite><cite><blockquote>K</blockquote></cite></cite>"#,
+      "**>  K**",
+    ),
+    (
+      r#"<s><b><blockquote>x</blockquote></b></s>"#,
+      "~~**>  x**~~",
+    ),
+    (r#"<em><blockquote>L</blockquote></em>"#, "*>  L*"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn link_title_after_a_dropped_empty_pair_is_kept() {
+  for (html, expected) in [
+    (
+      r#"<a href="/f" title="Lima ">Lima<i></i></a>"#,
+      r#"[Lima](/f "Lima ")"#,
+    ),
+    (
+      r#"<a href="/f" title="Lima ">Lima<var></var></a>"#,
+      r#"[Lima](/f "Lima ")"#,
+    ),
+    (
+      r#"<a href="/f" title="Lima"><span>Lima </span><svg></svg></a>"#,
+      "[Lima](/f)",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}

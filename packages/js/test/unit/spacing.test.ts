@@ -1095,3 +1095,19 @@ it.each([
   for (let split = 0; split <= html.length; split++)
     expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
 })
+
+it.each([
+  ['<em><strong><blockquote>L</blockquote></strong></em>', '***>  L***'],
+  ['<cite><cite><blockquote>K</blockquote></cite></cite>', '**>  K**'],
+  ['<s><b><blockquote>x</blockquote></b></s>', '~~**>  x**~~'],
+  ['<em><blockquote>L</blockquote></em>', '*>  L*'],
+  ['<a href="/f" title="Lima ">Lima<i></i></a>', '[Lima](/f "Lima ")'],
+  ['<a href="/f" title="Lima ">Lima<var></var></a>', '[Lima](/f "Lima ")'],
+  ['<a href="/f" title="Lima"><span>Lima </span><svg></svg></a>', '[Lima](/f)'],
+])('matches Rust after an opener run and after a dropped empty pair: %s', async (html, expected) => {
+  expect(htmlToMarkdown(html)).toBe(expected)
+  for (const width of [1, 2, 3, 11]) {
+    const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+    expect(await streamConvert(chunks), `width=${width}`).toBe(expected)
+  }
+})

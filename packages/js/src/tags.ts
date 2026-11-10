@@ -832,8 +832,9 @@ export const tagHandlers: Record<number, TagHandler> = {
         : state.lastContentCache?.replace(/[ \t\n\f\r]+$/, '')
       // Drop a title that repeats the link's last text run. A separator
       // written on its own is no part of that text, so `[x e](u "e")` keeps
-      // its title while `[e](u "e")` still drops the duplicate.
-      if (title && !state.cacheFollowsSeparator
+      // its title while `[e](u "e")` still drops the duplicate. As in Rust, an
+      // empty pair dropped right before leaves no last run to compare.
+      if (title && !state.cacheFollowsSeparator && state.droppedPairAt !== state.buffer!.length
         && cachedText === title.replace(/[ \t\n\f\r]+$/, '')) {
         title = ''
       }

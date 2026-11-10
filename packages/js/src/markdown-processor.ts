@@ -75,6 +75,8 @@ export interface MarkdownState {
   outputPositions?: OutputPositions
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
+  /** Buffer length right after an empty marker pair was dropped. */
+  droppedPairAt?: number
   /** A separator was just written on its own. See MdreamRuntimeState. */
   separatorPending?: boolean
   /** The cached run follows such a separator. */
@@ -3075,6 +3077,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.headingBreakPending = true
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+          state.droppedPairAt = buff.length
           restoreQuoteParentBoundary()
           return
         }

@@ -467,10 +467,11 @@ impl ConvertState {
     };
     // A quote that is this run's content writes its own prefix at that
     // position; a space in front of it would sit inside the opener.
+    let run_end = self.open_markers[self.open_markers.len() - 1].content_start;
     if self
       .blockquotes
       .last()
-      .is_some_and(|frame| frame.content_start == self.open_markers[outermost].content_start)
+      .is_some_and(|frame| frame.content_start == run_end)
     {
       return false;
     }
