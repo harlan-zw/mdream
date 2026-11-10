@@ -844,9 +844,14 @@ export const tagHandlers: Record<number, TagHandler> = {
         return safeAnchorOutput(node, state.options, false, true)
       const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
-      // Check if title matches the last content to avoid duplication
+      // Check if title matches the last content to avoid duplication. A label
+      // that ended in whitespace is cached without it, so the title is compared
+      // without its own, as in Rust.
       const lastContent = state.lastContentCache
-      if (lastContent === title) {
+      const lastNode = state.lastTextNode
+      const lastText = lastNode && 'value' in lastNode && typeof lastNode.value === 'string' ? lastNode.value : ''
+      if (title && (lastContent === title
+        || (/[\t\n\f\r ]$/.test(lastText) && lastContent === title.replace(/[\t\n\f\r ]+$/, '')))) {
         title = ''
       }
       // GFM autolink shorthand: when the link text equals href and href is a
