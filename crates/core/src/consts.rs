@@ -309,78 +309,64 @@ pub(crate) const MAX_WANTED_ATTR_NAME: usize = {
   max
 };
 
-/// Case-insensitive, length-first so the common miss costs one compare.
+const WORD_BYTES: usize = u64::BITS as usize / u8::BITS as usize;
+const ASCII_CASE_BIT: u8 = 0x20;
+
+/// `name` as a word with its letters lowercased; `name.len() <= WORD_BYTES`.
+/// Setting the case bit also maps a few control bytes onto punctuation, which
+/// no attribute name can contain.
+#[inline(always)]
+fn folded_word(name: &[u8]) -> u64 {
+  const CASE_BITS: u64 = u64::from_le_bytes([ASCII_CASE_BIT; WORD_BYTES]);
+  let mut bytes = [0u8; WORD_BYTES];
+  bytes[..name.len()].copy_from_slice(name);
+  let name_lanes_case_bits = CASE_BITS >> (u8::BITS as usize * (WORD_BYTES - name.len()));
+  u64::from_le_bytes(bytes) | name_lanes_case_bits
+}
+
+const fn literal_word(literal: &[u8]) -> u64 {
+  let mut word = 0u64;
+  let mut i = 0;
+  while i < literal.len() {
+    word |= (literal[i] as u64) << (u8::BITS as usize * i);
+    i += 1;
+  }
+  word
+}
+
+/// Case-insensitive, length-first. Names that fit a word compare as one.
 #[inline]
 pub(crate) fn attr_bit(name: &[u8]) -> u16 {
+  const ALT: u64 = literal_word(b"alt");
+  const SRC: u64 = literal_word(b"src");
+  const HREF: u64 = literal_word(b"href");
+  const NAME: u64 = literal_word(b"name");
+  const TITLE: u64 = literal_word(b"title");
+  const CLASS: u64 = literal_word(b"class");
+  const ALIGN: u64 = literal_word(b"align");
+  const START: u64 = literal_word(b"start");
+  const CONTENT: u64 = literal_word(b"content");
+  const COLSPAN: u64 = literal_word(b"colspan");
+  const PROPERTY: u64 = literal_word(b"property");
   match name.len() {
-    3 => {
-      if name.eq_ignore_ascii_case(b"alt") {
-        ATTR_ALT
-      } else if name.eq_ignore_ascii_case(b"src") {
-        ATTR_SRC
-      } else {
-        ATTR_NONE
-      }
-    }
-    4 => {
-      if name.eq_ignore_ascii_case(b"href") {
-        ATTR_HREF
-      } else if name.eq_ignore_ascii_case(b"name") {
-        ATTR_NAME
-      } else {
-        ATTR_NONE
-      }
-    }
-    5 => {
-      if name.eq_ignore_ascii_case(b"title") {
-        ATTR_TITLE
-      } else if name.eq_ignore_ascii_case(b"class") {
-        ATTR_CLASS
-      } else if name.eq_ignore_ascii_case(b"align") {
-        ATTR_ALIGN
-      } else if name.eq_ignore_ascii_case(b"start") {
-        ATTR_START
-      } else {
-        ATTR_NONE
-      }
-    }
-    7 => {
-      if name.eq_ignore_ascii_case(b"content") {
-        ATTR_CONTENT
-      } else if name.eq_ignore_ascii_case(b"colspan") {
-        ATTR_COLSPAN
-      } else {
-        ATTR_NONE
-      }
-    }
-    8 => {
-      if name.eq_ignore_ascii_case(b"property") {
-        ATTR_PROPERTY
-      } else {
-        ATTR_NONE
-      }
-    }
-    9 => {
-      if name.eq_ignore_ascii_case(b"data-lang") {
-        ATTR_DATA_LANG
-      } else {
-        ATTR_NONE
-      }
-    }
-    10 => {
-      if name.eq_ignore_ascii_case(b"aria-label") {
-        ATTR_ARIA_LABEL
-      } else {
-        ATTR_NONE
-      }
-    }
-    13 => {
-      if name.eq_ignore_ascii_case(b"data-language") {
-        ATTR_DATA_LANGUAGE
-      } else {
-        ATTR_NONE
-      }
-    }
+    3..=WORD_BYTES => match (name.len(), folded_word(name)) {
+      (3, ALT) => ATTR_ALT,
+      (3, SRC) => ATTR_SRC,
+      (4, HREF) => ATTR_HREF,
+      (4, NAME) => ATTR_NAME,
+      (5, TITLE) => ATTR_TITLE,
+      (5, CLASS) => ATTR_CLASS,
+      (5, ALIGN) => ATTR_ALIGN,
+      (5, START) => ATTR_START,
+      (7, CONTENT) => ATTR_CONTENT,
+      (7, COLSPAN) => ATTR_COLSPAN,
+      (8, PROPERTY) => ATTR_PROPERTY,
+      _ => ATTR_NONE,
+    },
+    // Longer than one word: compare bytes.
+    9 if name.eq_ignore_ascii_case(b"data-lang") => ATTR_DATA_LANG,
+    10 if name.eq_ignore_ascii_case(b"aria-label") => ATTR_ARIA_LABEL,
+    13 if name.eq_ignore_ascii_case(b"data-language") => ATTR_DATA_LANGUAGE,
     _ => ATTR_NONE,
   }
 }
@@ -583,4 +569,80 @@ fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
     b"a" => TAG_A,
     _ => return None,
   })
+}
+
+#[cfg(test)]
+mod attr_bit_tests {
+  use super::*;
+
+  /// The byte-wise definition `attr_bit` must keep matching.
+  fn reference(name: &[u8]) -> u16 {
+    const KNOWN: &[(&[u8], u16)] = &[
+      (b"alt", ATTR_ALT),
+      (b"src", ATTR_SRC),
+      (b"href", ATTR_HREF),
+      (b"name", ATTR_NAME),
+      (b"title", ATTR_TITLE),
+      (b"class", ATTR_CLASS),
+      (b"align", ATTR_ALIGN),
+      (b"start", ATTR_START),
+      (b"content", ATTR_CONTENT),
+      (b"colspan", ATTR_COLSPAN),
+      (b"property", ATTR_PROPERTY),
+      (b"data-lang", ATTR_DATA_LANG),
+      (b"aria-label", ATTR_ARIA_LABEL),
+      (b"data-language", ATTR_DATA_LANGUAGE),
+    ];
+    KNOWN
+      .iter()
+      .find(|(known, _)| name.eq_ignore_ascii_case(known))
+      .map_or(ATTR_NONE, |&(_, bit)| bit)
+  }
+
+  // Every byte at every position of each known name, its uppercase form, and
+  // one byte more or less, so a lane that folds wrongly or a length that
+  // leaks into the next lane shows up.
+  #[test]
+  fn word_compare_matches_bytewise_compare() {
+    let names: &[&[u8]] = &[
+      b"alt",
+      b"src",
+      b"href",
+      b"name",
+      b"title",
+      b"class",
+      b"align",
+      b"start",
+      b"content",
+      b"colspan",
+      b"property",
+      b"data-lang",
+      b"aria-label",
+      b"data-language",
+      b"data-x",
+    ];
+    for name in names {
+      let mut probe = name.to_vec();
+      assert_eq!(attr_bit(&probe), reference(&probe), "{probe:?}");
+      for at in 0..name.len() {
+        for byte in 0..=u8::MAX {
+          probe[at] = byte;
+          assert_eq!(attr_bit(&probe), reference(&probe), "{probe:?}");
+        }
+        probe[at] = name[at].to_ascii_uppercase();
+        assert_eq!(attr_bit(&probe), reference(&probe), "{probe:?}");
+      }
+      for extra in [b'a', b'-', 0] {
+        let mut longer = name.to_vec();
+        longer.push(extra);
+        assert_eq!(attr_bit(&longer), reference(&longer), "{longer:?}");
+      }
+      assert_eq!(
+        attr_bit(&name[1..]),
+        reference(&name[1..]),
+        "{:?}",
+        &name[1..]
+      );
+    }
+  }
 }
