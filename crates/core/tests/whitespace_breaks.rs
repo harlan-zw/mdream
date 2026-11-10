@@ -1563,6 +1563,31 @@ fn review_raw_style() {
 }
 
 #[test]
+fn unread_raw_text_of_blanks_ends_the_whitespace_run() {
+  // A body nothing reads ends the whitespace run before it, even when it is
+  // all whitespace. An empty body ends nothing.
+  for tag in [
+    "style", "iframe", "noscript", "noembed", "datalist", "noframes",
+  ] {
+    for (body, expected) in [
+      (" ", "a **D**"),
+      ("\n\t", "a **D**"),
+      ("s ", "a **D**"),
+      ("", "a**D**"),
+    ] {
+      let html = format!("<p>a<span> <{tag}>{body}</{tag}><span> <b>D</b></span></span></p>");
+      assert_every_split(&html, &HtmlToMarkdownOptions::default(), expected);
+    }
+  }
+  // `<title>` text is metadata the parser reads, so its blanks still collapse.
+  assert_every_split(
+    "<p>a<span> <title> </title><span> <b>D</b></span></span></p>",
+    &HtmlToMarkdownOptions::default(),
+    "a**D**",
+  );
+}
+
+#[test]
 fn opener_run_survives_repeated_blanks_without_leaking_to_siblings() {
   for depth in [2, 8, 254] {
     let html = format!(

@@ -938,6 +938,26 @@ it('reuses an opener run across repeated blanks without leaking it to siblings',
   }
 })
 
+it('ends the whitespace run after an unread raw-text body of blanks', async () => {
+  for (const tag of ['style', 'iframe', 'noscript', 'noembed', 'datalist', 'noframes']) {
+    for (const [body, expected] of [[' ', 'a **D**'], ['\n\t', 'a **D**'], ['s ', 'a **D**'], ['', 'a**D**']]) {
+      const html = `<p>a<span> <${tag}>${body}</${tag}><span> <b>D</b></span></span></p>`
+      expect(htmlToMarkdown(html), html).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+        expect(await streamConvert(chunks), `${html}, width=${width}`).toBe(expected)
+      }
+      for (let split = 0; split <= html.length; split++)
+        expect(await streamConvert([html.slice(0, split), html.slice(split)]), `${html}, split=${split}`).toBe(expected)
+    }
+  }
+  // `<title>` text is metadata the parser reads, so its blanks still collapse.
+  const title = '<p>a<span> <title> </title><span> <b>D</b></span></span></p>'
+  expect(htmlToMarkdown(title)).toBe('a**D**')
+  for (let split = 0; split <= title.length; split++)
+    expect(await streamConvert([title.slice(0, split), title.slice(split)]), `split=${split}`).toBe('a**D**')
+})
+
 it('does not count a split empty raw-text closer as body text', async () => {
   for (const tag of ['script', 'style']) {
     const html = `<p>a<span> <${tag}></${tag}><span> <b>D</b></span></span></p>`
