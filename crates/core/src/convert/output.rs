@@ -298,7 +298,7 @@ const U32_MAX_DIGITS: usize = 10;
 
 /// Append `value` in decimal. `write!` routes each item number through the
 /// formatter; this writes the digits directly.
-fn push_decimal(out: &mut String, mut value: u32) {
+pub(crate) fn push_decimal(out: &mut String, mut value: u32) {
   let mut digits = [0u8; U32_MAX_DIGITS];
   let mut start = U32_MAX_DIGITS;
   loop {
