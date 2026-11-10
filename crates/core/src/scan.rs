@@ -1156,7 +1156,7 @@ mod tests {
 
   #[test]
   fn whitespace_detection() {
-    for c in [b' ', b'\t', b'\n', b'\r'] {
+    for c in *b" \t\n\r" {
       assert!(is_whitespace(c));
     }
     for c in [b'a', b'0', b'-', 0u8] {

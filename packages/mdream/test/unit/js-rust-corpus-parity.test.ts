@@ -25,6 +25,21 @@ describe('javaScript and Rust engines agree on the corpus', () => {
     })
   }
 
+  // Long enough to cross the incremental quote flush; too large for the split-heavy corpus.
+  it('long quotes flushed at a code span', () => {
+    const words = 'w '.repeat(4500)
+    for (const template of [
+      '<blockquote><p>{W}</p>x<br><code></code><p>l</p></blockquote>',
+      '<blockquote><blockquote><p>{W}</p>x<br><code></code><p>l</p></blockquote></blockquote>',
+      '<blockquote>{W}<br><s></s><code> </code> <h2>l</h2>',
+      '<blockquote><ul><li><blockquote>{W}</blockquote><code></code><br><p>l</p></li></ul></blockquote>',
+      '<ul><li><blockquote><blockquote>{W}</blockquote><br><code></code><p>l</p></blockquote></li></ul>',
+    ]) {
+      const html = template.replace('{W}', words)
+      expect(jsHtmlToMarkdown(html), template).toBe(htmlToMarkdown(html))
+    }
+  })
+
   it('frontmatter onExtract payloads', () => {
     for (const html of CONVERSION_CORPUS) {
       const rust: Record<string, string>[] = []

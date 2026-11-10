@@ -913,6 +913,31 @@ fn streaming_nested_blockquote_separator_collapse_matches_one_shot() {
   }
 }
 
+// A root break before a nested quote strands the outer frame like leading text.
+#[test]
+fn streaming_nested_blockquote_after_block_break_matches_one_shot() {
+  for html in [
+    "<h3>y</h3><br><blockquote><blockquote>x</blockquote>y</blockquote>",
+    "<p>a</p><br><br><blockquote><blockquote><blockquote>x</blockquote></blockquote>y</blockquote>z",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches(
+      html,
+      HtmlToMarkdownOptions {
+        wrap_width: 12,
+        ..Default::default()
+      },
+    );
+    assert_stream_matches(
+      html,
+      HtmlToMarkdownOptions {
+        clean: Some(safe_clean()),
+        ..Default::default()
+      },
+    );
+  }
+}
+
 #[test]
 fn streaming_large_nested_blockquote_drains_without_changing_output() {
   let mut html = String::from("<blockquote><blockquote><blockquote>");
@@ -961,6 +986,7 @@ fn streaming_cmark_block_structure_matches_every_split() {
   for html in [
     "<ul><li>text <hr>after</li></ul>",
     "<ul><li><blockquote>text<hr></blockquote>after</li></ul>",
+    "<ul><li><hr><blockquote><p>q</p><p>r</p></blockquote>after</li></ul>",
     "<ol><li><span>parent<ul><li>child</li><li>child 2</li></ul></span></li></ol>",
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
@@ -2123,6 +2149,102 @@ fn streaming_heading_trailing_hashes_matches_one_shot() {
   }
 }
 
+// The whitespace before a `<pre>` nested in another one is code, kept however
+// the input is chunked.
+#[test]
+fn streaming_whitespace_before_a_nested_pre_stays_in_the_code() {
+  for (html, expected) in [
+    (
+      "<pre><code><h4>x y </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y z\n```",
+    ),
+    (
+      "<pre><code><h4>x # </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>&nbsp;x # </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### \u{a0}x # z\n```",
+    ),
+    (
+      "<pre><code><ul><li>x y   <pre><b>z</b></pre></li></ul></code></pre>",
+      "```\n- x y   z\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chars(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// The tab, CR or form feed a child block's text ends with, inside a `<pre>` an
+// inline wraps, stays in the code however the input is chunked.
+#[test]
+fn streaming_whitespace_before_a_block_break_in_code_stays() {
+  for (html, expected) in [
+    (
+      "<span><pre><p>a b\t</p><table><tr><td>x</td></tr></table></pre></span>",
+      "```\n\na b\t\n\n| x |\n| --- |\n```",
+    ),
+    (
+      "<span><pre><p>a b&#12;</p><figure><figcaption>x</figcaption></figure></pre></span>",
+      "```\n\na b\u{c}\n\nx\n```",
+    ),
+    (
+      "<span><pre><p>a b&#13;</p><hr></pre></span>",
+      "```\n\na b\r\n\n---\n```",
+    ),
+    (
+      "<span><pre><h4>a b\t</h4><ul><li>x</li></ul></pre></span>",
+      "```\n\n#### a b\t\n\n- x\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chars(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// In a code block the closing hashes are code and stay unescaped wherever a
+// chunk boundary lands. After a fence a parser may misread, the escape stays.
+#[test]
+fn streaming_heading_in_code_block_keeps_its_hashes() {
+  for (html, expected) in [
+    ("<pre><h2>foo #</h2></pre>", "```\n\n## foo #\n\n\n```"),
+    (
+      "<pre><code><h2>foo ##</h2></code></pre>",
+      "```\n## foo ##\n```",
+    ),
+    (
+      "<ul><li><pre><h2>foo #</h2></pre></li></ul>",
+      "- ```\n  ## foo #\n  ```",
+    ),
+    (
+      "<span><pre>x</pre>b</span><pre><h2>foo #</h2></pre>",
+      "```\nx\n``` b\n\n```\n\n## foo \\#\n\n\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // An empty heading in a list item drops its marker's trailing space at its exit,
 // so that space must still be held when the exit runs.
 #[test]
@@ -2479,6 +2601,53 @@ fn streaming_raw_html_blank_line_drained_matches_one_shot() {
   ] {
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// Streaming buffers one copy of a run of identical breaks. The blank line those
+// breaks already write after a raw HTML block must count every copy, or the
+// stream adds a second separator.
+#[test]
+fn streaming_raw_html_separator_counts_a_break_run() {
+  for (html, expected) in [
+    (
+      "<ul><li><dl><dt>l</dt></dl><br><br>l</li></ul>",
+      "- <dl><dt>l</dt></dl>  \n    \n  l",
+    ),
+    (
+      "<ul><li><dl><dt>l</dt></dl><br><br><br>l</li></ul>",
+      "- <dl><dt>l</dt></dl>  \n    \n    \n  l",
+    ),
+    (
+      "<ol><li><dl><dt>l</dt></dl><br><br>l</li></ol>",
+      "1. <dl><dt>l</dt></dl>  \n     \n   l",
+    ),
+    (
+      "<ul><li><ul><li><dl><dd>l</dd></dl><br><br>l</li></ul></li></ul>",
+      "-\n  - <dl><dd>l</dd></dl>  \n      \n    l",
+    ),
+    (
+      "<dl><dt>l</dt></dl><br><br>l",
+      "<dl><dt>l</dt>\n</dl>  \n  \nl",
+    ),
+    (
+      "<address>a</address><br><br><b>l</b>",
+      "<address>a</address>  \n  \n**l**",
+    ),
+  ] {
+    let opts = HtmlToMarkdownOptions::default();
+    assert_eq!(
+      html_to_markdown(html, opts.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+    let long = format!("<p>{}</p>{html}", "lead ".repeat(1000));
+    let long_expected = html_to_markdown(&long, opts.clone());
+    for width in [1, 7, 4096] {
+      assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
+    }
   }
 }
 
@@ -3031,6 +3200,37 @@ fn streaming_matches_one_shot_across_blockquote_quoting() {
     "<dd><h2><li><blockquote>a<p><code><p>>aa<<a><<li>`",
     HtmlToMarkdownOptions::default(),
   );
+}
+
+// Past the 8 KiB threshold a `<code>` quotes the open blockquote's completed
+// lines. Quoting through a trailing hard break anchored the quote at the buffer
+// end, so the next block read it as just opened and dropped its blank line
+// (`> x  \n> l`); a break followed by a list indent lost its offset. One-shot
+// output then depended on how much quoted content came first.
+#[test]
+fn quote_flush_at_code_matches_a_short_quote() {
+  let words = |n: usize| "w ".repeat(n);
+  let opts = HtmlToMarkdownOptions::default;
+  for template in [
+    "<blockquote><p>{W}</p>x<br><code></code><p>l</p></blockquote>",
+    "<blockquote><blockquote><p>{W}</p>x<br><code></code><p>l</p></blockquote></blockquote>",
+    "<blockquote>{W}<br><s></s><code> </code> <h2>l</h2>",
+    "<blockquote><ul><li><blockquote>{W}</blockquote><code></code><br><p>l</p></li></ul></blockquote>",
+    "<ul><li><blockquote><blockquote>{W}</blockquote><br><code></code><p>l</p></blockquote></li></ul>",
+    "<ul><li><blockquote><p>{W}</p><blockquote><p>l</p></blockquote><br><code></code><blockquote><p>l</p></blockquote></blockquote></li></ul>",
+  ] {
+    let short = html_to_markdown(&template.replace("{W}", &words(20)), opts());
+    let expected = short.replacen(words(20).trim_end(), words(4500).trim_end(), 1);
+    let html = template.replace("{W}", &words(4500));
+    assert_eq!(html_to_markdown(&html, opts()), expected, "html={template}");
+    for chunk in [1usize, 7, 64, 997, 4096, 8191] {
+      assert_eq!(
+        stream_chunks(&html, chunk, opts()),
+        expected,
+        "chunk={chunk} html={template}"
+      );
+    }
+  }
 }
 
 // A trim takes the marker's own trailing space, which leaves the marker's
@@ -4016,7 +4216,7 @@ fn blockquote_parent_continuation_matches_every_width_and_split() {
     ),
     (
       "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
-      "- ***\n\n  > \n  > q\n\n  tail",
+      "- ***\n\n  \n  > q\n\n  tail",
     ),
     ("<blockquote>q</blockquote>tail", "> q\n\ntail"),
     (
@@ -5610,6 +5810,213 @@ fn wrap_at_a_moved_link_separator_matches_every_partition() {
 }
 
 #[test]
+fn empty_quote_after_rule_streaming() {
+  assert_stream_matches_every_split(
+    "<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li><hr><blockquote><p></p></blockquote>tail</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<blockquote><ul><li><hr><blockquote><p></p></blockquote>tail</li></ul></blockquote>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li><hr><blockquote><p>q</p></blockquote><p>tail</p></li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+}
+
+#[test]
+fn quote_exit_override_after_rule_at_every_split() {
+  for html in [
+    "<ul><li><hr><blockquote></blockquote>tail</li></ul>",
+    "- ***\n\n  \n\n  tail",
+    "- ***\n\n  \n\n  tail",
+    "1. ***\n\n   \n\n   tail",
+    "- ***\n\n  \n\n  tail",
+    "> - ***\n>\n>   \n>\n>   tail",
+  ] {
+    assert_stream_matches_every_split(
+      html,
+      HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          tag_overrides: Some(vec![(
+            "blockquote".to_string(),
+            TagOverrideConfig {
+              exit: Some("END".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    );
+  }
+}
+
+#[test]
+fn pending_rule_quote_review_boundaries_at_every_split() {
+  for html in [
+    "<blockquote><ul><li><hr><blockquote><p><br></p></blockquote><blockquote><p><br></p></blockquote>tail</li></ul></blockquote>",
+    "> - ***\n>\n>   \n>   \n>   \n>\n>     \n>   \n>   tail",
+    "- ***\n\n  \n\n  tail",
+    "> - ***\n>\n>   \n>\n>   tail",
+    "> - \n>   > x\n>   >\n>   > ---\n>\n>   > q",
+    "- \n  > x\n  >\n  > ---\n\n  > q",
+    "- ***\n\n  \n\n  > q",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn rule_quote_boundaries_preserve_nested_content() {
+  for (html, expected) in [
+    (
+      "<ul><li><em><blockquote>-<hr></blockquote></em>tail</li></ul>",
+      "- *\n  > \\-\n  >\n  > ---\n\n  *tail",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><div><blockquote></blockquote></div><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>",
+      "- ***\n\n  \n  > > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote></blockquote><table><tr><td>a</td></tr></table></blockquote></li></ul>",
+      "- ***\n\n  \n  >\n  >   | a |\n  > | --- |",
+    ),
+    (
+      "<ul><li><hr><blockquote><em>x<blockquote></blockquote></em>y</blockquote></li></ul>",
+      "- ***\n\n  \n  > *x\n  >\n  > *y",
+    ),
+    (
+      "<ul><li><hr><blockquote><ul><li>q<blockquote></blockquote>tail</li></ul></blockquote></li></ul>",
+      "- ***\n\n  \n  > - q\n  >\n  >   tail",
+    ),
+    (
+      "<ul><li><blockquote><hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > ---\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<blockquote><ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul></blockquote>",
+      "> - \n>   > x\n>   >\n>   > ---\n>   > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote>q</blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><p>q</p></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><p></p><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote><p></p></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote>tail</li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q\n\n  tail",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n  > > q",
+    ),
+    (
+      "<ol><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ol>",
+      "1. \n   > x\n   >\n   > ---\n   > > q",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote><p>x</p><blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote>y</blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  > y",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote><p>y</p></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  > y",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote><blockquote></blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote><table><tr><td>x</td></tr></table><blockquote></blockquote><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > | x |\n  > | --- |\n  >\n  >   ---",
+    ),
+    (
+      "<ul><li><hr><blockquote>x<blockquote></blockquote>===</blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  > \\===",
+    ),
+    (
+      "<ol><li><hr><blockquote>x<blockquote></blockquote><hr></blockquote>tail</li></ol>",
+      "1. ***\n\n   \n   > x\n   >\n   >    ---\n\n   tail",
+    ),
+    (
+      "<ul><li><hr><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>",
+      "- ***\n\n  \n  > > q\n  >\n  > > r",
+    ),
+    (
+      "<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote>q</blockquote><blockquote>r</blockquote></blockquote></li></ul>",
+      "- \n  > x\n  >\n  > ---\n\n  > > q\n  >\n  > > r",
+    ),
+    (
+      "<ul><li><hr><blockquote><p>x</p><hr></blockquote></li></ul>",
+      "- ***\n\n  \n  > x\n  >\n  > ---",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default();
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
+fn pending_list_rule_survives_a_long_quote_and_its_sibling() {
+  let body = "<p>quoted line</p>".repeat(650);
+  let html = format!(
+    "<ul><li><blockquote>{body}<hr></blockquote><blockquote>next</blockquote>tail</li></ul>"
+  );
+  let options = HtmlToMarkdownOptions::default();
+  let expected = html_to_markdown(&html, options.clone());
+  assert!(expected.len() > 8 * 1024);
+  assert_eq!(expected.matches("quoted line").count(), 650);
+  assert!(expected.contains("> next"));
+  assert!(expected.ends_with("tail"));
+  assert_stream_matches_every_split(&html, options);
+}
+
+#[test]
 fn scout9_list_tail_quote_spacing_streaming() {
   for (html, expected) in [
     (
@@ -6759,5 +7166,115 @@ fn lone_closer_with_a_nested_marker_past_its_paragraph_streams() {
     );
     assert_stream_matches(html, HtmlToMarkdownOptions::default());
     assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_code_fence_after_cr() {
+  for html in [
+    "<pre>a&#13;```&#13;b</pre><p>c</p>",
+    "<pre>a&#13;```&#13;<h2>x #</h2></pre>",
+  ] {
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_empty_inline_pre_fence_reliability() {
+  for body in ["", " ", "\n", "<code></code>"] {
+    let html = format!("<span><pre>{body}</pre></span><pre><h2>x #</h2></pre>");
+    assert_stream_matches_every_split(&html, HtmlToMarkdownOptions::default());
+  }
+}
+
+fn vertical_tab_options(max_node_bytes: usize) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_images: false,
+      fragments: false,
+      urls: false,
+      ..CleanConfig::all()
+    }),
+    max_node_bytes,
+    ..Default::default()
+  }
+}
+
+#[test]
+fn vertical_tab_before_a_droppable_opener_streams_like_one_shot() {
+  // The empty element can drop and leave the tab trailing for the bold closer to move.
+  let opts = vertical_tab_options(1 << 20);
+  for (html, expected) in [
+    (
+      "<p><b>Note\u{b}<em></em></b> text</p>",
+      "**Note**\u{b} text",
+    ),
+    ("<p><b>Note\u{b}<s></s></b> text</p>", "**Note**\u{b}  text"),
+    (
+      "<p><b>Note\u{b}<code></code></b> text</p>",
+      "**Note**\u{b} text",
+    ),
+    (
+      "<p><b>Note\u{b}<a href=\"/x\"></a></b> text</p>",
+      "**Note**\u{b}  text",
+    ),
+    (
+      "<p><b>Note\u{b}<br><i></i>\u{b}<br></b> text</p>",
+      "**Note**\u{b}  \n\u{b}  \n text",
+    ),
+    ("<del>\u{b}<pre>", "~~~~\u{b}"),
+  ] {
+    assert_eq!(html_to_markdown(html, opts.clone()), expected);
+    assert_stream_matches(html, opts.clone());
+    assert_stream_matches_every_split(html, opts.clone());
+  }
+  // The opener is still open when the input ends.
+  let mut stream = MarkdownStreamProcessor::new(opts.clone());
+  let mut actual = stream.process_chunk("<p><b>Note\u{b}<em>");
+  actual.push_str(&stream.finish());
+  assert_eq!(actual, "**Note**\u{b}");
+  assert_eq!(html_to_markdown("<p><b>Note\u{b}<em>", opts), actual);
+}
+
+#[test]
+fn vertical_tab_hold_inside_emphasis_is_charged_to_the_node_cap() {
+  // Streaming holds the whole run for the closer, so the cap cuts it where one-shot does.
+  const CAP: usize = 64 * 1024;
+  let opts = vertical_tab_options(CAP);
+  for unit in [
+    "\u{b}<br>",
+    "&#11;<br>",
+    "\u{b} ",
+    "\u{b}<br><br>",
+    "\u{b}<span></span>",
+    "\u{b}<i>",
+  ] {
+    for (open, close) in [("<p><b>a", ""), ("<p><b>a", "</b>c</p>"), ("<p>a<b>", "")] {
+      let html = format!("{open}{}{close}", unit.repeat(2 * CAP));
+      let expected = html_to_format_result(&html, opts.clone(), OutputFormat::Markdown);
+      assert!(expected.truncated, "unit={unit:?} open={open:?}");
+      let (peak, total_out) = measure_peak(&html, 4096, opts.clone());
+      assert_eq!(total_out, expected.markdown.len() as u64, "unit={unit:?}");
+      assert!(
+        peak < 5 * CAP as u64,
+        "peak {peak} should stay within the {CAP} byte cap for {unit:?} after {open:?}"
+      );
+      let mut stream = MarkdownStreamProcessor::new(opts.clone());
+      let mut actual = String::new();
+      for chunk in html.as_bytes().chunks(4096) {
+        actual.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      actual.push_str(&stream.finish());
+      assert!(stream.truncated(), "unit={unit:?} open={open:?}");
+      assert_eq!(actual, expected.markdown, "unit={unit:?} open={open:?}");
+    }
+  }
+  // Below the cap the run streams out whole once the closer has moved it.
+  let html = format!("<p><b>a{}</b>c</p>", "\u{b}<br>".repeat(1000));
+  let expected = html_to_format_result(&html, opts.clone(), OutputFormat::Markdown);
+  assert!(!expected.truncated);
+  assert!(expected.markdown.starts_with("**a**\u{b}  \n"));
+  for width in [1, 7, 4096] {
+    assert_eq!(stream_chunks(&html, width, opts.clone()), expected.markdown);
   }
 }
