@@ -72,6 +72,8 @@ export interface MarkdownState {
   outputPositions?: OutputPositions
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
+  /** Buffer length right after an empty marker pair was dropped. */
+  droppedPairAt?: number
   /** Reference to the last processed node */
   lastNode?: ElementNode | TextNode
   /** Reference to the last processed text node - for context tracking */
@@ -2998,6 +3000,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.headingBreakPending = true
           resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
           state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+          state.droppedPairAt = buff.length
           restoreQuoteParentBoundary()
           return
         }

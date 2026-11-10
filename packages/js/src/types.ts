@@ -106,6 +106,8 @@ export interface CleanTarget {
   depthMap: Uint16Array
   /** The last buffer entry the converter wrote. */
   lastContentCache?: string
+  /** Buffer length right after an empty marker pair was dropped. */
+  droppedPairAt?: number
   options?: EngineOptions
   /** @internal */
   outputPositions?: OutputPositions
@@ -340,6 +342,8 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
 
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
+  /** Buffer length right after an empty marker pair was dropped. */
+  droppedPairAt?: number
 
   /** Reference to the last processed node */
   lastNode?: Node
