@@ -373,6 +373,9 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   preFencePendingDepth?: number
   preFenceLang?: string
   preFenceOwnerDepth?: number
+  /** A fence may be misread by a parser; see MarkdownState. */
+  fencesUnreliable?: boolean
+  preFenceInline?: boolean
   /** Element whose enter opened the deferred <pre> fence. */
   preFenceOpener?: ElementNode
   /** Open fenced block, whose opener is the fragment at this index. */

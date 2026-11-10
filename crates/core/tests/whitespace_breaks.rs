@@ -1,6 +1,6 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{
-  CleanConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+  CleanConfig, FilterConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
@@ -440,6 +440,385 @@ fn wrapped_caption_text_owns_no_leading_space() {
   assert_eq!(md("<figcaption><div>C</div></figcaption>"), "*C*");
 }
 
+// ── wrapWidth at a separator trimmed from an inline element ──
+
+fn assert_every_text_chunking(html: &str, options: &HtmlToMarkdownOptions, expected: &str) {
+  assert_eq!(html_to_text(html, options.clone()), expected, "html={html}");
+  for chunk in 1..=html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(options.clone(), OutputFormat::Text);
+    let mut out = String::new();
+    for c in html.as_bytes().chunks(chunk) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(c).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "html={html} chunk={chunk}");
+  }
+}
+
+#[test]
+fn wrap_breaks_at_a_separator_trimmed_from_an_inline_element() {
+  // The space `</span>` or `</em>` trims is the only break point, so a line
+  // that would pass the width breaks there.
+  let wrap = |width| HtmlToMarkdownOptions::default().with_wrap_width(width);
+  for (html, width, expected) in [
+    ("<p><span>aaaaa </span>bbbb</p>", 6, "aaaaa\nbbbb"),
+    ("<p><em>aaaaaaaaaaa </em>b</p>", 12, "*aaaaaaaaaaa*\nb"),
+    (
+      "<p><a href=\"/x\">aaaaa </a>bbbb cc</p>",
+      12,
+      "[aaaaa](/x)\nbbbb cc",
+    ),
+    ("<p><code>aaaaa </code>bbbb cc</p>", 6, "`aaaaa`\nbbbb\ncc"),
+    (
+      "<p><em>aaaaa </em><span>bbbb </span>cccc dd</p>",
+      6,
+      "*aaaaa*\nbbbb\ncccc\ndd",
+    ),
+    (
+      "<ul><li><em>aaaaaaa </em>bbbb cc dddd</li></ul>",
+      12,
+      "- *aaaaaaa*\n  bbbb cc\n  dddd",
+    ),
+    (
+      "<ol><li><strong>aaaaa </strong>bbbb cc</li></ol>",
+      6,
+      "1. **aaaaa**\n   bbbb\n   cc",
+    ),
+    (
+      "<blockquote><p><em>aaaaaaa </em>bbbb cc dddd</p></blockquote>",
+      12,
+      "> *aaaaaaa*\n> bbbb cc dddd",
+    ),
+    (
+      "<blockquote><ul><li><span>aaaaa </span>bbbb cc</li></ul></blockquote>",
+      6,
+      "> - aaaaa\n>   bbbb\n>   cc",
+    ),
+    (
+      "<p><strong>aaaaa </strong>bbbb cc</p>",
+      80,
+      "**aaaaa** bbbb cc",
+    ),
+  ] {
+    assert_every_chunking(html, &wrap(width), expected);
+  }
+  for (html, width, expected) in [
+    ("<p><span>aaaaa </span>bbbb</p>", 6, "aaaaa\nbbbb"),
+    ("<p><em>aaaaaaaaaaa </em>b</p>", 12, "aaaaaaaaaaa\nb"),
+    (
+      "<p>wwww<a href=\"/c\"><span>x</span> </a>yyyy end</p>",
+      12,
+      "wwwwx yyyy\nend",
+    ),
+  ] {
+    assert_every_text_chunking(html, &wrap(width), expected);
+  }
+}
+
+#[test]
+fn wrap_never_breaks_before_a_block_marker() {
+  // Text escaped mid-line leaves `-`, `>`, `#`, `1)`, `===` or `~~~` bare, so a
+  // break before one would open a list, quote, heading or fence. The marker
+  // keeps its space and overflows instead.
+  let wrap = |width| HtmlToMarkdownOptions::default().with_wrap_width(width);
+  for (html, width, expected) in [
+    (
+      "<p>The configuration guide explains each option in detail, so read it first <b>Price </b>- 5 dollars per month for every user seat.</p>",
+      80,
+      "The configuration guide explains each option in detail, so read it first **Price** -\n5 dollars per month for every user seat.",
+    ),
+    (
+      "<p>The configuration guide explains each option in detail, so read it before <code>count </code>&gt; 5 triggers the warning in the log.</p>",
+      80,
+      "The configuration guide explains each option in detail, so read it before `count` >\n5 triggers the warning in the log.",
+    ),
+    (
+      "<p>The configuration guide explains each option in detail, so read it to see <a href=\"/issues\">Issue </a># 42 for the full discussion.</p>",
+      80,
+      "The configuration guide explains each option in detail, so read it to see [Issue](/issues) #\n42 for the full discussion.",
+    ),
+    (
+      "<p>The configuration guide explains each option in detail, so read it until the <em>end </em>---</p><p>Next paragraph.</p>",
+      80,
+      "The configuration guide explains each option in detail, so read it until the *end* ---\n\nNext paragraph.",
+    ),
+    ("<p><span>aaaaa </span>- bbbb</p>", 6, "aaaaa -\nbbbb"),
+    ("<p>aaaaa - bbbb</p>", 6, "aaaaa -\nbbbb"),
+    ("<p>aaaaa &gt;b</p>", 6, "aaaaa >b"),
+    ("<p>aaaaa ## b</p>", 6, "aaaaa ##\nb"),
+    ("<p>aaaaa 1) bb</p>", 6, "aaaaa 1)\nbb"),
+    ("<p>aaaaa ===</p>", 6, "aaaaa ==="),
+    ("<ul><li>aaaaa - bbbb</li></ul>", 8, "- aaaaa -\n  bbbb"),
+    // A raw HTML line skips the GFM escape, so `~~~` would open a fence that
+    // swallows the rest of the document.
+    (
+      "<details><summary>S</summary><code>aaaaaaaa </code>~~~</details><p>After.</p>",
+      12,
+      "<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> ~~~</details>\n\n\n\nAfter.",
+    ),
+    (
+      "<details><summary>S</summary><code>aaaaaaaa</code> - x</details><p>After.</p>",
+      12,
+      "<details>\n\n<summary>S</summary>\n\n\n\n<code>aaaaaaaa</code> -\nx</details>\n\n\n\nAfter.",
+    ),
+    // Escaped or not a marker: the break stays.
+    ("<p>aaaaa * bbbb</p>", 6, "aaaaa\n\\*\nbbbb"),
+    ("<p>aaaaa 1.5 bb</p>", 6, "aaaaa\n1.5 bb"),
+    ("<p>aaaaa ####### b</p>", 6, "aaaaa\n#######\nb"),
+  ] {
+    assert_every_chunking(html, &wrap(width), expected);
+  }
+  // Plain text has no block syntax to protect.
+  assert_every_text_chunking(
+    "<p><span>aaaaa </span>- bbbb</p>",
+    &wrap(6),
+    "aaaaa\n- bbbb",
+  );
+}
+
+#[test]
+fn wrap_only_protects_ordered_markers_starting_at_one() {
+  let options = HtmlToMarkdownOptions::default().with_wrap_width(6);
+  for (marker, expected) in [
+    ("2015.", "aaaaa\n2015.\nbb"),
+    ("0)", "aaaaa\n0) bb"),
+    ("2.", "aaaaa\n2. bb"),
+    ("2)", "aaaaa\n2) bb"),
+    ("1.", "aaaaa 1.\nbb"),
+    ("1)", "aaaaa 1)\nbb"),
+    ("01.", "aaaaa 01.\nbb"),
+    ("000000001)", "aaaaa 000000001)\nbb"),
+    ("0000000001)", "aaaaa\n0000000001)\nbb"),
+  ] {
+    for text in ["aaaaa ", "<span>aaaaa </span>"] {
+      let html = format!("<p>{text}{marker} bb</p>");
+      assert_every_chunking(&html, &options, expected);
+    }
+  }
+  assert_every_chunking(
+    "<p>browsers since July 2015.</p>",
+    &HtmlToMarkdownOptions::default().with_wrap_width(20),
+    "browsers since July\n2015.",
+  );
+}
+
+#[test]
+fn horizontal_rule_stays_separate_inside_filtered_list_items() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::include(&["hr", "p"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("<ul><li><p>b</p><hr></li></ul>", "b\n\n---"),
+    ("<ul><li><p>b</p><hr><p>c</p></li></ul>", "b\n\n---\n\nc"),
+    (
+      "<ul><li><ul><li><p>b</p><hr></li></ul></li></ul>",
+      "b\n\n---",
+    ),
+    ("<ul><li><hr></li></ul>", "---"),
+    (
+      "<p>before</p><ul><li><ul><li><hr></li></ul></li></ul><p>after</p>",
+      "before\n\n---\n\nafter",
+    ),
+    (
+      "<ul><li><ul><li><hr><p>after</p></li></ul></li></ul>",
+      "---\n\nafter",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn wrapped_ordered_marker_completed_by_an_inline_node_is_escaped() {
+  for delimiter in [".", ")"] {
+    let html = format!("<p><span>aaaaa </span><span>1</span>{delimiter} bb</p>");
+    let expected = format!("aaaaa\n1\\{delimiter} bb");
+    assert_every_chunking(
+      &html,
+      &HtmlToMarkdownOptions::default().with_wrap_width(6),
+      &expected,
+    );
+  }
+  for (tail, expected) in [
+    ("<span>0</span>1) bb", "aaaaa\n01\\)\nbb"),
+    ("<span>00000000</span>1) bb", "aaaaa\n000000001\\)\nbb"),
+    ("<span>000000000</span>1) bb", "aaaaa\n0000000001)\nbb"),
+    ("<span>2</span>) bb", "aaaaa\n2) bb"),
+    ("<span>1</span>0) bb", "aaaaa\n10) bb"),
+    ("<span>1</span>.5 bb", "aaaaa\n1.5 bb"),
+    ("<span>1</span> bb", "aaaaa\n1 bb"),
+    ("<span>1 </span>) bb", "aaaaa\n1 ) bb"),
+  ] {
+    assert_every_chunking(
+      &format!("<p><span>aaaaa </span>{tail}</p>"),
+      &HtmlToMarkdownOptions::default().with_wrap_width(6),
+      expected,
+    );
+  }
+  for (html, width, expected) in [
+    (
+      "<ul><li>x<ul><li><span>aaaaa </span><span>1</span>) bb</li></ul></li></ul>",
+      10,
+      "- x\n  - aaaaa\n    1\\) bb",
+    ),
+    (
+      "<blockquote><p><span>aaaaa </span><span>1</span>) bb</p></blockquote>",
+      6,
+      "> aaaaa\n> 1\\) bb",
+    ),
+    (
+      "<p><span>aaaaa </span><span>1</span>) bb</p>",
+      0,
+      "aaaaa 1) bb",
+    ),
+  ] {
+    assert_every_chunking(
+      html,
+      &HtmlToMarkdownOptions::default().with_wrap_width(width),
+      expected,
+    );
+  }
+  assert_every_text_chunking(
+    "<p><span>aaaaa </span><span>1</span>) bb</p>",
+    &HtmlToMarkdownOptions::default().with_wrap_width(6),
+    "aaaaa\n1) bb",
+  );
+}
+
+#[test]
+fn split_ordered_marker_is_escaped_with_and_without_wrapping() {
+  for width in [0, 40] {
+    let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
+    for (html, expected) in [
+      ("<p>1<span>. x</span></p>", "1\\. x"),
+      ("<p>aaaa<br>1<span>. x</span></p>", "aaaa  \n1\\. x"),
+      ("<p>aaaa<br>2<span>. x</span></p>", "aaaa  \n2\\. x"),
+      ("<p>aa<br><br>2<span>. x</span></p>", "aa  \n  \n2\\. x"),
+      ("<p>aaaa</p><p>2<span>. x</span></p>", "aaaa\n\n2\\. x"),
+      ("<p>2<span>) x</span></p>", "2\\) x"),
+      ("<p>1<span>0. x</span></p>", "10\\. x"),
+      ("<p>12345678<span>9. x</span></p>", "123456789\\. x"),
+      ("<p>12345678<span>90. x</span></p>", "1234567890. x"),
+      ("<ul><li>1<span>. x</span></li></ul>", "- 1\\. x"),
+      (
+        "<blockquote><p>1<span>. x</span></p></blockquote>",
+        "> 1\\. x",
+      ),
+      ("<p>a 1<span>. x</span></p>", "a 1. x"),
+      ("<p>1<span>.5 x</span></p>", "1.5 x"),
+      ("<p><span>1 </span>. x</p>", "1 . x"),
+    ] {
+      assert_every_chunking(html, &options, expected);
+    }
+  }
+}
+
+#[test]
+fn split_marker_is_escaped_after_streaming_drain() {
+  let prefix = "x".repeat(9000);
+  let html = format!("<p>{prefix}</p><p><span>aaaaa </span><span>1</span>) bb</p>");
+  let expected = format!("{prefix}\n\naaaaa\n1\\) bb");
+  let options = HtmlToMarkdownOptions::default().with_wrap_width(6);
+  assert_eq!(html_to_markdown(&html, options.clone()), expected);
+  for size in [3, 1024] {
+    let mut stream = MarkdownStreamProcessor::new(options.clone());
+    let mut output = String::new();
+    for chunk in html.as_bytes().chunks(size) {
+      output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    output.push_str(&stream.finish());
+    assert_eq!(output.trim_end(), expected);
+  }
+}
+
+#[test]
+fn filtered_rule_keeps_both_block_boundaries() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::include(&["hr", "p", "br", "span"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    ("<ul><li><hr><span>c</span></li></ul>", "---\n\nc"),
+    ("<ul><li><p>b</p><br><hr></li></ul>", "b  \n\n---"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  assert_every_chunking(
+    "<ul><li>b<br><hr></li></ul>",
+    &HtmlToMarkdownOptions::default(),
+    "- b  \n  ***",
+  );
+}
+
+#[test]
+fn continued_line_gets_no_marker_from_a_dropped_blockquote() {
+  // A blockquote the filter or a literal override dropped writes no `>`, so a
+  // wrapped or hard-broken line inside it must not start with one either.
+  let include = |selector: &str| HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::include(&[selector])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let literal = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "blockquote".to_string(),
+        TagOverrideConfig {
+          enter: Some("[".to_string()),
+          exit: Some("]".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    (
+      "<blockquote><p><span>aaaaaaa </span>bbbb</p></blockquote>",
+      include("p").with_wrap_width(8),
+      "aaaaaaa\nbbbb",
+    ),
+    (
+      "<blockquote><p>aaaaaaa b</p></blockquote>",
+      include("p").with_wrap_width(8),
+      "aaaaaaa\nb",
+    ),
+    (
+      "<blockquote><p>aaaaaaa<br>b</p></blockquote>",
+      include("p"),
+      "aaaaaaa  \nb",
+    ),
+    (
+      "<blockquote><p>aaaaaaa b</p></blockquote>",
+      literal.clone().with_wrap_width(8),
+      "[\n\naaaaaaa\nb\n\n]",
+    ),
+    (
+      "<blockquote><p>aaaaaaa<br>b</p></blockquote>",
+      literal,
+      "[\n\naaaaaaa  \nb\n\n]",
+    ),
+    // A rendered blockquote still prefixes every line.
+    (
+      "<blockquote><blockquote><p>aaaaaaa b</p></blockquote></blockquote>",
+      include("blockquote").with_wrap_width(8),
+      "> > aaaaaaa\n> > b",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
 // ── tagOverrides spacing on a built-in inline tag ──
 
 fn md_block_override(html: &str, tag: &str) -> String {
@@ -490,6 +869,32 @@ fn link_text_drops_the_space_before_an_empty_element() {
     md(r#"<ul><li><a href="/x">q<br> </a></li></ul>"#),
     "- [q  \n  ](/x)"
   );
+}
+
+#[test]
+fn recovered_separators_match_ordinary_separators_before_inline_producers() {
+  for producer in [
+    "<strong>b</strong>",
+    "<em>b</em>",
+    "<code>b</code>",
+    "<a href=\"/x\">b</a>",
+  ] {
+    for (before, after) in [
+      ("<p>", "</p>"),
+      ("<ul><li>", "</li></ul>"),
+      ("<blockquote><p>", "</p></blockquote>"),
+      ("<blockquote><ul><li>", "</li></ul></blockquote>"),
+    ] {
+      for width in [0, 6, 8, 12] {
+        let ordinary = format!("{before}aaaaa {producer}{after}");
+        let recovered = format!("{before}<span>aaaaa </span>{producer}{after}");
+        let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
+        let expected = html_to_markdown(&ordinary, options.clone());
+        assert_every_chunking(&ordinary, &options, &expected);
+        assert_every_chunking(&recovered, &options, &expected);
+      }
+    }
+  }
 }
 
 #[test]
