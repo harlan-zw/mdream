@@ -105,6 +105,22 @@ const SLACK_TRIGGER: usize = 4;
 const SLACK_KEEP: usize = 2;
 pub(crate) const SLACK_FLOOR: usize = 64 * 1024;
 
+/// Offset of the `]]>` closing a CDATA section. WASM uses the byte search so
+/// that no `str::find(&str)` searcher is linked in. Native keeps `str::find`:
+/// without it, the codegen of the whole `process_html` loop changed and every
+/// fixture took 0.3-1% more instructions, even with this call out of line.
+#[inline]
+fn cdata_end(after_open: &str) -> Option<usize> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    crate::scan::find_bytes(after_open.as_bytes(), b"]]>")
+  }
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    after_open.find("]]>")
+  }
+}
+
 #[inline]
 pub(crate) fn release_stream_slack(buffer: &mut String) {
   let len = buffer.len();
@@ -2212,7 +2228,7 @@ impl ConvertState {
         // doctype cases.
         let cdata = chunk[i + 2..].strip_prefix("[CDATA[");
         if let Some(after_open) = cdata {
-          if let Some(rel) = after_open.find("]]>") {
+          if let Some(rel) = cdata_end(after_open) {
             let token_len = "<![CDATA[".len() + rel + 3;
             self.complete_text_node(&mut text_buffer);
             if self.held_output_exceeded {

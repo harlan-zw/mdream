@@ -186,7 +186,9 @@ pub(crate) fn matches_selector(tag: &ElementNode, selector: &ParsedSelector) -> 
         (Some("="), Some(v)) => attr_val == v,
         (Some("^="), Some(v)) => !v.is_empty() && attr_val.starts_with(v),
         (Some("$="), Some(v)) => !v.is_empty() && attr_val.ends_with(v),
-        (Some("*="), Some(v)) => !v.is_empty() && attr_val.contains(v),
+        (Some("*="), Some(v)) => {
+          !v.is_empty() && crate::scan::find_bytes(attr_val.as_bytes(), v.as_bytes()).is_some()
+        }
         (Some("~="), Some(v)) => !v.is_empty() && attr_val.split_ascii_whitespace().any(|w| w == v),
         (Some("|="), Some(v)) => attr_val == v || attr_val.starts_with(&format!("{v}-")),
         _ => false,

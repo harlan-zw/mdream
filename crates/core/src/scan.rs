@@ -125,6 +125,34 @@ pub(crate) fn find_byte(hay: &[u8], needle: u8) -> Option<usize> {
   rest.iter().position(|&b| b == needle).map(|p| offset + p)
 }
 
+/// First index of `needle` in `hay`. Used instead of `str::find(&str)`, whose
+/// two-way searcher costs about 2.6 KB of WASM; every needle here is a few
+/// bytes, so a first-byte scan and a compare is enough.
+pub(crate) fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+  let Some((&first, rest)) = needle.split_first() else {
+    return Some(0);
+  };
+  let mut from = 0;
+  while let Some(offset) = find_byte(&hay[from..], first) {
+    let at = from + offset;
+    if hay[at + 1..].starts_with(rest) {
+      return Some(at);
+    }
+    from = at + 1;
+  }
+  None
+}
+
+/// Last index of `needle` in `hay`, for the same reason as [`find_bytes`].
+pub(crate) fn rfind_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+  if needle.is_empty() {
+    return Some(hay.len());
+  }
+  hay
+    .windows(needle.len())
+    .rposition(|window| window == needle)
+}
+
 pub(crate) struct CommentResult {
   pub(crate) complete: bool,
   pub(crate) new_position: usize,
@@ -1290,6 +1318,42 @@ fn scan_attrs(html: &str, position: usize, mask: u16) -> (bool, usize, Attribute
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  // The byte searches must agree with `str::find` and `str::rfind`, including
+  // overlapping prefixes of the needle and matches past the SWAR width.
+  #[test]
+  fn byte_searches_match_str_searches() {
+    let long = format!("{}]]>{}```", "]".repeat(40), "`".repeat(20));
+    let hays = [
+      "",
+      "]",
+      "]]",
+      "]]>",
+      "a]]>",
+      "]]]>",
+      "]]]]>x",
+      "a]b]]c]]>d]]>",
+      "x://y://",
+      "``````",
+      "a``b```c",
+      long.as_str(),
+    ];
+    let needles = ["", "]]>", "://", "```", "a", "]]]]>"];
+    for hay in hays {
+      for needle in needles {
+        assert_eq!(
+          find_bytes(hay.as_bytes(), needle.as_bytes()),
+          hay.find(needle),
+          "find {needle:?} in {hay:?}"
+        );
+        assert_eq!(
+          rfind_bytes(hay.as_bytes(), needle.as_bytes()),
+          hay.rfind(needle),
+          "rfind {needle:?} in {hay:?}"
+        );
+      }
+    }
+  }
 
   /// The tokenizer one byte at a time, with no run and no jump: what the tag
   /// scan has to agree with. Returns the tag end and self-closing flag, or the

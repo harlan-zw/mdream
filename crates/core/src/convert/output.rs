@@ -602,9 +602,11 @@ impl ConvertState {
     language: String,
     indent: String,
   ) {
-    let marker_offset = self.buffer[output_start..content_start]
-      .rfind(MARKDOWN_CODE_BLOCK)
-      .expect("code fence opener missing from output");
+    let marker_offset = crate::scan::rfind_bytes(
+      &self.buffer.as_bytes()[output_start..content_start],
+      MARKDOWN_CODE_BLOCK.as_bytes(),
+    )
+    .expect("code fence opener missing from output");
     if !self.fences_unreliable
       && (self
         .stack
