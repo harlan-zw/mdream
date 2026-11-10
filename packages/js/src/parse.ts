@@ -543,6 +543,10 @@ export function finalizeParse(
     if (state.currentNode?.tagHandler?.isNonNesting) {
       if (state.rawtextEndTagPending)
         text = ''
+      // A cut prefix of the element's end tag set no text state while it
+      // could still become the tag. Excluded text nothing reads stays unread.
+      else if (!(state.discardExcludedText && state.currentNode.tagHandler.excludesTextNodes) && hasNonWhitespace(text))
+        state.textBufferContainsNonWhitespace = true
     }
     else {
       const incompleteTagIndex = findIncompleteTagResidualIndex(trailing)
@@ -1197,10 +1201,10 @@ function parseHtmlInternal(
         // An end tag name cut off by the input end is still text of this run:
         // it closes nothing yet, and at end of input it stays literal.
         if (peekEnd === chunkLength) {
-          // An excluded raw-text end-tag prefix is retained for the next
-          // chunk. Its syntax has not consumed any body text yet.
-          if (!state.discardExcludedText || !state.currentNode.tagHandler.excludesTextNodes
-            || !state.currentNode.name.startsWith(normalizeTagName(htmlChunk.substring(i + 2, peekEnd)))) {
+          // A prefix of this element's own end tag is retained for the next
+          // chunk. Its syntax has consumed no body text yet; at end of input
+          // finalizeParse counts it as the text it turned out to be.
+          if (!state.currentNode.name.startsWith(normalizeTagName(htmlChunk.substring(i + 2, peekEnd)))) {
             state.textBufferContainsNonWhitespace = true
             state.lastCharWasWhitespace = false
           }
