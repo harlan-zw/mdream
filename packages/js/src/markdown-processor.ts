@@ -50,6 +50,7 @@ import {
   TAG_SUB,
   TAG_SUMMARY,
   TAG_SUP,
+  TAG_SVG,
   TAG_TABLE,
   TAG_TD,
   TAG_TH,
@@ -188,6 +189,7 @@ const CAPTION_INTERNAL_BREAK = 2
 // The caption took a pending heading break at its enter; dropped empty, it
 // owes the break again.
 const CAPTION_HEADING_BREAK = 4
+const CAPTION_ANCHORED_BREAK = 8
 const CAPTION_DEFAULT_SPACING = -1
 const CAPTION_NO_ANCHOR = -1
 INLINE_MARKER_TYPE[TAG_STRONG] = 1 // **
@@ -1048,7 +1050,7 @@ function resetRetractedCaptionFrames(frames: number[] | undefined, count: number
   for (let index = 0; index < count; index++) {
     const offset = index * CAPTION_FRAME_SIZE
     if (frames[offset + 3]! >= fragment) {
-      frames[offset + 2] = frames[offset + 2]! & ~CAPTION_OPEN
+      frames[offset + 2] = frames[offset + 2]! & ~(CAPTION_OPEN | CAPTION_ANCHORED_BREAK)
       frames[offset + 3] = CAPTION_NO_ANCHOR
     }
   }
@@ -1688,6 +1690,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     const frames = captionFrames
     if (frames) {
+      let insertedFragment = -1
+      let insertedLength = 0
       for (let index = 0; index < captionFrameCount; index++) {
         const offset = index * CAPTION_FRAME_SIZE
         let flags = frames[offset + 2]!
@@ -1695,7 +1699,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           continue
         const anchor = frames[offset + 3]!
         const beforeFragment = anchor === CAPTION_NO_ANCHOR ? state.buffer.length : anchor
-        let opening = flags & CAPTION_INTERNAL_BREAK
+        let opening = (flags & CAPTION_INTERNAL_BREAK)
+          && !((flags & CAPTION_ANCHORED_BREAK) && anchor !== CAPTION_NO_ANCHOR)
           ? ''
           : captionSpacingPrefix(frames[offset]!, true, beforeFragment)
         // A block prefix replaces the owed separator. With no block prefix,
@@ -1718,13 +1723,16 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           }
           else {
             const anchored = state.buffer[beforeFragment]!
-            const replacement = opening + anchored
-            state.outputPositions?.replace(beforeFragment, beforeFragment + 1, [replacement], offset => offset + opening.length)
+            const at = insertedFragment === beforeFragment ? insertedLength : 0
+            const replacement = anchored.slice(0, at) + opening + anchored.slice(at)
+            state.outputPositions?.replace(beforeFragment, beforeFragment + 1, [replacement], offset => offset >= at ? offset + opening.length : offset)
             state.buffer[beforeFragment] = replacement
+            insertedFragment = beforeFragment
+            insertedLength = at + opening.length
             noteBufferRewrite(state)
             const codeSpan = gfmLifecycle.openCodeSpans.at(-1)
             if (codeSpan?.fragment === beforeFragment)
-              codeSpan.prefix = opening + codeSpan.prefix
+              codeSpan.prefix = codeSpan.prefix.slice(0, at) + opening + codeSpan.prefix.slice(at)
             if (state.lastContentCache === anchored)
               state.lastContentCache = replacement
           }
@@ -2420,7 +2428,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
 
-      if (state.pendingInlineWhitespace) {
+      const captionHasAnchor = captionFrameCount !== 0
+        && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
+        && captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 3] !== CAPTION_NO_ANCHOR
+      if (state.pendingInlineWhitespace && !captionHasAnchor) {
         state.pendingInlineWhitespace = false
         // A raw `<br>` (heading, table cell) ends no line, so it keeps the
         // separator a closed inline element deferred, as in Rust.
@@ -2477,8 +2488,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (breakOutput && pendingCaption && !hasNonWhitespace(breakOutput)) {
         for (let index = 0; index < captionFrameCount; index++) {
           const offset = index * CAPTION_FRAME_SIZE + 2
-          if ((captionFrames![offset]! & CAPTION_OPEN) === 0)
+          if ((captionFrames![offset]! & CAPTION_OPEN) === 0) {
+            if (captionFrames![offset + 1] !== CAPTION_NO_ANCHOR)
+              captionFrames![offset] = captionFrames![offset]! | CAPTION_ANCHORED_BREAK
             captionFrames![offset] = captionFrames![offset]! | CAPTION_INTERNAL_BREAK
+          }
         }
         captionBreakRun++
       }
@@ -2602,8 +2616,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           gfmAction = res
           if (res._tag === 'BlockquoteExit')
             closesQuote = state.blockquotes.length > 0
-          if (res._tag === 'CodeSpanEnter' && captionBoundary === 3 && res.output === ' `')
+          // A pending caption will put its own opener before this span. The
+          // list handler only saw the text preceding that deferred boundary.
+          if (res._tag === 'CodeSpanEnter' && res.output === ' `'
+            && (captionBoundary === 3 || (captionFrameCount !== 0
+              && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0))) {
             res.output = MARKDOWN_INLINE_CODE
+          }
           handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
         }
         if (handlerOutput)
@@ -2903,8 +2922,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       newLines = 0
 
     pendingSpaceFragment = -1
-    // Tentative caption markers wait for the caption-owned boundary.
-    if (state.pendingInlineWhitespace && !(captionTransition && captionFrameCount !== 0)) {
+    // Invisible children cannot consume the separator a pending caption owns.
+    if (state.pendingInlineWhitespace && !(captionFrameCount !== 0
+      && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
+      && (captionTransition || (!output && newLines === 0 && (eventType === NodeEventExit || tagId === TAG_SVG))))) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
         // A raw `<br>` (heading, table cell) is no line end, so it keeps the

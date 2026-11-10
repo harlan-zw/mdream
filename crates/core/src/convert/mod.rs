@@ -209,6 +209,7 @@ enum CaptionState {
     output_start: usize,
     content_start: usize,
     restore_space: bool,
+    restore_pending_whitespace: bool,
   },
   Committed,
 }

@@ -804,11 +804,27 @@ export const tagHandlers: Record<number, TagHandler> = {
         return safeAnchorOutput(node, state.options, false, true)
       const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
+      // A real code span preserves the cached trailing space. Its fallback
+      // label must use the same comparison as Rust's untrimmed code content.
+      let preservesCodeWhitespace = false
+      if (state.depthMap?.[TAG_CODE] && !state.depthMap[TAG_PRE]) {
+        let parent = node.parent
+        while (parent) {
+          if (parent.tagId === TAG_CODE && parent.tagHandler?.enter === tagHandlers[TAG_CODE]!.enter) {
+            preservesCodeWhitespace = true
+            break
+          }
+          parent = parent.parent
+        }
+      }
+      const cachedText = preservesCodeWhitespace
+        ? state.lastContentCache
+        : state.lastContentCache?.replace(/[ \t\n\f\r]+$/, '')
       // Drop a title that repeats the link's last text run. A separator
       // written on its own is no part of that text, so `[x e](u "e")` keeps
       // its title while `[e](u "e")` still drops the duplicate.
       if (title && !state.cacheFollowsSeparator
-        && state.lastContentCache?.replace(/[ \t\n\f\r]+$/, '') === title.replace(/[ \t\n\f\r]+$/, '')) {
+        && cachedText === title.replace(/[ \t\n\f\r]+$/, '')) {
         title = ''
       }
       // GFM autolink shorthand: when the link text equals href and href is a

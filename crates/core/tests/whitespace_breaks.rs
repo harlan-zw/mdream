@@ -1614,3 +1614,262 @@ fn empty_raw_text_closer_does_not_count_as_body_text() {
     }
   }
 }
+
+#[test]
+fn review_caption_lifecycle_empty_em() {
+  let html = r#"<strong><button>A </button><figcaption><em></em></figcaption></strong>"#;
+  let expected = "**A**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_code() {
+  let html = r#"<strong><span>A </span><figcaption><code></code></figcaption></strong>"#;
+  let expected = "**A**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_outer_em() {
+  let html = r#"<em><button>A </button><figcaption><em></em></figcaption></em>"#;
+  let expected = "*A*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_caption() {
+  let html = r#"<strong><button>A </button><figcaption></figcaption></strong>"#;
+  let expected = "**A**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_following_text() {
+  let html = r#"<strong><button>A </button><figcaption><em></em></figcaption>B</strong>"#;
+  let expected = "**A B**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_svg() {
+  let html = r#"<table><tr><td><button>A </button><figcaption><b><svg></svg></b>B</figcaption></td></tr></table>"#;
+  let expected = "| A *B* |\n| --- |";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_ol_code() {
+  let html =
+    r#"<ol><li><button>A<i></i> </button><figcaption><code>B</code></figcaption></li></ol>"#;
+  let expected = "1. A\n\n   *`B`*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_ul_code() {
+  let html =
+    r#"<ul><li><button>A<i></i> </button><figcaption><code>B</code></figcaption></li></ul>"#;
+  let expected = "- A\n\n  *`B`*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_ol_code_no_empty() {
+  let html = r#"<ol><li><button>A </button><figcaption><code>B</code></figcaption></li></ol>"#;
+  let expected = "1. A\n\n   *`B`*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_ul_code_empty_em() {
+  let html =
+    r#"<ul><li><button>A </button><figcaption><em> </em><code>B</code></figcaption></li></ul>"#;
+  let expected = "- A\n\n  *`B`*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_additional_0() {
+  let html = r#"<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>"#;
+  let expected = "`[Lima](/f) *[  \nLima](/f)*`";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn review_caption_additional_1() {
+  let html =
+    r#"<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>"#;
+  let expected = "[Lima](/f) *<mark></mark>*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn review_caption_additional_2() {
+  let html = r#"<figcaption><s>1. Lima </s><figcaption><svg></svg> Lima</figcaption></figcaption>"#;
+  let expected = "*~~1. Lima~~ *Lima**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn review_caption_additional_3() {
+  let html = r#"<code><a href="/f" title="Lima "></a></code>"#;
+  let expected = "`[Lima ](/f \"Lima \")`";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn review_caption_additional_4() {
+  let html = r#"<button>A </button><figcaption><em><br>B</em></figcaption>"#;
+  let expected = "A\n\n**  \nB**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}

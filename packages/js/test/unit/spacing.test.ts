@@ -681,6 +681,71 @@ describe('excluded-content review regressions', () => {
     for (let split = 0; split <= html.length; split++)
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
   })
+  it.each([
+    [
+      '<strong><button>A </button><figcaption><em></em></figcaption></strong>',
+      '**A**',
+    ],
+    [
+      '<strong><span>A </span><figcaption><code></code></figcaption></strong>',
+      '**A**',
+    ],
+    [
+      '<em><button>A </button><figcaption><em></em></figcaption></em>',
+      '*A*',
+    ],
+    [
+      '<strong><button>A </button><figcaption></figcaption></strong>',
+      '**A**',
+    ],
+    [
+      '<strong><button>A </button><figcaption><em></em></figcaption>B</strong>',
+      '**A B**',
+    ],
+    [
+      '<table><tr><td><button>A </button><figcaption><b><svg></svg></b>B</figcaption></td></tr></table>',
+      '| A *B* |\n| --- |',
+    ],
+    [
+      '<ol><li><button>A<i></i> </button><figcaption><code>B</code></figcaption></li></ol>',
+      '1. A\n\n   *`B`*',
+    ],
+    [
+      '<ul><li><button>A<i></i> </button><figcaption><code>B</code></figcaption></li></ul>',
+      '- A\n\n  *`B`*',
+    ],
+    [
+      '<ol><li><button>A </button><figcaption><code>B</code></figcaption></li></ol>',
+      '1. A\n\n   *`B`*',
+    ],
+    [
+      '<ul><li><button>A </button><figcaption><em> </em><code>B</code></figcaption></li></ul>',
+      '- A\n\n  *`B`*',
+    ],
+  ])('caption separator lifecycle: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks), `chunk width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  })
+  it.each([
+    ['<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>', '`[Lima](/f) *[  \nLima](/f)*`'],
+    ['<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>', '[Lima](/f) *<mark></mark>*'],
+    ['<figcaption><s>1. Lima </s><figcaption><svg></svg> Lima</figcaption></figcaption>', '*~~1. Lima~~ *Lima**'],
+    ['<code><a href="/f" title="Lima "></a></code>', '`[Lima ](/f "Lima ")`'],
+    ['<button>A </button><figcaption><em><br>B</em></figcaption>', 'A\n\n**  \nB**'],
+  ])('caption separator rollback and link fallback: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks)).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)])).toBe(expected)
+  })
   it('link-raw', async () => {
     const html = '<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>'
     const expected = 'D [<mark></mark>7](/x)'

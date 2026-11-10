@@ -2805,6 +2805,7 @@ impl ConvertState {
           output_start,
           content_start,
           restore_space,
+          restore_pending_whitespace,
         } => {
           // Text commits the frame, so `*`, `~`, a backtick, or `"` here is a
           // marker, not content. A marker pair around an empty block survives the
@@ -2819,6 +2820,7 @@ impl ConvertState {
             caption_exit_spacing = frame.spacing[1];
           } else {
             self.truncate_buffer(output_start);
+            self.pending_inline_whitespace |= restore_pending_whitespace;
             if restore_space {
               self.buffer.push(' ');
               self.last_content_cache_len = 1;
@@ -5020,9 +5022,11 @@ impl ConvertState {
         self.last_text_node_contains_whitespace = false;
         self.has_last_text_node = false;
       }
-      // Without a block prefix the owed space belongs before the caption's
-      // opener. Keep it outside the tentative frame so empty children cannot
-      // retract the separator with their delimiters.
+      let output_start = self.buffer.len();
+      let restore_pending_whitespace = self.pending_inline_whitespace;
+      // The separator and opener are tentative together. An empty caption
+      // returns the separator to pending state instead of leaving a literal
+      // space before an enclosing emphasis closer.
       if prefix.is_none() && self.pending_inline_whitespace {
         self.pending_inline_whitespace = false;
         if !matches!(
@@ -5032,7 +5036,6 @@ impl ConvertState {
           self.push_caption_content(" ");
         }
       }
-      let output_start = self.buffer.len();
       if let Some(prefix) = prefix {
         // The caption boundary consumes the separator before its opener.
         self.pending_inline_whitespace = false;
@@ -5048,6 +5051,7 @@ impl ConvertState {
           output_start,
           content_start: self.buffer.len(),
           restore_space: trimmed_space,
+          restore_pending_whitespace,
         }
       };
     }
@@ -5059,6 +5063,7 @@ impl ConvertState {
         output_start,
         content_start,
         restore_space,
+        restore_pending_whitespace,
       } = self.caption_frames[index].state
       else {
         continue;
@@ -5072,6 +5077,7 @@ impl ConvertState {
       }
       self.caption_frames[index].state = CaptionState::Pending;
       self.truncate_buffer(output_start);
+      self.pending_inline_whitespace |= restore_pending_whitespace;
       self.last_content_cache_len = 0;
       if restore_space {
         self.buffer.push(' ');
@@ -5699,6 +5705,10 @@ impl ConvertState {
           // code spans rather than merging into one (` `a``b` ` →
           // single span with literal content ``a``b``).
           if self.caption_boundary != CaptionBoundary::QuoteParent
+            && self
+              .caption_frames
+              .last()
+              .is_none_or(|frame| matches!(frame.state, CaptionState::Committed))
             && self.last_output_byte().is_some_and(|last_char| {
               !matches!(
                 last_char,
@@ -6161,7 +6171,18 @@ impl ConvertState {
     // sit outside its Markdown delimiter. Resolve it only when later visible
     // inline output begins; block boundaries and line breaks subsume it.
     self.pending_space_end = usize::MAX;
-    if self.pending_inline_whitespace && is_enter {
+    let pending_caption = output_str.is_empty()
+      && configured_new_lines == 0
+      && (!is_enter
+        || self
+          .stack
+          .last()
+          .is_some_and(|node| node.tag_id == Some(TAG_SVG)))
+      && self
+        .caption_frames
+        .last()
+        .is_some_and(|frame| matches!(frame.state, CaptionState::Pending));
+    if self.pending_inline_whitespace && is_enter && !pending_caption {
       // A div enter with no output only groups content on the same line.
       let transparent_div = output_str.is_empty()
         && self
@@ -6192,7 +6213,10 @@ impl ConvertState {
         }
         self.pending_inline_whitespace = false;
       }
-    } else if self.pending_inline_whitespace && (!is_inline || configured_new_lines > 0) {
+    } else if self.pending_inline_whitespace
+      && !pending_caption
+      && (!is_inline || configured_new_lines > 0)
+    {
       self.pending_inline_whitespace = false;
     }
 
