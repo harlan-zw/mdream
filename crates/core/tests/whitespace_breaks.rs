@@ -1873,3 +1873,135 @@ fn review_caption_additional_4() {
     assert_eq!(out, expected);
   }
 }
+
+#[test]
+fn caption_excluded_wrapper_0() {
+  use mdream::{PluginConfig, TagOverrideConfig};
+  let html = r#"<q><kbd>1. Lima
+</kbd><figcaption><samp><script></script><img src="/n"></samp></figcaption></q>"#;
+  let expected = "\"`1. Lima` *`![](/n)`*\"";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("x-q", TagOverrideConfig::alias("blockquote")),
+    ),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for width in [1, 2, 3, 11] {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn caption_excluded_wrapper_1() {
+  use mdream::{PluginConfig, TagOverrideConfig};
+  let html = r#"<var><a href="/f" title="Lima "></a><figcaption><strong><style></style></strong>1. Lima</figcaption></var>"#;
+  let expected = "`[Lima](/f) *1. Lima*%";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig::default().with_tag_override(
+      "var",
+      TagOverrideConfig {
+        exit: Some("%".into()),
+        ..Default::default()
+      },
+    )),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for width in [1, 2, 3, 11] {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn caption_excluded_wrapper_2() {
+  use mdream::{PluginConfig, TagOverrideConfig};
+  let html = r#"<q><kbd><code><li><script>x</script><script>x</script></li><svg></svg></code><figcaption>1. Lima
+</figcaption></kbd><figcaption><samp><cite><script>x</script><img src="/n"></cite><button>
+ Lima</button></samp><samp>
+<strong><script>x</script> </strong></samp></figcaption></q>"#;
+  let expected = "\"``- `*1. Lima*` *`*![](/n)* Lima`*\"";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("x-q", TagOverrideConfig::alias("blockquote")),
+    ),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for width in [1, 2, 3, 11] {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn caption_excluded_wrapper_3() {
+  use mdream::{PluginConfig, TagOverrideConfig};
+  let html = r#"<var><strong><samp><li><i></i> </li><a href="/f" title="Lima ">  </a></samp><figcaption><strong> <style></style></strong><cite><svg></svg>1. Lima</cite></figcaption></strong><s><var><blockquote><style></style>Kilo</blockquote><div> Lima Lima</div></var><script>x</script></s></var>"#;
+  let expected = "`**`- [Lima](/f)` **1. Lima****~~`>  Kilo Lima Lima%~~%";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig::default().with_tag_override(
+      "var",
+      TagOverrideConfig {
+        exit: Some("%".into()),
+        ..Default::default()
+      },
+    )),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for width in [1, 2, 3, 11] {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}

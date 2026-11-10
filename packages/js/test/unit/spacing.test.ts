@@ -746,6 +746,57 @@ describe('excluded-content review regressions', () => {
     for (let split = 0; split <= html.length; split++)
       expect(await streamConvert([html.slice(0, split), html.slice(split)])).toBe(expected)
   })
+
+  it.each([
+    [
+      '<q><kbd>1. Lima\n</kbd><figcaption><samp><script></script><img src="/n"></samp></figcaption></q>',
+      '"`1. Lima` *`![](/n)`*"',
+      {
+        tagOverrides: {
+          'x-q': 'blockquote',
+        },
+      },
+    ],
+    [
+      '<var><a href="/f" title="Lima "></a><figcaption><strong><style></style></strong>1. Lima</figcaption></var>',
+      '`[Lima](/f) *1. Lima*%',
+      {
+        tagOverrides: {
+          var: {
+            exit: '%',
+          },
+        },
+      },
+    ],
+    [
+      '<q><kbd><code><li><script>x</script><script>x</script></li><svg></svg></code><figcaption>1. Lima\n</figcaption></kbd><figcaption><samp><cite><script>x</script><img src="/n"></cite><button>\n Lima</button></samp><samp>\n<strong><script>x</script> </strong></samp></figcaption></q>',
+      '"``- `*1. Lima*` *`*![](/n)* Lima`*"',
+      {
+        tagOverrides: {
+          'x-q': 'blockquote',
+        },
+      },
+    ],
+    [
+      '<var><strong><samp><li><i></i> </li><a href="/f" title="Lima ">  </a></samp><figcaption><strong> <style></style></strong><cite><svg></svg>1. Lima</cite></figcaption></strong><s><var><blockquote><style></style>Kilo</blockquote><div> Lima Lima</div></var><script>x</script></s></var>',
+      '`**`- [Lima](/f)` **1. Lima****~~`>  Kilo Lima Lima%~~%',
+      {
+        tagOverrides: {
+          var: {
+            exit: '%',
+          },
+        },
+      },
+    ],
+  ])('keeps caption separators across excluded wrappers: %s', async (html, expected, options) => {
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (const width of [1, 2, 3, 7]) {
+      const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+      expect(await streamConvert(chunks, options), `width=${width}`).toBe(expected)
+    }
+    for (let split = 0; split <= html.length; split++)
+      expect(await streamConvert([html.slice(0, split), html.slice(split)], options), `split=${split}`).toBe(expected)
+  })
   it('link-raw', async () => {
     const html = '<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>'
     const expected = 'D [<mark></mark>7](/x)'
