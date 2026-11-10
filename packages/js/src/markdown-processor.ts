@@ -3133,8 +3133,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Invisible children cannot consume the separator a pending caption owns.
     if (state.pendingInlineWhitespace && !(captionFrameCount !== 0
       && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
-      && (captionTransition || (!output && newLines === 0
-        && (eventType === NodeEventExit || tagId === TAG_SVG || tagId === TAG_SCRIPT || tagId === TAG_STYLE))))) {
+      && (captionTransition
+        || captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 3] !== CAPTION_NO_ANCHOR
+        || (!output && newLines === 0
+          && (eventType === NodeEventExit || tagId === TAG_SVG || tagId === TAG_SCRIPT || tagId === TAG_STYLE))))) {
       const firstOutput = output?.[0]?.[0] || ''
       if (eventType === NodeEventEnter) {
         // A raw `<br>` (heading, table cell) is no line end, so it keeps the

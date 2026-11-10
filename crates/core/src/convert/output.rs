@@ -6591,7 +6591,7 @@ impl ConvertState {
         || self
           .stack
           .last()
-          .is_some_and(|node| node.tag_id == Some(TAG_SVG)))
+          .is_some_and(|node| matches!(node.tag_id, Some(TAG_SVG | TAG_SCRIPT | TAG_STYLE))))
       && self
         .caption_frames
         .last()

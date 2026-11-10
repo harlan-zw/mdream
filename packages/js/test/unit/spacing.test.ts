@@ -738,6 +738,9 @@ describe('excluded-content review regressions', () => {
     ['<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>', '[Lima](/f) *<mark></mark>*'],
     ['<figcaption><s>1. Lima </s><figcaption><svg></svg> Lima</figcaption></figcaption>', '*~~1. Lima~~ *Lima**'],
     ['<code><a href="/f" title="Lima "></a></code>', '`[Lima ](/f "Lima ")`'],
+    // Text the exit trims repeats the title, as outside a code span.
+    ['<code><a href="/f" title="Lima "><span>Lima </span></a></code>', '`[Lima](/f)`'],
+    ['<code>x<a href="/f" title="Lima ">Lima </a>y</code>', '`x [Lima](/f) y`'],
     ['<button>A </button><figcaption><em><br>B</em></figcaption>', 'A\n\n  \n**B**'],
   ])('caption separator rollback and link fallback: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
@@ -1012,6 +1015,28 @@ it.each([
   [
     'A<figcaption><br><em><br>B</em></figcaption>',
     'A  \n  \n**B**',
+  ],
+  // A child that renders nothing leaves the separator to the caption.
+  [
+    '<button>A </button><figcaption><script></script></figcaption>B',
+    'A B',
+  ],
+  [
+    '<h2><button>A </button><figcaption><style>s</style><code>B</code></figcaption></h2>',
+    '## A *`B`*',
+  ],
+  [
+    '<table><tr><td><button>A </button><figcaption><script>s</script><em>B</em></figcaption></td></tr></table>',
+    '| A **B** |\n| --- |',
+  ],
+  // So does a block inside a delimiter the caption already opened with.
+  [
+    '<a href="/r"><em>A </em><figcaption><s><p>N</p></s></figcaption></a>',
+    '[*A* *~~N~~*](/r)',
+  ],
+  [
+    '<h3><em>A </em><figcaption><s><ul><em>N</em></ul></s></figcaption></h3>',
+    '### *A* *~~*N*~~*',
   ],
 ])('preserves caption delimiter context: %s', async (html, expected) => {
   expect(htmlToMarkdown(html)).toBe(expected)

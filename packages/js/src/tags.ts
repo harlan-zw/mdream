@@ -808,11 +808,17 @@ export const tagHandlers: Record<number, TagHandler> = {
         return safeAnchorOutput(node, state.options, false, true)
       const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
-      // A real code span preserves the cached trailing space. Its fallback
-      // label must use the same comparison as Rust's untrimmed code content.
+      // A real code span preserves the cached trailing space, and Rust
+      // compares what its buffer holds. Only a run still whole there and not
+      // trimmed at this exit keeps the space: the label an empty link takes
+      // from its title.
       let preservesCodeWhitespace = false
-      if (state.depthMap?.[TAG_CODE] && !state.depthMap[TAG_PRE]) {
-        let parent = node.parent
+      if (state.depthMap?.[TAG_CODE] && !state.depthMap[TAG_PRE] && !state.lastTextNode?.containsWhitespace) {
+        const buffer = state.buffer!
+        let tail = buffer.length - 1
+        while (tail >= 0 && !buffer[tail])
+          tail--
+        let parent = buffer[tail] === state.lastContentCache ? node.parent : undefined
         while (parent) {
           if (parent.tagId === TAG_CODE && parent.tagHandler?.enter === tagHandlers[TAG_CODE]!.enter) {
             preservesCodeWhitespace = true

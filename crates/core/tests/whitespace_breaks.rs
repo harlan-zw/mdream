@@ -2322,6 +2322,25 @@ fn review_caption_additional_3() {
 }
 
 #[test]
+fn code_span_link_drops_title_repeating_trimmed_text() {
+  for (html, expected) in [
+    (
+      r#"<code><a href="/f" title="Lima "><span>Lima </span></a></code>"#,
+      "`[Lima](/f)`",
+    ),
+    (
+      r#"<code>x<a href="/f" title="Lima ">Lima </a>y</code>"#,
+      "`x [Lima](/f) y`",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
 fn review_caption_additional_4() {
   let html = r#"<button>A </button><figcaption><em><br>B</em></figcaption>"#;
   let expected = "A\n\n  \n**B**";
@@ -2539,6 +2558,28 @@ fn caption_delimiter_context() {
     (
       r#"A<figcaption><br><em><br>B</em></figcaption>"#,
       "A  \n  \n**B**",
+    ),
+    // A child that renders nothing leaves the separator to the caption.
+    (
+      r#"<button>A </button><figcaption><script></script></figcaption>B"#,
+      "A B",
+    ),
+    (
+      r#"<h2><button>A </button><figcaption><style>s</style><code>B</code></figcaption></h2>"#,
+      "## A *`B`*",
+    ),
+    (
+      r#"<table><tr><td><button>A </button><figcaption><script>s</script><em>B</em></figcaption></td></tr></table>"#,
+      "| A **B** |\n| --- |",
+    ),
+    // So does a block inside a delimiter the caption already opened with.
+    (
+      r#"<a href="/r"><em>A </em><figcaption><s><p>N</p></s></figcaption></a>"#,
+      "[*A* *~~N~~*](/r)",
+    ),
+    (
+      r#"<h3><em>A </em><figcaption><s><ul><em>N</em></ul></s></figcaption></h3>"#,
+      "### *A* *~~*N*~~*",
     ),
   ] {
     assert_eq!(md(html), expected, "{html}");
