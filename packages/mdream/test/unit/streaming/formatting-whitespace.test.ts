@@ -128,30 +128,31 @@ describe('javascript plugin hard breaks', () => {
 
 describe.each(engines)('$name formatting whitespace', (engine) => {
   it.each([
-    ['<p><em><span>a &#10;&#11;</span> </em>x</p>', '*a* x'],
-    ['<p><strong><span>a &#10;&#11;</span> </strong>x</p>', '**a** x'],
-    ['<ul><li><em><span>a &#10;&#11;</span> </em>x</li></ul>', '- *a* x'],
-    ['<p><em>a<br><span>&#11;</span> </em>x</p>', '*a  \n\u000B* x'],
+    ['<p><em><span>a &#10;&#11;</span> </em>x</p>', '*a* \n\u000B x'],
+    ['<p><strong><span>a &#10;&#11;</span> </strong>x</p>', '**a** \n\u000B x'],
+    ['<ul><li><em><span>a &#10;&#11;</span> </em>x</li></ul>', '- *a* \n\u000B x'],
+    ['<p><em>a<br><span>&#11;</span> </em>x</p>', '*a*  \n\u000B x'],
   ])('keeps delimiter-owned source tails separate from structural output: %s', async (html, expected) => {
     expect(engine.markdown(html)).toBe(expected)
     await assertChunkings(html, engine.markdownStream, expected)
   })
 
   it.each([
-    { tag: 'em', marker: '*', wrappers: 0, depth: 1, tail: '&#10;&#11;  ' },
-    { tag: 'em', marker: '*', wrappers: 1, depth: 1, tail: '&#10;&#11;  ' },
-    { tag: 'em', marker: '*', wrappers: 1, depth: 1, tail: '&#11;&#10;  ' },
-    { tag: 'strong', marker: '**', wrappers: 1, depth: 1, tail: '&#10;&#11;  ' },
-    { tag: 'strong', marker: '**', wrappers: 1, depth: 1, tail: '&#11;&#10;  ' },
-    { tag: 'del', marker: '~~', wrappers: 1, depth: 1, tail: '&#10;&#11;  ' },
-    { tag: 'em', marker: '*', wrappers: 2, depth: 2, tail: ' &#10;&#11;' },
-    { tag: 'strong', marker: '**', wrappers: 2, depth: 2, tail: ' &#11;&#10;' },
-  ])('keeps quoted $tag tails mutable through $wrappers wrappers at depth $depth: $tail', async ({ tag, marker, wrappers, depth, tail }) => {
+    { tag: 'em', marker: '*', wrappers: 0, depth: 1, tail: '&#10;&#11;  ', moved: '\n> \u000B' },
+    { tag: 'em', marker: '*', wrappers: 1, depth: 1, tail: '&#10;&#11;  ', moved: '\n> \u000B' },
+    { tag: 'em', marker: '*', wrappers: 1, depth: 1, tail: '&#11;&#10;  ', moved: '\u000B' },
+    { tag: 'strong', marker: '**', wrappers: 1, depth: 1, tail: '&#10;&#11;  ', moved: '\n> \u000B' },
+    { tag: 'strong', marker: '**', wrappers: 1, depth: 1, tail: '&#11;&#10;  ', moved: '\u000B' },
+    { tag: 'del', marker: '~~', wrappers: 1, depth: 1, tail: '&#10;&#11;  ', moved: '\n> \u000B' },
+    { tag: 'em', marker: '*', wrappers: 2, depth: 2, tail: ' &#10;&#11;', moved: ' \n> > \u000B' },
+    { tag: 'strong', marker: '**', wrappers: 2, depth: 2, tail: ' &#11;&#10;', moved: ' \u000B' },
+  ])('keeps quoted $tag tails mutable through $wrappers wrappers at depth $depth: $tail', async ({ tag, marker, wrappers, depth, tail, moved }) => {
     const text = 'a'.repeat(8200)
     const first = `${'<blockquote>'.repeat(depth)}<${tag}>${'<span>'.repeat(wrappers)}${text}${tail}${'</span>'.repeat(wrappers)}`
     const last = ` </${tag}>x${'</blockquote>'.repeat(depth)}`
     const html = first + last
-    const expected = `${'> '.repeat(depth)}${marker}${text}${marker} x`
+    // The closer moves the vertical tab's run after itself.
+    const expected = `${'> '.repeat(depth)}${marker}${text}${marker}${moved} x`
     expect(engine.markdown(first + last)).toBe(expected)
     const chunkings = [[first, last]]
     for (const width of [7, 127, 8191]) {
@@ -179,7 +180,7 @@ describe.each(engines)('$name formatting whitespace', (engine) => {
     const text = 'a'.repeat(8200)
     const first = `<blockquote><em><span>${text}${literal ? '&#10;&#11; ' : '&#11;'}</span>`
     const last = '</em>x</blockquote>'
-    const expected = literal ? `> *${text}\n> \u000B* x` : `> *${text}\u000B*x`
+    const expected = literal ? `> *${text}\n> \u000B* x` : `> *${text}*\u000Bx`
     const convert = literal ? (html: string) => engine.literalExit(html, 'em', '*') : engine.markdown
     expect(convert(first + last)).toBe(expected)
     const input = new ReadableStream<string>({
@@ -216,13 +217,13 @@ describe.each(engines)('$name formatting whitespace', (engine) => {
   })
 
   it.each([
-    ['<p><em><span>T&#11; </span></em>x</p>', '*T* x'],
-    ['<p><em><span>T &#11;</span></em>x</p>', '*T* x'],
-    ['<p><strong><span>T&#11; </span></strong>x</p>', '**T** x'],
-    ['<p><strong><span>T &#11;</span></strong>x</p>', '**T** x'],
-    ['<p><em><span><span>T&#11; </span></span></em>x</p>', '*T* x'],
-    ['<p><em><span>T&#11;</span></em>x</p>', '*T\u000B*x'],
-    ['<p><strong><span>T&#11;</span></strong>x</p>', '**T\u000B**x'],
+    ['<p><em><span>T&#11; </span></em>x</p>', '*T*\u000B x'],
+    ['<p><em><span>T &#11;</span></em>x</p>', '*T* \u000Bx'],
+    ['<p><strong><span>T&#11; </span></strong>x</p>', '**T**\u000B x'],
+    ['<p><strong><span>T &#11;</span></strong>x</p>', '**T** \u000Bx'],
+    ['<p><em><span><span>T&#11; </span></span></em>x</p>', '*T*\u000B x'],
+    ['<p><em><span>T&#11;</span></em>x</p>', '*T*\u000Bx'],
+    ['<p><strong><span>T&#11;</span></strong>x</p>', '**T**\u000Bx'],
     ['<p><span>T&#11; </span>x</p>', 'T\u000B x'],
     ['<pre><code><em><span>T&#11; </span></em></code></pre>', '```\nT\u000B\n```'],
   ])('settles formatting whitespace through transparent wrappers: %s', async (html, expected) => {
@@ -243,12 +244,12 @@ describe.each(engines)('$name formatting whitespace', (engine) => {
   })
 
   it.each([
-    ['<p><em>T&#11; </em>x</p>', '*T* x'],
-    ['<p><em>a &#11;</em>b</p>', '*a* b'],
-    ['<p><strong>T&#11; </strong>x</p>', '**T** x'],
-    ['<p><strong>a &#11;</strong>b</p>', '**a** b'],
-    ['<p><em>T&#11;</em>x</p>', '*T\u000B*x'],
-    ['<p><strong>T&#11;</strong>x</p>', '**T\u000B**x'],
+    ['<p><em>T&#11; </em>x</p>', '*T*\u000B x'],
+    ['<p><em>a &#11;</em>b</p>', '*a* \u000Bb'],
+    ['<p><strong>T&#11; </strong>x</p>', '**T**\u000B x'],
+    ['<p><strong>a &#11;</strong>b</p>', '**a** \u000Bb'],
+    ['<p><em>T&#11;</em>x</p>', '*T*\u000Bx'],
+    ['<p><strong>T&#11;</strong>x</p>', '**T**\u000Bx'],
     ['<p>T&#11; x</p>', 'T\u000B x'],
     ['<pre><code>T&#11; </code></pre>', '```\nT\u000B\n```'],
     ['<code>T&#11; </code>', '`T\u000B`'],
@@ -363,7 +364,8 @@ describe.each(engines)('$name formatting whitespace', (engine) => {
 
   it('keeps long vertical-tab tails consistent across chunks', async () => {
     const html = `<p><em>T${' &#11;'.repeat(2048)}</em>x</p>`
-    expect(engine.markdown(html)).toBe('*T* x')
+    const expected = `*T*${' \u000B'.repeat(2048)}x`
+    expect(engine.markdown(html)).toBe(expected)
     for (const width of [1, 7, 1024]) {
       const stream = new ReadableStream<string>({
         start(controller) {
@@ -375,7 +377,7 @@ describe.each(engines)('$name formatting whitespace', (engine) => {
       let output = ''
       for await (const chunk of engine.markdownStream(stream))
         output += chunk
-      expect(output, `width=${width}`).toBe('*T* x')
+      expect(output, `width=${width}`).toBe(expected)
     }
   })
 

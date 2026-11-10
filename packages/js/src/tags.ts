@@ -124,7 +124,7 @@ import {
   TAG_XMP,
 } from './const'
 import { resolveUrl, safeAnchorOutput } from './url'
-import { blockOpenPrefix, continuationPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, noteBufferRewrite, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
+import { blockOpenPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, noteBufferRewrite, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
   if (!/[\t\n\f\r ()\\<>]/.test(destination))
@@ -186,7 +186,7 @@ function isAutolinkUri(s: string): boolean {
   return true
 }
 
-export function renderBreak(node: HandlerContext['node'], state: HandlerContext['state']): string {
+export function renderBreak(state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
   const depthMap = state.depthMap!
@@ -197,16 +197,11 @@ export function renderBreak(node: HandlerContext['node'], state: HandlerContext[
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
     return '\n'
 
-  const prefix = continuationPrefix(
-    node,
-    state.listIndentWidths || [],
-    !state.bufferedBlockquoteDepth,
-  )
-  return `  \n${prefix}`
+  return `  \n${state.listIndent ?? ''}`
 }
 
 export const breakHandler: TagHandler = {
-  enter: ({ node, state }) => renderBreak(node, state),
+  enter: ({ state }) => renderBreak(state),
   isSelfClosing: true,
   spacing: NO_SPACING,
   collapsesInnerWhiteSpace: true,
@@ -462,11 +457,16 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
       break
     lead--
   }
-  if (leadFragment >= 0 && listMarkerLineStart(buffer, leadFragment, lead - 1, pendingMarkerIndent(state))
-    && (!state.headingHasText || (!state.depthMap?.[TAG_LI] && !state.depthMap?.[TAG_BLOCKQUOTE]
-      && (state.depthMap?.[TAG_PRE] || !markerOpensItem(buffer, leadFragment, lead - 1))))) {
+  const inContainer = !!state.depthMap?.[TAG_LI] || !!state.depthMap?.[TAG_BLOCKQUOTE]
+  const leadsLine = leadFragment >= 0 && listMarkerLineStart(buffer, leadFragment, lead - 1, pendingMarkerIndent(state))
+  if (leadsLine && (!state.headingHasText || (!inContainer
+    && (state.depthMap?.[TAG_PRE] || !markerOpensItem(buffer, leadFragment, lead - 1))))) {
     return
   }
+  // Inside a code fence the heading is code, where a backslash would be
+  // literal text. A marker line that left the container left the fence too.
+  if (inPreCodeFence(state) && !(leadsLine && inContainer))
+    return
 
   const entry = buffer[index]!
   const replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
@@ -477,6 +477,20 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
   // or a line end after the run still goes when the item or the block ends.
   if (state.lastContentCache === entry)
     state.lastContentCache = replacement
+}
+
+// Whether output lands inside the code block of a `<pre>` fence; see
+// `fencesUnreliable` for fences a parser may not read as written.
+function inPreCodeFence(state: HandlerContext['state']): boolean {
+  return !!state.codeFence && !state.fencesUnreliable && !!state.depthMap?.[TAG_PRE]
+}
+
+function hasInlineAncestor(node: ElementNode): boolean {
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.tagHandler ? parent.tagHandler.isInline === true : parent.tagId === -1)
+      return true
+  }
+  return false
 }
 
 // What the current output line holds where a table row is about to be written.
@@ -589,11 +603,11 @@ function handleHeading(depth: number): TagHandler {
       // The newline a quote opened on already starts the heading's line.
       if (state.listIndent && lastOutputChar(state.buffer) === 10
         && state.blockquotes?.at(-1)?.fragment !== state.buffer.length) {
-        const prefix = continuationPrefix(node, state.listIndentWidths || [], !state.bufferedBlockquoteDepth)
+        const prefix = state.listIndent
         return `\n${prefix}${heading}`
       }
       if (state.listIndent && node.parent?.tagId === TAG_LI) {
-        const prefix = continuationPrefix(node, state.listIndentWidths || [], !state.bufferedBlockquoteDepth)
+        const prefix = state.listIndent
         const open = blockOpenPrefix(state, prefix)
         if (open !== undefined)
           return `${open}${heading}`
@@ -721,19 +735,10 @@ export const tagHandlers: Record<number, TagHandler> = {
       // A thematic break cannot end a GFM row; raw <hr> can sit in a cell.
       if (isInsideTableCell(state))
         return '<hr>'
-      // `continuationPrefix` allocates an ancestor chain, so only a rule that
-      // can actually carry a prefix asks for one.
-      if (!(state.depthMap?.[TAG_LI] || state.bufferedBlockquoteDepth))
+      if (!state.depthMap?.[TAG_LI])
         return MARKDOWN_HORIZONTAL_RULE
-      const prefix = continuationPrefix(
-        node,
-        state.listIndentWidths || [],
-        !state.bufferedBlockquoteDepth,
-      )
-      if (!prefix)
-        return MARKDOWN_HORIZONTAL_RULE
-      if (state.depthMap?.[TAG_LI])
-        state.listRulePending = prefix
+      const prefix = state.listIndent
+      state.listRulePending = prefix
       const end = enterOutputEnd(node, state)
       // A <code> fence opener stops at column 0 and leaves the first line's
       // indent to the content, which this rule is. It opens no new block.
@@ -742,9 +747,9 @@ export const tagHandlers: Record<number, TagHandler> = {
       const open = blockOpenPrefix(state, prefix, end)
       // Sharing the marker's line, where `---` would make the whole line a
       // thematic break and take the item with it.
-      return open === undefined
+      return open === undefined && prefix
         ? MARKDOWN_HORIZONTAL_RULE_ALT
-        : `${open}${MARKDOWN_HORIZONTAL_RULE}`
+        : `${open ?? ''}${MARKDOWN_HORIZONTAL_RULE}`
     },
     isSelfClosing: true,
   },
@@ -798,6 +803,9 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideTableCell(state)) {
         return '<pre>'
       }
+      // Inside inline content the fences share lines with that content.
+      if (!state.preFenceOwnerDepth && !state.preFencePending)
+        state.preFenceInline = hasInlineAncestor(node)
       return {
         _tag: 'PreEnter',
         language: getLanguageFromAttributes(node.attributes),

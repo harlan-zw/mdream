@@ -1,6 +1,7 @@
-import type { MdreamOptions, TextNode } from '../../src/types'
+import type { ElementNode, MdreamOptions, TextNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { createPlugin, htmlToMarkdown, NodeEventEnter, streamHtmlToMarkdown, TEXT_NODE } from '../../src/index'
+import { frontmatterPlugin } from '../../src/plugins/frontmatter'
 import { tailwindPlugin } from '../../src/plugins/tailwind'
 
 async function streamConvert(
@@ -100,6 +101,77 @@ describe('gfm text escaping', () => {
       .toBe('```\n~~~\ncode\n```')
     expect(htmlToMarkdown('<div><pre class="language-js`x">a\nb\n\n</pre><a href="#x">link</a></div>'))
       .toBe('```\na\nb\n\n\n```\n\n[link](#x)')
+  })
+
+  it.each([
+    ['<pre><h2>x #</h2></pre>', '```\n\n## x #\n\n\n```'],
+    ['<pre><h2>x ##</h2></pre>', '```\n\n## x ##\n\n\n```'],
+    ['<pre><h1>#</h1></pre>', '```\n\n# #\n\n\n```'],
+    ['<pre><code><h2>x #</h2></code></pre>', '```\n## x #\n```'],
+    ['<pre><h2>x <b>#</b></h2></pre>', '```\n\n## x #\n\n\n```'],
+    ['<ul><li><pre><h2>x #</h2></pre></li></ul>', '- ```\n  ## x #\n  ```'],
+    ['<blockquote><pre><h2>x #</h2></pre></blockquote>', '> ```\n>\n> ## x #\n>\n>\n> ```'],
+  ])('keeps a heading\'s closing hashes literal in a code block for %s', async (html, expected) => {
+    // Nothing in a fenced code block is parsed, so a backslash would show as code.
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
+  it.each<[string, string, string, Partial<MdreamOptions>]>([
+    ['a <pre> glued to inline text', '<span>a<pre><h2>x #</h2></pre></span>', 'a```\n\n## x \\#\n\n\n```', {}],
+    ['a fence closed onto inline text', '<span><pre>x</pre>b</span><pre><h2>x #</h2></pre>', '```\nx\n``` b\n\n```\n\n## x \\#\n\n\n```', {}],
+    ['a fence opened after emphasis', '<em>a<pre>x</pre></em><pre><h2>x #</h2></pre>', '*a```\nx\n```*\n\n```\n\n## x \\#\n\n\n```', {}],
+    ['a literal tag override', '<pre><h2>x #</h2></pre>', '```\n\n## x \\#\n\n\n```', { tagOverrides: { sup: { enter: '^', exit: '^' } } }],
+    ['a literal <pre> override', '<pre><h2>x #</h2></pre>', '## x \\#', { tagOverrides: { pre: { enter: '', exit: '' } } }],
+  ])('keeps the closing-hash escape after %s', async (_, html, expected, options) => {
+    // A parser may not read these fences as written, which can leave the heading a heading.
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize, options), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
+  it.each([
+    ['<pre><code><h4>x y </h4><pre><i>z</i></pre></code></pre>', '```\n#### x y z\n```'],
+    ['<pre><code><h4>x y   </h4><pre><i>z</i></pre></code></pre>', '```\n#### x y   z\n```'],
+    ['<pre><code><h4>x # </h4><pre><i>z</i></pre></code></pre>', '```\n#### x # z\n```'],
+    ['<pre><code><blockquote><h4>&nbsp;x # </h4><pre><i>z</i></pre></blockquote></code></pre>', '```\n> ####  x # z\n```'],
+    ['<pre><code><blockquote><h4>x y </h4><pre><i>z</i></pre></blockquote></code></pre>', '```\n> #### x y z\n```'],
+    ['<pre><code><ul><li>x y <pre><i>z</i></pre></li></ul></code></pre>', '```\n- x y z\n```'],
+    ['<pre><code><ul><li><h4>x # </h4><pre><b>z</b></pre></li></ul></code></pre>', '```\n- #### x # z\n```'],
+    ['<pre><code><h4>&nbsp;x y&nbsp; </h4><pre><span>z</span></pre></code></pre>', '```\n####  x y  z\n```'],
+    ['<pre><code>x y <pre><code>z</code></pre></code></pre>', '```\nx y z\n```'],
+    ['<span>a <pre>x</pre></span>', 'a```\nx\n```'],
+  ])('keeps the whitespace before a nested <pre> in the code for %s', async (html, expected) => {
+    // A <pre> in another one enters inside that one's code block; outside the
+    // code, the space before a <pre> still goes.
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
+  const blockBreakCases = [['\t', '\t'], ['&#9;', '\t'], ['&#13;', '\r'], ['&#12;', '\f']].flatMap(([ws, kept]) =>
+    [['<span>', '</span>'], ['', '']].flatMap(([open, close]) => ['p', 'h4'].flatMap(block => ([
+      ['<table><tr><td>x</td></tr></table>', '| x |\n| --- |'],
+      ['<figure><figcaption>x</figcaption></figure>', 'x'],
+      ['<hr>', '---'],
+      ['<ul><li>x</li></ul>', '- x'],
+      ['<ol><li>x</li></ol>', '1. x'],
+    ] as [string, string][]).map(([next, following]) => [`${open}<pre><${block}>a b${ws}</${block}>${next}</pre>${close}`, `a b${kept}`, following]))))
+
+  it.each(blockBreakCases)('keeps the whitespace before a block break in code for %j', async (html, kept, following) => {
+    // In a <pre> an inline wraps, a child block's exit writes a line break after
+    // its text; the tab, CR or form feed before it is code.
+    const out = htmlToMarkdown(html)
+    expect(out).toContain(kept)
+    expect(out.slice(out.indexOf(kept) + kept.length)).toContain(following)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(out)
+  })
+
+  it('keeps the tab before a table in a <pre> an inline wraps', () => {
+    expect(htmlToMarkdown('<span><pre><p>a b\t</p><table><tr><td>x</td></tr></table></pre></span>'))
+      .toBe('```\n\na b\t\n\n| x |\n| --- |\n```')
   })
 
   it('does not double escape parser-protected link and table text', () => {
@@ -250,5 +322,108 @@ describe('gfm text escaping', () => {
       for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
         expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
     }
+  })
+})
+
+describe('heading fence reliability', () => {
+  it.each(['', ' ', '\n', '<code></code>'])('marks inline pre only when emitting a fence: %j', async (body) => {
+    const html = `<span><pre>${body}</pre></span><pre><h2>x #</h2></pre>`
+    const expected = htmlToMarkdown(html)
+    expect(expected).toContain(body.includes('code') ? '## x \\#' : '## x #')
+    for (let size = 1; size <= html.length; size++)
+      expect(await streamConvert(html, size)).toBe(expected)
+  })
+
+  it.each(['```', '~~~', '````', 'prefix```suffix', 'prefix~~~suffix', '`', '~', 'note'])('tracks raw plugin fences: %s', async (marker) => {
+    for (const hook of ['onNodeEnter', 'onNodeExit'] as const) {
+      const options = { plugins: [createPlugin({ [hook]: (node: ElementNode) => node.name === 'div' ? `${marker}\n` : undefined })] }
+      const html = '<div>a</div><pre><h2>x #</h2></pre>'
+      const expected = htmlToMarkdown(html, options)
+      expect(expected).toContain(marker === 'note' ? '## x #' : '## x \\#')
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+
+  it('keeps reliable fences with frontmatter', () => {
+    expect(htmlToMarkdown('<head><title>Title</title></head><pre><h2>x #</h2></pre>', { plugins: [frontmatterPlugin()] })).toContain('## x #')
+  })
+
+  it('tracks a fence split across plugin fragments and events', async () => {
+    const cases: [string, Partial<MdreamOptions>][] = [
+      ['<div>a</div><pre><h2>x #</h2></pre>', { plugins: [
+        createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? '`' : undefined }),
+        createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? '``\n' : undefined }),
+      ] }],
+      ['<x-a></x-a><x-b></x-b>a<pre><h2>x #</h2></pre>', { plugins: [
+        createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'x-a' ? '`' : node.name === 'x-b' ? '``\n' : undefined }),
+      ] }],
+    ]
+    for (const [html, options] of cases) {
+      const expected = htmlToMarkdown(html, options)
+      expect(expected).toContain('## x \\#')
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+
+  it.each(['```\n', '`', '~~~\n', '~~'])('tracks fences in generated text delimiters: %j', async (prefix) => {
+    const options = { plugins: [createPlugin({ processTextNode(node: TextNode) {
+      if (node.value === 'a')
+        node.generatedMarkdown = { prefix, suffix: '' }
+      return undefined
+    } })] }
+    const html = '<div>a</div><pre><h2>x #</h2></pre>'
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toContain(prefix === '~~' ? '## x #' : '## x \\#')
+    for (let size = 1; size <= html.length; size++)
+      expect(await streamConvert(html, size, options)).toBe(expected)
+  })
+
+  it.each([
+    ['<pre><div>a</div><h2>x #</h2></pre>', '~\n', '```\n\n~\na\n\n## x #\n\n\n```'],
+    ['<pre><div>a</div><h2>x #</h2></pre>', '```\n', '````\n\n```\na\n\n## x #\n\n\n````'],
+    ['<pre><code><div>a</div><h2>x #</h2></code></pre>', '~\n', '```\n~\na ## x #\n```'],
+  ])('keeps reliable fences for plugin output inside an open fence: %s %j', async (html, marker, expected) => {
+    const options = { plugins: [createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? marker : undefined })] }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let size = 1; size <= html.length; size++)
+      expect(await streamConvert(html, size, options)).toBe(expected)
+  })
+
+  it.each(['`', '```\n'])('keeps reliable fences for generated delimiters inside an open fence: %j', async (prefix) => {
+    const options = { plugins: [createPlugin({ processTextNode(node: TextNode) {
+      if (node.value === 'a')
+        node.generatedMarkdown = { prefix, suffix: '' }
+      return undefined
+    } })] }
+    const html = '<pre><span>a</span><h2>x #</h2></pre>'
+    const expected = htmlToMarkdown(html, options)
+    expect(expected).toContain('## x #')
+    for (let size = 1; size <= html.length; size++)
+      expect(await streamConvert(html, size, options)).toBe(expected)
+  })
+
+  it('sizes code fences past runs after a CR', async () => {
+    expect(htmlToMarkdown('<pre>a&#13;```&#13;b</pre><p>c</p>')).toBe('````\na\r```\rb\n````\n\nc')
+    const plugin = { plugins: [createPlugin({ onNodeEnter: (node: ElementNode) => node.name === 'div' ? '\r```\r' : undefined })] }
+    const cases: [string, Partial<MdreamOptions>][] = [
+      ['<pre>a&#13;```&#13;<h2>x #</h2></pre>', {}],
+      ['<pre><code>a&#13;```&#13;<h2>x #</h2></code></pre>', {}],
+      ['<ul><li><pre>a&#13;```&#13;<h2>x #</h2></pre></li></ul>', {}],
+      ['<pre><div>a</div><h2>x #</h2></pre>', plugin],
+    ]
+    for (const [html, options] of cases) {
+      const expected = htmlToMarkdown(html, options)
+      expect(expected).toContain('````')
+      expect(expected).toContain('## x #')
+      for (let size = 1; size <= html.length; size++)
+        expect(await streamConvert(html, size, options)).toBe(expected)
+    }
+  })
+
+  it('keeps reliable fences with Tailwind delimiters', () => {
+    const html = '<p><span class="line-through font-bold italic">a</span></p><pre><h2>x #</h2></pre>'
+    expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toContain('## x #')
   })
 })

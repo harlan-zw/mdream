@@ -22,8 +22,8 @@ async function streamConvert(chunks: string[]): Promise<string> {
 
 describe('inline whitespace', () => {
   it.each([
-    ['<p><em>T&#11; </em>x</p>', '*T* x'],
-    ['<p><em>a &#11;</em>b</p>', '*a* b'],
+    ['<p><em>T&#11; </em>x</p>', '*T*\u000B x'],
+    ['<p><em>a &#11;</em>b</p>', '*a* \u000Bb'],
   ])('preserves emphasis when vertical tab is mixed with trailing space: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
     for (let split = 0; split <= html.length; split++) {

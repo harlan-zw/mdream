@@ -59,7 +59,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, bufferIsOutputLead, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, bufferIsOutputLead, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -96,7 +96,9 @@ export interface MarkdownState {
    * Cumulative indent for list-item continuation. Grows by each ancestor
    * `<li>`'s marker width (`"- "` = 2, `"N. "` = digits(N) + 2) so code blocks
    * and continuation paragraphs land in the content column CommonMark requires.
-   * Pushed on `<li>` enter, popped on `<li>` exit.
+   * Pushed on `<li>` enter, popped on `<li>` exit. It is the whole prefix of a
+   * wrapped or hard-broken line: an item a plugin skipped adds nothing, and a
+   * blockquote prefixes its own lines when it closes.
    */
   listIndent: string
   /** Per-`<li>` contribution widths, parallel stack to listIndent. */
@@ -118,6 +120,16 @@ export interface MarkdownState {
    * opener; 0 when none. Only that <pre>'s exit closes the fence.
    */
   preFenceOwnerDepth?: number
+  /**
+   * A fence was written where a parser may not read it as one: opened after
+   * text on its line, or for a <pre> inside inline content, whose closing fence
+   * can share a line with the text after it. Every later fence may then be read
+   * with the opposite parity, so open fences no longer prove code. Set from the
+   * start when a tag override writes literal text, which the processor cannot
+   * keep on a code line.
+   */
+  fencesUnreliable?: boolean
+  preFenceInline?: boolean
   /** Open fenced block whose delimiter is finalized after its content is known. */
   codeFence?: CodeFence
   /** A `<div>`'s cached heading-marker check; see `noteBufferRewrite`. */
@@ -658,6 +670,63 @@ function isEqualsLine(value: string, start: number, formFeed: boolean): boolean 
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
 
 /**
+ * Digits that end the buffer at a line start. The escape pass counts them as
+ * the start of an ordered list marker that the next text may complete. After
+ * a soft break, which is what wrapping writes, only a list starting at one
+ * interrupts the paragraph. After a blank line or a hard break any number
+ * counts, as it does for a marker inside one text node. Parity with the Rust
+ * `line_start_digits`.
+ */
+function lineStartDigits(buffer: string[], indent: string, value: string): number {
+  let lead = 0
+  while (value.charCodeAt(lead) >= 48 && value.charCodeAt(lead) <= 57)
+    lead++
+  // Whether the buffered digits and those `value` adds read as one.
+  let one = lead === 0 || value.charCodeAt(lead - 1) === 49
+  for (let index = 0; one && index < lead - 1; index++)
+    one = value.charCodeAt(index) === 48
+  let fragment = buffer.length - 1
+  let offset = fragment >= 0 ? buffer[fragment]!.length : 0
+  let digits = 0
+  let spaces = 0
+  let newline = false
+  for (;;) {
+    while (offset === 0 && fragment >= 0) {
+      fragment--
+      offset = fragment >= 0 ? buffer[fragment]!.length : 0
+    }
+    const code = fragment >= 0 ? buffer[fragment]!.charCodeAt(--offset) : -1
+    // A blank line or the spaces or backslash of a hard break; any other
+    // character ends the line at a soft break.
+    if (newline)
+      return code === -1 || code === 10 || code === 32 || code === 9 || code === 92 ? digits : 0
+    if (spaces === 0 && code >= 48 && code <= 57) {
+      if (++digits > 9)
+        return 0
+      one &&= code === (digits === 1 && lead === 0 ? 49 : 48)
+      continue
+    }
+    if (digits === 0)
+      return 0
+    if (code === 32) {
+      if (++spaces > indent.length + 3)
+        return 0
+      continue
+    }
+    if (code === -1 || code === 10) {
+      if (spaces > 3 && spaces < indent.length)
+        return 0
+      if (code === -1 || one)
+        return digits
+      newline = true
+      continue
+    }
+    // A list item's content opens a block, so `- 1` + `. x` nests a list.
+    return spaces > 0 && spaces <= 3 && listMarkerLineStart(buffer, fragment, offset) ? digits : 0
+  }
+}
+
+/**
  * Reject ordinary prose through the native string search before entering the
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
@@ -709,12 +778,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number, atStart: boolean): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number, atStart: boolean, orderedDigits = 0): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
   let lineIndent = markdownLineIndent(buffer, structuralIndent)
-  let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
   let start = 0
@@ -824,35 +892,43 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
 /**
  * Character count (code points) of the current unterminated output line, i.e.
  * since the last newline across the buffer chunks. Includes any block prefix
- * (`> `, list indent) already written for the line.
+ * (`> `, list indent) already written for the line. The walk stops at `limit`,
+ * past which a wrap decides the same: words no line may start with, such as
+ * `#`, never break, and reading their line whole for every text node is
+ * quadratic. Parity with the Rust `current_column`.
  */
-function currentColumn(buffer: string[]): number {
+export function currentColumn(buffer: string[], limit: number): number {
   let col = 0
   for (let i = buffer.length - 1; i >= 0; i--) {
     const s = buffer[i]!
-    const nl = s.lastIndexOf('\n')
-    if (nl >= 0) {
-      return col + columnWidth(s, nl + 1)
+    for (let j = s.length - 1; j >= 0; j--) {
+      const code = s.charCodeAt(j)
+      if (code === 10)
+        return col
+      if (takesColumn(code) && ++col >= limit)
+        return col
     }
-    col += columnWidth(s, 0)
   }
   return col
 }
 
 /**
- * Code points in `value` from `start`. The fragment link markers `clean`
- * writes are removed before output, so they take no column.
+ * Whether a UTF-16 unit starts a code point that takes a column. A low
+ * surrogate completes a pair already counted, and the fragment link markers
+ * `clean` writes are removed before output.
  */
-function columnWidth(value: string, start: number): number {
-  let width = 0
-  for (let i = start; i < value.length; i++) {
-    const code = value.charCodeAt(i)
-    // A low surrogate completes a pair already counted.
-    if ((code & 0xFC00) !== 0xDC00 && code !== FRAGMENT_LINK_OPEN_CODE && code !== FRAGMENT_LINK_CLOSE_CODE)
-      width++
-  }
-  return width
+function takesColumn(code: number): boolean {
+  return (code & 0xFC00) !== 0xDC00 && code !== FRAGMENT_LINK_OPEN_CODE && code !== FRAGMENT_LINK_CLOSE_CODE
 }
+
+/**
+ * Whether `word`, moved to the start of a line, would open a block there: a
+ * quote, an ATX heading, a list item, a code fence, a setext underline or a
+ * thematic break. Text escaped mid-line leaves these markers bare, so a wrap
+ * must not be what puts one at the start of a line. Parity with the Rust
+ * `opens_block_at_line_start`.
+ */
+const BLOCK_START_WORD = /^(?:>|`{3}|~{3}|(?:#{1,6}|\+|-+|=+|\*|\*{3,}|_{3,}|0{0,8}1[.)])$)/
 
 /**
  * Only the word's own line counts: a decoded line ending or a trailing tab
@@ -866,9 +942,11 @@ function isSetextMarkerRun(word: string): boolean {
 /**
  * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
  * Words are never split, so an oversized token (e.g. a URL) overflows rather
- * than breaking, and a break only ever replaces an inter-word space. `value`
- * already carries any significant leading/trailing space (added upstream), so
- * those boundary spaces are preserved. Parity with the Rust `push_text_wrapped`.
+ * than breaking, and a break only ever replaces an inter-word space. A word
+ * that would open a block at the start of a line keeps its space and
+ * overflows too. `value` already carries any significant leading/trailing
+ * space (added upstream), so those boundary spaces are preserved. Parity with
+ * the Rust `push_text_wrapped`.
  */
 function wrapText(value: string, col: number, width: number, prefix: string): string {
   const leading = value.charCodeAt(0) === 32
@@ -887,7 +965,7 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
       const word = value.slice(i, next)
       const wordLen = [...word].length
       const needSpace = first ? leading : true
-      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !isSetextMarkerRun(word)) {
+      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !isSetextMarkerRun(word) && !BLOCK_START_WORD.test(word)) {
         out += `\n${prefix}`
         col = prefixLen
       }
@@ -1085,13 +1163,6 @@ export function trimAsciiWhitespaceEnd(value: string, inlineClose = false): stri
   return end === value.length ? value : value.slice(0, end)
 }
 
-function textInPre(node: TextNode): boolean {
-  let parent = node.parent
-  while (parent && parent.tagId !== TAG_PRE)
-    parent = parent.parent
-  return !!parent
-}
-
 /** Drop the top marker when every following fragment is whitespace. */
 function dropEmptyMarker(buffer: string[], packed: number, markerType: number, positions?: OutputPositions): number {
   const idx = packed >> 3
@@ -1099,6 +1170,37 @@ function dropEmptyMarker(buffer: string[], packed: number, markerType: number, p
     return dropEmptyLinkText(buffer, idx, positions) ? idx : -1
   }
   return -1
+}
+
+/** Whether every character is ASCII whitespace or a vertical tab. */
+function isVerticalTabRun(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c !== 11 && !isAsciiWhitespace(c))
+      return false
+  }
+  return true
+}
+
+/**
+ * Drop an emphasis opener followed only by whitespace and vertical tabs. The
+ * closer would move that run after itself and leave the pair empty, so the
+ * run stays. Only the delimiter leaves the opener fragment, which can also
+ * hold a caption opener, and fragment indexes stay put.
+ */
+function dropVerticalTabMarker(buffer: string[], packed: number, markerType: number, marker: string, positions?: OutputPositions): boolean {
+  const idx = packed >> 3
+  const opener = buffer[idx]
+  if ((packed & MARKER_TYPE_MASK) !== markerType || opener === undefined || !opener.endsWith(marker))
+    return false
+  for (let index = idx + 1; index < buffer.length; index++) {
+    if (!isVerticalTabRun(buffer[index]!))
+      return false
+  }
+  const kept = opener.slice(0, opener.length - marker.length)
+  positions?.replace(idx, idx + 1, [kept])
+  buffer[idx] = kept
+  return true
 }
 
 function resetRetractedCaptionFrames(frames: number[] | undefined, count: number, fragment: number): void {
@@ -1166,10 +1268,13 @@ function maxLineLeadingRun(value: string, marker: number, indent: string): numbe
       run++
     if (run > max)
       max = run
-    const newline = value.indexOf('\n', lineStart)
-    if (newline === -1)
+    // A parser also ends a line at CR, so a run after one can close the fence.
+    let lineEnd = index + run
+    while (lineEnd < value.length && value.charCodeAt(lineEnd) !== 10 && value.charCodeAt(lineEnd) !== 13)
+      lineEnd++
+    if (lineEnd >= value.length)
       break
-    lineStart = newline + 1
+    lineStart = lineEnd + 1
   }
   return max
 }
@@ -1203,8 +1308,38 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
   return `${padded ? ' ' : ''}${delimiter}`
 }
 
+function hasLiteralTagOverride(overrides: EngineOptions['tagOverrides']): boolean {
+  for (const name in overrides) {
+    const override = overrides[name]
+    if (override && typeof override === 'object' && (override.enter !== undefined || override.exit !== undefined))
+      return true
+  }
+  return false
+}
+
+// Raw plugin text is written unescaped, and a single backtick or tilde can
+// join a neighbouring fragment or event into a fence. Inside an open fence it
+// is code: the closing delimiter grows past any run in it.
+function notePluginFences(state: MarkdownState, output: string[] | undefined): void {
+  if (!state.fencesUnreliable && !state.codeFence && output?.some(part => part.includes('`') || part.includes('~')))
+    state.fencesUnreliable = true
+}
+
+// Tailwind writes at most `~~`, so only a backtick or three tildes can come
+// from another plugin's fence.
+function noteGeneratedFences(state: MarkdownState, delimiters: { prefix: string, suffix: string }): void {
+  if (!state.fencesUnreliable && !state.codeFence && (mayOpenFence(delimiters.prefix) || mayOpenFence(delimiters.suffix)))
+    state.fencesUnreliable = true
+}
+
+function mayOpenFence(delimiter: string): boolean {
+  return delimiter.includes('`') || delimiter.includes('~~~')
+}
+
 function startCodeFence(state: MarkdownState, fragment: number, language: string, indent: string): void {
   const markerOffset = state.buffer[fragment]!.lastIndexOf(MARKDOWN_CODE_BLOCK)
+  if (!state.fencesUnreliable && (state.preFenceInline || !opensBlockLine(state.buffer, fragment, markerOffset)))
+    state.fencesUnreliable = true
   state.codeFence = { fragment, markerOffset, indent, language }
   state.onCodeFenceOpen?.(language)
 }
@@ -1481,6 +1616,10 @@ function commitGfmAction(
       if (state.blockquotes.length > 0 && !keepsQuoteSeparator
         && (!rawHtmlQuoteBoundary || newlineRunBefore(state.buffer, state.buffer.length) > 2)) {
         collapseNestedBlockquoteSeparator(state.buffer, state.outputPositions)
+        // Frames anchored at the old end move with the popped fragment. Siblings
+        // can share a fragment, so this is not only the innermost.
+        for (const frame of state.blockquotes)
+          frame.fragment = Math.min(frame.fragment, state.buffer.length)
         noteBufferRewrite(state)
       }
       const before = lastOutputChar(state.buffer)
@@ -1579,6 +1718,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFencePending: false,
     preFencePendingDepth: 0,
     preFenceOwnerDepth: 0,
+    fencesUnreliable: hasLiteralTagOverride(options.tagOverrides),
     preFenceOpener: undefined,
   }
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
@@ -2072,37 +2212,35 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = escapeRawHtmlText(textNode.value, state.depthMap, rawHtmlLink !== undefined && parent === rawHtmlLink)
       }
 
+      // Digits already at a line start become an ordered marker if this text
+      // continues them with `.` or `)`. Both ends are checked before the scan.
+      const last = lastChar.charCodeAt(0)
+      const first = last >= 48 && last <= 57 ? textNode.value.charCodeAt(0) : 0
+      const orderedDigits = ((first >= 48 && first <= 57) || first === 46 || first === 41)
+        && !textNode.generatedMarkdown?.prefix
+        ? lineStartDigits(state.buffer, state.listIndent, textNode.value)
+        : 0
       if (!state.depthMap[TAG_PRE]
         && !state.depthMap[TAG_CODE]
         // Inside a raw-HTML region only text past a blank line is Markdown
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length, atOutputStart)
+        && (orderedDigits > 0 || mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length, atOutputStart))
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length, atOutputStart)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length, atOutputStart, orderedDigits)
       }
 
-      if (textNode.generatedMarkdown && textNode.value)
+      if (textNode.generatedMarkdown && textNode.value) {
+        noteGeneratedFences(state, textNode.generatedMarkdown)
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
+      }
 
       const wrapWidth = state.options?.wrapWidth
-      if (lastChar === '\u000B' && state.lastTextNode?.containsWhitespace && !state.depthMap[TAG_PRE]
-        && state.lastContentCache && state.lastContentCache === state.buffer.at(-1)
-        && trimAsciiWhitespaceEnd(textNode.value).length === 0 && !textInPre(state.lastTextNode)) {
-        // Transparent wrappers can separate a mutable tail from its final source space.
-        const joined = state.lastContentCache + textNode.value
-        state.outputPositions?.replace(state.buffer.length - 1, state.buffer.length, [joined])
-        state.buffer[state.buffer.length - 1] = joined
-        state.lastContentCache = joined
-      }
-      else if (wrapWidth && canWrapHere(state.depthMap)) {
-        const wrapped = wrapText(
-          textNode.value,
-          currentColumn(state.buffer),
-          wrapWidth,
-          continuationPrefix(textNode, state.listIndentWidths, state.blockquotes.length === 0),
-        )
+      if (wrapWidth && canWrapHere(state.depthMap)) {
+        // Past both the width and the prefix every word breaks or overflows.
+        const column = currentColumn(state.buffer, Math.max(wrapWidth, state.listIndent.length + 1))
+        const wrapped = wrapText(textNode.value, column, wrapWidth, state.listIndent)
         state.buffer.push(wrapped)
         state.lastContentCache = wrapped
       }
@@ -2116,7 +2254,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (openLinkFragment >= 0 && hasVisibleText)
           openLinkFragment = -openLinkFragment - 2
         if (openMarkerCount && hasVisibleText) {
-          openMarkerCount = 0
+          // Vertical tabs alone leave an emphasis pair empty once its closer
+          // moves them out, so the exit still has to see the open marker.
+          const first = textNode.value.charCodeAt(0)
+          if ((first !== 11 && !isAsciiWhitespace(first))
+            || (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) > 4
+            || !isVerticalTabRun(textNode.value)) {
+            openMarkerCount = 0
+          }
           commitCaptionFrames()
         }
       }
@@ -2252,6 +2397,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (pendingElement.pluginOutput?.length || literalOverride) {
           preparePendingPreFence()
           flushPreFence(state)
+          notePluginFences(state, pendingElement.pluginOutput)
         }
         else if (consumePendingPreChild(state, node, eventType, preparePendingPreFence)) {
           return
@@ -2292,7 +2438,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
     if (eventType === NodeEventEnter && state.depthMap[TAG_LI] && !insideRawHtmlRegion
-      && (tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_PRE || tagId === TAG_TABLE)
+      && (tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_PRE || tagId === TAG_TABLE
+        || (tagId === TAG_HR && !state.listIndent))
       && !handler?.literalEnter && endsAtHardBreak(buff)) {
       trimTrailingSpaces(buff)
       const separator = tagId === TAG_P || tagId === TAG_DIV ? `\n${state.listIndent}` : '\n'
@@ -2316,7 +2463,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && handler === breakHandler
       && !element.pluginOutput?.length) {
       const inPre = state.depthMap[TAG_PRE] !== 0
-      let breakOutput: string | undefined = renderBreak(element, state)
+      let breakOutput: string | undefined = renderBreak(state)
 
       if (captionBoundary !== 0 || captionFrameCount !== 0) {
         // The break's whitespace would pass for the spacing at the buffer tail.
@@ -2423,6 +2570,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     let output: string[] | undefined
     const hasPluginOutput = !!element.pluginOutput?.length
     if (hasPluginOutput) {
+      notePluginFences(state, element.pluginOutput)
       output = element.pluginOutput
       element.pluginOutput = undefined
     }
@@ -2732,6 +2880,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           restoreQuoteParentBoundary()
           return
         }
+        if (markerType <= 4 && dropVerticalTabMarker(buff, packed, markerType, handlerOutput!, state.outputPositions)) {
+          noteBufferRewrite(state)
+          state.lastContentCache = buff[buff.length - 1]
+          return
+        }
         openMarkerCount = 0
       }
     }
@@ -2919,8 +3072,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
           if (shouldTrim) {
             const originalLength = lastFragment.length
-            const trimmed = trimAsciiWhitespaceEnd(lastFragment, eventType === NodeEventExit && isInlineElement
-              && !handler?.literalExit && (handlerOutput === '*' || handlerOutput === '**' || handlerOutput === '~~'))
+            const trimmed = trimAsciiWhitespaceEnd(lastFragment)
             const trimmedChars = originalLength - trimmed.length
 
             // Update the last content in buffer regions with trimmed content
@@ -3024,6 +3176,49 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = ' '
     }
 
+    // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
+    let trailingEmphasisWhitespace = ''
+    if (eventType === NodeEventExit && !handler?.literalExit
+      && INLINE_MARKER_TYPE[tagId]! >= 1 && INLINE_MARKER_TYPE[tagId]! <= 4
+      && (output?.[0]?.charCodeAt(0) === 42 || output?.[0]?.charCodeAt(0) === 126)) {
+      let firstFragment = buff.length
+      let firstOffset = 0
+      let hasVerticalTab = false
+      for (let index = buff.length - 1; index >= 0; index--) {
+        const fragment = buff[index]!
+        let end = fragment.length
+        while (end > 0) {
+          const code = fragment.charCodeAt(end - 1)
+          if (code !== 11 && !isAsciiWhitespace(code))
+            break
+          hasVerticalTab ||= code === 11
+          end--
+        }
+        if (end < fragment.length) {
+          firstFragment = index
+          firstOffset = end
+        }
+        if (end > 0)
+          break
+      }
+      if (hasVerticalTab) {
+        for (let index = firstFragment; index < buff.length; index++) {
+          const fragment = buff[index]!
+          const end = index === firstFragment ? firstOffset : 0
+          trailingEmphasisWhitespace += fragment.slice(end)
+          const trimmed = fragment.slice(0, end)
+          state.outputPositions?.replace(index, index + 1, [trimmed])
+          buff[index] = trimmed
+        }
+        noteBufferRewrite(state)
+        if (newLines > 0 && output) {
+          // Exit spacing follows the closer and its displaced source whitespace.
+          output.splice(output.length - 1, 0, trailingEmphasisWhitespace)
+          trailingEmphasisWhitespace = ''
+        }
+      }
+    }
+
     // Only an ATX prefix can take in the text after it. Inside `<pre>` that
     // text is code, and inside a caption the emphasis wrapping it, either of
     // which a break would split.
@@ -3069,6 +3264,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           state.lastContentCache = fragment
         }
       }
+    }
+
+    if (trailingEmphasisWhitespace) {
+      state.buffer.push(trailingEmphasisWhitespace)
+      state.lastContentCache = trailingEmphasisWhitespace
     }
 
     if (gfmAction)
