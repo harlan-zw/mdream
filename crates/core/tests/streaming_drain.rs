@@ -2147,6 +2147,102 @@ fn streaming_heading_trailing_hashes_matches_one_shot() {
   }
 }
 
+// The whitespace before a `<pre>` nested in another one is code, kept however
+// the input is chunked.
+#[test]
+fn streaming_whitespace_before_a_nested_pre_stays_in_the_code() {
+  for (html, expected) in [
+    (
+      "<pre><code><h4>x y </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y z\n```",
+    ),
+    (
+      "<pre><code><h4>x # </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>&nbsp;x # </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### \u{a0}x # z\n```",
+    ),
+    (
+      "<pre><code><ul><li>x y   <pre><b>z</b></pre></li></ul></code></pre>",
+      "```\n- x y   z\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chars(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// The tab, CR or form feed a child block's text ends with, inside a `<pre>` an
+// inline wraps, stays in the code however the input is chunked.
+#[test]
+fn streaming_whitespace_before_a_block_break_in_code_stays() {
+  for (html, expected) in [
+    (
+      "<span><pre><p>a b\t</p><table><tr><td>x</td></tr></table></pre></span>",
+      "```\n\na b\t\n\n| x |\n| --- |\n```",
+    ),
+    (
+      "<span><pre><p>a b&#12;</p><figure><figcaption>x</figcaption></figure></pre></span>",
+      "```\n\na b\u{c}\n\nx\n```",
+    ),
+    (
+      "<span><pre><p>a b&#13;</p><hr></pre></span>",
+      "```\n\na b\r\n\n---\n```",
+    ),
+    (
+      "<span><pre><h4>a b\t</h4><ul><li>x</li></ul></pre></span>",
+      "```\n\n#### a b\t\n\n- x\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chars(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// In a code block the closing hashes are code and stay unescaped wherever a
+// chunk boundary lands. After a fence a parser may misread, the escape stays.
+#[test]
+fn streaming_heading_in_code_block_keeps_its_hashes() {
+  for (html, expected) in [
+    ("<pre><h2>foo #</h2></pre>", "```\n\n## foo #\n\n\n```"),
+    (
+      "<pre><code><h2>foo ##</h2></code></pre>",
+      "```\n## foo ##\n```",
+    ),
+    (
+      "<ul><li><pre><h2>foo #</h2></pre></li></ul>",
+      "- ```\n  ## foo #\n  ```",
+    ),
+    (
+      "<span><pre>x</pre>b</span><pre><h2>foo #</h2></pre>",
+      "```\nx\n``` b\n\n```\n\n## foo \\#\n\n\n```",
+    ),
+  ] {
+    for chunk in 1..=html.len() {
+      assert_eq!(
+        stream_chunks(html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk} html={html:?}"
+      );
+    }
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // An empty heading in a list item drops its marker's trailing space at its exit,
 // so that space must still be held when the exit runs.
 #[test]
@@ -6222,5 +6318,23 @@ fn a_drain_inside_a_line_lead_keeps_block_line_checks_like_one_shot() {
     for width in [1, 7, 4096] {
       assert_eq!(stream_chunks(&long, width, opts.clone()), long_expected);
     }
+  }
+}
+
+#[test]
+fn streaming_code_fence_after_cr() {
+  for html in [
+    "<pre>a&#13;```&#13;b</pre><p>c</p>",
+    "<pre>a&#13;```&#13;<h2>x #</h2></pre>",
+  ] {
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn streaming_empty_inline_pre_fence_reliability() {
+  for body in ["", " ", "\n", "<code></code>"] {
+    let html = format!("<span><pre>{body}</pre></span><pre><h2>x #</h2></pre>");
+    assert_stream_matches_every_split(&html, HtmlToMarkdownOptions::default());
   }
 }

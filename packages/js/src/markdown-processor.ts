@@ -120,6 +120,16 @@ export interface MarkdownState {
    * opener; 0 when none. Only that <pre>'s exit closes the fence.
    */
   preFenceOwnerDepth?: number
+  /**
+   * A fence was written where a parser may not read it as one: opened after
+   * text on its line, or for a <pre> inside inline content, whose closing fence
+   * can share a line with the text after it. Every later fence may then be read
+   * with the opposite parity, so open fences no longer prove code. Set from the
+   * start when a tag override writes literal text, which the processor cannot
+   * keep on a code line.
+   */
+  fencesUnreliable?: boolean
+  preFenceInline?: boolean
   /** Open fenced block whose delimiter is finalized after its content is known. */
   codeFence?: CodeFence
   /** A `<div>`'s cached heading-marker check; see `noteBufferRewrite`. */
@@ -1200,10 +1210,13 @@ function maxLineLeadingRun(value: string, marker: number, indent: string): numbe
       run++
     if (run > max)
       max = run
-    const newline = value.indexOf('\n', lineStart)
-    if (newline === -1)
+    // A parser also ends a line at CR, so a run after one can close the fence.
+    let lineEnd = index + run
+    while (lineEnd < value.length && value.charCodeAt(lineEnd) !== 10 && value.charCodeAt(lineEnd) !== 13)
+      lineEnd++
+    if (lineEnd >= value.length)
       break
-    lineStart = newline + 1
+    lineStart = lineEnd + 1
   }
   return max
 }
@@ -1237,8 +1250,38 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
   return `${padded ? ' ' : ''}${delimiter}`
 }
 
+function hasLiteralTagOverride(overrides: EngineOptions['tagOverrides']): boolean {
+  for (const name in overrides) {
+    const override = overrides[name]
+    if (override && typeof override === 'object' && (override.enter !== undefined || override.exit !== undefined))
+      return true
+  }
+  return false
+}
+
+// Raw plugin text is written unescaped, and a single backtick or tilde can
+// join a neighbouring fragment or event into a fence. Inside an open fence it
+// is code: the closing delimiter grows past any run in it.
+function notePluginFences(state: MarkdownState, output: string[] | undefined): void {
+  if (!state.fencesUnreliable && !state.codeFence && output?.some(part => part.includes('`') || part.includes('~')))
+    state.fencesUnreliable = true
+}
+
+// Tailwind writes at most `~~`, so only a backtick or three tildes can come
+// from another plugin's fence.
+function noteGeneratedFences(state: MarkdownState, delimiters: { prefix: string, suffix: string }): void {
+  if (!state.fencesUnreliable && !state.codeFence && (mayOpenFence(delimiters.prefix) || mayOpenFence(delimiters.suffix)))
+    state.fencesUnreliable = true
+}
+
+function mayOpenFence(delimiter: string): boolean {
+  return delimiter.includes('`') || delimiter.includes('~~~')
+}
+
 function startCodeFence(state: MarkdownState, fragment: number, language: string, indent: string): void {
   const markerOffset = state.buffer[fragment]!.lastIndexOf(MARKDOWN_CODE_BLOCK)
+  if (!state.fencesUnreliable && (state.preFenceInline || !opensBlockLine(state.buffer, fragment, markerOffset)))
+    state.fencesUnreliable = true
   state.codeFence = { fragment, markerOffset, indent, language }
   state.onCodeFenceOpen?.(language)
 }
@@ -1617,6 +1660,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     preFencePending: false,
     preFencePendingDepth: 0,
     preFenceOwnerDepth: 0,
+    fencesUnreliable: hasLiteralTagOverride(options.tagOverrides),
     preFenceOpener: undefined,
   }
   const bufferScan: BufferScanState = [false, 0, 0, 0, 0, undefined, 0]
@@ -2096,8 +2140,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length, orderedDigits)
       }
 
-      if (textNode.generatedMarkdown && textNode.value)
+      if (textNode.generatedMarkdown && textNode.value) {
+        noteGeneratedFences(state, textNode.generatedMarkdown)
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
+      }
 
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
@@ -2257,6 +2303,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (pendingElement.pluginOutput?.length || literalOverride) {
           preparePendingPreFence()
           flushPreFence(state)
+          notePluginFences(state, pendingElement.pluginOutput)
         }
         else if (consumePendingPreChild(state, node, eventType, preparePendingPreFence)) {
           return
@@ -2428,6 +2475,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     let output: string[] | undefined
     const hasPluginOutput = !!element.pluginOutput?.length
     if (hasPluginOutput) {
+      notePluginFences(state, element.pluginOutput)
       output = element.pluginOutput
       element.pluginOutput = undefined
     }

@@ -512,8 +512,9 @@ impl ConvertState {
   }
 
   fn max_line_leading_run(value: &str, marker: u8, indent: &str) -> usize {
+    // A parser also ends a line at CR, so a run after one can close the fence.
     value
-      .split('\n')
+      .split(['\n', '\r'])
       .map(|line| {
         let line = line.strip_prefix(indent).unwrap_or(line);
         let bytes = line.as_bytes();
@@ -604,6 +605,16 @@ impl ConvertState {
     let marker_offset = self.buffer[output_start..content_start]
       .rfind(MARKDOWN_CODE_BLOCK)
       .expect("code fence opener missing from output");
+    if !self.fences_unreliable
+      && (self
+        .stack
+        .iter()
+        .position(|node| node.tag_id == Some(TAG_PRE))
+        .is_some_and(|index| self.stack[..index].iter().any(|node| node.is_inline))
+        || !self.opens_block_line(self.buffer.as_bytes(), output_start + marker_offset))
+    {
+      self.fences_unreliable = true;
+    }
     self.settle_quote_boundary_at_fence();
     self.code_fence = Some(CodeFenceState {
       output_start,
@@ -3167,6 +3178,7 @@ impl ConvertState {
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.has_last_text_node = true;
+    self.break_after_last_text = false;
     self.last_text_node_depth = depth;
     self.last_text_node_index = index;
     self.last_node_is_inline = false;
@@ -3818,10 +3830,20 @@ impl ConvertState {
       return;
     }
     // Past the block lead, only a run after whitespace closes the heading. That
-    // includes a run right after the opening prefix and its space.
-    if marker > 0 && matches!(self.buffer.as_bytes()[marker - 1], b' ' | b'\t') {
+    // includes a run right after the opening prefix and its space. Inside a code
+    // fence the heading is code, where a backslash would be literal text.
+    if marker > 0
+      && matches!(self.buffer.as_bytes()[marker - 1], b' ' | b'\t')
+      && !self.in_pre_code_fence()
+    {
       self.replace_code_span_content(marker..marker, "\\");
     }
+  }
+
+  /// Whether output lands inside the code block of a `<pre>` fence; see
+  /// `fences_unreliable` for fences a parser may not read as written.
+  fn in_pre_code_fence(&self) -> bool {
+    self.code_fence.is_some() && !self.fences_unreliable && self.depth_map[TAG_PRE as usize] > 0
   }
 
   /// Whether only a block lead precedes `at` on its line: indentation, then
@@ -6096,6 +6118,32 @@ impl ConvertState {
     self.last_text_node_contains_whitespace = false;
   }
 
+  /// Inside `<pre>` the whitespace before an element boundary is code: only the
+  /// boundary of a direct child of a `<pre>` trims it, as in JS. On exit the node
+  /// is already popped, so the top of the stack is its parent. On enter the node
+  /// tops the stack: its parent decides, and a `<pre>` with no `<pre>` above it
+  /// still opens outside the code. Testing the entering node itself made a
+  /// `<pre>` nested in another trim a space of the outer code. Plain text keeps
+  /// testing the top of the stack, as the JS text engine does.
+  ///
+  /// The parent rule skips a text that a block boundary already closed with
+  /// newlines: the reach-back would cross them and trim a tab, CR or form feed
+  /// that JS keeps, since JS trims only its last fragment, the newlines.
+  fn at_pre_whitespace_boundary(&self, is_enter: bool) -> bool {
+    let len = self.stack.len();
+    let top_is_pre = self
+      .stack
+      .last()
+      .is_some_and(|node| node.tag_id == Some(TAG_PRE));
+    if !is_enter || plain_text!(self) {
+      return top_is_pre;
+    }
+    self.depth_map[TAG_PRE as usize] == u16::from(top_is_pre)
+      || (top_is_pre || !self.break_after_last_text)
+        && len >= 2
+        && self.stack[len - 2].tag_id == Some(TAG_PRE)
+  }
+
   #[inline]
   pub(crate) fn write_output(
     &mut self,
@@ -6306,14 +6354,14 @@ impl ConvertState {
           self.push_code_span_content("\n", true);
         }
       }
+      if new_lines > 0 && (!is_enter || output_str.is_empty()) {
+        self.break_after_last_text = true;
+      }
     } else {
       if self.last_text_node_contains_whitespace
         && (is_inline || !self.stack.is_empty())
         && (self.depth_map[TAG_PRE as usize] == 0
-          || self
-            .stack
-            .last()
-            .is_some_and(|parent| parent.tag_id == Some(TAG_PRE))
+          || self.at_pre_whitespace_boundary(is_enter)
           // A `<br>` inside `<pre>` settles the whitespace state on enter (the
           // `<br>` itself is on top of the stack then). Left set, a later exit
           // reaches back and trims the break's own newline.

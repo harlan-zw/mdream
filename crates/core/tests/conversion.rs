@@ -6356,6 +6356,150 @@ fn a_heading_without_an_atx_prefix_keeps_its_hash_unescaped() {
 }
 
 #[test]
+fn a_heading_in_a_code_block_keeps_its_hash_unescaped() {
+  // Nothing in a fenced code block is parsed, so a backslash before the closing
+  // hashes would show as code.
+  for (html, expected) in [
+    ("<pre><h2>x #</h2></pre>", "```\n\n## x #\n\n\n```"),
+    ("<pre><h2>x ##</h2></pre>", "```\n\n## x ##\n\n\n```"),
+    ("<pre><h1>#</h1></pre>", "```\n\n# #\n\n\n```"),
+    ("<pre><code><h2>x #</h2></code></pre>", "```\n## x #\n```"),
+    ("<pre><h2>x <b>#</b></h2></pre>", "```\n\n## x #\n\n\n```"),
+    (
+      "<ul><li><pre><h2>x #</h2></pre></li></ul>",
+      "- ```\n  ## x #\n  ```",
+    ),
+    (
+      "<blockquote><pre><h2>x #</h2></pre></blockquote>",
+      "> ```\n>\n> ## x #\n>\n>\n> ```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+}
+
+#[test]
+fn a_heading_after_a_misread_fence_keeps_its_escape() {
+  // A `<pre>` in inline content writes fences glued to that content, which a
+  // parser can read with the opposite parity, leaving the heading a heading.
+  for (html, expected) in [
+    (
+      "<span>a<pre><h2>x #</h2></pre></span>",
+      "a```\n\n## x \\#\n\n\n```",
+    ),
+    (
+      "<span><pre>x</pre>b</span><pre><h2>x #</h2></pre>",
+      "```\nx\n``` b\n\n```\n\n## x \\#\n\n\n```",
+    ),
+    (
+      "<em>a<pre>x</pre></em><pre><h2>x #</h2></pre>",
+      "*a```\nx\n```*\n\n```\n\n## x \\#\n\n\n```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Literal override text need not stay on a code line, so the escape stays.
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![("sup".to_string(), TagOverrideConfig::wrap("^", "^"))]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(
+    html_to_markdown("<pre><h2>x #</h2></pre>", options),
+    "```\n\n## x \\#\n\n\n```"
+  );
+}
+
+#[test]
+fn whitespace_before_a_nested_pre_stays_in_the_code() {
+  // A `<pre>` nested in another enters inside that one's code block, so the
+  // whitespace before it is code, not a boundary to trim.
+  for (html, expected) in [
+    (
+      "<pre><code><h4>x y </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y z\n```",
+    ),
+    (
+      "<pre><code><h4>x y   </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x y   z\n```",
+    ),
+    (
+      "<pre><code><h4>x # </h4><pre><i>z</i></pre></code></pre>",
+      "```\n#### x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>&nbsp;x # </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### \u{a0}x # z\n```",
+    ),
+    (
+      "<pre><code><blockquote><h4>x y </h4><pre><i>z</i></pre></blockquote></code></pre>",
+      "```\n> #### x y z\n```",
+    ),
+    (
+      "<pre><code><ul><li>x y <pre><i>z</i></pre></li></ul></code></pre>",
+      "```\n- x y z\n```",
+    ),
+    (
+      "<pre><code><ul><li><h4>x # </h4><pre><b>z</b></pre></li></ul></code></pre>",
+      "```\n- #### x # z\n```",
+    ),
+    (
+      "<pre><code><h4>&nbsp;x y&nbsp; </h4><pre><span>z</span></pre></code></pre>",
+      "```\n#### \u{a0}x y\u{a0} z\n```",
+    ),
+    (
+      "<pre><code>x y <pre><code>z</code></pre></code></pre>",
+      "```\nx y z\n```",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html:?}");
+  }
+  // Outside the code, the space before a `<pre>` still goes.
+  assert_eq!(convert("<span>a <pre>x</pre></span>"), "a```\nx\n```");
+}
+
+#[test]
+fn whitespace_before_a_block_break_in_code_stays() {
+  // In a `<pre>` an inline wraps, a child block's exit writes newlines after its
+  // text. The next block must not trim back across them: the tab, CR or form
+  // feed before them is code, kept as JS keeps it.
+  assert_eq!(
+    convert("<span><pre><p>a b\t</p><table><tr><td>x</td></tr></table></pre></span>"),
+    "```\n\na b\t\n\n| x |\n| --- |\n```"
+  );
+  for (ws, kept) in [
+    ("\t", '\t'),
+    ("&#9;", '\t'),
+    ("&#13;", '\r'),
+    ("&#12;", '\u{c}'),
+  ] {
+    for (open, close) in [("<span>", "</span>"), ("", "")] {
+      for block in ["p", "h4"] {
+        for (next, following) in [
+          ("<table><tr><td>x</td></tr></table>", "| x |\n| --- |"),
+          ("<figure><figcaption>x</figcaption></figure>", "x"),
+          ("<hr>", "---"),
+          ("<ul><li>x</li></ul>", "- x"),
+          ("<ol><li>x</li></ol>", "1. x"),
+        ] {
+          let html = format!("{open}<pre><{block}>a b{ws}</{block}>{next}</pre>{close}");
+          let out = convert(&html);
+          let after = out
+            .split_once(&format!("a b{kept}"))
+            .map(|(_, after)| after);
+          assert!(
+            after.is_some_and(|after| after.contains(following)),
+            "html={html:?} out={out:?}"
+          );
+        }
+      }
+    }
+  }
+}
+
+#[test]
 fn ordered_lists_honor_the_start_attribute() {
   assert_eq!(
     convert("<ol start=\"3\"><li>a</li><li>b</li></ol>"),
@@ -6931,15 +7075,16 @@ fn blockquote_quoting_keeps_escaping_a_later_line() {
 // A link rewrite is anchored on the `[` the anchor itself wrote. An anchor that
 // writes none -- no href, or suppressed inside `<pre>` -- used to abort its exit
 // and let the rewrite scan reach forward into the text, which dropped a literal
-// `[` behind its own escape and left the fence's trailing whitespace untrimmed.
+// `[` behind its own escape.
 #[test]
 fn a_clean_flag_leaves_content_outside_the_link_alone() {
   for (html, expected) in [
     ("<a>[", "\\["),
     ("x <a>[", "x \\["),
     ("<p><a>[</p>", "\\["),
-    ("<pre>x\t<a>", "```\nx\n```"),
-    ("<pre>x\n<a>", "```\nx\n```"),
+    // An empty link inside `<pre>` leaves the code as `<pre>x\t</pre>` gives it.
+    ("<pre>x\t<a>", "```\nx\t\n```"),
+    ("<pre>x\n<a>", "```\nx\n\n```"),
   ] {
     assert_eq!(
       convert_with_clean(html, clean_all()),
@@ -9408,5 +9553,55 @@ fn text_after_a_closed_nested_item_stays_escaped() {
   assert_eq!(
     convert("<ul><li>a<ul><li></li></ul># t</li></ul>"),
     "- a\n\n  - \\# t"
+  );
+}
+
+#[test]
+fn empty_inline_pre_does_not_taint_later_fences() {
+  for body in ["", " ", "\n", "<code></code>"] {
+    let html = format!("<span><pre>{body}</pre></span><pre><h2>x #</h2></pre>");
+    let expected = if body.contains("code") {
+      "## x \\#"
+    } else {
+      "## x #"
+    };
+    assert!(convert(&html).contains(expected), "{html:?}");
+  }
+}
+
+#[test]
+fn code_fence_grows_past_runs_after_cr() {
+  assert_eq!(
+    convert("<pre>a&#13;```&#13;b</pre><p>c</p>"),
+    "````\na\r```\rb\n````\n\nc"
+  );
+  for html in [
+    "<pre>a&#13;```&#13;<h2>x #</h2></pre>",
+    "<pre><code>a&#13;```&#13;<h2>x #</h2></code></pre>",
+    "<ul><li><pre>a&#13;```&#13;<h2>x #</h2></pre></li></ul>",
+  ] {
+    let markdown = convert(html);
+    assert!(
+      markdown.contains("````") && markdown.contains("## x #"),
+      "{html:?}"
+    );
+  }
+}
+
+#[test]
+fn frontmatter_keeps_heading_fences_reliable() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      frontmatter: Some(FrontmatterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert!(
+    html_to_markdown(
+      "<head><title>Title</title></head><pre><h2>x #</h2></pre>",
+      options
+    )
+    .contains("## x #")
   );
 }
