@@ -59,7 +59,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, continuationPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -96,7 +96,9 @@ export interface MarkdownState {
    * Cumulative indent for list-item continuation. Grows by each ancestor
    * `<li>`'s marker width (`"- "` = 2, `"N. "` = digits(N) + 2) so code blocks
    * and continuation paragraphs land in the content column CommonMark requires.
-   * Pushed on `<li>` enter, popped on `<li>` exit.
+   * Pushed on `<li>` enter, popped on `<li>` exit. It is the whole prefix of a
+   * wrapped or hard-broken line: an item a plugin skipped adds nothing, and a
+   * blockquote prefixes its own lines when it closes.
    */
   listIndent: string
   /** Per-`<li>` contribution widths, parallel stack to listIndent. */
@@ -646,6 +648,63 @@ function isEqualsLine(value: string, start: number): boolean {
 const GFM_TEXT_NATIVE_TRIGGER = /[\\*_~`[<\r\n]/
 
 /**
+ * Digits that end the buffer at a line start. The escape pass counts them as
+ * the start of an ordered list marker that the next text may complete. After
+ * a soft break, which is what wrapping writes, only a list starting at one
+ * interrupts the paragraph. After a blank line or a hard break any number
+ * counts, as it does for a marker inside one text node. Parity with the Rust
+ * `line_start_digits`.
+ */
+function lineStartDigits(buffer: string[], indent: string, value: string): number {
+  let lead = 0
+  while (value.charCodeAt(lead) >= 48 && value.charCodeAt(lead) <= 57)
+    lead++
+  // Whether the buffered digits and those `value` adds read as one.
+  let one = lead === 0 || value.charCodeAt(lead - 1) === 49
+  for (let index = 0; one && index < lead - 1; index++)
+    one = value.charCodeAt(index) === 48
+  let fragment = buffer.length - 1
+  let offset = fragment >= 0 ? buffer[fragment]!.length : 0
+  let digits = 0
+  let spaces = 0
+  let newline = false
+  for (;;) {
+    while (offset === 0 && fragment >= 0) {
+      fragment--
+      offset = fragment >= 0 ? buffer[fragment]!.length : 0
+    }
+    const code = fragment >= 0 ? buffer[fragment]!.charCodeAt(--offset) : -1
+    // A blank line or the spaces or backslash of a hard break; any other
+    // character ends the line at a soft break.
+    if (newline)
+      return code === -1 || code === 10 || code === 32 || code === 9 || code === 92 ? digits : 0
+    if (spaces === 0 && code >= 48 && code <= 57) {
+      if (++digits > 9)
+        return 0
+      one &&= code === (digits === 1 && lead === 0 ? 49 : 48)
+      continue
+    }
+    if (digits === 0)
+      return 0
+    if (code === 32) {
+      if (++spaces > indent.length + 3)
+        return 0
+      continue
+    }
+    if (code === -1 || code === 10) {
+      if (spaces > 3 && spaces < indent.length)
+        return 0
+      if (code === -1 || one)
+        return digits
+      newline = true
+      continue
+    }
+    // A list item's content opens a block, so `- 1` + `. x` nests a list.
+    return spaces > 0 && spaces <= 3 && listMarkerLineStart(buffer, fragment, offset) ? digits : 0
+  }
+}
+
+/**
  * Reject ordinary prose through the native string search before entering the
  * precise JavaScript scanner. A block marker can only begin within the first
  * four characters here; later lines are covered by the newline trigger.
@@ -688,12 +747,11 @@ function mayNeedGfmTextEscape(value: string, buffer: string[], depthMap: Uint16A
  * markers never pass through here, while code and raw-HTML contexts bypass it.
  * The common plain-text path returns the original string without allocation.
  */
-function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number): string {
+function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, structuralIndent: number, orderedDigits = 0): string {
   const inTable = Boolean(depthMap[TAG_TABLE])
   const inLink = Boolean(depthMap[TAG_A])
   const inBlockquote = Boolean(depthMap[TAG_BLOCKQUOTE])
   let lineIndent = markdownLineIndent(buffer, structuralIndent)
-  let orderedDigits = 0
   let copiedUntil = 0
   let escaped = ''
 
@@ -792,35 +850,43 @@ function escapeGfmText(value: string, buffer: string[], depthMap: Uint16Array, s
 /**
  * Character count (code points) of the current unterminated output line, i.e.
  * since the last newline across the buffer chunks. Includes any block prefix
- * (`> `, list indent) already written for the line.
+ * (`> `, list indent) already written for the line. The walk stops at `limit`,
+ * past which a wrap decides the same: words no line may start with, such as
+ * `#`, never break, and reading their line whole for every text node is
+ * quadratic. Parity with the Rust `current_column`.
  */
-function currentColumn(buffer: string[]): number {
+export function currentColumn(buffer: string[], limit: number): number {
   let col = 0
   for (let i = buffer.length - 1; i >= 0; i--) {
     const s = buffer[i]!
-    const nl = s.lastIndexOf('\n')
-    if (nl >= 0) {
-      return col + columnWidth(s, nl + 1)
+    for (let j = s.length - 1; j >= 0; j--) {
+      const code = s.charCodeAt(j)
+      if (code === 10)
+        return col
+      if (takesColumn(code) && ++col >= limit)
+        return col
     }
-    col += columnWidth(s, 0)
   }
   return col
 }
 
 /**
- * Code points in `value` from `start`. The fragment link markers `clean`
- * writes are removed before output, so they take no column.
+ * Whether a UTF-16 unit starts a code point that takes a column. A low
+ * surrogate completes a pair already counted, and the fragment link markers
+ * `clean` writes are removed before output.
  */
-function columnWidth(value: string, start: number): number {
-  let width = 0
-  for (let i = start; i < value.length; i++) {
-    const code = value.charCodeAt(i)
-    // A low surrogate completes a pair already counted.
-    if ((code & 0xFC00) !== 0xDC00 && code !== FRAGMENT_LINK_OPEN_CODE && code !== FRAGMENT_LINK_CLOSE_CODE)
-      width++
-  }
-  return width
+function takesColumn(code: number): boolean {
+  return (code & 0xFC00) !== 0xDC00 && code !== FRAGMENT_LINK_OPEN_CODE && code !== FRAGMENT_LINK_CLOSE_CODE
 }
+
+/**
+ * Whether `word`, moved to the start of a line, would open a block there: a
+ * quote, an ATX heading, a list item, a code fence, a setext underline or a
+ * thematic break. Text escaped mid-line leaves these markers bare, so a wrap
+ * must not be what puts one at the start of a line. Parity with the Rust
+ * `opens_block_at_line_start`.
+ */
+const BLOCK_START_WORD = /^(?:>|`{3}|~{3}|(?:#{1,6}|\+|-+|=+|\*|\*{3,}|_{3,}|0{0,8}1[.)])$)/
 
 /**
  * Only the word's own line counts: a decoded line ending or a trailing tab
@@ -834,9 +900,11 @@ function isSetextMarkerRun(word: string): boolean {
 /**
  * Hard-wrap `value` on spaces so no output line exceeds `width` code points.
  * Words are never split, so an oversized token (e.g. a URL) overflows rather
- * than breaking, and a break only ever replaces an inter-word space. `value`
- * already carries any significant leading/trailing space (added upstream), so
- * those boundary spaces are preserved. Parity with the Rust `push_text_wrapped`.
+ * than breaking, and a break only ever replaces an inter-word space. A word
+ * that would open a block at the start of a line keeps its space and
+ * overflows too. `value` already carries any significant leading/trailing
+ * space (added upstream), so those boundary spaces are preserved. Parity with
+ * the Rust `push_text_wrapped`.
  */
 function wrapText(value: string, col: number, width: number, prefix: string): string {
   const leading = value.charCodeAt(0) === 32
@@ -855,7 +923,7 @@ function wrapText(value: string, col: number, width: number, prefix: string): st
       const word = value.slice(i, next)
       const wordLen = [...word].length
       const needSpace = first ? leading : true
-      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !isSetextMarkerRun(word)) {
+      if (needSpace && col > prefixLen && col + 1 + wordLen > width && !isSetextMarkerRun(word) && !BLOCK_START_WORD.test(word)) {
         out += `\n${prefix}`
         col = prefixLen
       }
@@ -2009,15 +2077,23 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = escapeRawHtmlText(textNode.value, state.depthMap, rawHtmlLink !== undefined && parent === rawHtmlLink)
       }
 
+      // Digits already at a line start become an ordered marker if this text
+      // continues them with `.` or `)`. Both ends are checked before the scan.
+      const last = lastChar.charCodeAt(0)
+      const first = last >= 48 && last <= 57 ? textNode.value.charCodeAt(0) : 0
+      const orderedDigits = ((first >= 48 && first <= 57) || first === 46 || first === 41)
+        && !textNode.generatedMarkdown?.prefix
+        ? lineStartDigits(state.buffer, state.listIndent, textNode.value)
+        : 0
       if (!state.depthMap[TAG_PRE]
         && !state.depthMap[TAG_CODE]
         // Inside a raw-HTML region only text past a blank line is Markdown
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
         && (!insideRawHtmlBlock || rawHtmlMarkdown)
-        && mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
+        && (orderedDigits > 0 || mayNeedGfmTextEscape(textNode.value, state.buffer, state.depthMap, state.listIndent.length))
         && (!insideRawHtmlBlock || !lineOpensRawHtmlBlock(state.buffer, bufferScan))) {
-        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length)
+        textNode.value = escapeGfmText(textNode.value, state.buffer, state.depthMap, state.listIndent.length, orderedDigits)
       }
 
       if (textNode.generatedMarkdown && textNode.value)
@@ -2025,12 +2101,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
-        const wrapped = wrapText(
-          textNode.value,
-          currentColumn(state.buffer),
-          wrapWidth,
-          continuationPrefix(textNode, state.listIndentWidths, state.blockquotes.length === 0),
-        )
+        // Past both the width and the prefix every word breaks or overflows.
+        const column = currentColumn(state.buffer, Math.max(wrapWidth, state.listIndent.length + 1))
+        const wrapped = wrapText(textNode.value, column, wrapWidth, state.listIndent)
         state.buffer.push(wrapped)
         state.lastContentCache = wrapped
       }
@@ -2224,7 +2297,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // A hard break ends a line, while a following block also ends the
     // paragraph. Preserve that extra boundary inside a list's content column.
     if (eventType === NodeEventEnter && state.depthMap[TAG_LI] && !insideRawHtmlRegion
-      && (tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_PRE || tagId === TAG_TABLE)
+      && (tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_PRE || tagId === TAG_TABLE
+        || (tagId === TAG_HR && !state.listIndent))
       && !handler?.literalEnter && endsAtHardBreak(buff)) {
       trimTrailingSpaces(buff)
       const separator = tagId === TAG_P || tagId === TAG_DIV ? `\n${state.listIndent}` : '\n'
@@ -2248,7 +2322,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && handler === breakHandler
       && !element.pluginOutput?.length) {
       const inPre = state.depthMap[TAG_PRE] !== 0
-      let breakOutput: string | undefined = renderBreak(element, state)
+      let breakOutput: string | undefined = renderBreak(state)
 
       if (captionBoundary !== 0 || captionFrameCount !== 0) {
         // The break's whitespace would pass for the spacing at the buffer tail.

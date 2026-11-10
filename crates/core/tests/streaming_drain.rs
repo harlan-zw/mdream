@@ -4068,7 +4068,7 @@ fn blockquote_parent_continuation_matches_every_width_and_split() {
     ),
     (
       "<ul><li><hr><blockquote>q</blockquote>tail</li></ul>",
-      "- ***\n\n  > \n  > q\n\n  tail",
+      "- ***\n\n  \n  > q\n\n  tail",
     ),
     ("<blockquote>q</blockquote>tail", "> q\n\ntail"),
     (

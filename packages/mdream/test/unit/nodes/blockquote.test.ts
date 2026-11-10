@@ -257,9 +257,7 @@ describe.each(engines)('blockquotes $name', (engineConfig) => {
   it('keeps blockquote parent continuation after a list rule', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<ul><li><hr><blockquote>q</blockquote>tail</li></ul>'
-    // The pre-existing HR prefix differs between engines (tracked separately).
-    const prefix = engineConfig.name === 'Rust Engine' ? '- ***\n\n  > \n  > q' : '- ***\n\n  \n  > q'
-    const expected = `${prefix}\n\n  tail`
+    const expected = '- ***\n\n  \n  > q\n\n  tail'
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
     for (let width = 1; width <= html.length; width++) {
       const stream = new ReadableStream<string>({
