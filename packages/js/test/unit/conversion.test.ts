@@ -133,7 +133,7 @@ describe('root conversion', () => {
   it.each([1, 37, 4096])('does not repeat a base href past 2048 bytes in every link, chunk size %i', async (chunkSize) => {
     // Each relative URL used to repeat the whole base: 64 KiB of input made 16 MiB.
     const html = `<base href="https://cdn.example/${'a'.repeat(4096)}/">${'<a href=x>t</a>'.repeat(4096)}`
-    const expected = Array.from({ length: 4096 }, () => '[t](x)').join(' ')
+    const expected = Array.from({ length: 4096 }).fill('[t](x)').join(' ')
     expect(htmlToMarkdown(html)).toBe(expected)
     const stream = new ReadableStream<string>({
       start(controller) {
