@@ -73,6 +73,37 @@ pub(crate) fn tag_name_end(bytes: &[u8], from: usize) -> usize {
 
 const SWAR_WIDTH: usize = 8;
 
+/// First index at or after `from` holding a byte that is not whitespace.
+// Out of line: the callers are large functions with no register to spare, where
+// the same loop reloads its base pointer from the stack for every byte.
+#[inline(never)]
+pub(crate) fn whitespace_run_end(bytes: &[u8], from: usize) -> usize {
+  const SPACES: u64 = u64::from_le_bytes([b' '; SWAR_WIDTH]);
+  const TABS: u64 = u64::from_le_bytes([b'\t'; SWAR_WIDTH]);
+  let mut i = from;
+  loop {
+    // Indentation repeats one byte: count how much of each word it fills.
+    while let Some(chunk) = bytes
+      .get(i..)
+      .and_then(|rest| rest.first_chunk::<SWAR_WIDTH>())
+    {
+      let word = u64::from_le_bytes(*chunk);
+      let indent = if word as u8 == b'\t' { TABS } else { SPACES };
+      let differing = word ^ indent;
+      if differing != 0 {
+        i += (differing.trailing_zeros() / u8::BITS) as usize;
+        break;
+      }
+      i += SWAR_WIDTH;
+    }
+    // A line break, a change of indent byte, or the last bytes of the input.
+    match bytes.get(i) {
+      Some(&byte) if is_whitespace(byte) => i += 1,
+      _ => return i,
+    }
+  }
+}
+
 /// The lowest set bit of the zero-byte test is exact: borrows run upward only.
 // One out-of-line copy in WASM, where each inlined loop costs bundle bytes.
 #[cfg_attr(target_arch = "wasm32", inline(never))]
