@@ -545,6 +545,16 @@ impl ConvertState {
     }
 
     let first_block_parent_index = self.first_block_parent_index;
+
+    // Excluded text emits nothing, so the copy, the whitespace trim and the
+    // entity decode would only build a string nothing reads. The counters
+    // still advance, as they do for emitted text.
+    if excludes_text_nodes {
+      self.has_encoded_html_entity = false;
+      self.advance_text_node_counters(first_block_parent_index);
+      return;
+    }
+
     let first_block_child_text_count =
       first_block_parent_index.map_or(0, |idx| self.stack[idx].child_text_node_index);
 
