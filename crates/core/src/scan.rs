@@ -104,13 +104,14 @@ pub(crate) fn whitespace_run_end(bytes: &[u8], from: usize) -> usize {
   }
 }
 
+const BYTE_ONES: u64 = 0x0101_0101_0101_0101;
+const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
+
 /// The lowest set bit of the zero-byte test is exact: borrows run upward only.
 // One out-of-line copy in WASM, where each inlined loop costs bundle bytes.
 #[cfg_attr(target_arch = "wasm32", inline(never))]
 #[cfg_attr(not(target_arch = "wasm32"), inline)]
 pub(crate) fn find_byte(hay: &[u8], needle: u8) -> Option<usize> {
-  const BYTE_ONES: u64 = 0x0101_0101_0101_0101;
-  const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
   let pattern = BYTE_ONES * u64::from(needle);
   let (words, rest) = hay.as_chunks::<SWAR_WIDTH>();
   let mut offset = 0usize;
@@ -123,6 +124,30 @@ pub(crate) fn find_byte(hay: &[u8], needle: u8) -> Option<usize> {
     offset += SWAR_WIDTH;
   }
   rest.iter().position(|&b| b == needle).map(|p| offset + p)
+}
+
+/// [`find_byte`] for long runs such as script bodies: four words per step
+/// with one test, then `find_byte` places the match. Out of line and not for
+/// attribute values or short comments, where the wider step costs more than
+/// it saves.
+#[inline(never)]
+pub(crate) fn find_byte_far(hay: &[u8], needle: u8) -> Option<usize> {
+  const BLOCK: usize = 4 * SWAR_WIDTH;
+  let pattern = BYTE_ONES * u64::from(needle);
+  let mut offset = 0usize;
+  for block in hay.as_chunks::<BLOCK>().0 {
+    let mut hits = 0u64;
+    for word in block.as_chunks::<SWAR_WIDTH>().0 {
+      let word = u64::from_le_bytes(*word) ^ pattern;
+      hits |= word.wrapping_sub(BYTE_ONES) & !word;
+    }
+    // A borrow can flag a byte above a match, never a block without one.
+    if hits & HIGH_BITS != 0 {
+      break;
+    }
+    offset += BLOCK;
+  }
+  find_byte(&hay[offset..], needle).map(|p| offset + p)
 }
 
 /// Occurrences of `needle`. `str::matches(char).count()` makes a searcher
@@ -1679,16 +1704,27 @@ mod tests {
           }
           let mut hay = vec![fill; len];
           assert_eq!(find_byte(&hay, needle), None, "len {len} fill {fill:#x}");
+          assert_eq!(
+            find_byte_far(&hay, needle),
+            None,
+            "far len {len} fill {fill:#x}"
+          );
           for at in 0..len {
             hay[at] = needle;
             // A later duplicate must not win over the first match.
             if at + 3 < len {
               hay[at + 3] = needle;
             }
+            let want = hay.iter().position(|&b| b == needle);
             assert_eq!(
               find_byte(&hay, needle),
-              hay.iter().position(|&b| b == needle),
+              want,
               "needle {needle:#x} at {at} len {len} fill {fill:#x}"
+            );
+            assert_eq!(
+              find_byte_far(&hay, needle),
+              want,
+              "far needle {needle:#x} at {at} len {len} fill {fill:#x}"
             );
             hay.fill(fill);
           }
