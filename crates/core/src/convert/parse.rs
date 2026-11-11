@@ -1796,20 +1796,6 @@ impl ConvertState {
       if (id as usize) < MAX_TAG_ID {
         self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
       }
-      self.refresh_raw_html_block(id);
-      self.update_in_pre_on_close(id);
-      if id == TAG_OL {
-        self.ordered_starts.pop();
-        self.list_item_counts.pop();
-      } else if id == TAG_UL {
-        self.list_item_counts.pop();
-      }
-      if id == TAG_LI
-        && let Some(w) = self.list_indent_widths.pop()
-      {
-        let new_len = self.list_indent.len().saturating_sub(w as usize);
-        self.list_indent.truncate(new_len);
-      }
     }
 
     self.in_non_nesting = self.stack.last().is_some_and(|n| n.is_non_nesting);
@@ -1817,18 +1803,47 @@ impl ConvertState {
     self.has_encoded_html_entity = false;
     self.just_closed_tag = true;
 
-    // Each enclosing quote re-quotes whatever content is still unflushed when it
-    // closes, so a deep nest closed within one chunk copied its content once per
-    // level. Quote the settled lines now, as a chunk boundary here would. A quote
-    // inside a list item is re-quoted frame by frame by the flush too, so there
-    // it would only add work.
-    if node_tag_id == Some(TAG_BLOCKQUOTE)
-      && self
-        .blockquotes
-        .iter()
-        .all(|frame| frame.list_indent.is_empty())
-    {
-      self.flush_settled_blockquote_lines();
+    if let Some(id) = node_tag_id {
+      self.close_tail(id);
+    }
+  }
+
+  /// Close work past the depth count, for the tags `CLOSE_TAIL_TAG` names.
+  #[inline(always)]
+  fn close_tail(&mut self, id: u8) {
+    use super::output::{
+      CLOSE_BLOCKQUOTE, CLOSE_LI, CLOSE_OL, CLOSE_PRE, CLOSE_RAW_BLOCK, CLOSE_TAIL_TAG, CLOSE_UL,
+    };
+    match CLOSE_TAIL_TAG[id as usize] {
+      CLOSE_RAW_BLOCK => self.refresh_raw_html_block(id),
+      CLOSE_PRE => self.update_in_pre_on_close(id),
+      CLOSE_OL => {
+        self.ordered_starts.pop();
+        self.list_item_counts.pop();
+      }
+      CLOSE_UL => {
+        self.list_item_counts.pop();
+      }
+      CLOSE_LI => {
+        if let Some(w) = self.list_indent_widths.pop() {
+          let new_len = self.list_indent.len().saturating_sub(w as usize);
+          self.list_indent.truncate(new_len);
+        }
+      }
+      // Each enclosing quote re-quotes whatever content is still unflushed when
+      // it closes, so a deep nest closed within one chunk copied its content
+      // once per level. Quote the settled lines now, as a chunk boundary here
+      // would. A quote inside a list item is re-quoted frame by frame by the
+      // flush too, so there it would only add work.
+      CLOSE_BLOCKQUOTE
+        if self
+          .blockquotes
+          .iter()
+          .all(|frame| frame.list_indent.is_empty()) =>
+      {
+        self.flush_settled_blockquote_lines();
+      }
+      _ => {}
     }
   }
 

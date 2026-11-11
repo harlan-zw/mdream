@@ -102,6 +102,32 @@ static RAW_HTML_BLOCK_TAG: [bool; 256] = {
   table
 };
 
+/// Tags with close work past the depth count: raw HTML blocks, `pre`, lists,
+/// items and quotes. One lookup skips the separate tests for every other tag.
+pub(crate) const CLOSE_NONE: u8 = 0;
+pub(crate) const CLOSE_RAW_BLOCK: u8 = 1;
+pub(crate) const CLOSE_PRE: u8 = 2;
+pub(crate) const CLOSE_OL: u8 = 3;
+pub(crate) const CLOSE_UL: u8 = 4;
+pub(crate) const CLOSE_LI: u8 = 5;
+pub(crate) const CLOSE_BLOCKQUOTE: u8 = 6;
+pub(crate) static CLOSE_TAIL_TAG: [u8; 256] = {
+  let mut table = [CLOSE_NONE; 256];
+  let mut i = 0;
+  while i < 256 {
+    if RAW_HTML_BLOCK_TAG[i] {
+      table[i] = CLOSE_RAW_BLOCK;
+    }
+    i += 1;
+  }
+  table[TAG_PRE as usize] = CLOSE_PRE;
+  table[TAG_OL as usize] = CLOSE_OL;
+  table[TAG_UL as usize] = CLOSE_UL;
+  table[TAG_LI as usize] = CLOSE_LI;
+  table[TAG_BLOCKQUOTE as usize] = CLOSE_BLOCKQUOTE;
+  table
+};
+
 /// Emphasis and strikethrough tags whose default exit closes a delimiter run.
 static EMPHASIS_EXIT_TAG: [bool; MAX_TAG_ID] = {
   let mut table = [false; MAX_TAG_ID];
