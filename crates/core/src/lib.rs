@@ -728,6 +728,11 @@ mod fast_path_parity {
     "<pre><code>a  b</code></pre><p>x<br>y</p><figure><img alt=a><figcaption>cap</figcaption></figure>",
     "<p>&amp; &lt;b&gt; &#91;x&#93; caf\u{e9} \u{4e2d}\u{6587}</p><h2> spaced  heading </h2><hr>",
     "<div><p>a</p>  <p>b</p></div><p>   </p><span> </span>trailing <em> </em>end",
+    // Several text nodes in `<pre>`: leading newlines, entities, a blank `<pre>`.
+    "<pre><code>\n\n  let a<span class=\"k\">=</span>&amp;b &lt;c&gt; 1<span> </span>2\n\n  </code></pre><pre>   </pre><p>x</p>",
+    // The same `<pre>` text inside a list item, a quote and a table cell.
+    "<ul><li><pre><code>one\n  <span>two</span></code></pre></li></ul><blockquote><pre>q <b>r</b> 2.</pre></blockquote><table><tr><td><pre><code>c <i>d</i></code></pre></td></tr></table>",
+    "<pre>1<span>2</span>&#50;<b>)</b>\n3<span>.4</span><div>x</div> y &amp; <span>z</span></pre>",
   ];
 
   fn fixtures() -> Vec<String> {
