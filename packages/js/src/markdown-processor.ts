@@ -1098,6 +1098,24 @@ export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
 }
 
+// How many characters of blanks and openers may follow an emphasis closer for
+// an opener to still take it back. More than a few empty elements never write
+// that much, and without a bound a run of quotes would hold a stream.
+const CLOSED_MARKER_REACH = 32
+
+/**
+ * Whether the fragment holds only blanks and the delimiters an inline element
+ * opens with. Output made of these alone may still be taken back.
+ */
+function isTransientOutput(fragment: string): boolean {
+  for (let index = 0; index < fragment.length; index++) {
+    const code = fragment.charCodeAt(index)
+    if (code !== 42 && code !== 126 && code !== 96 && code !== 34 && !isAsciiWhitespace(code))
+      return false
+  }
+  return true
+}
+
 export function trimAsciiWhitespaceEnd(value: string): string {
   let end = value.length
   while (end > 0 && isAsciiWhitespace(value.charCodeAt(end - 1)))
@@ -1670,6 +1688,39 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
+  // The fragments of the emphasis closers that end the output, one right
+  // after the other. An opener of the same delimiter written next would touch
+  // its closer, which CommonMark reads as one run, so the pair is reopened.
+  const closedMarkers: number[] = []
+  let closedMarkerCount = 0
+  // The delimiter and the type of the pair reopened last.
+  let reopenedDelimiter = ''
+  let reopenedType = 0
+
+  /**
+   * The fragment of the first closer an opener may still take back, or
+   * `Infinity`. The closers stay as long as only blanks and openers that may
+   * close empty came after them.
+   */
+  function heldClosedMarker(): number {
+    if (closedMarkerCount === 0)
+      return Infinity
+    const buffer = state.buffer
+    let reach = CLOSED_MARKER_REACH
+    for (let index = closedMarkers[closedMarkerCount - 1]! + 1; index < buffer.length; index++) {
+      const fragment = buffer[index]!
+      reach -= fragment.length
+      if (reach < 0 || !isTransientOutput(fragment)) {
+        closedMarkerCount = 0
+        return Infinity
+      }
+    }
+    if (closedMarkers[closedMarkerCount - 1]! >= buffer.length) {
+      closedMarkerCount = 0
+      return Infinity
+    }
+    return closedMarkers[0]!
+  }
   let captionFrames: number[] | undefined
   let captionFrameCount = 0
   // 1 needs caption spacing; 2 owns the next source space after a boundary;
@@ -2165,9 +2216,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (openMarkerCount && hasVisibleText) {
           // Vertical tabs alone leave an emphasis pair empty once its closer
           // moves them out, so the exit still has to see the open marker.
+          // Types 5 and 6 are no emphasis; 7 marks a reopened emphasis pair.
           const first = textNode.value.charCodeAt(0)
           if ((first !== 11 && !isAsciiWhitespace(first))
-            || (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) > 4
+            || ((openMarkers[openMarkerCount - 1]! + 1) & MARKER_TYPE_MASK) > 5
             || !isVerticalTabRun(textNode.value)) {
             openMarkerCount = 0
           }
@@ -2216,6 +2268,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    */
   function processEvent(event: NodeEvent): void {
     const { type: eventType, node } = event
+    // Output that is no blank or opener, even if taken back later, came
+    // between a closer and the next opener.
+    if (closedMarkerCount)
+      heldClosedMarker()
     if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
       && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
       pendingRawHtmlBoundary = false
@@ -2772,23 +2828,44 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
         const packed = openMarkers[--openMarkerCount]!
-        // Only a heading separator adds a newline to an opener. Whitespace
-        // moved before the opener must not hide the separator it carries.
-        const restoresHeadingBreak = buff[packed >> 3]?.includes('\n')
-        const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
-        if (idx >= 0) {
-          noteBufferRewrite(state)
-          if (restoresHeadingBreak)
-            state.headingBreakPending = true
-          resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
-          state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
-          restoreQuoteParentBoundary()
-          return
+        if ((packed & MARKER_TYPE_MASK) === MARKER_TYPE_MASK) {
+          // A reopened pair left empty gets back the closer it took, where it
+          // stood, and what an empty pair would drop goes.
+          const start = packed >> 3
+          let index = start
+          while (index < buff.length && !hasNonWhitespace(buff[index]!))
+            index++
+          if (index === buff.length && (markerType === 1 || markerType === 2 || markerType === 4)) {
+            state.outputPositions?.replace(start, buff.length, [handlerOutput!])
+            buff.length = start
+            buff.push(handlerOutput!)
+            noteBufferRewrite(state)
+            state.lastContentCache = handlerOutput
+            if (closedMarkerCount && closedMarkers[closedMarkerCount - 1] !== start - 1)
+              closedMarkerCount = 0
+            closedMarkers[closedMarkerCount++] = start
+            return
+          }
         }
-        if (markerType <= 4 && dropVerticalTabMarker(buff, packed, markerType, handlerOutput!, state.outputPositions)) {
-          noteBufferRewrite(state)
-          state.lastContentCache = buff[buff.length - 1]
-          return
+        else {
+          // Only a heading separator adds a newline to an opener. Whitespace
+          // moved before the opener must not hide the separator it carries.
+          const restoresHeadingBreak = buff[packed >> 3]?.includes('\n')
+          const idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
+          if (idx >= 0) {
+            noteBufferRewrite(state)
+            if (restoresHeadingBreak)
+              state.headingBreakPending = true
+            resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
+            state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+            restoreQuoteParentBoundary()
+            return
+          }
+          if (markerType <= 4 && dropVerticalTabMarker(buff, packed, markerType, handlerOutput!, state.outputPositions)) {
+            noteBufferRewrite(state)
+            state.lastContentCache = buff[buff.length - 1]
+            return
+          }
         }
         openMarkerCount = 0
       }
@@ -3186,6 +3263,27 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
+    if (eventType === NodeEventExit && handlerOutput !== undefined && !handler?.literalExit) {
+      const closedType = INLINE_MARKER_TYPE[tagId]
+      if ((closedType === 1 || closedType === 2 || closedType === 4) && buff[buff.length - 1] === handlerOutput) {
+        // A trim leaves emptied fragments between two closers.
+        let previous = buff.length - 2
+        while (previous >= 0 && buff[previous] === '')
+          previous--
+        if (closedMarkerCount && closedMarkers[closedMarkerCount - 1] !== previous)
+          closedMarkerCount = 0
+        // A closer behind a blank or a hard break closes nothing in CommonMark,
+        // and one behind a code span keeps that span from touching the next.
+        const before = lastOutputChar(buff, buff.length - 1)
+        // A pair that closes behind a pair of its own delimiter ends in a
+        // longer run, which CommonMark may read apart.
+        if (closedMarkerCount && buff[closedMarkers[closedMarkerCount - 1]!] === handlerOutput)
+          closedMarkerCount = 0
+        else if (before !== -1 && before !== 96 && !isAsciiWhitespace(before))
+          closedMarkers[closedMarkerCount++] = buff.length - 1
+      }
+    }
+
     // Track open inline markers for empty pair detection. Inline code in a
     // list may own a leading separator (" `"), so retain the whole output
     // fragment as the drop boundary.
@@ -3195,7 +3293,48 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
-        openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
+        // A trim leaves emptied fragments between the closer and the opener.
+        let closer = buff.length - 2
+        while (closer >= 0 && buff[closer] === '')
+          closer--
+        const merges = (markerType === 1 || markerType === 2 || markerType === 4)
+          && (handlerOutput === '*' || handlerOutput === '**')
+        const reopened = openMarkerCount ? openMarkers[openMarkerCount - 1]! : 0
+        if (merges && (reopened & MARKER_TYPE_MASK) === MARKER_TYPE_MASK
+          && closer < reopened >> 3 && reopenedDelimiter === handlerOutput) {
+          // A pair that opens with a pair of its own delimiter writes a longer
+          // run, which CommonMark may read apart, so it is written as before.
+          const opener = buff.length - 1
+          state.outputPositions?.replace(opener, opener, [handlerOutput, handlerOutput])
+          buff.splice(opener, 0, handlerOutput, handlerOutput)
+          noteBufferRewrite(state)
+          openMarkers[openMarkerCount - 1] = (opener + 1) << 3 | reopenedType
+          openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
+        }
+        else if (merges && closedMarkerCount && closedMarkers[closedMarkerCount - 1] === closer
+          && buff[closer] === handlerOutput
+          && (markerType === 1
+            ? state.depthMap[TAG_STRONG]! + state.depthMap[TAG_B]! + state.depthMap[TAG_DFN]!
+            // A caption is written in `*` as well.
+            : state.depthMap[TAG_EM]! + state.depthMap[TAG_I]! + state.depthMap[TAG_CITE]!
+              + state.depthMap[TAG_FIGCAPTION]!) < 2) {
+          // Neither delimiter is written. The type no pair has marks the
+          // reopened one, which already has content and cannot be dropped.
+          reopenedDelimiter = handlerOutput
+          reopenedType = markerType
+          closedMarkerCount--
+          state.outputPositions?.replace(closer, buff.length, [])
+          buff.length = closer
+          noteBufferRewrite(state)
+          state.lastContentCache = buff[buff.length - 1]
+          // A pair reopened around this one begins where its closer stood.
+          for (let index = openMarkerCount - 1; index >= 0 && openMarkers[index]! >> 3 > buff.length; index--)
+            openMarkers[index] = buff.length << 3 | MARKER_TYPE_MASK
+          openMarkers[openMarkerCount++] = buff.length << 3 | MARKER_TYPE_MASK
+        }
+        else {
+          openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
+        }
       }
       else if (openMarkerCount
         && !(tagId === TAG_A && cleanEmptyLinkText)
@@ -3251,6 +3390,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       ? Infinity
       : Math.min(
           openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
+          heldClosedMarker(),
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
           state.emptyItemFragment ?? Infinity,
           state.codeFence?.fragment ?? Infinity,

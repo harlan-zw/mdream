@@ -734,6 +734,32 @@ fn streaming_unresolved_root_and_list_break_runs_stay_bounded() {
   }
 }
 
+// Quotes are among the bytes that keep an emphasis closer within reach of the
+// next opener, so a run of them must stop holding it.
+#[test]
+fn streaming_text_after_a_closed_emphasis_pair_is_not_held() {
+  const TARGET: usize = 1024 * 1024;
+  for unit in ["\"", "\"<!---->"] {
+    let mut html = String::with_capacity(TARGET + 32);
+    html.push_str("<p><em>a</em>");
+    while html.len() < TARGET {
+      html.push_str(unit);
+    }
+    let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default()).len() as u64;
+
+    let (peak, total_out) = measure_peak_unfinished(&html, 8 * 1024);
+    assert!(
+      total_out * 2 > expected,
+      "unit={unit:?} streamed {total_out} of {expected} bytes before the end"
+    );
+    assert!(
+      peak < TARGET as u64 / 2,
+      "unit={unit:?} peak {peak} should stay below the {} byte input",
+      html.len()
+    );
+  }
+}
+
 #[test]
 fn streaming_compacted_break_runs_preserve_late_output() {
   let breaks = "<br>".repeat(32 * 1024);
@@ -3449,7 +3475,15 @@ fn generated_link_content_releases_the_hold() {
     ),
     (
       "markers",
-      format!("<a href=\"/x\">{}</a>", "<em>&nbsp;</em>".repeat(100_000)),
+      format!(
+        "<a href=\"/x\">{}</a>",
+        "<em>&nbsp;</em><strong>&nbsp;</strong>".repeat(50_000)
+      ),
+    ),
+    // Touching pairs of one delimiter are reopened into a single pair.
+    (
+      "reopened markers",
+      format!("<a href=\"/x\">{}</a>", "<em>&nbsp;</em>".repeat(150_000)),
     ),
   ];
 

@@ -1103,3 +1103,99 @@ fn raw_html_blocks_end_before_following_markdown() {
     }
   }
 }
+
+#[test]
+fn touching_emphasis_pairs_of_one_delimiter_are_reopened() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<strong>Aa</strong><strong>Bb</strong>", "**AaBb**"),
+    ("<b>Aa</b><strong>Bb</strong>", "**AaBb**"),
+    ("<em>Aa</em><i>Bb</i>", "*AaBb*"),
+    ("<em>Aa</em><cite>Bb</cite>", "*AaBb*"),
+    (
+      "<strong>Aa</strong><strong>Bb</strong><strong>Cc</strong>",
+      "**AaBbCc**",
+    ),
+    (
+      "<strong>Aa</strong><span></span><strong>Bb</strong>",
+      "**AaBb**",
+    ),
+    ("<strong>Aa</strong><strong> Bb</strong>", "**Aa Bb**"),
+    (
+      "<strong><em>Aa</em></strong><strong><em>Bb</em></strong>",
+      "***AaBb***",
+    ),
+    (
+      "<strong><em>Aa</em></strong><strong>Bb</strong>",
+      "***Aa*Bb**",
+    ),
+    (
+      "<strong>Aa</strong><strong><em>Bb</em></strong>",
+      "**Aa*Bb***",
+    ),
+    // A reopened pair that stays empty is closed again where it was.
+    ("<strong>Aa</strong><strong></strong>", "**Aa**"),
+    ("<strong>Aa</strong><strong> </strong>x", "**Aa**x"),
+    ("<b>Aa</b><b>&#9;</b>x", "**Aa**x"),
+    (
+      r#"<a href="/x"><em>Cc</em><cite>&#32;</cite></a>"#,
+      "[*Cc*](/x)",
+    ),
+    (
+      "<strong>Aa</strong><strong>&#32;</strong><strong>Bb</strong>",
+      "**AaBb**",
+    ),
+    (
+      "<ul><li><strong>Aa</strong><strong>Bb</strong></li></ul>",
+      "- **AaBb**",
+    ),
+    (
+      r#"<a href="/x"><strong>Aa</strong><strong>Bb</strong></a>"#,
+      "[**AaBb**](/x)",
+    ),
+    // An element between the two that writes nothing to keep leaves them
+    // touching all the same.
+    ("<strong>Aa</strong><i></i><strong>Bb</strong>", "**AaBb**"),
+    ("<b>Aa</b><i> </i><b>Bb</b><b>Cc</b>", "**AaBbCc**"),
+    ("<strong>Aa</strong><q></q><strong>Bb</strong>", "**AaBb**"),
+    // Visible output between the two, another delimiter, or a closer that
+    // closes nothing keeps both pairs.
+    ("<strong>Aa</strong> <strong>Bb</strong>", "**Aa** **Bb**"),
+    ("<strong>Aa</strong><em>Bb</em>", "**Aa***Bb*"),
+    (
+      "<strong>Aa</strong><i>x</i><strong>Bb</strong>",
+      "**Aa***x***Bb**",
+    ),
+    // A pair inside one of its own delimiter, or right against one, is part
+    // of a longer run already and stays as it was.
+    ("<em><cite>Aa</cite></em><em>Bb</em>", "**Aa***Bb*"),
+    ("<cite>Aa</cite><em><cite>Bb</cite></em>", "*Aa***Bb**"),
+    ("<em>Aa<cite>Bb</cite><i>Cc</i> x</em>", "*Aa*Bb**Cc* x*"),
+    (
+      "<strong>Aa</strong><dfn><strong>Bb</strong></dfn>",
+      "**Aa******Bb****",
+    ),
+    (
+      "<figcaption><em>Aa</em><em>Bb</em></figcaption>",
+      "**Aa**Bb**",
+    ),
+    ("<strong><em>Aa</em><em>Bb</em></strong>", "***AaBb***"),
+    // Two code spans would touch.
+    (
+      "<em><kbd>Aa</kbd></em><cite><kbd>Bb</kbd></cite>",
+      "*`Aa`**`Bb`*",
+    ),
+    ("<s>Aa</s><s>Bb</s>", "~~Aa~~ ~~Bb~~"),
+    (
+      "<strong>Aa<br></strong><strong>Bb</strong>",
+      "**Aa  \n****Bb**",
+    ),
+    (
+      r#"<strong>Aa</strong><a href="/x"><strong>Bb</strong></a>"#,
+      "**Aa**[**Bb**](/x)",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    assert_every_split(html, &options, expected);
+  }
+}
