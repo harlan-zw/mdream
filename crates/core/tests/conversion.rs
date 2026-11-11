@@ -9747,6 +9747,20 @@ fn code_fence_grows_past_runs_after_cr() {
 }
 
 #[test]
+fn code_fence_counts_runs_after_lf_and_cr() {
+  // A body with a CR also splits at CR, so a run after it can be the longest one.
+  assert_eq!(
+    convert("<pre>a\n```\r`````\nc</pre><p>d</p>"),
+    "``````\na\n```\r`````\nc\n``````\n\nd"
+  );
+  // A body without a CR splits at LF only and keeps its own longest run.
+  assert_eq!(
+    convert("<pre>a\n````\nc</pre><p>d</p>"),
+    "`````\na\n````\nc\n`````\n\nd"
+  );
+}
+
+#[test]
 fn frontmatter_keeps_heading_fences_reliable() {
   let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {

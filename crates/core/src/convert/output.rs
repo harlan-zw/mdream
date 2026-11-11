@@ -513,8 +513,18 @@ impl ConvertState {
 
   fn max_line_leading_run(value: &str, marker: u8, indent: &str) -> usize {
     // A parser also ends a line at CR, so a run after one can close the fence.
-    value
-      .split(['\n', '\r'])
+    // A char-set split matches byte by byte and costs more than the memchr-backed
+    // `\n` split on every fence body, so it runs only when a CR is present.
+    if value.contains('\r') {
+      Self::max_run_of_lines(value.split(['\n', '\r']), marker, indent)
+    } else {
+      Self::max_run_of_lines(value.split('\n'), marker, indent)
+    }
+  }
+
+  #[inline(always)]
+  fn max_run_of_lines<'a>(lines: impl Iterator<Item = &'a str>, marker: u8, indent: &str) -> usize {
+    lines
       .map(|line| {
         let line = line.strip_prefix(indent).unwrap_or(line);
         let bytes = line.as_bytes();
