@@ -651,7 +651,7 @@ mod fast_path_parity {
   use super::fast_path_diff::{convert, stream};
   use super::types::{
     CleanConfig, FilterConfig, FrontmatterConfig, HtmlToMarkdownOptions, IsolateMainConfig,
-    OutputFormat, PluginConfig, TailwindConfig,
+    OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
   };
 
   fn option_sets() -> Vec<(&'static str, HtmlToMarkdownOptions, OutputFormat)> {
@@ -757,6 +757,168 @@ mod fast_path_parity {
             slow == fast,
             "stream mismatch: options={name} doc={i} chunk={size}"
           );
+        }
+      }
+    }
+  }
+
+  /// Snippets where overridden and plain tags sit side by side: nested inline
+  /// markup, links both inside and around overridden tags, lists, headings,
+  /// code, tables, quotes, images, breaks and empty elements.
+  const OVERRIDE_SNIPPETS: &[&str] = &[
+    "<p>a <em>b</em> c <strong>d</strong> e</p>",
+    "<p><a href=\"/x\">link <em>in</em> text</a> and <em><a href=\"/y\">out</a></em></p>",
+    "<ul><li>one <em>two</em></li><li><strong>three</strong> <a href=\"/z\">four</a></li></ul><ol><li><em>x</em></li></ol>",
+    "<h2>Head <em>er</em></h2><h3><a href=\"/h\">linked</a></h3><blockquote><p>q <em>x</em></p><p>r</p></blockquote>",
+    "<pre><code>a <em>b</em></code></pre><p>inline <code>c <em>d</em></code> end</p>",
+    "<table><tr><th><em>h</em></th><th>h2</th></tr><tr><td><a href=\"/c\">c</a></td><td><strong>d</strong></td></tr></table>",
+    "<p><img src=\"/i.png\" alt=\"pic\"> <em><img src=\"/j.png\" alt=\"\"></em><br><em></em><strong> </strong>end</p>",
+    "<p>x<br>y <em>z</em><br/><strong>w</strong></p>",
+    "<blockquote>Q <em>a</em><blockquote><p><strong>nested</strong></p></blockquote></blockquote><p>after</p>",
+    "<p>para <p>with <p><em>implicit</em></p>",
+    "<div><p>a <a href=\"/d\">b <em>c</em></a></p><p><em>d</em></p></div>",
+    "<p><em>1</em><em>2</em><strong><em>3</em></strong><video><source><em>v</em></video></p>",
+    "<video><em>x</em></video><x-box>boxed <em>and <strong>b</strong></em></x-box><b>bold</b> <i>it</i>",
+    "<p>a <b>bold</b> <x-alias>alias</x-alias> <em>emph</em> <strong><x-box>c</x-box></strong></p>",
+    "<dl><dt><em>t</em></dt><dd>d <a href=\"/q\">q</a></dd></dl><details><summary><em>s</em></summary>body <strong>x</strong></details>",
+    "<p><a href=\"/e\"></a><em></em><a href=\"#frag\">f</a> <a href=\"https://x\"><img alt=\"i\" src=\"a\"></a></p>",
+    "<p>  spaced <em> e </em> <strong>\n s \n</strong>tail</p>",
+    "<p>text <p style=\"x\">paragraph <span><em>sp</em></span></p><hr><li>loose</li>",
+    "<figure><img src=\"f\" alt=\"f\"><figcaption><em>cap</em> words</figcaption></figure><p>after</p>",
+    "<p>a<em>b</em>c<strong>d</strong>e</p>",
+    "<p>&amp; <em>&lt;b&gt;</em> [x] <a href=\"/b\">[bracket]</a> <code>k</code></p>",
+  ];
+
+  /// Override sets for the differential test. Each names one tag or key, so
+  /// every other tag in the document keeps its fast path.
+  fn override_sets() -> Vec<(&'static str, Vec<(String, TagOverrideConfig)>)> {
+    let one = |key: &str, config: TagOverrideConfig| vec![(key.to_string(), config)];
+    vec![
+      ("em wrap", one("em", TagOverrideConfig::wrap("_", "_"))),
+      (
+        "em exit only",
+        one(
+          "em",
+          TagOverrideConfig {
+            exit: Some("!".into()),
+            ..Default::default()
+          },
+        ),
+      ),
+      ("a wrap", one("a", TagOverrideConfig::wrap("<", ">"))),
+      ("code wrap", one("code", TagOverrideConfig::wrap("`", "`"))),
+      (
+        "li inline",
+        one(
+          "li",
+          TagOverrideConfig {
+            is_inline: Some(true),
+            ..Default::default()
+          },
+        ),
+      ),
+      (
+        "p spacing",
+        one(
+          "p",
+          TagOverrideConfig {
+            spacing: Some([1, 1]),
+            ..Default::default()
+          },
+        ),
+      ),
+      (
+        "blockquote enter",
+        one(
+          "blockquote",
+          TagOverrideConfig {
+            enter: Some("Q ".into()),
+            ..Default::default()
+          },
+        ),
+      ),
+      (
+        "strong enter and exit",
+        one(
+          "strong",
+          TagOverrideConfig {
+            enter: Some("*".into()),
+            exit: Some("*".into()),
+            ..Default::default()
+          },
+        ),
+      ),
+      (
+        "video absent from documents",
+        one("video", TagOverrideConfig::wrap("[v]", "[/v]")),
+      ),
+      (
+        "custom key",
+        one("x-box", TagOverrideConfig::wrap("<<", ">>")),
+      ),
+      (
+        "built-in alias",
+        one("b", TagOverrideConfig::alias("strong")),
+      ),
+      (
+        "custom alias",
+        one("x-alias", TagOverrideConfig::alias("em")),
+      ),
+      (
+        "mixed",
+        vec![
+          ("em".into(), TagOverrideConfig::wrap("_", "_")),
+          (
+            "li".into(),
+            TagOverrideConfig {
+              is_inline: Some(true),
+              ..Default::default()
+            },
+          ),
+          (
+            "p".into(),
+            TagOverrideConfig {
+              spacing: Some([1, 1]),
+              ..Default::default()
+            },
+          ),
+          ("x-box".into(), TagOverrideConfig::wrap("<<", ">>")),
+          ("video".into(), TagOverrideConfig::wrap("[v]", "[/v]")),
+        ],
+      ),
+    ]
+  }
+
+  #[test]
+  fn fast_paths_match_general_paths_with_overrides() {
+    for (name, overrides) in override_sets() {
+      for clean in [false, true] {
+        for format in [OutputFormat::Markdown, OutputFormat::Text] {
+          let options = || HtmlToMarkdownOptions {
+            clean: clean.then(CleanConfig::all),
+            plugins: Some(PluginConfig {
+              tag_overrides: Some(overrides.clone()),
+              ..Default::default()
+            }),
+            ..Default::default()
+          };
+          for (i, html) in OVERRIDE_SNIPPETS.iter().enumerate() {
+            let slow = convert(html, options(), format, false);
+            let fast = convert(html, options(), format, true);
+            assert!(
+              slow == fast,
+              "one-shot mismatch: overrides={name} clean={clean} format={format:?} doc={i}"
+            );
+            for size in [7, 4096] {
+              let parts = chunks(html, size);
+              let slow = stream(&parts, options(), format, false);
+              let fast = stream(&parts, options(), format, true);
+              assert!(
+                slow == fast,
+                "stream mismatch: overrides={name} clean={clean} format={format:?} doc={i} chunk={size}"
+              );
+            }
+          }
         }
       }
     }
