@@ -1151,3 +1151,26 @@ it.each([
     expect(await streamConvert(chunks), `width=${width}`).toBe(expected)
   }
 })
+
+it.each([
+  ['Aa<span> </span>&#32;<form><span>Bb</span></form>', 'Aa Bb'],
+  ['Aa<span> </span>&#32; <form><span>Bb</span></form>', 'Aa Bb'],
+  ['Aa<span> </span>&#9;<form><span>Bb</span></form>', 'Aa Bb'],
+  ['Aa<span> </span>&#32;<form></form><span>Bb</span>', 'Aa Bb'],
+  ['<b>Aa</b><i> </i>&#32;<form><span>Bb</span></form>', '**Aa** Bb'],
+  ['Aa<span> </span>&#32;<address>Bb</address>', 'Aa <address>Bb</address>'],
+  ['<ul><li>Aa<span> </span>&#32;<form><span>Bb</span></form></li></ul>', '- Aa Bb'],
+  ['<table><tr><td>Aa<span> </span>&#32;<form><span>Bb</span></form></td></tr></table>', '| Aa Bb |\n| --- |'],
+  // An emphasis closer still leaves it outside, and a line end takes it.
+  ['<strong>h<span> </span>&#32;</strong>x', '**h** x'],
+  ['Aa<span> </span>&#32;<p>Bb</p>', 'Aa\n\nBb'],
+  // A space written after it is still output like any other.
+  ['<strong>Aa<span> </span>&#32;<i></i> <blockquote></blockquote>Bb</strong>', '**Aa Bb**'],
+  ['Aa<span> </span>&#32;<blockquote>Bb</blockquote>', 'Aa\n\n> Bb'],
+  ['<ul><li>Aa<span> </span>&#32;<pre>Bb</pre></li></ul>', '- Aa\n\n  ```\n  Bb\n  ```'],
+  ['<ul><li><span>Aa </span><i></i><pre>Bb</pre></li></ul>', '- Aa\n\n  ```\n  Bb\n  ```'],
+])('keeps a decoded blank after a blank that opened an inline element: %s', async (html, expected) => {
+  expect(htmlToMarkdown(html)).toBe(expected)
+  for (let split = 0; split <= html.length; split++)
+    expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+})

@@ -1025,6 +1025,9 @@ pub struct ConvertState {
   /// in front of a pair, and given back when the pair turned out empty. It
   /// stood in the output, so only a line end takes it.
   pending_pair_separator: bool,
+  /// A decoded blank joined the pending separator a blank that opened an
+  /// inline element owes. It is content, so only a line end takes it.
+  pending_decoded_blank: bool,
   /// The separator at `pending_space_end` was trimmed from a closed inline
   /// element, or given back as one that was.
   pending_space_trimmed: bool,
@@ -1411,6 +1414,7 @@ impl ConvertState {
       pending_inline_whitespace: false,
       pending_leading_blank: false,
       pending_pair_separator: false,
+      pending_decoded_blank: false,
       pending_space_trimmed: false,
       pending_space_end: usize::MAX,
       separator_end: usize::MAX,

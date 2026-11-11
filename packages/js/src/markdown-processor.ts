@@ -95,6 +95,11 @@ export interface MarkdownState {
    * the output, so only a line end takes it.
    */
   pendingPairSeparator?: boolean
+  /**
+   * A decoded blank joined the pending separator a blank that opened an inline
+   * element owes. It is content, so only a line end takes it.
+   */
+  pendingDecodedBlank?: boolean
   /** Table processing state - specialized for Markdown tables */
   tableRenderedTable?: boolean
   tableCurrentRowCells?: number
@@ -1674,6 +1679,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     emptyItemAfterCr: false,
     pendingLeadingBlank: false,
     pendingPairSeparator: false,
+    pendingDecodedBlank: false,
     separatorPending: false,
     cacheFollowsSeparator: false,
     // A row or cell with no <table> ancestor still writes a table, as in Rust.
@@ -2148,6 +2154,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.pendingInlineWhitespace = true
       state.pendingLeadingBlank = true
       state.pendingPairSeparator = false
+      state.pendingDecodedBlank = false
     }
   }
 
@@ -2307,13 +2314,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // A blank that opened an inline element only stands in for a
         // separator the source does not write. A space it does write takes
         // that place and is output like any other, so an element that starts
-        // no line cannot take it. A decoded blank is content an emphasis
-        // closer would keep inside, and a separator an empty pair gave back
-        // stood in the output already, so both stay with the pending one.
+        // no line cannot take it. A separator an empty pair gave back stood in
+        // the output already, so a blank stays with it. A decoded blank is
+        // content an emphasis closer would keep inside, so it stays with the
+        // pending one too, which only a line end then takes.
         const blank = !hasNonWhitespace(textNode.value)
-        if (blank && !(textNode.value === ' ' && textNode.containsWhitespace
-          && state.pendingLeadingBlank && !state.pendingPairSeparator)) {
-          return
+        if (blank) {
+          if (!state.pendingLeadingBlank || state.pendingPairSeparator)
+            return
+          if (textNode.value !== ' ' || !textNode.containsWhitespace) {
+            state.pendingDecodedBlank = true
+            return
+          }
         }
         if (!blank && lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || '')
           && !(literalOpeners.length && followsLiteralOpener(state.buffer.length))
@@ -2837,6 +2849,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.pendingInlineWhitespace = true
             state.pendingLeadingBlank = false
             state.pendingPairSeparator = false
+            state.pendingDecodedBlank = false
             lastBuffEntry = buff.at(-1)!
             lastChar = String.fromCharCode(lastOutputChar(buff))
           }
@@ -3076,6 +3089,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.pendingInlineWhitespace = true
             state.pendingLeadingBlank = true
             state.pendingPairSeparator = false
+            state.pendingDecodedBlank = false
           }
           if (openMarkerFollowsSpace[slot] && buff[idx - 1] === ' ') {
             idx--
@@ -3084,6 +3098,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.pendingInlineWhitespace = true
             state.pendingLeadingBlank = true
             state.pendingPairSeparator = openMarkerSeparatorTrimmed[slot]
+            state.pendingDecodedBlank = false
           }
           if (restoresHeadingBreak)
             state.headingBreakPending = true
@@ -3184,10 +3199,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         || (!output && newLines === 0
           && (eventType === NodeEventExit || tagId === TAG_SVG || tagId === TAG_SCRIPT || tagId === TAG_STYLE))))) {
       const firstOutput = output?.[0]?.[0] || ''
-      // A trimmed separator an empty pair gave back stood in the output, so a
-      // block that starts no line does not take it. A quote does: it writes its
-      // `>` where it opens, which the separator would end up behind.
-      const owed = !!state.pendingPairSeparator && !(eventType === NodeEventEnter && tagId === TAG_BLOCKQUOTE)
+      // A trimmed separator an empty pair gave back stood in the output, and a
+      // decoded blank is content, so a block that starts no line takes
+      // neither. A quote does: it writes its `>` where it opens, which the
+      // separator would end up behind.
+      const opensQuote = eventType === NodeEventEnter && tagId === TAG_BLOCKQUOTE
+      const pairOwed = !!state.pendingPairSeparator && !opensQuote
+      const owed = pairOwed || (!!state.pendingDecodedBlank && !opensQuote)
       if (eventType === NodeEventEnter) {
         // A raw `<br>` (heading, table cell) is no line end, so it keeps the
         // separator like any inline output, as in Rust.
@@ -3203,7 +3221,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.lastContentCache = ' '
             lastChar = ' '
             pendingSpaceFragment = state.buffer.length - 1
-            pendingSpaceTrimmed = !state.pendingLeadingBlank || owed
+            // A decoded blank does not make it one: given back as trimmed, it
+            // would keep a space written after the pair from being output.
+            pendingSpaceTrimmed = !state.pendingLeadingBlank || pairOwed
           }
           state.pendingInlineWhitespace = false
         }
@@ -3313,6 +3333,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
                 state.pendingInlineWhitespace = true
                 state.pendingLeadingBlank = false
                 state.pendingPairSeparator = false
+                state.pendingDecodedBlank = false
               }
             }
           }

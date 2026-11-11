@@ -37,6 +37,8 @@ interface TextState extends MdreamRuntimeState {
   pendingInlineWhitespace?: boolean
   /** A blank that opened an inline element owes the pending separator. */
   pendingLeadingBlank?: boolean
+  /** A decoded blank joined that separator, so only a line end takes it. */
+  pendingDecodedBlank?: boolean
 }
 
 function trimAsciiWhitespaceEnd(value: string): string {
@@ -306,8 +308,9 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
 
   if (state.pendingInlineWhitespace) {
     const firstOutput = output?.[0] || ''
+    const owed = !!state.pendingDecodedBlank && !(eventType === NodeEventEnter && element.tagId === TAG_BLOCKQUOTE)
     if (eventType === NodeEventEnter) {
-      if (!isInline || element.tagId === TAG_BR || missingNewlines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+      if ((!isInline && !owed) || element.tagId === TAG_BR || missingNewlines > 0 || firstOutput === '\n' || firstOutput === '\r') {
         state.pendingInlineWhitespace = false
       }
       else if (firstOutput) {
@@ -317,7 +320,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
         state.pendingInlineWhitespace = false
       }
     }
-    else if (!isInline || missingNewlines > 0) {
+    else if ((!isInline && !owed) || missingNewlines > 0) {
       state.pendingInlineWhitespace = false
     }
   }
@@ -350,6 +353,7 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
         if (eventType === NodeEventExit && isInline) {
           state.pendingInlineWhitespace = true
           state.pendingLeadingBlank = false
+          state.pendingDecodedBlank = false
         }
       }
     }
@@ -458,6 +462,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
         && !state.pendingInlineWhitespace) {
         state.pendingInlineWhitespace = true
         state.pendingLeadingBlank = true
+        state.pendingDecodedBlank = false
       }
       return
     }
@@ -468,10 +473,17 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     const last = charOf(lastOutputChar(state.buffer))
     if (state.pendingInlineWhitespace) {
       // A space the source writes takes the place of the separator a blank
-      // that opened an inline element stands in for, as in Markdown output.
+      // that opened an inline element stands in for, and a decoded blank
+      // stays with that separator and makes it owed, as in Markdown output.
       const blank = !hasNonWhitespace(node.value)
-      if (blank && !(node.value === ' ' && node.containsWhitespace && state.pendingLeadingBlank))
-        return
+      if (blank) {
+        if (!state.pendingLeadingBlank)
+          return
+        if (node.value !== ' ' || !node.containsWhitespace) {
+          state.pendingDecodedBlank = true
+          return
+        }
+      }
       if (!blank && last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(node.value[0] || '')
         && !(literalOpeners.length && followsLiteralOpener())) {
         node.value = ` ${node.value}`

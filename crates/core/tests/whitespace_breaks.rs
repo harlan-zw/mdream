@@ -2893,3 +2893,73 @@ fn inline_code_in_a_list_item_keeps_its_separator_after_an_element_that_writes_n
     }
   }
 }
+
+#[test]
+fn decoded_blank_after_a_leading_blank_survives_an_element_that_starts_no_line() {
+  for (html, expected) in [
+    ("Aa<span> </span>&#32;<form><span>Bb</span></form>", "Aa Bb"),
+    (
+      "Aa<span> </span>&#32; <form><span>Bb</span></form>",
+      "Aa Bb",
+    ),
+    ("Aa<span> </span>&#9;<form><span>Bb</span></form>", "Aa Bb"),
+    ("Aa<span> </span>&#32;<form></form><span>Bb</span>", "Aa Bb"),
+    (
+      "<b>Aa</b><i> </i>&#32;<form><span>Bb</span></form>",
+      "**Aa** Bb",
+    ),
+    (
+      "Aa<span> </span>&#32;<address>Bb</address>",
+      "Aa <address>Bb</address>",
+    ),
+    (
+      "<ul><li>Aa<span> </span>&#32;<form><span>Bb</span></form></li></ul>",
+      "- Aa Bb",
+    ),
+    (
+      "<table><tr><td>Aa<span> </span>&#32;<form><span>Bb</span></form></td></tr></table>",
+      "| Aa Bb |\n| --- |",
+    ),
+    // An emphasis closer still leaves it outside, and a line end takes it.
+    ("<strong>h<span> </span>&#32;</strong>x", "**h** x"),
+    ("Aa<span> </span>&#32;<p>Bb</p>", "Aa\n\nBb"),
+    // A space written after it is still output like any other.
+    (
+      "<strong>Aa<span> </span>&#32;<i></i> <blockquote></blockquote>Bb</strong>",
+      "**Aa Bb**",
+    ),
+    (
+      "Aa<span> </span>&#32;<blockquote>Bb</blockquote>",
+      "Aa\n\n> Bb",
+    ),
+    // So does the line a deferred fence opens.
+    (
+      "<ul><li>Aa<span> </span>&#32;<pre>Bb</pre></li></ul>",
+      "- Aa\n\n  ```\n  Bb\n  ```",
+    ),
+    (
+      "<ul><li><span>Aa </span><i></i><pre>Bb</pre></li></ul>",
+      "- Aa\n\n  ```\n  Bb\n  ```",
+    ),
+    (
+      "<h2><span>Aa </span><i></i><pre>Bb</pre></h2>",
+      "## Aa```\nBb\n```",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+  for (html, expected) in [
+    ("Aa<span> </span>&#32;<form><span>Bb</span></form>", "Aa Bb"),
+    ("Aa<span> </span>&#32;<form></form><span>Bb</span>", "Aa Bb"),
+    (
+      "<ul><li>Aa<span> </span>&#32;<form><span>Bb</span></form></li></ul>",
+      "Aa Bb",
+    ),
+    ("<strong>h<span> </span>&#32;</strong>x", "h x"),
+  ] {
+    assert_text_every_split(html, expected);
+  }
+}

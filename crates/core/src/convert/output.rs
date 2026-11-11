@@ -529,6 +529,7 @@ impl ConvertState {
       self.pending_inline_whitespace = true;
       self.pending_leading_blank = true;
       self.pending_pair_separator = false;
+      self.pending_decoded_blank = false;
     }
   }
 
@@ -1676,6 +1677,7 @@ impl ConvertState {
           self.pending_inline_whitespace = true;
           self.pending_leading_blank = true;
           self.pending_pair_separator = open_marker.separator_trimmed;
+          self.pending_decoded_blank = false;
         }
         self.truncate_buffer(end);
         if open_marker.starts_at_hard_break {
@@ -2632,6 +2634,7 @@ impl ConvertState {
       self.pending_inline_whitespace = true;
       self.pending_leading_blank = false;
       self.pending_pair_separator = false;
+      self.pending_decoded_blank = false;
     }
 
     let link_text_end = self.buffer.len();
@@ -3630,16 +3633,18 @@ impl ConvertState {
       // A blank that opened an inline element only stands in for a separator
       // the source does not write. A space it does write takes that place and
       // is output like any other, so an element that starts no line cannot
-      // take it. A decoded blank is content an emphasis closer would keep
-      // inside, and a separator an empty pair gave back stood in the output
-      // already, so both stay with the pending one.
-      if text.as_bytes().iter().all(|&b| is_whitespace(b))
-        && !(text == " "
-          && contains_whitespace
-          && self.pending_leading_blank
-          && !self.pending_pair_separator)
-      {
-        return;
+      // take it. A separator an empty pair gave back stood in the output
+      // already, so a blank stays with it. A decoded blank is content an
+      // emphasis closer would keep inside, so it stays with the pending one
+      // too, which only a line end then takes.
+      if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
+        if !self.pending_leading_blank || self.pending_pair_separator {
+          return;
+        }
+        if text != " " || !contains_whitespace {
+          self.pending_decoded_blank |= !text.is_empty();
+          return;
+        }
       }
       let last = self.last_output_byte();
       let first = text.as_bytes()[0];
@@ -3647,9 +3652,11 @@ impl ConvertState {
       // A separator trimmed from a closed element is a wrap boundary. One a
       // blank that opened an inline element owes, or one an empty pair gave
       // back, stays outside the text, where a line break cannot set the text
-      // at a line start.
+      // at a line start. A deferred fence this text opens starts a line, which
+      // takes the separator.
       if !matches!(last, Some(b' ' | b'\n' | b'\t') | None)
         && !is_whitespace(first)
+        && !self.pre_fence_pending
         && !self.follows_literal_opener(self.buffer.len())
         && (self.open_markers.is_empty() || !self.hoist_opener_space())
       {
@@ -6718,15 +6725,17 @@ impl ConvertState {
         .caption_frames
         .last()
         .is_some_and(|frame| matches!(frame.state, CaptionState::Pending));
-    // A trimmed separator an empty pair gave back stood in the output, so a
-    // block that starts no line does not take it. A quote does: it writes its
-    // `>` where it opens, which the separator would end up behind.
-    let owed = self.pending_pair_separator
-      && !(is_enter
-        && self
-          .stack
-          .last()
-          .is_some_and(|node| node.tag_id == Some(TAG_BLOCKQUOTE)));
+    // A trimmed separator an empty pair gave back stood in the output, and a
+    // decoded blank is content, so a block that starts no line takes neither.
+    // A quote does: it writes its `>` where it opens, which the separator
+    // would end up behind.
+    let opens_quote = is_enter
+      && self
+        .stack
+        .last()
+        .is_some_and(|node| node.tag_id == Some(TAG_BLOCKQUOTE));
+    let pair_owed = self.pending_pair_separator && !opens_quote;
+    let owed = pair_owed || (self.pending_decoded_blank && !opens_quote);
     if self.pending_inline_whitespace && is_enter && !pending_caption {
       // A div enter with no output only groups content on the same line.
       let transparent_div = output_str.is_empty()
@@ -6754,7 +6763,9 @@ impl ConvertState {
           // Only Markdown drops an empty pair with the separator in front of it.
           if self.is_markdown() {
             self.pending_space_end = self.separator_end;
-            self.pending_space_trimmed = !self.pending_leading_blank || owed;
+            // A decoded blank does not make it one: given back as trimmed, it
+            // would keep a space written after the pair from being output.
+            self.pending_space_trimmed = !self.pending_leading_blank || pair_owed;
           }
         }
         self.pending_inline_whitespace = false;
@@ -6964,6 +6975,7 @@ impl ConvertState {
                 self.pending_inline_whitespace = true;
                 self.pending_leading_blank = false;
                 self.pending_pair_separator = false;
+                self.pending_decoded_blank = false;
               }
             }
           }
