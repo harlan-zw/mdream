@@ -176,6 +176,17 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<p>a<span> </span>&nbsp;</p>',
     '<table><tr><td>a<span> </span><span>&nbsp;</span>b</td></tr></table>',
   ], ['markdown', 'html']],
+  'written space after a blank that opened an inline element': [[
+    'Aa<span> </span> <form><span>Bb</span></form>',
+    'Aa<span> </span> <select><span>Bb</span></select>',
+    'Aa<span> </span>\n<form><span>Bb</span></form>',
+    'Aa<span> </span> <form></form><span>Bb</span>',
+    'Aa<strong> </strong> <form><span>Bb</span></form>',
+    'Aa<span> </span> <address>Bb</address>',
+    '<table><tr><td>Aa<span> </span> <blockquote>Bb</blockquote></td></tr></table>',
+    '<strong>h<span> </span>&#32;</strong>x',
+    'Aa<span> </span>&#32;<form><span>Bb</span></form>',
+  ], ['markdown', 'text']],
 }
 
 describe('javaScript engine matches Rust output', () => {

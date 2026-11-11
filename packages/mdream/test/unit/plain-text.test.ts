@@ -366,6 +366,10 @@ describe.each(engines)('inline text separators $name', (engineConfig) => {
     ['<figure>x<figcaption><span> <span>b</span></span></figcaption></figure>', 'x\n\nb'],
     ['<p>a</p><p><span> <span>b</span></span></p>', 'a\n\nb'],
     ['<p>a</p><p><span>&nbsp;<span>b</span></span></p>', 'a\n\n\u00A0b'],
+    ['Aa<span> </span> <form><span>Bb</span></form>', 'Aa Bb'],
+    ['Aa<span> </span> <form></form><span>Bb</span>', 'Aa Bb'],
+    ['<ul><li>Aa<span> </span> <form><span>Bb</span></form></li></ul>', 'Aa Bb'],
+    ['Aa<span> </span><form><span>Bb</span></form>', 'AaBb'],
   ])('preserves inline separators at every chunk width: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe(expected)

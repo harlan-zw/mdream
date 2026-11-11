@@ -2774,3 +2774,57 @@ fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
     }
   }
 }
+
+#[test]
+fn written_space_after_a_leading_blank_survives_an_element_that_starts_no_line() {
+  for (html, expected) in [
+    ("Aa<span> </span> <form><span>Bb</span></form>", "Aa Bb"),
+    (
+      "Aa<span> </span> <fieldset><span>Bb</span></fieldset>",
+      "Aa Bb",
+    ),
+    ("Aa<span> </span> <select><span>Bb</span></select>", "Aa Bb"),
+    ("Aa<span> </span>\n<form><span>Bb</span></form>", "Aa Bb"),
+    ("Aa<span> </span> <form></form><span>Bb</span>", "Aa Bb"),
+    ("Aa<strong> </strong> <form><span>Bb</span></form>", "Aa Bb"),
+    (
+      "Aa<span> </span> <address>Bb</address>",
+      "Aa <address>Bb</address>",
+    ),
+    (
+      "<ul><li>Aa<span> </span> <form><span>Bb</span></form></li></ul>",
+      "- Aa Bb",
+    ),
+    (
+      "<table><tr><td>Aa<span> </span> <blockquote>Bb</blockquote></td></tr></table>",
+      "| Aa > Bb |\n| --- |",
+    ),
+    (
+      r#"<a href="/x">Aa<span> </span> <form><span>Bb</span></form></a>"#,
+      "[Aa Bb](/x)",
+    ),
+    (
+      "<strong>Aa<span> </span> <form><span>Bb</span></form></strong>",
+      "**Aa Bb**",
+    ),
+    // The blank alone writes nothing there, and a decoded one stays owed.
+    ("Aa<span> </span><form><span>Bb</span></form>", "AaBb"),
+    ("<strong>h<span> </span>&#32;</strong>x", "**h** x"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+  for (html, expected) in [
+    ("Aa<span> </span> <form><span>Bb</span></form>", "Aa Bb"),
+    ("Aa<span> </span> <form></form><span>Bb</span>", "Aa Bb"),
+    (
+      "<ul><li>Aa<span> </span> <form><span>Bb</span></form></li></ul>",
+      "Aa Bb",
+    ),
+    ("Aa<span> </span><form><span>Bb</span></form>", "AaBb"),
+  ] {
+    assert_text_every_split(html, expected);
+  }
+}

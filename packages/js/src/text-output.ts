@@ -35,6 +35,8 @@ interface TextState extends MdreamRuntimeState {
   lastNode?: ElementNode | TextNode
   lastTextNode?: TextNode
   pendingInlineWhitespace?: boolean
+  /** A blank that opened an inline element owes the pending separator. */
+  pendingLeadingBlank?: boolean
 }
 
 function trimAsciiWhitespaceEnd(value: string): string {
@@ -345,8 +347,10 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
           : trimAsciiWhitespaceEnd(last)
       if (trimmed.length !== last.length) {
         buffer[buffer.length - 1] = trimmed
-        if (eventType === NodeEventExit && isInline)
+        if (eventType === NodeEventExit && isInline) {
           state.pendingInlineWhitespace = true
+          state.pendingLeadingBlank = false
+        }
       }
     }
     if (!keepsOwnSpaces)
@@ -450,8 +454,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     if (node.leadingBlank && !hasNonWhitespace(node.value)) {
       if (captionClosedSpacing === 0 && !(captionOpen > 0 && !captionContent)
         && openQuotes.at(-1) !== state.buffer.length - 1
-        && !(literalOpeners.length && followsLiteralOpener())) {
+        && !(literalOpeners.length && followsLiteralOpener())
+        && !state.pendingInlineWhitespace) {
         state.pendingInlineWhitespace = true
+        state.pendingLeadingBlank = true
       }
       return
     }
@@ -461,9 +467,12 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
     const last = charOf(lastOutputChar(state.buffer))
     if (state.pendingInlineWhitespace) {
-      if (!hasNonWhitespace(node.value))
+      // A space the source writes takes the place of the separator a blank
+      // that opened an inline element stands in for, as in Markdown output.
+      const blank = !hasNonWhitespace(node.value)
+      if (blank && !(node.value === ' ' && node.containsWhitespace && state.pendingLeadingBlank))
         return
-      if (last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(node.value[0] || '')
+      if (!blank && last && !' \n\t\r'.includes(last) && !' \n\t\r'.includes(node.value[0] || '')
         && !(literalOpeners.length && followsLiteralOpener())) {
         node.value = ` ${node.value}`
       }

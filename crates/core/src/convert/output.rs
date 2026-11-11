@@ -3627,7 +3627,18 @@ impl ConvertState {
 
     let mut wrap_separator = false;
     if self.pending_inline_whitespace {
-      if text.as_bytes().iter().all(|&b| is_whitespace(b)) {
+      // A blank that opened an inline element only stands in for a separator
+      // the source does not write. A space it does write takes that place and
+      // is output like any other, so an element that starts no line cannot
+      // take it. A decoded blank is content an emphasis closer would keep
+      // inside, and a separator an empty pair gave back stood in the output
+      // already, so both stay with the pending one.
+      if text.as_bytes().iter().all(|&b| is_whitespace(b))
+        && !(text == " "
+          && contains_whitespace
+          && self.pending_leading_blank
+          && !self.pending_pair_separator)
+      {
         return;
       }
       let last = self.last_output_byte();

@@ -2304,9 +2304,18 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // boundary. U+00A0 is content that needs it, not a blank that takes its
       // place.
       if (state.pendingInlineWhitespace) {
-        if (!hasNonWhitespace(textNode.value))
+        // A blank that opened an inline element only stands in for a
+        // separator the source does not write. A space it does write takes
+        // that place and is output like any other, so an element that starts
+        // no line cannot take it. A decoded blank is content an emphasis
+        // closer would keep inside, and a separator an empty pair gave back
+        // stood in the output already, so both stay with the pending one.
+        const blank = !hasNonWhitespace(textNode.value)
+        if (blank && !(textNode.value === ' ' && textNode.containsWhitespace
+          && state.pendingLeadingBlank && !state.pendingPairSeparator)) {
           return
-        if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || '')
+        }
+        if (!blank && lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(textNode.value[0] || '')
           && !(literalOpeners.length && followsLiteralOpener(state.buffer.length))
           && !(openMarkerCount && hoistOpenerSpace())) {
           if (textNode.generatedMarkdown?.prefix || state.pendingLeadingBlank) {

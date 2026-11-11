@@ -1111,3 +1111,24 @@ it.each([
     expect(await streamConvert(chunks), `width=${width}`).toBe(expected)
   }
 })
+
+it.each([
+  ['Aa<span> </span> <form><span>Bb</span></form>', 'Aa Bb'],
+  ['Aa<span> </span> <fieldset><span>Bb</span></fieldset>', 'Aa Bb'],
+  ['Aa<span> </span> <select><span>Bb</span></select>', 'Aa Bb'],
+  ['Aa<span> </span>\n<form><span>Bb</span></form>', 'Aa Bb'],
+  ['Aa<span> </span> <form></form><span>Bb</span>', 'Aa Bb'],
+  ['Aa<strong> </strong> <form><span>Bb</span></form>', 'Aa Bb'],
+  ['Aa<span> </span> <address>Bb</address>', 'Aa <address>Bb</address>'],
+  ['<ul><li>Aa<span> </span> <form><span>Bb</span></form></li></ul>', '- Aa Bb'],
+  ['<table><tr><td>Aa<span> </span> <blockquote>Bb</blockquote></td></tr></table>', '| Aa > Bb |\n| --- |'],
+  ['<a href="/x">Aa<span> </span> <form><span>Bb</span></form></a>', '[Aa Bb](/x)'],
+  ['<strong>Aa<span> </span> <form><span>Bb</span></form></strong>', '**Aa Bb**'],
+  // The blank alone writes nothing there, and a decoded one stays owed.
+  ['Aa<span> </span><form><span>Bb</span></form>', 'AaBb'],
+  ['<strong>h<span> </span>&#32;</strong>x', '**h** x'],
+])('keeps a written space after a blank that opened an inline element: %s', async (html, expected) => {
+  expect(htmlToMarkdown(html)).toBe(expected)
+  for (let split = 0; split <= html.length; split++)
+    expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+})
