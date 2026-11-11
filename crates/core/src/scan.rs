@@ -125,6 +125,19 @@ pub(crate) fn find_byte(hay: &[u8], needle: u8) -> Option<usize> {
   rest.iter().position(|&b| b == needle).map(|p| offset + p)
 }
 
+/// Occurrences of `needle`. `str::matches(char).count()` makes a searcher
+/// call per match, costly on many short lines; a byte-by-byte count is
+/// costly on long ones. Jumping with `find_byte` is cheap on both.
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+pub(crate) fn count_byte(hay: &[u8], needle: u8) -> usize {
+  let (mut count, mut rest) = (0, hay);
+  while let Some(p) = find_byte(rest, needle) {
+    count += 1;
+    rest = &rest[p + 1..];
+  }
+  count
+}
+
 /// First index of `needle` in `hay`. Used instead of `str::find(&str)`, whose
 /// two-way searcher costs about 2.6 KB of WASM; every needle here is a few
 /// bytes, so a first-byte scan and a compare is enough.
