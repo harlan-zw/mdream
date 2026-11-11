@@ -779,6 +779,87 @@ mod fast_path_parity {
     }
   }
 
+  /// Text that isolate-main or the filter excludes skips the copy and decode
+  /// on the plain fast path. Each document must match the general path, both
+  /// one-shot and streamed at every chunk size, with entities and whitespace
+  /// inside excluded text and text right after an excluded subtree.
+  #[test]
+  fn excluded_text_fast_path_matches_general_path() {
+    let filter = |exclude: &[&str]| FilterConfig {
+      exclude: Some(exclude.iter().map(|tag| (*tag).to_string()).collect()),
+      ..Default::default()
+    };
+    let option_sets = [
+      (
+        "isolate",
+        HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            isolate_main: Some(IsolateMainConfig),
+            ..Default::default()
+          }),
+          ..Default::default()
+        },
+      ),
+      (
+        "filter inline",
+        HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            filter: Some(filter(&["span", "nav"])),
+            ..Default::default()
+          }),
+          ..Default::default()
+        },
+      ),
+      (
+        "isolate+filter",
+        HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            isolate_main: Some(IsolateMainConfig),
+            filter: Some(filter(&["span", "footer", "b"])),
+            ..Default::default()
+          }),
+          ..Default::default()
+        },
+      ),
+    ];
+    let docs = [
+      // With <main>: excluded nav and footer around the main text.
+      "<nav>Menu &amp; <b>x</b></nav><main><h1>Title</h1><p>a <span>hidden &amp; x</span> <i>b</i> c</p></main><footer>F  &copy;</footer>  tail",
+      // Without <main>: text is skipped until the first heading.
+      "<div><span> skip &amp; me </span>   <h2>Head</h2><p>text &lt;<em>x</em> y</p></div><span>  </span>tail",
+      // Whitespace-only runs and text right after excluded subtrees.
+      "<header>  x  &amp;  </header>  after  <p>  </p>  <b> </b>  <h1>T</h1>\n<p>q &nbsp; r</p>",
+      "<p>one <span>two &amp; three</span> four <b>five</b> <span> </span>six</p>",
+      "<p>a<span> </span>  b</p><div>  <span>   </span> </div>",
+      "<main><p>x</p></main><main><span>y &amp;</span> z</main>",
+    ];
+    for (name, options) in option_sets {
+      for format in [OutputFormat::Markdown, OutputFormat::Text] {
+        for (i, html) in docs.iter().enumerate() {
+          let slow = convert(html, options.clone(), format, false);
+          let fast = convert(html, options.clone(), format, true);
+          assert!(
+            slow == fast,
+            "one-shot mismatch: options={name} format={format:?} doc={i}"
+          );
+          for size in [1, 3, 7, 4096] {
+            let parts = chunks(html, size);
+            let streamed_fast = stream(&parts, options.clone(), format, true);
+            let streamed_slow = stream(&parts, options.clone(), format, false);
+            assert!(
+              streamed_slow == streamed_fast,
+              "stream mismatch: options={name} format={format:?} doc={i} chunk={size}"
+            );
+            assert!(
+              streamed_fast == fast,
+              "stream differs from one-shot: options={name} format={format:?} doc={i} chunk={size}"
+            );
+          }
+        }
+      }
+    }
+  }
+
   /// Snippets where overridden and plain tags sit side by side: nested inline
   /// markup, links both inside and around overridden tags, lists, headings,
   /// code, tables, quotes, images, breaks and empty elements.
