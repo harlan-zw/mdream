@@ -927,6 +927,11 @@ pub struct ConvertState {
   filter_attr_bits: u16,
   pub has_extraction: bool,
   has_tag_overrides: bool,
+  /// The `override_idx` table is built and no override is an alias. Then a
+  /// built-in tag whose slot is `NO_OVERRIDE` has no override, so its fast path
+  /// can stay on while other tags are overridden. An alias breaks this: the node
+  /// carries the target's id, so the table cannot see the alias's override.
+  override_fast_ok: bool,
   /// Some plugin reads arbitrary attributes, so every tag captures all of them.
   /// `frontmatter` is absent deliberately: TAG_META's mask covers what it reads.
   attrs_force_all: bool,
@@ -1323,6 +1328,7 @@ impl ConvertState {
       has_extraction: false,
       filter_attr_bits: ATTR_NONE,
       has_tag_overrides: false,
+      override_fast_ok: false,
       override_idx: None,
       attrs_force_all: false,
 
@@ -1512,6 +1518,7 @@ impl ConvertState {
             }
           }
           s.override_idx = Some(idx);
+          s.override_fast_ok = ovs.iter().all(|(_, ov)| ov.alias_tag_id.is_none());
         }
       }
       if let Some(extraction) = &plugins.extraction {
@@ -4055,6 +4062,78 @@ mod tests {
 
     check(&["<p><b></b> 😀"]);
     check(&["<p><b></b> ", "😀"]);
+  }
+}
+
+#[cfg(test)]
+mod override_fast_gate_tests {
+  use super::*;
+  use crate::types::{PluginConfig, TagOverrideConfig};
+
+  fn state_with(overrides: Vec<(String, TagOverrideConfig)>) -> ConvertState {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    ConvertState::new(options, 4096, OutputFormat::Markdown)
+  }
+
+  /// Enter and exit overrides keep the per-tag gate; an alias turns it off.
+  #[test]
+  fn override_fast_ok_is_false_only_when_an_alias_is_present() {
+    let plain = state_with(vec![("em".into(), TagOverrideConfig::wrap("_", "_"))]);
+    assert!(plain.override_fast_ok);
+
+    let aliased = state_with(vec![("b".into(), TagOverrideConfig::alias("strong"))]);
+    assert!(!aliased.override_fast_ok);
+
+    let mixed = state_with(vec![
+      ("em".into(), TagOverrideConfig::wrap("_", "_")),
+      ("x-alias".into(), TagOverrideConfig::alias("em")),
+    ]);
+    assert!(!mixed.override_fast_ok);
+
+    let none = ConvertState::new(
+      HtmlToMarkdownOptions::default(),
+      4096,
+      OutputFormat::Markdown,
+    );
+    assert!(!none.override_fast_ok);
+  }
+
+  /// Only the overridden tag leaves the fast path; its neighbours keep it.
+  #[test]
+  fn only_the_overridden_tag_leaves_the_fast_path() {
+    let state = state_with(vec![("em".into(), TagOverrideConfig::wrap("_", "_"))]);
+    assert!(!state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(state.element_fast_path_ok(Some(TAG_STRONG)));
+    assert!(state.link_fast_path_ok(Some(TAG_A)));
+    assert!(!state.element_fast_path_ok(None));
+  }
+
+  /// An override for a tag the document never uses still leaves every
+  /// element on its fast path.
+  #[test]
+  fn override_for_an_absent_tag_keeps_fast_paths() {
+    let state = state_with(vec![(
+      "video".into(),
+      TagOverrideConfig::wrap("[v]", "[/v]"),
+    )]);
+    assert!(state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(!state.element_fast_path_ok(Some(TAG_VIDEO)));
+  }
+
+  /// An alias makes the id table unable to see the alias node, so no
+  /// element may take a fast path.
+  #[test]
+  fn alias_override_turns_every_fast_path_off() {
+    let state = state_with(vec![("b".into(), TagOverrideConfig::alias("strong"))]);
+    assert!(!state.element_fast_path_ok(Some(TAG_STRONG)));
+    assert!(!state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(!state.link_fast_path_ok(Some(TAG_A)));
   }
 }
 

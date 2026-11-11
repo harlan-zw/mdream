@@ -1128,20 +1128,34 @@ impl ConvertState {
     self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block()
   }
 
-  /// State every fast path needs: Markdown output, no overrides or pending fence, no caption.
+  /// State every fast path needs: Markdown output, no pending fence, no caption,
+  /// and no override on this tag.
   #[inline(always)]
-  fn common_fast_path_ok(&self) -> bool {
+  fn common_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
     self.is_markdown()
-      && !self.has_tag_overrides
+      && (!self.has_tag_overrides || self.override_slot_empty(tag_id))
       && !self.pre_fence_pending
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
       && self.fast_paths_enabled()
   }
 
+  /// Whether a built-in tag has no override, so its fast path may run while
+  /// other tags are overridden. Only valid when `override_fast_ok` holds.
+  #[inline(never)]
+  fn override_slot_empty(&self, tag_id: Option<u8>) -> bool {
+    self.override_fast_ok
+      && tag_id.is_some_and(|id| {
+        self
+          .override_idx
+          .as_deref()
+          .is_some_and(|idx| idx[id as usize] == NO_OVERRIDE)
+      })
+  }
+
   #[inline(always)]
   pub(crate) fn element_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
-    tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize]) && self.common_fast_path_ok()
+    tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize]) && self.common_fast_path_ok(tag_id)
   }
 
   /// Open the inline marker an enter wrote, or drop the markers its text closes.
@@ -1636,7 +1650,7 @@ impl ConvertState {
   #[inline(always)]
   pub(crate) fn link_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
     tag_id == Some(TAG_A)
-      && self.common_fast_path_ok()
+      && self.common_fast_path_ok(tag_id)
       && self.options.max_node_bytes == 0
       && !self.raw_html_block_open
       && self.depth_map[TAG_PRE as usize] == 0
