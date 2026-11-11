@@ -923,6 +923,106 @@ mod fast_path_parity {
       }
     }
   }
+
+  /// `<li>` shapes for the item fast path: markers, empty and nested items,
+  /// breaks and blocks that end an item, skipped siblings, and isolated main.
+  const LI_SNIPPETS: &[&str] = &[
+    r#"<ul><li>a</li><li>b</li></ul>"#,
+    r#"<ol start="5"><li>a</li><li>b</li></ol>"#,
+    r#"<ol start="0"><li>a</li></ol>"#,
+    r#"<ol start="999999999999"><li>a</li></ol>"#,
+    r#"<ol><li>a<ol start="3"><li>b</li></ol></li></ol>"#,
+    "<ul><li></li></ul>",
+    "<p>x</p><ul><li></li></ul>",
+    "<div>x<ul><li></li></ul></div>",
+    "<ul><li>   </li><li>x</li></ul>",
+    "<ul><li>a<br></li><li>b</li></ul>",
+    "<ul><li>a<br><br></li></ul>",
+    "<ul><li>a<br><p>b</p></li></ul>",
+    "<ul><li><p>a</p><p>b</p></li><li>c</li></ul>",
+    "<ul><li><h2>x</h2></li>y</ul>",
+    "<ul><li><h2>x</h2></li><li>y</li></ul>",
+    "<ul><li>a<hr></li><li>b</li></ul>",
+    "<ul><li><hr></li></ul>",
+    "<ul><li><blockquote>q</blockquote></li><li>x</li></ul>",
+    "<ul><li><pre><code>x\ny</code></pre></li><li>z</li></ul>",
+    "<ul><li><code>a</li><li>b</code></li></ul>",
+    "<ul><li><em>x</li><li>y</em></ul>",
+    "<ul><li><em></em></li><li>x</li></ul>",
+    r#"<ul><li><a href="x">a</li><li>b</a></li></ul>"#,
+    r##"<ul><li><a href="#"></a></li></ul>"##,
+    "<ul><li>a</li> text <li>b</li></ul>",
+    "<ul><li>a</li><!-- c --><li>b</li></ul>",
+    "<ul><li>a</li><script>x</script><li>b</li></ul>",
+    "<li>a</li><li>b</li>",
+    "<div><li>a</li><li>b</li></div>",
+    "<ul><li><li>x</li></li></ul>",
+    "<table><tr><td><ul><li>a</li><li>b</li></ul></td></tr></table>",
+    r#"<ul><li><img alt="x" src="y"></li></ul>"#,
+    r#"<ul><li><input type="checkbox" checked> task</li></ul>"#,
+    "<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>",
+    "<ul><li><blockquote><ul><li>q</li></ul></blockquote></li><li>r</li></ul>",
+    r#"<ol><li>a</li><li>b<ol start="2"><li>c</li></ol></li></ol>"#,
+    "<ul><li>a\n</li>\n<li>  b  </li></ul>",
+    "<figure><figcaption><ul><li>x</li></ul></figcaption></figure>",
+    "<details><summary>s</summary><ul><li>x</li></ul></details>",
+    "<address>a</address><ul><li>x</li></ul>",
+    "<main><ul><li>a</li></ul></main><ul><li>b</li></ul>",
+    "<header>h</header><ul><li>a</li></ul><main><ul><li>b</li></ul></main>",
+  ];
+
+  /// Plain `<li>` output must match the general path under every option that
+  /// reaches it: clean, the node-byte cap, isolated main, and a tag override on
+  /// `ul` (li keeps its fast path) or on `li` (li takes the general path).
+  #[test]
+  fn li_fast_path_matches_general_path() {
+    let overrides: [(&str, Vec<(String, TagOverrideConfig)>); 3] = [
+      ("no override", Vec::new()),
+      (
+        "ul override",
+        vec![("ul".into(), TagOverrideConfig::wrap("[", "]"))],
+      ),
+      (
+        "li override",
+        vec![("li".into(), TagOverrideConfig::wrap("(", ")"))],
+      ),
+    ];
+    for (ov_name, ov) in &overrides {
+      for clean in [false, true] {
+        for max_node_bytes in [0, 16, 64] {
+          for isolate_main in [false, true] {
+            for format in [OutputFormat::Markdown, OutputFormat::Text] {
+              let options = || HtmlToMarkdownOptions {
+                clean: clean.then(CleanConfig::all),
+                max_node_bytes,
+                plugins: Some(PluginConfig {
+                  isolate_main: isolate_main.then_some(IsolateMainConfig),
+                  tag_overrides: (!ov.is_empty()).then(|| ov.clone()),
+                  ..Default::default()
+                }),
+                ..Default::default()
+              };
+              for (i, html) in LI_SNIPPETS.iter().enumerate() {
+                let label = format!(
+                  "overrides={ov_name} clean={clean} max={max_node_bytes} \
+                   isolate={isolate_main} format={format:?} doc={i}"
+                );
+                let slow = convert(html, options(), format, false);
+                let fast = convert(html, options(), format, true);
+                assert!(slow == fast, "one-shot mismatch: {label}");
+                for size in [1, 2, 3, 7, 4096] {
+                  let parts = chunks(html, size);
+                  let slow = stream(&parts, options(), format, false);
+                  let fast = stream(&parts, options(), format, true);
+                  assert!(slow == fast, "stream mismatch: {label} chunk={size}");
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 #[cfg(test)]

@@ -1500,10 +1500,17 @@ impl ConvertState {
 
     // Inline emit (no callback!)
     if !skip_node {
-      if self.element_fast_path_ok(tag_id) {
-        self.emit_enter_simple(false);
-      } else if self.link_fast_path_ok(tag_id) {
-        self.emit_enter_simple(true);
+      // Every fast path needs Markdown, so other formats test that once here.
+      if self.is_markdown() {
+        if self.element_fast_path_ok(tag_id) {
+          self.emit_enter_simple::<false>(false);
+        } else if self.link_fast_path_ok(tag_id) {
+          self.emit_enter_simple::<false>(true);
+        } else if tag_id == Some(TAG_LI) && self.li_fast_path_ok() {
+          self.emit_enter_simple::<true>(false);
+        } else {
+          self.emit_enter_element();
+        }
       } else {
         self.emit_enter_element();
       }
@@ -1559,6 +1566,15 @@ impl ConvertState {
       self_closing,
       skip: false,
     }
+  }
+
+  /// The general exit. It takes the retired node out of the stack, since
+  /// `emit_exit_element` needs it owned, and puts it back afterwards.
+  #[inline(always)]
+  fn close_node_general_exit(&mut self) {
+    let node = self.stack.take_retired();
+    self.emit_exit_element(&node);
+    self.stack.restore_retired(node);
   }
 
   pub(crate) fn close_node(&mut self) {
@@ -1717,14 +1733,25 @@ impl ConvertState {
     }
 
     // The general exit needs the node owned; the fast ones read it in place.
-    if self.element_fast_path_ok(node_tag_id) {
-      self.emit_exit_simple(false);
-    } else if self.link_fast_path_ok(node_tag_id) {
-      self.emit_exit_simple(true);
+    // Every fast path needs Markdown, so other formats test that once here.
+    if self.is_markdown() {
+      if self.element_fast_path_ok(node_tag_id) {
+        self.emit_exit_simple::<false>(false);
+      } else if self.link_fast_path_ok(node_tag_id) {
+        self.emit_exit_simple::<false>(true);
+      } else if node_tag_id == Some(TAG_LI)
+        && !node_excluded
+        // A skipped item keeps the general exit, which clears the heading break
+        // even though no output was written for it.
+        && !node_enter_skipped
+        && self.li_fast_path_ok()
+      {
+        self.emit_exit_simple::<true>(false);
+      } else {
+        self.close_node_general_exit();
+      }
     } else {
-      let node = self.stack.take_retired();
-      self.emit_exit_element(&node);
-      self.stack.restore_retired(node);
+      self.close_node_general_exit();
     }
     self.stack.release_retired();
 

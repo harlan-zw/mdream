@@ -1168,6 +1168,20 @@ impl ConvertState {
     tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize]) && self.common_fast_path_ok(tag_id)
   }
 
+  /// A plain `<li>` takes the simple emitters with the item steps added. Kept
+  /// out of `SIMPLE_EMIT_TAG` so the other tags never test for it.
+  /// Same gate as `common_fast_path_ok(Some(TAG_LI))`. The li slot is decided
+  /// once at setup, so this reads a bool instead of the override table.
+  #[inline(always)]
+  pub(crate) fn li_fast_path_ok(&self) -> bool {
+    self.is_markdown()
+      && self.li_slot_free
+      && !self.pre_fence_pending
+      && self.caption_boundary == CaptionBoundary::None
+      && self.caption_frames.is_empty()
+      && self.fast_paths_enabled()
+  }
+
   /// Open the inline marker an enter wrote, or drop the markers its text closes.
   #[inline(always)]
   fn record_enter_marker(
@@ -1372,14 +1386,25 @@ impl ConvertState {
     }
   }
 
-  /// Simple-tag enter; `link` selects the `<a>` variant.
+  /// Simple-tag enter; `link` selects the `<a>` variant and `LI` the list item
+  /// variant, which adds the item marker step. Other tags compile that step out.
   #[inline(never)]
-  pub(crate) fn emit_enter_simple(&mut self, link: bool) {
+  pub(crate) fn emit_enter_simple<const LI: bool>(&mut self, link: bool) {
+    self.emit_enter_body(link, LI);
+  }
+
+  /// Body of `emit_enter_simple`. Native inlines it into each const instance.
+  /// On wasm32 both instances share this one copy and `li` is a runtime flag.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  fn emit_enter_body(&mut self, link: bool, li: bool) {
     let stack_len = self.stack.len();
     debug_assert!(
       stack_len > 0
         && if link {
           self.link_fast_path_ok(self.stack[stack_len - 1].tag_id)
+        } else if li {
+          self.li_fast_path_ok() && self.stack[stack_len - 1].tag_id == Some(TAG_LI)
         } else {
           self.element_fast_path_ok(self.stack[stack_len - 1].tag_id)
         }
@@ -1510,6 +1535,17 @@ impl ConvertState {
       tag_id.and_then(Self::inline_marker_type).is_some()
     });
 
+    if li {
+      #[cfg(test)]
+      {
+        self.li_simple_enters += 1;
+      }
+      // Same step as the general enter, which arms the empty-item guard.
+      if !plain_text!(self) && !self.in_table_cell() {
+        self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+      }
+    }
+
     self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
 
     if !is_inline && !self.open_markers.is_empty() {
@@ -1600,19 +1636,39 @@ impl ConvertState {
     self.last_node_is_inline = is_inline;
   }
 
-  /// Simple-tag exit; `link` selects the `<a>` variant.
+  /// Simple-tag exit; `link` selects the `<a>` variant and `LI` the list item
+  /// variant, which adds the item steps of the general exit.
   #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
   #[cfg_attr(target_arch = "wasm32", inline(never))]
-  pub(crate) fn emit_exit_simple(&mut self, link: bool) {
+  pub(crate) fn emit_exit_simple<const LI: bool>(&mut self, link: bool) {
+    self.emit_exit_body(link, LI);
+  }
+
+  /// Body of `emit_exit_simple`; see `emit_enter_body` for the wasm32 split.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  fn emit_exit_body(&mut self, link: bool, li: bool) {
     let node = self.stack.retired();
     debug_assert!(if link {
       self.link_fast_path_ok(node.tag_id)
+    } else if li {
+      self.li_fast_path_ok() && node.tag_id == Some(TAG_LI)
     } else {
       self.element_fast_path_ok(node.tag_id)
     });
     if node.excluded_from_markdown || node.enter_skipped {
       self.last_node_is_inline = node.is_inline;
       return;
+    }
+    if li {
+      #[cfg(test)]
+      {
+        self.li_simple_exits += 1;
+      }
+      // The general exit clears these first. Skipping that would let a pending
+      // heading break or list rule reach the text after the item.
+      self.list_rule_pending = false;
+      self.heading_break_pending = false;
     }
     let tag_id = node.tag_id;
     let is_inline = node.is_inline;
@@ -1639,6 +1695,22 @@ impl ConvertState {
     }
 
     self.release_markers_on_exit(!is_inline, output.as_deref());
+
+    if li {
+      // A hard break already ended the item, so its continuation indent must
+      // not become a whitespace-only line. This runs before `output_start` is
+      // taken: resolving the marker can insert a newline before it.
+      if self.hard_break_end == self.buffer.len()
+        && !self.empty_item_hazard
+        && self.depth_map[TAG_PRE as usize] == 0
+        && !self.in_table_cell()
+      {
+        self.trim_trailing_spaces();
+        self.hard_break_end = self.buffer.len();
+      }
+      self.pending_raw_html_boundary = false;
+      self.resolve_item_marker(true);
+    }
 
     let output_start = self.buffer.len();
     if let Some(output) = output.as_deref()

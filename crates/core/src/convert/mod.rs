@@ -932,6 +932,9 @@ pub struct ConvertState {
   /// can stay on while other tags are overridden. An alias breaks this: the node
   /// carries the target's id, so the table cannot see the alias's override.
   override_fast_ok: bool,
+  /// No override names `li`, or the override table cannot tell. Set once at
+  /// setup so each item's gate reads one bool instead of the table.
+  li_slot_free: bool,
   /// Some plugin reads arbitrary attributes, so every tag captures all of them.
   /// `frontmatter` is absent deliberately: TAG_META's mask covers what it reads.
   attrs_force_all: bool,
@@ -1194,6 +1197,12 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Test-only count of `<li>` enters taken by the simple emitter.
+  #[cfg(test)]
+  pub(crate) li_simple_enters: usize,
+  /// Test-only count of `<li>` exits taken by the simple emitter.
+  #[cfg(test)]
+  pub(crate) li_simple_exits: usize,
   /// Test/fuzz switch: `false` routes everything through the general path.
   #[cfg(any(test, fuzzing))]
   pub(crate) fast_paths: bool,
@@ -1329,6 +1338,7 @@ impl ConvertState {
       filter_attr_bits: ATTR_NONE,
       has_tag_overrides: false,
       override_fast_ok: false,
+      li_slot_free: true,
       override_idx: None,
       attrs_force_all: false,
 
@@ -1452,6 +1462,10 @@ impl ConvertState {
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
+      #[cfg(test)]
+      li_simple_enters: 0,
+      #[cfg(test)]
+      li_simple_exits: 0,
       #[cfg(any(test, fuzzing))]
       fast_paths: true,
       #[cfg(test)]
@@ -1501,6 +1515,8 @@ impl ConvertState {
       s.has_frontmatter = plugins.frontmatter.is_some();
       if let Some(ovs) = &plugins.tag_overrides {
         s.has_tag_overrides = true;
+        // Stays false when the table is not built below.
+        s.li_slot_free = false;
         s.fences_unreliable = ovs
           .iter()
           .any(|(_, ov)| ov.enter.is_some() || ov.exit.is_some());
@@ -1517,8 +1533,10 @@ impl ConvertState {
               idx[id as usize] = i;
             }
           }
+          s.li_slot_free = idx[TAG_LI as usize] == NO_OVERRIDE;
           s.override_idx = Some(idx);
           s.override_fast_ok = ovs.iter().all(|(_, ov)| ov.alias_tag_id.is_none());
+          s.li_slot_free &= s.override_fast_ok;
         }
       }
       if let Some(extraction) = &plugins.extraction {
@@ -4134,6 +4152,39 @@ mod override_fast_gate_tests {
     assert!(!state.element_fast_path_ok(Some(TAG_STRONG)));
     assert!(!state.element_fast_path_ok(Some(TAG_EM)));
     assert!(!state.link_fast_path_ok(Some(TAG_A)));
+  }
+
+  /// Counts of `<li>` enters and exits the simple emitter took for
+  /// `<ul><li>a</li></ul>` under the given overrides and format.
+  fn li_simple_paths(
+    overrides: Vec<(String, TagOverrideConfig)>,
+    format: OutputFormat,
+  ) -> (usize, usize) {
+    let html = "<ul><li>a</li></ul>";
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(crate::types::PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let mut state = ConvertState::new(options, 4096, format);
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    (state.li_simple_enters, state.li_simple_exits)
+  }
+
+  /// A plain `<li>` takes the item fast path on both enter and exit. An
+  /// override on `ul` leaves it there, and an override on `li` itself sends it
+  /// to the general path. Text output never takes a Markdown fast path.
+  #[test]
+  fn plain_li_takes_the_item_fast_path() {
+    let ul = || vec![("ul".into(), TagOverrideConfig::wrap("[", "]"))];
+    let li = || vec![("li".into(), TagOverrideConfig::wrap("(", ")"))];
+    assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Markdown), (1, 1));
+    assert_eq!(li_simple_paths(ul(), OutputFormat::Markdown), (1, 1));
+    assert_eq!(li_simple_paths(li(), OutputFormat::Markdown), (0, 0));
+    assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Text), (0, 0));
   }
 }
 
