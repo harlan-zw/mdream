@@ -218,6 +218,11 @@ export interface TextNode extends Node {
    * the output is at the start of a line.
    */
   trimsAtLineStart?: boolean
+  /**
+   * How many whitespace characters lead the text in the source. Whitespace
+   * decoded from a character reference is content and is not counted.
+   */
+  sourceLead?: number
 }
 
 /**

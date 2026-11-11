@@ -68,7 +68,7 @@ import {
 } from './const'
 import { parserTagHandlers } from './parser-tags'
 import { resolveUrl } from './url'
-import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+import { decodeHTMLEntities, leadingWhitespaceLength, traverseUpToFirstBlockNode } from './utils'
 
 // The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
 const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
@@ -1494,6 +1494,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     if (rootText.length === 0) {
       return
     }
+    const sourceLead = containsWhitespace ? leadingWhitespaceLength(rootText) : 0
     if (state.hasEncodedHtmlEntity) {
       rootText = decodeHTMLEntities(String(rootText), false, shouldProtectDecodedEntityReferences(state))
       state.hasEncodedHtmlEntity = false
@@ -1509,8 +1510,10 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     }
     if (state.endTagClosedNothing)
       rootTextNode.joinsPrevious = true
-    if (containsWhitespace)
+    if (sourceLead !== 0) {
       rootTextNode.trimsAtLineStart = true
+      rootTextNode.sourceLead = sourceLead
+    }
     state.endTagClosedNothing = false
     handleEvent({ type: NodeEventEnter, node: rootTextNode })
     state.lastTextNode = rootTextNode
@@ -1553,6 +1556,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     }
   }
 
+  const sourceLead = containsWhitespace && !inPreTag ? leadingWhitespaceLength(text) : 0
   if (state.hasEncodedHtmlEntity) {
     text = decodeHTMLEntities(String(text), false, shouldProtectDecodedEntityReferences(state))
     state.hasEncodedHtmlEntity = false
@@ -1572,6 +1576,8 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     textNode.joinsPrevious = true
   if (inlineAtRoot)
     textNode.trimsAtLineStart = true
+  if (sourceLead !== 0)
+    textNode.sourceLead = sourceLead
   state.endTagClosedNothing = false
 
   for (const parent of parentsToIncrement) {

@@ -317,16 +317,8 @@ export function trimOutputStart(value: string): string {
   return start === 0 ? value : value.slice(start)
 }
 
-/**
- * Drop the leading whitespace of text flagged `trimsAtLineStart` when the
- * output is empty or ends a line. Parity with the Rust engine, which trims the
- * first text of a block that way when the text has no block ancestor.
- */
-export function trimTextAtLineStart(node: TextNode, buffer: readonly string[]): void {
-  const last = lastOutputChar(buffer)
-  if (last !== -1 && last !== 10)
-    return
-  const value = node.value
+/** Length of the run of HTML whitespace that leads `value`. */
+export function leadingWhitespaceLength(value: string): number {
   let start = 0
   while (start < value.length) {
     const code = value.charCodeAt(start)
@@ -334,8 +326,32 @@ export function trimTextAtLineStart(node: TextNode, buffer: readonly string[]): 
       break
     start++
   }
+  return start
+}
+
+/**
+ * Drop the whitespace that led the text in the source. The Rust engine trims
+ * before it decodes character references, so whitespace that came from one
+ * stays, and a plugin may have rewritten the text since it was parsed.
+ */
+export function dropSourceLead(node: TextNode): void {
+  const start = Math.min(node.sourceLead!, leadingWhitespaceLength(node.value))
+  node.sourceLead = 0
   if (start !== 0)
-    node.value = value.slice(start)
+    node.value = node.value.slice(start)
+}
+
+/**
+ * Drop the leading whitespace of text flagged `trimsAtLineStart` when the
+ * output is empty or ends a line. Parity with the Rust engine, which trims the
+ * first text of a block that way when the text has no block ancestor.
+ */
+export function trimTextAtLineStart(node: TextNode, buffer: readonly string[]): void {
+  if (!node.sourceLead)
+    return
+  const last = lastOutputChar(buffer)
+  if (last === -1 || last === 10)
+    dropSourceLead(node)
 }
 
 /**
