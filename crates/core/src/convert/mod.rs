@@ -3262,6 +3262,13 @@ impl ConvertState {
     }
   }
 
+  /// Whether the open link's `[` ends the output, so text written now leads
+  /// its label.
+  #[inline]
+  pub(crate) fn leads_link_label(&self) -> bool {
+    self.link.open && self.link.bracket_emitted && self.link.bracket_pos + 1 == self.buffer.len()
+  }
+
   #[inline]
   fn open_link_hold_floor(&self) -> Option<usize> {
     std::iter::once(&self.link)

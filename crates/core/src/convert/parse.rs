@@ -556,7 +556,7 @@ impl ConvertState {
           .as_bytes()
           .last()
           .is_none_or(|&last| last == b'\n'));
-    if contains_whitespace && is_first_text_in_block {
+    if contains_whitespace && (is_first_text_in_block || self.leads_link_label()) {
       let bytes = text.as_bytes();
       let mut start = 0;
       while start < bytes.len() && is_whitespace(bytes[start]) {
@@ -666,7 +666,7 @@ impl ConvertState {
           Some(&last) => last == b'\n',
           None => !self.is_html() || self.flushed_tail[1] == b'\n',
         });
-    if contains_whitespace && is_first_text_in_block {
+    if contains_whitespace && (is_first_text_in_block || (!in_pre_tag && self.leads_link_label())) {
       let mut start = 0;
       let bytes = text.as_bytes();
       while start < bytes.len()
