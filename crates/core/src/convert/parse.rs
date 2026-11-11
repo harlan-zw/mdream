@@ -948,6 +948,7 @@ impl ConvertState {
     self.apply_opening_tag(
       tag_name,
       tag_id,
+      tag_handler,
       is_builtin,
       scan.new_position,
       scan.self_closing,
@@ -959,17 +960,9 @@ impl ConvertState {
   /// reads attributes the handlers do not.
   #[inline]
   pub(crate) fn attr_mask(&self, tag_handler: Option<&crate::types::TagHandler>) -> u16 {
-    if self.attrs_force_all {
-      ATTR_ALL
-    } else {
-      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
-        | if self.has_tailwind {
-          ATTR_CLASS
-        } else {
-          ATTR_NONE
-        }
-        | self.filter_attr_bits
-    }
+    // `attr_extra_mask` is `ATTR_ALL` when every attribute is wanted, and that
+    // absorbs the handler's bits, so no branch is needed here.
+    tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs) | self.attr_extra_mask
   }
 
   /// The first `<base href>` replaces `origin` when it resolves to an HTTP(S)
@@ -997,17 +990,19 @@ impl ConvertState {
 
   /// Open an element whose attributes are already scanned into `attr_scratch`:
   /// tree recovery, overflow handling and node creation.
+  // The arguments are kept separate: packing the flags into a struct measured
+  // slower, so the lint is allowed here.
+  #[allow(clippy::too_many_arguments)]
   pub(crate) fn apply_opening_tag(
     &mut self,
     tag_name: &str,
     tag_id: Option<u8>,
+    tag_handler: Option<&'static crate::types::TagHandler>,
     is_builtin: bool,
     new_position: usize,
     self_closing: bool,
     overflow: bool,
   ) -> OpeningTagResult {
-    let tag_handler = tag_id.and_then(get_tag_handler);
-
     // A retained attribute outgrew `max_node_bytes`. Drop the tag whole, as an
     // over-cap tag always has; the children it would have wrapped still parse.
     if overflow {
@@ -1150,8 +1145,9 @@ impl ConvertState {
       }
     }
 
-    let in_overflow =
-      !self_closing && (self.overflow_same_name_depth > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH);
+    // Read once: the stack is not resized between here and the node push.
+    let deep = self.stack.len() >= MAX_ELEMENT_DEPTH;
+    let in_overflow = !self_closing && (self.overflow_same_name_depth > 0 || deep);
     let overflow_plugin_mode = if in_overflow {
       self.overflow_plugin_mode(
         tag_name,
@@ -1189,7 +1185,7 @@ impl ConvertState {
       };
     }
 
-    if !self_closing && self.stack.len() >= MAX_ELEMENT_DEPTH {
+    if !self_closing && deep {
       self.enter_overflow(
         tag_name,
         tag_id,
@@ -1224,7 +1220,9 @@ impl ConvertState {
     }
     self.depth += 1;
 
-    let current_walk_index = self.stack.last().map_or(0, |n| n.current_walk_index);
+    // The parent is the top node, so its walk index is the one `stack.last()` gave.
+    let parent = self.stack.len().checked_sub(1);
+    let current_walk_index = parent.map_or(0, |p| self.stack[p].current_walk_index);
     let extras = NodeExtras::for_tag(is_builtin, tag_name);
 
     let (mut h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) =
@@ -1265,7 +1263,6 @@ impl ConvertState {
     }
 
     // Filled in place: a built-then-moved node stalls store forwarding.
-    let parent = self.stack.len().checked_sub(1);
     let idx = self.stack.len();
     let parent_hidden = self.has_plugins
       && self.has_tailwind
@@ -1440,20 +1437,22 @@ impl ConvertState {
       }
     }
 
-    tag.excluded_from_markdown = in_template
+    let excluded_from_markdown = in_template
       || filter_excluded
       || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
+    tag.excluded_from_markdown = excluded_from_markdown;
     tag.enter_skipped = skip_node;
 
-    if tag.collapses_inner_white_space && !tag.excluded_from_markdown {
-      if tag.tag_id == Some(TAG_SPAN) {
+    // Read from the locals that were stored into the node, not back from it.
+    if h_collapses && !excluded_from_markdown {
+      if tag_id == Some(TAG_SPAN) {
         self.collapse_span_depth = self.collapse_span_depth.saturating_add(1);
       } else {
         self.collapse_non_span_depth = self.collapse_non_span_depth.saturating_add(1);
       }
     }
 
-    if !tag.is_inline {
+    if !h_inline {
       self.first_block_parent_index = Some(idx);
       self.block_parent_indices.push(idx);
     }
@@ -1573,7 +1572,7 @@ impl ConvertState {
 
     self.has_encoded_html_entity = false;
 
-    if self.stack.last().is_some_and(|n| n.is_non_nesting) && !self_closing {
+    if h_non_nesting && !self_closing {
       self.in_non_nesting = true;
     }
 
