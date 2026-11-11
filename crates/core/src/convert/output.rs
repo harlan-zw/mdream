@@ -1138,16 +1138,23 @@ impl ConvertState {
     self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block()
   }
 
-  /// State every fast path needs: Markdown output, no pending fence, no caption,
+  /// State every simple emitter needs in Markdown and in Text: no pending
+  /// fence, no caption, and fast paths on.
+  #[inline(always)]
+  fn fast_path_state_ok(&self) -> bool {
+    !self.pre_fence_pending
+      && self.caption_boundary == CaptionBoundary::None
+      && self.caption_frames.is_empty()
+      && self.fast_paths_enabled()
+  }
+
+  /// State every Markdown fast path needs: Markdown output, the shared state,
   /// and no override on this tag.
   #[inline(always)]
   fn common_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
     self.is_markdown()
       && (!self.has_tag_overrides || self.override_slot_empty(tag_id))
-      && !self.pre_fence_pending
-      && self.caption_boundary == CaptionBoundary::None
-      && self.caption_frames.is_empty()
-      && self.fast_paths_enabled()
+      && self.fast_path_state_ok()
   }
 
   /// Whether a built-in tag has no override, so its fast path may run while
@@ -1168,18 +1175,29 @@ impl ConvertState {
     tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize]) && self.common_fast_path_ok(tag_id)
   }
 
+  /// `element_fast_path_ok` for Text output. Same tags and state, without the
+  /// Markdown test: the simple emitters write the Text forms through the same
+  /// shared steps, and the steps that differ are gated on `plain_text`.
+  #[inline(always)]
+  pub(crate) fn text_element_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
+    tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize])
+      && (!self.has_tag_overrides || self.override_slot_empty(tag_id))
+      && self.fast_path_state_ok()
+  }
+
   /// A plain `<li>` takes the simple emitters with the item steps added. Kept
   /// out of `SIMPLE_EMIT_TAG` so the other tags never test for it.
   /// Same gate as `common_fast_path_ok(Some(TAG_LI))`. The li slot is decided
   /// once at setup, so this reads a bool instead of the override table.
   #[inline(always)]
   pub(crate) fn li_fast_path_ok(&self) -> bool {
-    self.is_markdown()
-      && self.li_slot_free
-      && !self.pre_fence_pending
-      && self.caption_boundary == CaptionBoundary::None
-      && self.caption_frames.is_empty()
-      && self.fast_paths_enabled()
+    self.is_markdown() && self.li_simple_state_ok()
+  }
+
+  /// `li_fast_path_ok` without the Markdown test, for Text output.
+  #[inline(always)]
+  pub(crate) fn li_simple_state_ok(&self) -> bool {
+    self.li_slot_free && self.fast_path_state_ok()
   }
 
   /// Open the inline marker an enter wrote, or drop the markers its text closes.
@@ -1404,9 +1422,10 @@ impl ConvertState {
         && if link {
           self.link_fast_path_ok(self.stack[stack_len - 1].tag_id)
         } else if li {
-          self.li_fast_path_ok() && self.stack[stack_len - 1].tag_id == Some(TAG_LI)
+          self.li_simple_state_ok() && self.stack[stack_len - 1].tag_id == Some(TAG_LI)
         } else {
-          self.element_fast_path_ok(self.stack[stack_len - 1].tag_id)
+          let tag_id = self.stack[stack_len - 1].tag_id;
+          self.element_fast_path_ok(tag_id) || self.text_element_fast_path_ok(tag_id)
         }
     );
     if self.stack[stack_len - 1].excluded_from_markdown {
@@ -1433,11 +1452,13 @@ impl ConvertState {
       self.confirm_div_marker_break(&mut output);
     }
 
+    // Plain text skips the list break the general enter writes here.
     if self.hard_break_end == self.buffer.len()
       && matches!(tag_id, Some(TAG_P | TAG_DIV))
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
       && self.depth_map[TAG_PRE as usize] == 0
+      && !plain_text!(self)
     {
       self.prepend_list_break(&mut output);
     }
@@ -1531,6 +1552,11 @@ impl ConvertState {
       return;
     }
 
+    #[cfg(test)]
+    {
+      self.simple_enters += 1;
+    }
+
     self.settle_empty_text_pending(output_start, || {
       tag_id.and_then(Self::inline_marker_type).is_some()
     });
@@ -1540,7 +1566,8 @@ impl ConvertState {
       {
         self.li_simple_enters += 1;
       }
-      // Same step as the general enter, which arms the empty-item guard.
+      // Same step as the general enter, which arms the empty-item guard. Plain
+      // text never writes an item marker, so the general enter skips it there.
       if !plain_text!(self) && !self.in_table_cell() {
         self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
       }
@@ -1652,9 +1679,9 @@ impl ConvertState {
     debug_assert!(if link {
       self.link_fast_path_ok(node.tag_id)
     } else if li {
-      self.li_fast_path_ok() && node.tag_id == Some(TAG_LI)
+      self.li_simple_state_ok() && node.tag_id == Some(TAG_LI)
     } else {
-      self.element_fast_path_ok(node.tag_id)
+      self.element_fast_path_ok(node.tag_id) || self.text_element_fast_path_ok(node.tag_id)
     });
     if node.excluded_from_markdown || node.enter_skipped {
       self.last_node_is_inline = node.is_inline;
@@ -1686,6 +1713,10 @@ impl ConvertState {
       self.stack.retired_mut().attributes = attributes;
       return;
     }
+    #[cfg(test)]
+    {
+      self.simple_exits += 1;
+    }
     let output = self.get_exit_output(node, 1);
     let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
     let configured_new_lines = new_line_config[1];
@@ -1696,7 +1727,9 @@ impl ConvertState {
 
     self.release_markers_on_exit(!is_inline, output.as_deref());
 
-    if li {
+    // Plain text writes no item marker, so the general exit skips these steps
+    // there too.
+    if li && !plain_text!(self) {
       // A hard break already ended the item, so its continuation indent must
       // not become a whitespace-only line. This runs before `output_start` is
       // taken: resolving the marker can insert a newline before it.

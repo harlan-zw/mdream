@@ -1203,6 +1203,12 @@ pub struct ConvertState {
   /// Test-only count of `<li>` exits taken by the simple emitter.
   #[cfg(test)]
   pub(crate) li_simple_exits: usize,
+  /// Test-only count of non-link enters taken by the simple emitter, `<li>` included.
+  #[cfg(test)]
+  pub(crate) simple_enters: usize,
+  /// Test-only count of non-link exits taken by the simple emitter, `<li>` included.
+  #[cfg(test)]
+  pub(crate) simple_exits: usize,
   /// Test/fuzz switch: `false` routes everything through the general path.
   #[cfg(any(test, fuzzing))]
   pub(crate) fast_paths: bool,
@@ -1466,6 +1472,10 @@ impl ConvertState {
       li_simple_enters: 0,
       #[cfg(test)]
       li_simple_exits: 0,
+      #[cfg(test)]
+      simple_enters: 0,
+      #[cfg(test)]
+      simple_exits: 0,
       #[cfg(any(test, fuzzing))]
       fast_paths: true,
       #[cfg(test)]
@@ -4174,9 +4184,9 @@ mod override_fast_gate_tests {
     (state.li_simple_enters, state.li_simple_exits)
   }
 
-  /// A plain `<li>` takes the item fast path on both enter and exit. An
-  /// override on `ul` leaves it there, and an override on `li` itself sends it
-  /// to the general path. Text output never takes a Markdown fast path.
+  /// A plain `<li>` takes the item fast path on both enter and exit, in
+  /// Markdown and Text. An override on `ul` leaves it there, and an override on
+  /// `li` itself sends it to the general path.
   #[test]
   fn plain_li_takes_the_item_fast_path() {
     let ul = || vec![("ul".into(), TagOverrideConfig::wrap("[", "]"))];
@@ -4184,7 +4194,43 @@ mod override_fast_gate_tests {
     assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Markdown), (1, 1));
     assert_eq!(li_simple_paths(ul(), OutputFormat::Markdown), (1, 1));
     assert_eq!(li_simple_paths(li(), OutputFormat::Markdown), (0, 0));
-    assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Text), (0, 0));
+    assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Text), (1, 1));
+    assert_eq!(li_simple_paths(ul(), OutputFormat::Text), (1, 1));
+    assert_eq!(li_simple_paths(li(), OutputFormat::Text), (0, 0));
+  }
+
+  /// Simple-emitter enters and exits for `html`, with the fast paths on or off.
+  fn simple_takes(html: &str, format: OutputFormat, fast: bool) -> (usize, usize) {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 4096, format);
+    state.fast_paths = fast;
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    (state.simple_enters, state.simple_exits)
+  }
+
+  /// Plain inline and block tags take the simple emitter in Text as well as
+  /// Markdown. With the fast paths off nothing does. `<ul>` is a simple tag,
+  /// so the two-element list counts twice.
+  #[test]
+  fn text_takes_the_simple_path_for_plain_tags() {
+    for format in [OutputFormat::Markdown, OutputFormat::Text] {
+      assert_eq!(simple_takes("<p>a</p>", format, true), (1, 1), "{format:?}");
+      assert_eq!(
+        simple_takes("<span>a</span>", format, true),
+        (1, 1),
+        "{format:?}"
+      );
+      assert_eq!(
+        simple_takes("<ul><li>a</li></ul>", format, true),
+        (2, 2),
+        "{format:?}"
+      );
+      assert_eq!(
+        simple_takes("<p>a</p>", format, false),
+        (0, 0),
+        "{format:?}"
+      );
+    }
   }
 }
 

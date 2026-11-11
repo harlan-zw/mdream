@@ -1500,13 +1500,22 @@ impl ConvertState {
 
     // Inline emit (no callback!)
     if !skip_node {
-      // Every fast path needs Markdown, so other formats test that once here.
+      // Every fast path needs Markdown or Text, so HTML tests once here. Text
+      // takes the simple tags and items only; links stay Markdown.
       if self.is_markdown() {
         if self.element_fast_path_ok(tag_id) {
           self.emit_enter_simple::<false>(false);
         } else if self.link_fast_path_ok(tag_id) {
           self.emit_enter_simple::<false>(true);
         } else if tag_id == Some(TAG_LI) && self.li_fast_path_ok() {
+          self.emit_enter_simple::<true>(false);
+        } else {
+          self.emit_enter_element();
+        }
+      } else if plain_text!(self) {
+        if self.text_element_fast_path_ok(tag_id) {
+          self.emit_enter_simple::<false>(false);
+        } else if tag_id == Some(TAG_LI) && self.li_simple_state_ok() {
           self.emit_enter_simple::<true>(false);
         } else {
           self.emit_enter_element();
@@ -1733,7 +1742,8 @@ impl ConvertState {
     }
 
     // The general exit needs the node owned; the fast ones read it in place.
-    // Every fast path needs Markdown, so other formats test that once here.
+    // Same split as the enter: Markdown takes every simple path, Text the
+    // simple tags and items, and HTML none.
     if self.is_markdown() {
       if self.element_fast_path_ok(node_tag_id) {
         self.emit_exit_simple::<false>(false);
@@ -1745,6 +1755,18 @@ impl ConvertState {
         // even though no output was written for it.
         && !node_enter_skipped
         && self.li_fast_path_ok()
+      {
+        self.emit_exit_simple::<true>(false);
+      } else {
+        self.close_node_general_exit();
+      }
+    } else if plain_text!(self) {
+      if self.text_element_fast_path_ok(node_tag_id) {
+        self.emit_exit_simple::<false>(false);
+      } else if node_tag_id == Some(TAG_LI)
+        && !node_excluded
+        && !node_enter_skipped
+        && self.li_simple_state_ok()
       {
         self.emit_exit_simple::<true>(false);
       } else {
