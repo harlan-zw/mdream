@@ -195,13 +195,10 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
       };
     }
     while i + 2 < chunk_length {
-      // Scanning for the dash on its own keeps this loop vectorizable; the
-      // three-byte window is only formed once a dash is found.
-      while i + 2 < chunk_length && bytes[i] != DASH_CHAR {
-        i += 1;
-      }
-      if i + 2 >= chunk_length {
-        break;
+      // Jump to the next dash; the three-byte window is only formed there.
+      match find_byte(&bytes[i..chunk_length - 2], DASH_CHAR) {
+        Some(offset) => i += offset,
+        None => break,
       }
       if bytes[i + 1] == DASH_CHAR {
         let after_dashes = bytes[i + 2];
