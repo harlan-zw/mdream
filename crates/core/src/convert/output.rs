@@ -1298,6 +1298,14 @@ impl ConvertState {
         }
         _ => 1,
       };
+      let blank_outside = self
+        .open_markers
+        .last()
+        .is_some_and(|outer| outer.decoded_blank || outer.blank_outside);
+      // Markers that closed since the count was taken no longer hold it up.
+      if self.silent_markers > self.open_markers.len() {
+        self.silent_markers = self.open_markers.len();
+      }
       self.open_markers.push(OpenMarker {
         output_start: marker_start,
         content_start: self.buffer.len(),
@@ -1310,7 +1318,7 @@ impl ConvertState {
         restores_heading_break: emitted.starts_with('\n'),
         vertical_tab_start: usize::MAX,
         decoded_blank: false,
-        silent_block: false,
+        blank_outside,
       });
     } else if !keeps_markers
       && !self.open_markers.is_empty()
@@ -3296,16 +3304,30 @@ impl ConvertState {
   /// empty pair empty, but a code-like span holding a decoded blank has
   /// content, so it and the spans around it stop being droppable.
   fn note_silent_block(&mut self) {
-    let mut kept = None;
-    for (index, marker) in self.open_markers.iter_mut().enumerate() {
-      marker.silent_block = true;
-      if marker.decoded_blank {
-        kept = Some(index);
+    #[cfg(debug_assertions)]
+    self.check_blank_outside();
+    // The innermost marker says whether any span holds a blank, so the walk
+    // only runs when one does and stops at it. That span and the ones around
+    // it then go, which leaves each marker walked at most once.
+    if self
+      .open_markers
+      .last()
+      .is_some_and(|marker| marker.decoded_blank || marker.blank_outside)
+      && let Some(index) = self
+        .open_markers
+        .iter()
+        .rposition(|marker| marker.decoded_blank)
+    {
+      #[cfg(test)]
+      {
+        self.silent_block_walked += self.open_markers.len() - index;
+      }
+      self.open_markers.drain(..=index);
+      for marker in &mut self.open_markers {
+        marker.blank_outside = false;
       }
     }
-    if let Some(index) = kept {
-      self.open_markers.drain(..=index);
-    }
+    self.silent_markers = self.open_markers.len();
   }
 
   /// Settle a pending empty-text link once visible text follows it.
@@ -3403,11 +3425,7 @@ impl ConvertState {
       {
         // An entity-decoded blank is content to a code-like span, but alone it
         // still leaves the pair droppable: only a block closing inside settles it.
-        if self
-          .open_markers
-          .last()
-          .is_some_and(|marker| marker.silent_block)
-        {
+        if self.silent_markers >= self.open_markers.len() {
           self.open_markers.clear();
         } else if let Some(marker) = self.open_markers.last_mut() {
           marker.decoded_blank = true;
@@ -4531,6 +4549,17 @@ impl ConvertState {
       walk -= 1;
     }
     assert_eq!(walk, outermost, "opener run length is stale");
+  }
+
+  /// Each marker's `blank_outside` is whether a span around it holds a
+  /// decoded blank.
+  #[cfg(debug_assertions)]
+  fn check_blank_outside(&self) {
+    let mut outside = false;
+    for marker in &self.open_markers {
+      assert_eq!(marker.blank_outside, outside, "decoded blank flag is stale");
+      outside |= marker.decoded_blank;
+    }
   }
 
   /// Only the run's own markers sit at or past its start, so moving the run
@@ -7754,6 +7783,35 @@ mod tests {
       state.break_run_scanned,
       html.len()
     );
+  }
+
+  // A block that writes nothing used to walk every open marker, so dropped
+  // elements inside deep emphasis each cost the depth.
+  #[test]
+  fn silent_blocks_walk_each_open_marker_at_most_once() {
+    for (open, items) in [
+      ("<s><cite>", " <svg></svg>".repeat(4096)),
+      ("<kbd><samp>", "&#32;<svg></svg>".repeat(4096)),
+      // The blank sits below the markers opened after it, which are walked.
+      (
+        "<kbd>",
+        format!("&#32;{}<svg></svg>", "<samp><var>".repeat(64)).repeat(3),
+      ),
+    ] {
+      let mut state =
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      let html = format!("<p>a{}{items}", open.repeat(100));
+      assert_eq!(state.process_html(&html), html.len());
+      state.finalize("");
+      let out = state.get_final_markdown_chunk();
+      assert!(out.starts_with('a'), "{:.20}", out);
+      let tags = html.matches('<').count();
+      assert!(
+        state.silent_block_walked <= tags,
+        "walked {} markers for {tags} tags after {open}",
+        state.silent_block_walked,
+      );
+    }
   }
 
   #[test]

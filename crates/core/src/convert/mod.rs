@@ -198,8 +198,9 @@ struct OpenMarker {
   vertical_tab_start: usize,
   /// An entity-decoded blank is all this code-like span holds so far.
   decoded_blank: bool,
-  /// A block that writes nothing closed inside the span.
-  silent_block: bool,
+  /// A span around this one holds such a blank. Only the innermost span takes
+  /// text, so this stays as read when the marker opened.
+  blank_outside: bool,
 }
 
 struct LiteralOpener {
@@ -1093,6 +1094,9 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
+  /// Open markers, counted from the outermost, that a block writing nothing
+  /// closed inside. A count above the open ones covers them all.
+  silent_markers: usize,
   /// Each open inline element's literal `tagOverrides` opener, with the
   /// stream position after it, which still ends the output while nothing has
   /// been written since.
@@ -1218,6 +1222,9 @@ pub struct ConvertState {
   /// Bytes read to decide whether held line-break runs are final.
   #[cfg(test)]
   break_run_scanned: usize,
+  /// Open markers a block that writes nothing walked to find a decoded blank.
+  #[cfg(test)]
+  silent_block_walked: usize,
   /// Bytes behind a code span's opener when the span closes, which closing
   /// reads and moves.
   #[cfg(test)]
@@ -1432,6 +1439,7 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      silent_markers: 0,
       literal_opener_ends: Vec::new(),
       drained: 0,
       #[cfg(debug_assertions)]
@@ -1480,6 +1488,8 @@ impl ConvertState {
       quoted_bytes: 0,
       #[cfg(test)]
       break_run_scanned: 0,
+      #[cfg(test)]
+      silent_block_walked: 0,
       #[cfg(test)]
       code_span_closed_bytes: 0,
       #[cfg(test)]

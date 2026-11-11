@@ -2740,3 +2740,37 @@ fn link_title_after_a_dropped_empty_pair_is_kept() {
     }
   }
 }
+
+#[test]
+fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
+  for (html, expected) in [
+    (
+      "<p>h<code>&#32;<kbd>&#32;</kbd><svg></svg></code>B</p>",
+      "h` `B",
+    ),
+    ("<p>h<code>&#32;<i><svg></svg></i></code>B</p>", "h` `B"),
+    (
+      "<p>h<kbd>&#32;<samp><svg></svg>&#32;</samp></kbd>B</p>",
+      "h` ` ``B",
+    ),
+    (
+      "<p>h<kbd><samp>&#32;</samp><svg></svg>&#32;</kbd>B</p>",
+      "h` `B",
+    ),
+    ("<p>h<s><kbd>&#32;<svg></svg></kbd></s>B</p>", "h ~~` `~~B"),
+    ("<p>h<kbd>&#32;<s><svg></svg></s></kbd>B</p>", "h` `B"),
+    (
+      "<p>h<kbd>&#32;<samp><var><svg></svg></var></samp></kbd>B</p>",
+      "h` `B",
+    ),
+    (
+      "<p>h<kbd><samp>&#32;<var>&#32;<svg></svg></var></samp></kbd>B</p>",
+      "h`` ` ```B",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
