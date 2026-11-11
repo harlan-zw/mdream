@@ -308,6 +308,8 @@ impl ConvertState {
   /// names scan the keys.
   #[inline(never)]
   pub(crate) fn alias_tag_id(&self, tag_name: &str, builtin_tag_id: Option<u8>) -> Option<u8> {
+    #[cfg(test)]
+    self.alias_lookups.set(self.alias_lookups.get() + 1);
     let overrides = self.options.plugins.as_ref()?.tag_overrides.as_ref();
     let config = match builtin_tag_id {
       Some(id) => Self::override_by_id(overrides, self.override_idx.as_deref(), id),
@@ -1929,7 +1931,10 @@ impl ConvertState {
       // A built-in end tag must also find a node without a custom name, so
       // `</div>` cannot close an aliased `<blockquote>`.
       needs_name_match = true;
-      if let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id) {
+      // With no alias in any override, the lookup can only return `None`.
+      if !self.override_fast_ok
+        && let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id)
+      {
         if let Some(id) = builtin_tag_id {
           name = TAG_NAMES[id as usize];
         }

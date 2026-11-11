@@ -1197,6 +1197,9 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Test-only count of alias lookups, open and close tags alike.
+  #[cfg(test)]
+  pub(crate) alias_lookups: std::cell::Cell<usize>,
   /// Test-only count of `<li>` enters taken by the simple emitter.
   #[cfg(test)]
   pub(crate) li_simple_enters: usize,
@@ -1469,6 +1472,8 @@ impl ConvertState {
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
       #[cfg(test)]
+      alias_lookups: std::cell::Cell::new(0),
+      #[cfg(test)]
       li_simple_enters: 0,
       #[cfg(test)]
       li_simple_exits: 0,
@@ -1543,7 +1548,14 @@ impl ConvertState {
               idx[id as usize] = i;
             }
           }
-          s.li_slot_free = idx[TAG_LI as usize] == NO_OVERRIDE;
+          // An `li` override that sets only `is_inline` emits what no override
+          // does: the open tag already copied `is_inline` onto the node. Spacing
+          // and enter/exit strings change the output, so those keep the general path.
+          let li_slot = idx[TAG_LI as usize];
+          s.li_slot_free = li_slot == NO_OVERRIDE
+            || ovs.get(li_slot as usize).is_some_and(|(_, ov)| {
+              ov.enter.is_none() && ov.exit.is_none() && ov.spacing.is_none()
+            });
           s.override_idx = Some(idx);
           s.override_fast_ok = ovs.iter().all(|(_, ov)| ov.alias_tag_id.is_none());
           s.li_slot_free &= s.override_fast_ok;
@@ -2435,7 +2447,9 @@ impl ConvertState {
         let mut is_builtin = builtin_tag_id.is_some();
         // An aliased tag renders as its target but keeps its source name for
         // its end tag; a built-in one takes the lowercase name from TAG_NAMES.
+        // With no alias in any override, the lookup can only return `None`.
         if self.has_tag_overrides
+          && !self.override_fast_ok
           && let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id)
         {
           if let Some(id) = builtin_tag_id {
@@ -4197,6 +4211,87 @@ mod override_fast_gate_tests {
     assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Text), (1, 1));
     assert_eq!(li_simple_paths(ul(), OutputFormat::Text), (1, 1));
     assert_eq!(li_simple_paths(li(), OutputFormat::Text), (0, 0));
+  }
+
+  /// An `li` override that sets only `is_inline` changes no output (the open
+  /// tag already copies it onto the node), so the item keeps its fast path.
+  /// Spacing, enter and exit change output, so they send it to the general path.
+  #[test]
+  fn li_override_fast_path_depends_on_what_it_sets() {
+    let li_with = |config: TagOverrideConfig| vec![("li".into(), config)];
+    let inline = || {
+      li_with(TagOverrideConfig {
+        is_inline: Some(true),
+        ..Default::default()
+      })
+    };
+    let spacing = || {
+      li_with(TagOverrideConfig {
+        spacing: Some([1, 1]),
+        ..Default::default()
+      })
+    };
+    let enter = || {
+      li_with(TagOverrideConfig {
+        enter: Some("(".into()),
+        ..Default::default()
+      })
+    };
+    let exit = || {
+      li_with(TagOverrideConfig {
+        exit: Some(")".into()),
+        ..Default::default()
+      })
+    };
+    for format in [OutputFormat::Markdown, OutputFormat::Text] {
+      assert_eq!(li_simple_paths(inline(), format), (1, 1), "{format:?}");
+      assert_eq!(li_simple_paths(spacing(), format), (0, 0), "{format:?}");
+      assert_eq!(li_simple_paths(enter(), format), (0, 0), "{format:?}");
+      assert_eq!(li_simple_paths(exit(), format), (0, 0), "{format:?}");
+    }
+    // Duplicate keys: the first one decides, as in `override_for_node`.
+    let mut enter_then_inline = enter();
+    enter_then_inline.extend(inline());
+    let mut inline_then_enter = inline();
+    inline_then_enter.extend(enter());
+    assert_eq!(
+      li_simple_paths(enter_then_inline, OutputFormat::Markdown),
+      (0, 0)
+    );
+    assert_eq!(
+      li_simple_paths(inline_then_enter, OutputFormat::Markdown),
+      (1, 1)
+    );
+    // An alias elsewhere turns the override fast gate off for every tag.
+    let mut aliased = inline();
+    aliased.push(("x-alias".into(), TagOverrideConfig::alias("em")));
+    assert_eq!(li_simple_paths(aliased, OutputFormat::Markdown), (0, 0));
+  }
+
+  /// Alias lookups made while converting `<ul><li>a</li></ul>`.
+  fn alias_lookups(overrides: Vec<(String, TagOverrideConfig)>) -> usize {
+    let html = "<ul><li>a</li></ul>";
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(crate::types::PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let mut state = ConvertState::new(options, 4096, OutputFormat::Markdown);
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    state.alias_lookups.get()
+  }
+
+  /// With no alias in any override, open and close tags skip the alias lookup;
+  /// an alias anywhere keeps it on every tag.
+  #[test]
+  fn alias_lookup_is_skipped_when_no_override_aliases() {
+    let plain = vec![("em".into(), TagOverrideConfig::wrap("_", "_"))];
+    assert_eq!(alias_lookups(plain), 0);
+    let aliased = vec![("b".into(), TagOverrideConfig::alias("strong"))];
+    assert!(alias_lookups(aliased) > 0);
   }
 
   /// Simple-emitter enters and exits for `html`, with the fast paths on or off.

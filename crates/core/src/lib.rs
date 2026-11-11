@@ -1121,6 +1121,104 @@ mod fast_path_parity {
       }
     }
   }
+
+  /// `<li>` overrides that keep the item fast path (`is_inline` alone) and ones
+  /// that send it to the general path (spacing, enter, exit), alone and with
+  /// overrides on other tags. Fast and general output must match, one-shot and
+  /// streamed, in Markdown and Text.
+  #[test]
+  fn li_override_fast_path_matches_general_path() {
+    let li = |config: TagOverrideConfig| ("li".to_string(), config);
+    let inline = || TagOverrideConfig {
+      is_inline: Some(true),
+      ..Default::default()
+    };
+    let block = || TagOverrideConfig {
+      is_inline: Some(false),
+      ..Default::default()
+    };
+    let spacing = || TagOverrideConfig {
+      spacing: Some([1, 1]),
+      ..Default::default()
+    };
+    let enter = || TagOverrideConfig {
+      enter: Some("(".into()),
+      ..Default::default()
+    };
+    let exit = || TagOverrideConfig {
+      exit: Some(")".into()),
+      ..Default::default()
+    };
+    let all = || TagOverrideConfig {
+      enter: Some("(".into()),
+      exit: Some(")".into()),
+      spacing: Some([0, 0]),
+      is_inline: Some(true),
+      ..Default::default()
+    };
+    let around = || -> Vec<(String, TagOverrideConfig)> {
+      vec![
+        ("ul".into(), TagOverrideConfig::wrap("[", "]")),
+        ("ol".into(), TagOverrideConfig::wrap("{", "}")),
+        ("em".into(), TagOverrideConfig::wrap("_", "_")),
+      ]
+    };
+    let with_around = |mut ovs: Vec<(String, TagOverrideConfig)>, config: TagOverrideConfig| {
+      ovs.push(li(config));
+      ovs.extend(around());
+      ovs
+    };
+    let overrides: Vec<(&str, Vec<(String, TagOverrideConfig)>)> = vec![
+      ("li is_inline", vec![li(inline())]),
+      ("li is_inline false", vec![li(block())]),
+      ("li spacing", vec![li(spacing())]),
+      ("li enter", vec![li(enter())]),
+      ("li exit", vec![li(exit())]),
+      ("li all", vec![li(all())]),
+      (
+        "li is_inline with ul ol em",
+        with_around(Vec::new(), inline()),
+      ),
+      ("li enter with ul ol em", with_around(Vec::new(), enter())),
+      (
+        "li spacing with ul ol em",
+        with_around(Vec::new(), spacing()),
+      ),
+      (
+        "li is_inline with alias elsewhere",
+        vec![
+          li(inline()),
+          ("x-alias".into(), TagOverrideConfig::alias("em")),
+        ],
+      ),
+    ];
+    for (name, ov) in &overrides {
+      for format in [OutputFormat::Markdown, OutputFormat::Text] {
+        for clean in [false, true] {
+          let options = || HtmlToMarkdownOptions {
+            clean: clean.then(CleanConfig::all),
+            plugins: Some(PluginConfig {
+              tag_overrides: Some(ov.clone()),
+              ..Default::default()
+            }),
+            ..Default::default()
+          };
+          for (i, html) in LI_SNIPPETS.iter().enumerate() {
+            let label = format!("overrides={name} clean={clean} format={format:?} doc={i}");
+            let slow = convert(html, options(), format, false);
+            let fast = convert(html, options(), format, true);
+            assert!(slow == fast, "one-shot mismatch: {label}");
+            for size in [1, 3, 7, 4096] {
+              let parts = chunks(html, size);
+              let slow = stream(&parts, options(), format, false);
+              let fast = stream(&parts, options(), format, true);
+              assert!(slow == fast, "stream mismatch: {label} chunk={size}");
+            }
+          }
+        }
+      }
+    }
+  }
 }
 
 #[cfg(test)]
