@@ -37,6 +37,24 @@ describe.each(engines)('figure $name', (engineConfig) => {
       .toBe('- Before After')
   })
 
+  // Inline HTML that opens a caption leaves the next source space to the
+  // caption, as a block's first content does, with or without spacing before
+  // it. A text node of only whitespace goes whole, decoded whitespace
+  // included. The space after the caption is not the caption's.
+  it.each([
+    ['<figcaption><mark></mark> x</figcaption>', '*<mark></mark>x*'],
+    ['<figure><img src="/i.png" alt="i"><figcaption><sub></sub> x</figcaption></figure>', '![i](/i.png)\n\n*<sub></sub>x*'],
+    ['<p>a</p><figcaption><u></u> x</figcaption>', 'a\n\n*<u></u>x*'],
+    ['<strong><figcaption><mark></mark> x</figcaption>y</strong>', '***<mark></mark>x*y**'],
+    ['<figcaption><mark>m</mark> x</figcaption>', '*<mark>m</mark> x*'],
+    ['<figcaption><sub>&#9;<br>z</sub></figcaption>', '*<sub>  \nz</sub>*'],
+    ['<figcaption><mark></mark>&#9;x</figcaption>', '*<mark></mark>\tx*'],
+    ['<strong><figcaption><mark></mark> </figcaption> y</strong>', '***<mark></mark>* y**'],
+  ])('drops the space after inline HTML that opens a caption for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('preserves surrounding text for empty plain-text captions', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('Before<figcaption></figcaption>After', { engine, format: 'text' })).toBe('BeforeAfter')

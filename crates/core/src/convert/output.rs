@@ -1883,6 +1883,7 @@ impl ConvertState {
     let mut quote_sibling_separator = false;
     let mut caption_heading_enter = false;
     let mut consumes_caption_boundary = false;
+    let mut opens_caption = false;
     if !caption_fast {
       let caption_active =
         self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
@@ -1915,6 +1916,12 @@ impl ConvertState {
         false
       };
       if visible_output && (tag_id != Some(TAG_BLOCKQUOTE) || enter_is_literal) {
+        opens_caption = !enter_is_literal
+          && !tentative_caption_output
+          && self
+            .caption_frames
+            .last()
+            .is_some_and(|frame| matches!(frame.state, CaptionState::Pending));
         self.materialize_caption_frames(if caption_enter && enter_is_literal {
           CaptionMaterialization::ExplicitCommit
         } else if tentative_caption_output {
@@ -2240,6 +2247,13 @@ impl ConvertState {
 
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
+    } else if opens_caption
+      && is_inline
+      && !matches!(tag_id, Some(TAG_IMG | TAG_BR))
+      && self.caption_boundary == CaptionBoundary::None
+    {
+      // Inline output that opens a caption leaves the next source space to it.
+      self.caption_boundary = CaptionBoundary::ConsumeSpace;
     }
 
     // Clean: track heading start for slug collection
@@ -2681,6 +2695,7 @@ impl ConvertState {
     }
 
     let mut caption_exit_spacing = 0;
+    let mut caption_opened = false;
     if caption_exit {
       let top = self.caption_frames.len().saturating_sub(1);
       self.expand_deferred_caption_breaks_until(top);
@@ -2711,6 +2726,7 @@ impl ConvertState {
               .any(|byte| !is_whitespace(byte) && !matches!(byte, b'*' | b'~' | b'`' | b'"'))
           {
             caption_exit_spacing = frame.spacing[1];
+            caption_opened = true;
           } else {
             self.truncate_buffer(output_start);
             if restore_space {
@@ -2727,6 +2743,7 @@ impl ConvertState {
         }
         CaptionState::Committed => {
           caption_exit_spacing = frame.spacing[1];
+          caption_opened = true;
         }
       }
       self.write_deferred_break_run(deferred_breaks);
@@ -2941,6 +2958,9 @@ impl ConvertState {
     }
     if caption_exit_spacing > 0 {
       self.caption_boundary = CaptionBoundary::Pending(caption_exit_spacing);
+    } else if caption_opened && self.caption_boundary == CaptionBoundary::ConsumeSpace {
+      // The space an opened caption owned does not outlive it.
+      self.caption_boundary = CaptionBoundary::None;
     }
     // Reuse the deferred block boundary: it already ignores invisible output
     // and supplies list continuation indentation, without taxing plain text.
