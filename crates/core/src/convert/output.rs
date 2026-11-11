@@ -760,8 +760,10 @@ impl ConvertState {
     // document full of quotes pays for this region once.
     let mut quoted = core::mem::take(&mut self.blockquote_scratch);
     quoted.clear();
-    quoted
-      .reserve(content.len() + (frame.list_indent.len() + 2) * (content.matches('\n').count() + 1));
+    quoted.reserve(
+      content.len()
+        + (frame.list_indent.len() + 2) * (crate::scan::count_byte(content.as_bytes(), b'\n') + 1),
+    );
 
     for (index, line) in content.split('\n').enumerate() {
       if index > 0 {
@@ -1021,7 +1023,9 @@ impl ConvertState {
         .as_str();
       let mut quoted = core::mem::take(&mut self.blockquote_scratch);
       quoted.clear();
-      quoted.reserve(content.len() + quoted_prefix.len() * content.matches('\n').count());
+      quoted.reserve(
+        content.len() + quoted_prefix.len() * crate::scan::count_byte(content.as_bytes(), b'\n'),
+      );
       let mut rest = content;
       while !rest.is_empty() {
         let (line, remainder) = match crate::scan::find_byte(rest.as_bytes(), b'\n') {
@@ -1071,7 +1075,10 @@ impl ConvertState {
     for frame in self.blockquotes.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
       quoted.clear();
-      quoted.reserve(content.len() + (frame.list_indent.len() + 2) * content.matches('\n').count());
+      quoted.reserve(
+        content.len()
+          + (frame.list_indent.len() + 2) * crate::scan::count_byte(content.as_bytes(), b'\n'),
+      );
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
         quoted.push_str(&frame.list_indent);
