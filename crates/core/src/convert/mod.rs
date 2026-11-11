@@ -926,6 +926,8 @@ pub struct ConvertState {
   /// selectors); merged into every element's attribute mask.
   filter_attr_bits: u16,
   pub has_extraction: bool,
+  /// Isolate-main, frontmatter or extraction is on: close_node runs its plugin tail.
+  close_plugin_work: bool,
   has_tag_overrides: bool,
   /// The `override_idx` table is built and no override is an alias. Then a
   /// built-in tag whose slot is `NO_OVERRIDE` has no override, so its fast path
@@ -1350,6 +1352,7 @@ impl ConvertState {
       has_frontmatter: false,
       has_filter: false,
       has_extraction: false,
+      close_plugin_work: false,
       filter_attr_bits: ATTR_NONE,
       has_tag_overrides: false,
       override_fast_ok: false,
@@ -1578,6 +1581,7 @@ impl ConvertState {
           .map(|sel| (sel.clone(), parse_css_selector_list(sel)))
           .collect();
       }
+      s.close_plugin_work = s.has_isolate_main || s.has_frontmatter || s.has_extraction;
       if let Some(filter) = &plugins.filter {
         s.has_filter = true;
         if let Some(incl) = &filter.include {

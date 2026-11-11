@@ -1043,6 +1043,77 @@ impl ConvertState {
     }
   }
 
+  /// Overflow checks for an opening tag, run only when a same-name or depth
+  /// overflow is possible. `Some` is the result of an element that was consumed.
+  #[cold]
+  #[inline(never)]
+  #[allow(clippy::too_many_arguments)]
+  fn apply_overflow_tail(
+    &mut self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    tag_handler: Option<&'static crate::types::TagHandler>,
+    self_closing: bool,
+    new_position: usize,
+    deep: bool,
+  ) -> Option<OpeningTagResult> {
+    let in_overflow = !self_closing && (self.overflow_same_name_depth > 0 || deep);
+    let overflow_plugin_mode = if in_overflow {
+      self.overflow_plugin_mode(
+        tag_name,
+        tag_id,
+        is_builtin,
+        &self.attr_scratch,
+        tag_handler,
+      )
+    } else {
+      0
+    };
+    if in_overflow && (tag_id == Some(TAG_TEMPLATE) || overflow_plugin_mode == 1) {
+      self.enter_opaque_overflow(tag_name, tag_handler);
+      return Some(OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      });
+    }
+
+    if self.overflow_same_name_depth > 0 && !self_closing {
+      if self.matches_overflow_tag(tag_name, tag_id, is_builtin) {
+        self.overflow_same_name_depth = self.overflow_same_name_depth.saturating_add(1);
+      } else if tag_handler.is_some_and(|handler| handler.is_non_nesting) {
+        self.overflow_raw_name = Some(tag_name.to_string());
+        self.overflow_raw_excludes_text =
+          tag_handler.is_some_and(|handler| handler.excludes_text_nodes);
+      }
+      return Some(OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      });
+    }
+
+    if !self_closing && deep {
+      self.enter_overflow(
+        tag_name,
+        tag_id,
+        is_builtin,
+        tag_handler,
+        overflow_plugin_mode == 2,
+      );
+      return Some(OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      });
+    }
+    None
+  }
+
   /// Open an element whose attributes are already scanned into `attr_scratch`:
   /// tree recovery, overflow handling and node creation.
   // The arguments are kept separate: packing the flags into a struct measured
@@ -1091,8 +1162,8 @@ impl ConvertState {
     // page never closed its head (no </head>/<body>). Auto-close head (and anything
     // wrongly opened inside it) so body content parses as flow content with normal
     // block spacing instead of inheriting head's whitespace collapsing.
-    if self.overflow_same_name_depth == 0
-      && self.depth_map[TAG_HEAD as usize] > 0
+    if self.depth_map[TAG_HEAD as usize] > 0
+      && self.overflow_same_name_depth == 0
       && self.depth_map[TAG_TEMPLATE as usize] == 0
       && !is_head_content_tag(tag_id)
     {
@@ -1202,58 +1273,19 @@ impl ConvertState {
 
     // Read once: the stack is not resized between here and the node push.
     let deep = self.stack.len() >= MAX_ELEMENT_DEPTH;
-    let in_overflow = !self_closing && (self.overflow_same_name_depth > 0 || deep);
-    let overflow_plugin_mode = if in_overflow {
-      self.overflow_plugin_mode(
+    // Same-name and depth overflow are rare: one test keeps them off the common path.
+    if (self.overflow_same_name_depth > 0 || deep)
+      && let Some(result) = self.apply_overflow_tail(
         tag_name,
         tag_id,
         is_builtin,
-        &self.attr_scratch,
         tag_handler,
+        self_closing,
+        new_position,
+        deep,
       )
-    } else {
-      0
-    };
-    if in_overflow && (tag_id == Some(TAG_TEMPLATE) || overflow_plugin_mode == 1) {
-      self.enter_opaque_overflow(tag_name, tag_handler);
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
-    }
-
-    if self.overflow_same_name_depth > 0 && !self_closing {
-      if self.matches_overflow_tag(tag_name, tag_id, is_builtin) {
-        self.overflow_same_name_depth = self.overflow_same_name_depth.saturating_add(1);
-      } else if tag_handler.is_some_and(|handler| handler.is_non_nesting) {
-        self.overflow_raw_name = Some(tag_name.to_string());
-        self.overflow_raw_excludes_text =
-          tag_handler.is_some_and(|handler| handler.excludes_text_nodes);
-      }
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
-    }
-
-    if !self_closing && deep {
-      self.enter_overflow(
-        tag_name,
-        tag_id,
-        is_builtin,
-        tag_handler,
-        overflow_plugin_mode == 2,
-      );
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
+    {
+      return result;
     }
 
     if let Some(id) = tag_id {
@@ -1657,26 +1689,6 @@ impl ConvertState {
       return;
     }
 
-    // Extraction finalize
-    if !self.extraction_tracked.is_empty() {
-      let current_depth = self.stack.len();
-      if let Some(first) = self
-        .extraction_tracked
-        .iter()
-        .position(|tracked| tracked.stack_depth == current_depth)
-      {
-        let extraction_results = &mut self.extraction_results;
-        for tracked in self.extraction_tracked.drain(first..) {
-          extraction_results.push(ExtractedElement {
-            selector: tracked.selector,
-            tag_name: tracked.tag_name,
-            text_content: tracked.text_content.trim().to_string(),
-            attributes: tracked.attributes,
-          });
-        }
-      }
-    }
-
     let popping_index = self.stack.len() - 1;
     // Guard already checked above, but avoid panic on edge cases
     if !self.stack.retire() {
@@ -1726,23 +1738,46 @@ impl ConvertState {
       }
     }
 
-    if self.has_isolate_main
-      && node_tag_id == Some(TAG_MAIN)
-      && !node_excluded
-      && self.isolate_main_found
-      && !self.isolate_main_closed
-    {
-      self.isolate_main_closed = true;
-    }
+    // One flag for the plugin-only tail: a page without these plugins pays one test.
+    if self.close_plugin_work {
+      // Extraction finalize. Runs after `retire`, so the depth is one above the stack.
+      if self.has_extraction && !self.extraction_tracked.is_empty() {
+        let current_depth = self.stack.len() + 1;
+        if let Some(first) = self
+          .extraction_tracked
+          .iter()
+          .position(|tracked| tracked.stack_depth == current_depth)
+        {
+          let extraction_results = &mut self.extraction_results;
+          for tracked in self.extraction_tracked.drain(first..) {
+            extraction_results.push(ExtractedElement {
+              selector: tracked.selector,
+              tag_name: tracked.tag_name,
+              text_content: tracked.text_content.trim().to_string(),
+              attributes: tracked.attributes,
+            });
+          }
+        }
+      }
 
-    // Frontmatter generation on HEAD close
-    if self.has_frontmatter
-      && node_tag_id == Some(TAG_HEAD)
-      && !node_excluded
-      && self.frontmatter_in_head
-    {
-      self.frontmatter_in_head = false;
-      self.generate_frontmatter_yaml();
+      if self.has_isolate_main
+        && node_tag_id == Some(TAG_MAIN)
+        && !node_excluded
+        && self.isolate_main_found
+        && !self.isolate_main_closed
+      {
+        self.isolate_main_closed = true;
+      }
+
+      // Frontmatter generation on HEAD close
+      if self.has_frontmatter
+        && node_tag_id == Some(TAG_HEAD)
+        && !node_excluded
+        && self.frontmatter_in_head
+      {
+        self.frontmatter_in_head = false;
+        self.generate_frontmatter_yaml();
+      }
     }
 
     // Special: empty links — synthesize text from title/aria-label
