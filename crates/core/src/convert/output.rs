@@ -88,6 +88,20 @@ static SIMPLE_EMIT_TAG: [bool; MAX_TAG_ID] = {
   table
 };
 
+/// Block tags whose raw HTML region arms the boundary, indexed by tag id. Sized
+/// to `u8` so a lookup needs no bounds check; a compare chain cost more on every
+/// element exit.
+static RAW_HTML_BLOCK_TAG: [bool; 256] = {
+  let mut table = [false; 256];
+  table[TAG_DETAILS as usize] = true;
+  table[TAG_SUMMARY as usize] = true;
+  table[TAG_ADDRESS as usize] = true;
+  table[TAG_DL as usize] = true;
+  table[TAG_DT as usize] = true;
+  table[TAG_DD as usize] = true;
+  table
+};
+
 /// Emphasis and strikethrough tags whose default exit closes a delimiter run.
 static EMPHASIS_EXIT_TAG: [bool; MAX_TAG_ID] = {
   let mut table = [false; MAX_TAG_ID];
@@ -5189,10 +5203,7 @@ impl ConvertState {
   /// blank line inside the region re-enables it.
   #[inline]
   pub(crate) fn is_raw_html_block_tag(id: u8) -> bool {
-    matches!(
-      id,
-      TAG_DETAILS | TAG_SUMMARY | TAG_ADDRESS | TAG_DL | TAG_DT | TAG_DD
-    )
+    RAW_HTML_BLOCK_TAG[id as usize]
   }
 
   // Keep boundary tracking out of the common element emitters. These helpers
@@ -6742,7 +6753,7 @@ impl ConvertState {
       && self.ordered_item_number(0) != 1
       && !self.in_table_cell()
       && !self.inside_open_inline_delimiter()
-      && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
+      && (self.block_open_needs_break() || self.hard_break_end == self.buffer.len())
     {
       return DEFAULT_BLOCK_SPACING;
     }
@@ -7079,8 +7090,8 @@ impl ConvertState {
 #[cfg(test)]
 mod tests {
   use super::{
-    BlockquoteFrame, ConvertState, CutLineLead, EMPHASIS_EXIT_TAG, TAG_A, TAG_CODE, TAG_H2, TAG_LI,
-    TAG_P, push_decimal,
+    BlockquoteFrame, ConvertState, CutLineLead, EMPHASIS_EXIT_TAG, TAG_A, TAG_ADDRESS, TAG_CODE,
+    TAG_DD, TAG_DETAILS, TAG_DL, TAG_DT, TAG_H2, TAG_LI, TAG_P, TAG_SUMMARY, push_decimal,
   };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
@@ -7090,6 +7101,21 @@ mod tests {
       assert_eq!(
         is_emphasis,
         matches!(ConvertState::inline_marker_type(id as u8), Some(1..=4)),
+        "tag id {id}"
+      );
+    }
+  }
+
+  #[test]
+  fn raw_html_block_tag_table_matches_the_six_tags() {
+    for id in 0..=u8::MAX {
+      let expected = matches!(
+        id,
+        TAG_DETAILS | TAG_SUMMARY | TAG_ADDRESS | TAG_DL | TAG_DT | TAG_DD
+      );
+      assert_eq!(
+        ConvertState::is_raw_html_block_tag(id),
+        expected,
         "tag id {id}"
       );
     }
