@@ -608,6 +608,108 @@ fn walk_plain_attributes(bytes: &[u8], from: usize) -> PlainWalk {
   PlainWalk::Resume(boundary)
 }
 
+/// [`walk_plain_attributes`] for the extracting scan: each well-formed
+/// `name="value"` or bare `name` goes straight to [`push_attr`]. A `Resume`
+/// position is always one where the tokenizer is in `State::Gap` with every
+/// attribute before it already stored.
+// Out of line, like the plain walk: inlined it cost real pages 0.45%.
+#[inline(never)]
+fn walk_extracted_attributes(
+  html_chunk: &str,
+  from: usize,
+  mask: u16,
+  budget: &mut AttrBudget,
+  result: &mut Attributes,
+) -> PlainWalk {
+  let bytes = html_chunk.as_bytes();
+  let mut i = from;
+  loop {
+    while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & NON_WHITESPACE_STOP == 0 {
+      i += 1;
+    }
+    let Some(&c) = bytes.get(i) else {
+      return PlainWalk::Resume(i);
+    };
+    if c == GT_CHAR {
+      return PlainWalk::Done {
+        end: i + 1,
+        slash: false,
+      };
+    }
+    if c == SLASH_CHAR || c == EQUALS_CHAR {
+      if c == SLASH_CHAR && bytes.get(i + 1) == Some(&GT_CHAR) {
+        return PlainWalk::Done {
+          end: i + 2,
+          slash: true,
+        };
+      }
+      return PlainWalk::Resume(i);
+    }
+    let name_start = i;
+    i += 1;
+    while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & ATTR_NAME_STOP == 0 {
+      i += 1;
+    }
+    let name = &html_chunk[name_start..i];
+    match bytes.get(i) {
+      Some(&EQUALS_CHAR) => {
+        let Some(&quote) = bytes
+          .get(i + 1)
+          .filter(|&&next| next == QUOTE_CHAR || next == APOS_CHAR)
+        else {
+          return PlainWalk::Resume(name_start);
+        };
+        let value_start = i + 2;
+        let Some(offset) = find_byte(&bytes[value_start..], quote) else {
+          return PlainWalk::Resume(name_start);
+        };
+        let value_end = value_start + offset;
+        push_attr(
+          result,
+          mask,
+          budget,
+          name,
+          Some(&html_chunk[value_start..value_end]),
+        );
+        i = value_end + 1;
+      }
+      Some(&GT_CHAR) => {
+        push_attr(result, mask, budget, name, None);
+        return PlainWalk::Done {
+          end: i + 1,
+          slash: false,
+        };
+      }
+      Some(&SLASH_CHAR) => {
+        if bytes.get(i + 1) == Some(&GT_CHAR) {
+          push_attr(result, mask, budget, name, None);
+          return PlainWalk::Done {
+            end: i + 2,
+            slash: true,
+          };
+        }
+        return PlainWalk::Resume(name_start);
+      }
+      // Whitespace: the name stands alone unless a `=` follows it. A `/` or
+      // the chunk end there is left to the tokenizer, name included.
+      Some(_) => {
+        let mut next = i + 1;
+        while next < bytes.len() && SCAN_CLASS[bytes[next] as usize] & NON_WHITESPACE_STOP == 0 {
+          next += 1;
+        }
+        match bytes.get(next) {
+          None | Some(&(EQUALS_CHAR | SLASH_CHAR)) => return PlainWalk::Resume(name_start),
+          Some(_) => {
+            push_attr(result, mask, budget, name, None);
+            i = next;
+          }
+        }
+      }
+      None => return PlainWalk::Resume(name_start),
+    }
+  }
+}
+
 /// Walk a start tag to its `>`, extracting attributes on the way when
 /// `EXTRACT`. Finding `>` needs the same quote tracking the extraction does, so
 /// both come from one pass; the flag is a const so the `ATTR_NONE`
@@ -639,6 +741,19 @@ fn scan_tag<const EXTRACT: bool>(
         }
         PlainWalk::Resume(boundary) => i = boundary,
       },
+      _ => {}
+    }
+  } else {
+    match bytes.get(i) {
+      Some(&GT_CHAR) => return TagScan::done(i + 1, self_closing, scan.budget.overflow),
+      Some(&next) if is_whitespace(next) => {
+        match walk_extracted_attributes(html_chunk, i, scan.mask, &mut scan.budget, scan.result) {
+          PlainWalk::Done { end, slash } => {
+            return TagScan::done(end, slash || self_closing, scan.budget.overflow);
+          }
+          PlainWalk::Resume(boundary) => i = boundary,
+        }
+      }
       _ => {}
     }
   }
@@ -1425,6 +1540,122 @@ mod tests {
             );
           }
         }
+      }
+    }
+  }
+
+  type TagEnd = Result<(usize, bool), (State, bool)>;
+
+  fn store(out: &mut Vec<(String, String)>, name: &str, value: &str) {
+    let name = name.to_ascii_lowercase();
+    if !out.iter().any(|(seen, _)| *seen == name) {
+      out.push((name, value.to_string()));
+    }
+  }
+
+  /// Extraction one byte at a time, with no run, jump or walk: the attributes
+  /// stored before the tag ended or the chunk ran out (the first of a name
+  /// wins), and the tag end as [`reference_tag_end`] reports it.
+  fn reference_attributes(html: &str) -> (Vec<(String, String)>, TagEnd) {
+    let bytes = html.as_bytes();
+    let mut out = Vec::new();
+    let mut state = State::Gap;
+    let (mut name_start, mut name_end, mut value_start) = (0, 0, 0);
+    for (i, &c) in bytes.iter().enumerate() {
+      if !matches!(state, State::Quoted(_)) {
+        let mut end = (c == GT_CHAR).then_some((i + 1, false));
+        if state != State::UnquotedValue && c == SLASH_CHAR {
+          match bytes.get(i + 1) {
+            None => return (out, Err((state, true))),
+            Some(&GT_CHAR) => end = Some((i + 2, true)),
+            Some(_) => {}
+          }
+        }
+        if let Some(end) = end {
+          match state {
+            State::Name => store(&mut out, &html[name_start..i], ""),
+            State::AfterName | State::BeforeValue => {
+              store(&mut out, &html[name_start..name_end], "");
+            }
+            State::UnquotedValue => {
+              store(&mut out, &html[name_start..name_end], &html[value_start..i]);
+            }
+            State::Gap | State::Quoted(_) => {}
+          }
+          return (out, Ok(end));
+        }
+      }
+      // The tokenizer's own steps; only the name and value bounds are recorded here.
+      let next = state.step_without_extraction(c);
+      match (state, next) {
+        (State::AfterName, State::Name) => {
+          store(&mut out, &html[name_start..name_end], "");
+          name_start = i;
+        }
+        (State::Gap, State::Name) => name_start = i,
+        (State::Name, State::BeforeValue | State::AfterName) => name_end = i,
+        (State::BeforeValue, State::Quoted(_)) => value_start = i + 1,
+        (State::BeforeValue, State::UnquotedValue) => value_start = i,
+        (State::UnquotedValue | State::Quoted(_), State::Gap) => {
+          store(&mut out, &html[name_start..name_end], &html[value_start..i]);
+        }
+        _ => {}
+      }
+      state = next;
+    }
+    (out, Err((state, false)))
+  }
+
+  fn assert_extraction_matches(html: &str, mask: u16, attrs: &mut Attributes) {
+    let (mut want, want_end) = reference_attributes(html);
+    if mask != ATTR_ALL {
+      want.retain(|(name, _)| mask & attr_bit(name.as_bytes()) != 0);
+    }
+    let scan = process_tag_attributes(html, 0, None, mask, AttrBudget::new(0), attrs);
+    let got: Vec<(String, String)> = attrs
+      .iter()
+      .map(|(name, value)| (name.to_string(), value.to_string()))
+      .collect();
+    assert_eq!(got, want, "{html:?} mask {mask:#x}: attributes");
+    match want_end {
+      Ok((end, self_closing)) => assert!(
+        scan.complete && scan.new_position == end && scan.self_closing == self_closing,
+        "{html:?} mask {mask:#x}: got ({}, {}, {}), want ({end}, {self_closing})",
+        scan.complete,
+        scan.new_position,
+        scan.self_closing
+      ),
+      Err((state, slash)) => {
+        let carry = scan.carry.as_deref();
+        assert!(
+          !scan.complete
+            && scan.new_position == html.len()
+            && carry.is_some_and(|carry| carry.state == state && carry.slash == slash),
+          "{html:?} mask {mask:#x}: suspended scan disagrees"
+        );
+      }
+    }
+  }
+
+  // Every body up to six tokens, so each state meets each byte in the
+  // straight-line walk and in the loop it hands over to. One name is masked
+  // in: duplicates, bare names and a name the mask rejects are kept or dropped
+  // as the tokenizer would.
+  #[test]
+  fn tag_scan_with_extraction_matches_the_tokenizer() {
+    const TOKENS: [&str; 8] = ["href", "x", " ", "=", "\"", "'", "/", ">"];
+    const MAX_TOKENS: usize = 6;
+    let mut attrs = Attributes::new();
+    let mut html = String::new();
+    for count in 0..=MAX_TOKENS {
+      for mut code in 0..TOKENS.len().pow(count as u32) {
+        html.clear();
+        for _ in 0..count {
+          html.push_str(TOKENS[code % TOKENS.len()]);
+          code /= TOKENS.len();
+        }
+        assert_extraction_matches(&html, ATTR_HREF, &mut attrs);
+        assert_extraction_matches(&html, ATTR_ALL, &mut attrs);
       }
     }
   }
