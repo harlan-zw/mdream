@@ -491,6 +491,11 @@ describe.each(engines)('touching emphasis pairs $name', (engineConfig) => {
     ['<strong>Aa</strong><dfn><strong>Bb</strong></dfn>', '**Aa******Bb****'],
     ['<figcaption><em>Aa</em><em>Bb</em></figcaption>', '**Aa**Bb**'],
     ['<strong><em>Aa</em><em>Bb</em></strong>', '***AaBb***'],
+    // An empty pair is no such run once it is dropped.
+    ['<i>Aa</i><em><i> </i>Bb</em><i>Cc</i>', '*AaBbCc*'],
+    ['<i>Aa</i><em><i></i></em><i>Cc</i>', '*AaCc*'],
+    ['<cite>Aa</cite><em><cite></cite><cite>Bb</cite></em>', '*Aa***Bb**'],
+    ['<ul><li>Aa<em>Aa </em><strong>Bb</strong><i></i><dfn><strong>*</strong><strong><dfn>&#32;</dfn>\n<cite>x<br></cite>Bb</strong></dfn> tail</li></ul>', '- Aa*Aa* **Bb******\\***** *x  \n  *Bb**** tail'],
     // Two code spans would touch.
     ['<em><kbd>Aa</kbd></em><cite><kbd>Bb</kbd></cite>', '*`Aa`**`Bb`*'],
     ['<s>Aa</s><s>Bb</s>', '~~Aa~~ ~~Bb~~'],

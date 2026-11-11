@@ -1696,6 +1696,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // The delimiter and the type of the pair reopened last.
   let reopenedDelimiter = ''
   let reopenedType = 0
+  // The opener fragment and the stack slot of a pair that was reopened and
+  // then written out again because a pair of its own delimiter opened right
+  // inside it.
+  let unmergedOpener = -1
+  let unmergedSlot = -1
 
   /**
    * The fragment of the first closer an opener may still take back, or
@@ -2859,6 +2864,20 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
             state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
             restoreQuoteParentBoundary()
+            // The empty pair was all that kept the pair around it from
+            // continuing the one before, so that pair is reopened after all.
+            if (unmergedSlot === openMarkerCount - 1 && unmergedOpener === buff.length - 1
+              && openMarkers[unmergedSlot]! >> 3 === unmergedOpener
+              && closedMarkerCount && closedMarkers[closedMarkerCount - 1] === unmergedOpener - 1
+              && buff[unmergedOpener] === buff[unmergedOpener - 1]) {
+              closedMarkerCount--
+              state.outputPositions?.replace(unmergedOpener - 1, buff.length, [])
+              buff.length = unmergedOpener - 1
+              noteBufferRewrite(state)
+              state.lastContentCache = buff[buff.length - 1]
+              openMarkers[unmergedSlot] = buff.length << 3 | MARKER_TYPE_MASK
+              unmergedSlot = -1
+            }
             return
           }
           if (markerType <= 4 && dropVerticalTabMarker(buff, packed, markerType, handlerOutput!, state.outputPositions)) {
@@ -3304,11 +3323,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           && closer < reopened >> 3 && reopenedDelimiter === handlerOutput) {
           // A pair that opens with a pair of its own delimiter writes a longer
           // run, which CommonMark may read apart, so it is written as before.
+          // The closer stays on record in case the inner pair closes empty.
           const opener = buff.length - 1
           state.outputPositions?.replace(opener, opener, [handlerOutput, handlerOutput])
           buff.splice(opener, 0, handlerOutput, handlerOutput)
           noteBufferRewrite(state)
-          openMarkers[openMarkerCount - 1] = (opener + 1) << 3 | reopenedType
+          if (closedMarkerCount && closedMarkers[closedMarkerCount - 1] !== closer)
+            closedMarkerCount = 0
+          closedMarkers[closedMarkerCount++] = opener
+          unmergedOpener = opener + 1
+          unmergedSlot = openMarkerCount - 1
+          openMarkers[unmergedSlot] = unmergedOpener << 3 | reopenedType
           openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
         }
         else if (merges && closedMarkerCount && closedMarkers[closedMarkerCount - 1] === closer
@@ -3330,9 +3355,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // A pair reopened around this one begins where its closer stood.
           for (let index = openMarkerCount - 1; index >= 0 && openMarkers[index]! >> 3 > buff.length; index--)
             openMarkers[index] = buff.length << 3 | MARKER_TYPE_MASK
+          if (unmergedSlot >= openMarkerCount)
+            unmergedSlot = -1
           openMarkers[openMarkerCount++] = buff.length << 3 | MARKER_TYPE_MASK
         }
         else {
+          // A marker pushed into the slot replaces the pair it described.
+          if (unmergedSlot >= openMarkerCount)
+            unmergedSlot = -1
           openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
         }
       }

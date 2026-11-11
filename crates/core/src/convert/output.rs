@@ -1167,6 +1167,8 @@ impl ConvertState {
       {
         // A pair that opens with a pair of its own delimiter writes a longer
         // run, which CommonMark may read apart, so it is written as before.
+        // The closer stays on record in case the inner pair closes empty.
+        reopened.unmerged = reopened.reopened;
         reopened.reopened = 0;
         reopened.output_start = marker_start + emitted.len();
         reopened.content_start = marker_start + 2 * emitted.len();
@@ -1176,6 +1178,16 @@ impl ConvertState {
           self.buffer.push_str(emitted);
         }
         self.last_content_cache_len = cache;
+        if self
+          .closed_markers
+          .last()
+          .is_some_and(|closer| closer[1] != marker_start)
+        {
+          self.closed_markers.clear();
+        }
+        self
+          .closed_markers
+          .push([marker_start, marker_start + emitted.len()]);
         marker_start = self.buffer.len() - emitted.len();
       } else if merges
         && let Some(&[start, end]) = self.closed_markers.last()
@@ -1203,6 +1215,7 @@ impl ConvertState {
           restores_heading_break: false,
           vertical_tab_start: usize::MAX,
           reopened: emitted.len() as u8,
+          unmerged: 0,
         });
         return;
       }
@@ -1215,6 +1228,7 @@ impl ConvertState {
         restores_heading_break: emitted.starts_with('\n'),
         vertical_tab_start: usize::MAX,
         reopened: 0,
+        unmerged: 0,
       });
     } else if !keeps_markers
       && !self.open_markers.is_empty()
@@ -1235,6 +1249,27 @@ impl ConvertState {
       depth(TAG_EM) + depth(TAG_I) + depth(TAG_CITE) + depth(TAG_FIGCAPTION)
     };
     open > 1
+  }
+
+  /// The empty pair just dropped was all that kept the pair around it from
+  /// continuing the one before, so that pair is reopened after all.
+  #[inline]
+  fn reopen_unmerged_marker(&mut self) {
+    if let Some(marker) = self.open_markers.last_mut()
+      && marker.unmerged != 0
+      && marker.content_start == self.buffer.len()
+      && let Some(&[start, end]) = self.closed_markers.last()
+      && end == marker.output_start
+      && start >= self.last_yielded_length
+    {
+      marker.reopened = marker.unmerged;
+      marker.unmerged = 0;
+      marker.output_start = start;
+      marker.content_start = start;
+      self.closed_markers.pop();
+      self.truncate_buffer(start);
+      self.last_content_cache_len = 0;
+    }
   }
 
   /// Remember the emphasis closer an exit wrote at the end of the output.
@@ -1644,6 +1679,7 @@ impl ConvertState {
         self.reset_empty_tentative_caption_frames();
         self.restore_quote_parent_boundary();
         self.last_node_is_inline = is_inline;
+        self.reopen_unmerged_marker();
         return true;
       }
       if inline_marker_type <= 4 && content.iter().all(|&b| is_whitespace(b) || b == 11) {

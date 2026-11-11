@@ -135,6 +135,8 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<strong>Aa</strong><dfn><strong>Bb</strong></dfn>z',
     '<figcaption>Aa<em>Bb</em><cite>Cc</cite></figcaption>',
     '<strong><em>Aa</em></strong><strong><em><cite>Bb</cite></em></strong>',
+    '<i>Aa</i><em><i><b></b></i>Bb</em><i>Cc</i>',
+    '<b>Aa</b><strong><dfn>&#32;</dfn>Bb</strong><b>Cc</b>',
   ],
 }
 

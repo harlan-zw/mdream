@@ -196,6 +196,9 @@ struct OpenMarker {
   /// Its opener would have touched that closer, so neither was written and
   /// the pair cannot be dropped as empty. Zero for any other pair.
   reopened: u8,
+  /// The length of the delimiter, if the pair was reopened and then written
+  /// out again because a pair of its own delimiter opened right inside it.
+  unmerged: u8,
 }
 
 #[derive(Clone, Copy)]
