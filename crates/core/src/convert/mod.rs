@@ -964,6 +964,10 @@ pub struct ConvertState {
   /// Some plugin reads arbitrary attributes, so every tag captures all of them.
   /// `frontmatter` is absent deliberately: TAG_META's mask covers what it reads.
   attrs_force_all: bool,
+  /// Attribute bits every element captures on top of its handler's: the filter
+  /// and Tailwind bits, or `ATTR_ALL` when `attrs_force_all`. Set once at setup
+  /// so the per-tag mask is one OR.
+  attr_extra_mask: u16,
 
   // Plugin tracking
   isolate_main_found: bool,
@@ -1416,6 +1420,7 @@ impl ConvertState {
       li_slot_free: true,
       override_idx: None,
       attrs_force_all: false,
+      attr_extra_mask: ATTR_NONE,
 
       isolate_main_found: false,
       isolate_main_closed: false,
@@ -1684,6 +1689,16 @@ impl ConvertState {
       }
       s.attrs_force_all =
         filter_needs_all || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
+      s.attr_extra_mask = if s.attrs_force_all {
+        ATTR_ALL
+      } else {
+        s.filter_attr_bits
+          | if s.has_tailwind {
+            ATTR_CLASS
+          } else {
+            ATTR_NONE
+          }
+      };
     }
     s
   }
@@ -2025,6 +2040,7 @@ impl ConvertState {
       let result = self.apply_opening_tag(
         pending.name(),
         pending.tag_id,
+        tag_handler,
         pending.is_builtin,
         i,
         resume.self_closing,
