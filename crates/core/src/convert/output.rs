@@ -1921,7 +1921,7 @@ impl ConvertState {
           && self
             .caption_frames
             .last()
-            .is_some_and(|frame| matches!(frame.state, CaptionState::Pending));
+            .is_some_and(|frame| !matches!(frame.state, CaptionState::Committed));
         self.materialize_caption_frames(if caption_enter && enter_is_literal {
           CaptionMaterialization::ExplicitCommit
         } else if tentative_caption_output {

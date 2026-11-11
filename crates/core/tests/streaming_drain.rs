@@ -394,6 +394,10 @@ fn figcaption_streaming_matches_one_shot() {
       "***<mark></mark>x*y**",
     ),
     (
+      "<figcaption><b><mark></mark></b> x</figcaption>",
+      "***<mark></mark>**x*",
+    ),
+    (
       "<figcaption><mark>m</mark> x</figcaption>",
       "*<mark>m</mark> x*",
     ),

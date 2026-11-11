@@ -46,6 +46,7 @@ describe.each(engines)('figure $name', (engineConfig) => {
     ['<figure><img src="/i.png" alt="i"><figcaption><sub></sub> x</figcaption></figure>', '![i](/i.png)\n\n*<sub></sub>x*'],
     ['<p>a</p><figcaption><u></u> x</figcaption>', 'a\n\n*<u></u>x*'],
     ['<strong><figcaption><mark></mark> x</figcaption>y</strong>', '***<mark></mark>x*y**'],
+    ['<figcaption><b><mark></mark></b> x</figcaption>', '***<mark></mark>**x*'],
     ['<figcaption><mark>m</mark> x</figcaption>', '*<mark>m</mark> x*'],
     ['<figcaption><sub>&#9;<br>z</sub></figcaption>', '*<sub>  \nz</sub>*'],
     ['<figcaption><mark></mark>&#9;x</figcaption>', '*<mark></mark>\tx*'],
