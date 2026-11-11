@@ -704,7 +704,7 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
 
   while i < bytes.len() {
     if state == SCRIPT_DATA {
-      i = crate::scan::find_byte(&bytes[i..], LT_CHAR).map_or(bytes.len(), |p| i + p);
+      i = crate::scan::find_byte_far(&bytes[i..], LT_CHAR).map_or(bytes.len(), |p| i + p);
     } else if state == SCRIPT_DATA_ESCAPED || state == SCRIPT_DATA_DOUBLE_ESCAPED {
       i = bytes[i..]
         .iter()
