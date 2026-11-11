@@ -1070,6 +1070,8 @@ pub struct ConvertState {
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
   wrap_width: usize,
+  /// Markdown, no node cap, no wrap: the fixed part of the text fast-path gate.
+  pub(crate) text_static_ok: bool,
   // A single-format build folds every format check to a constant.
   #[cfg_attr(
     not(any(
@@ -1428,6 +1430,7 @@ impl ConvertState {
       keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
+      text_static_ok: false,
       #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
       plain_text: format == OutputFormat::Text,
       format,
@@ -1528,6 +1531,7 @@ impl ConvertState {
       s.clean_flags = flags;
     }
 
+    s.text_static_ok = s.is_markdown() && options_max_node_bytes == 0 && options_wrap_width == 0;
     if let Some(plugins) = &s.options.plugins {
       s.has_plugins = true;
       s.has_tailwind = plugins.tailwind.is_some();

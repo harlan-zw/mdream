@@ -3224,9 +3224,7 @@ impl ConvertState {
   /// Context for [`Self::emit_plain_text_inline`]: no clamp, defer, indent or wrap state.
   #[inline(always)]
   pub(crate) fn text_fast_path_ok(&self) -> bool {
-    self.is_markdown()
-      && self.options.max_node_bytes == 0
-      && self.wrap_width == 0
+    self.text_static_ok
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
       && !self.list_rule_pending
