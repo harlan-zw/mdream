@@ -868,19 +868,20 @@ fn push_attr(
   if mask != ATTR_ALL && mask & bit == 0 {
     return;
   }
-  // First occurrence wins, so a later duplicate is ignored and must not charge.
-  if bit != ATTR_NONE && result.contains_bit(bit) {
-    return;
-  }
-  if !budget.take(raw.len() + value.map_or(0, str::len)) {
-    return;
-  }
+  let cost = raw.len() + value.map_or(0, str::len);
   // A known name is fully described by `bit`; only the `ATTR_ALL` long tail
   // needs an owned, lowercased copy. Values decode into a recycled buffer.
   if bit == ATTR_NONE {
-    result.insert_custom(raw.to_ascii_lowercase().into_boxed_str(), value);
-  } else {
-    result.insert_known(bit, value);
+    if budget.take(cost) {
+      result.insert_custom(raw.to_ascii_lowercase().into_boxed_str(), value);
+    }
+    return;
+  }
+  // First occurrence wins, so a later duplicate is ignored and must not charge.
+  if let Some(slot) = result.vacant_bit(bit)
+    && budget.take(cost)
+  {
+    result.insert_known_at(slot, bit, value);
   }
 }
 

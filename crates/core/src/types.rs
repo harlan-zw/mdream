@@ -123,13 +123,23 @@ impl Attributes {
   }
 
   /// Store a known attribute by bit. The first occurrence wins, as in HTML.
-  #[inline]
+  #[cfg(test)]
   pub fn insert_known(&mut self, bit: u16, value: Option<&str>) {
+    if let Some(index) = self.vacant_bit(bit) {
+      self.insert_known_at(index, bit, value);
+    }
+  }
+
+  /// The slot a new `bit` attribute takes, or `None` when one is stored.
+  #[inline]
+  pub(crate) fn vacant_bit(&self, bit: u16) -> Option<usize> {
     debug_assert!(bit != ATTR_NONE, "a known attribute has a bit");
-    let index = match self.locate_bit(bit) {
-      Ok(_) => return,
-      Err(index) => index,
-    };
+    self.locate_bit(bit).err()
+  }
+
+  /// Store a known attribute in the slot [`Self::vacant_bit`] returned.
+  #[inline]
+  pub(crate) fn insert_known_at(&mut self, index: usize, bit: u16, value: Option<&str>) {
     let slot = self.claim_slot(index);
     slot.bit = bit;
     write_attribute_value(&mut slot.value, value);
