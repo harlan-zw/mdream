@@ -3369,7 +3369,8 @@ impl ConvertState {
     self.last_node_is_inline = false;
   }
 
-  /// Plain-text emit for [`Self::text_fast_path_ok`] contexts.
+  /// Plain-text emit for [`Self::text_fast_path_ok`] contexts. `in_pre` covers
+  /// `<pre>` text, which the general path never escapes.
   #[inline(always)]
   pub(crate) fn emit_plain_text_inline(
     &mut self,
@@ -3377,8 +3378,9 @@ impl ConvertState {
     contains_whitespace: bool,
     depth: usize,
     index: usize,
+    in_pre: bool,
   ) {
-    debug_assert!(self.text_fast_path_ok());
+    debug_assert!(in_pre || self.text_fast_path_ok());
     let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
       return;
@@ -3418,10 +3420,12 @@ impl ConvertState {
     } else {
       0
     };
-    let hazard = ordered_digits > 0
-      || has_inline_gfm_hazard
-      || context_hazard
-      || self.starts_with_gfm_block_candidate(text);
+    // The general path escapes nothing inside `<pre>`.
+    let hazard = !in_pre
+      && (ordered_digits > 0
+        || has_inline_gfm_hazard
+        || context_hazard
+        || self.starts_with_gfm_block_candidate(text));
     let text = if self.escape_text_node(
       text,
       hazard,

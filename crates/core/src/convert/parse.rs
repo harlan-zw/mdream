@@ -454,23 +454,56 @@ impl ConvertState {
   }
 
   pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
-    if self.text_node_fast_path_ok() {
-      self.process_plain_text_node(text_buffer);
-    } else {
-      self.process_text_buffer_piece(text_buffer, true);
+    // `in_pre` is tested first, so text outside `<pre>` pays one check.
+    if self.in_pre {
+      if self.pre_text_node_fast_path_ok() {
+        self.process_plain_text_node::<true>(text_buffer);
+        return;
+      }
+    } else if self.text_node_fast_path_ok() {
+      self.process_plain_text_node::<false>(text_buffer);
+      return;
     }
+    self.process_text_buffer_piece(text_buffer, true);
   }
 
   /// Gate for [`Self::process_plain_text_node`]: no per-node state needs the general path.
   #[inline(always)]
   fn text_node_fast_path_ok(&self) -> bool {
     self.text_fast_path_ok()
-      && !self.in_pre
       && self.overflow_tag_id.is_none()
       && self.overflow_opaque_depth == 0
       && !self.overflow_raw_excludes_text
       && self.extraction_tracked.is_empty()
       // Tailwind-wrapped text takes the general path.
+      && self.stack.last().is_none_or(|parent| {
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
+      })
+  }
+
+  /// Gate for `process_plain_text_node::<true>`: Markdown text in an open `<pre>`.
+  /// Lists, quotes and tables add indent, prefixes or cell folding, so they stay general.
+  #[inline(always)]
+  fn pre_text_node_fast_path_ok(&self) -> bool {
+    self.in_pre
+      && self.text_static_ok
+      && self.fast_paths_enabled()
+      && self.caption_boundary == CaptionBoundary::None
+      && self.caption_frames.is_empty()
+      && !self.list_rule_pending
+      && !self.heading_break_pending
+      && !self.pending_inline_whitespace
+      && !self.pending_raw_html_boundary
+      && !self.pre_fence_pending
+      && self.depth_map[TAG_LI as usize] == 0
+      && self.depth_map[TAG_BLOCKQUOTE as usize] == 0
+      && self.depth_map[TAG_TABLE as usize] == 0
+      && !self.in_table_cell()
+      && !self.in_raw_html_block()
+      && self.overflow_tag_id.is_none()
+      && self.overflow_opaque_depth == 0
+      && !self.overflow_raw_excludes_text
+      && self.extraction_tracked.is_empty()
       && self.stack.last().is_none_or(|parent| {
         parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
       })
@@ -514,10 +547,25 @@ impl ConvertState {
     }
   }
 
-  /// [`Self::process_text_buffer_piece`] for [`Self::text_node_fast_path_ok`] nodes.
+  /// [`Self::process_text_buffer_piece`] for the fast-path gates. `IN_PRE` selects
+  /// the `<pre>` rules: whitespace-only text is code, only line breaks lead-trim,
+  /// and decoded references are not protected.
   #[inline(never)]
-  fn process_plain_text_node(&mut self, text_buffer: &mut String) {
-    debug_assert!(self.text_node_fast_path_ok());
+  fn process_plain_text_node<const IN_PRE: bool>(&mut self, text_buffer: &mut String) {
+    self.process_plain_text_body(text_buffer, IN_PRE);
+  }
+
+  /// Body of `process_plain_text_node`. Native inlines it into each const
+  /// instance. On wasm32 both instances share this one copy and `in_pre` is a
+  /// runtime flag.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  fn process_plain_text_body(&mut self, text_buffer: &mut String, in_pre: bool) {
+    debug_assert!(if in_pre {
+      self.pre_text_node_fast_path_ok()
+    } else {
+      self.text_node_fast_path_ok()
+    });
     let contains_non_whitespace = self.text_buffer_contains_non_whitespace;
     let contains_whitespace = self.text_buffer_contains_whitespace;
     let has_inline_gfm_hazard =
@@ -539,7 +587,8 @@ impl ConvertState {
       excludes_text_nodes = true;
     }
 
-    if !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty() {
+    // Whitespace-only text inside `<pre>` is code, so the general path keeps it.
+    if !in_pre && !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty() {
       return;
     }
     if text_buffer.is_empty() {
@@ -571,7 +620,13 @@ impl ConvertState {
     if contains_whitespace && is_first_text_in_block {
       let bytes = text.as_bytes();
       let mut start = 0;
-      while start < bytes.len() && is_whitespace(bytes[start]) {
+      while start < bytes.len()
+        && (if in_pre {
+          bytes[start] == NEWLINE_CHAR || bytes[start] == CARRIAGE_RETURN_CHAR
+        } else {
+          is_whitespace(bytes[start])
+        })
+      {
         start += 1;
       }
       if start > 0 {
@@ -579,9 +634,9 @@ impl ConvertState {
       }
     }
 
-    // Only raw HTML leaves decoded references unprotected.
+    // Only raw HTML leaves decoded references unprotected. Inside `<pre>` none are.
     if self.has_encoded_html_entity {
-      let protect = !self.raw_html_block_open;
+      let protect = !in_pre && !self.raw_html_block_open;
       if decode_html_entities_into(&text, false, protect, &mut self.entity_buffer) {
         std::mem::swap(&mut text, &mut self.entity_buffer);
       }
@@ -590,7 +645,7 @@ impl ConvertState {
 
     if !excludes_text_nodes {
       let (depth, index) = self.begin_text_emit(&text, has_inline_gfm_hazard);
-      self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
+      self.emit_plain_text_inline(&text, contains_whitespace, depth, index, in_pre);
     }
 
     text.clear();
