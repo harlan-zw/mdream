@@ -673,6 +673,23 @@ mod fast_path_parity {
     vec![
       ("default", base(), OutputFormat::Markdown),
       ("text", base(), OutputFormat::Text),
+      ("text minimal", minimal(), OutputFormat::Text),
+      (
+        "text capped",
+        HtmlToMarkdownOptions {
+          max_node_bytes: 512,
+          ..Default::default()
+        },
+        OutputFormat::Text,
+      ),
+      (
+        "text wrap",
+        HtmlToMarkdownOptions {
+          wrap_width: 40,
+          ..Default::default()
+        },
+        OutputFormat::Text,
+      ),
       ("html", base(), OutputFormat::Html),
       ("minimal", minimal(), OutputFormat::Markdown),
       (
