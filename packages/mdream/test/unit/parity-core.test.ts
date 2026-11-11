@@ -187,6 +187,18 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<strong>h<span> </span>&#32;</strong>x',
     'Aa<span> </span>&#32;<form><span>Bb</span></form>',
   ], ['markdown', 'text']],
+  'paragraph after a trimmed element in a list item': [[
+    '<ul><li><span><span>Aa</span> </span><p>Bb</p></li></ul>',
+    '<ul><li><span><span>Aa</span> </span><i></i> <p>Bb</p></li></ul>',
+  ], ['markdown', 'text']],
+  'link title after a pair dropped in an earlier block': [[
+    '<blockquote><br><em>h</em><i></i></blockquote><a href="/x" title="x">x</a>',
+  ], ['markdown']],
+  'inline code in a list item after an element that writes nothing': [[
+    '<ul><li><code>Aa</code> <table></table><code>Bb</code></li></ul>',
+    '<ul><li>Aa<span> </span> <p><code>Bb</code></p></li></ul>',
+    '<ul><li>Aa<span> </span> <section><code>Bb</code></section></li></ul>',
+  ], ['markdown']],
 }
 
 describe('javaScript engine matches Rust output', () => {

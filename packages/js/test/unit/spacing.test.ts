@@ -1132,3 +1132,22 @@ it.each([
   for (let split = 0; split <= html.length; split++)
     expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
 })
+
+it.each([
+  ['<ul><li><span><span>Aa</span> </span><p>Bb</p></li></ul>', '- Aa\n\n  Bb'],
+  ['<ul><li><span><span>Aa</span> </span><i></i> <p>Bb</p></li></ul>', '- Aa\n\n  Bb'],
+  ['<ol><li><span><span>Aa</span> </span><i></i><p>Bb</p><p>Cc</p></li></ol>', '1. Aa\n\n   Bb\n\n   Cc'],
+  ['<blockquote><br><em>h</em><i></i></blockquote><a href="/x" title="x">x</a>', '>   \n> *h*\n\n[x](/x)'],
+  ['<blockquote><br><em>x</em><i></i></blockquote><a href="/x" title="x">x</a>', '>   \n> *x*\n\n[x](/x)'],
+  ['<ul><li><code>Aa</code> <table></table><code>Bb</code></li></ul>', '- `Aa` `Bb`'],
+  ['<ul><li>Aa<span> </span> <p><code>Bb</code></p></li></ul>', '- Aa `Bb`'],
+  ['<ul><li>Aa<span> </span> <section><code>Bb</code></section></li></ul>', '- Aa `Bb`'],
+])('converts in one shot as it streams once a trim or a dropped pair rewrote the buffer: %s', async (html, expected) => {
+  expect(htmlToMarkdown(html)).toBe(expected)
+  for (let split = 0; split <= html.length; split++)
+    expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
+  for (const width of [1, 2, 3, 11]) {
+    const chunks = Array.from({ length: Math.ceil(html.length / width) }, (_, i) => html.slice(i * width, (i + 1) * width))
+    expect(await streamConvert(chunks), `width=${width}`).toBe(expected)
+  }
+})

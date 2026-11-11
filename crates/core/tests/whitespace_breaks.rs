@@ -2828,3 +2828,68 @@ fn written_space_after_a_leading_blank_survives_an_element_that_starts_no_line()
     assert_text_every_split(html, expected);
   }
 }
+
+#[test]
+fn paragraph_in_a_list_item_opens_its_block_after_a_trimmed_inline_element() {
+  for (html, expected) in [
+    (
+      "<ul><li><span><span>Aa</span> </span><p>Bb</p></li></ul>",
+      "- Aa\n\n  Bb",
+    ),
+    (
+      "<ul><li><span><span>Aa</span> </span><i></i> <p>Bb</p></li></ul>",
+      "- Aa\n\n  Bb",
+    ),
+    (
+      "<ol><li><span><span>Aa</span> </span><i></i><p>Bb</p><p>Cc</p></li></ol>",
+      "1. Aa\n\n   Bb\n\n   Cc",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn link_title_is_compared_once_text_follows_a_dropped_empty_pair() {
+  for (html, expected) in [
+    (
+      r#"<blockquote><br><em>h</em><i></i></blockquote><a href="/x" title="x">x</a>"#,
+      ">   \n> *h*\n\n[x](/x)",
+    ),
+    (
+      r#"<blockquote><br><em>x</em><i></i></blockquote><a href="/x" title="x">x</a>"#,
+      ">   \n> *x*\n\n[x](/x)",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn inline_code_in_a_list_item_keeps_its_separator_after_an_element_that_writes_nothing() {
+  for (html, expected) in [
+    (
+      "<ul><li><code>Aa</code> <table></table><code>Bb</code></li></ul>",
+      "- `Aa` `Bb`",
+    ),
+    (
+      "<ul><li>Aa<span> </span> <p><code>Bb</code></p></li></ul>",
+      "- Aa `Bb`",
+    ),
+    (
+      "<ul><li>Aa<span> </span> <section><code>Bb</code></section></li></ul>",
+      "- Aa `Bb`",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}

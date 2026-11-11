@@ -2397,6 +2397,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // The run written below follows the separator the pending flag recorded.
       state.cacheFollowsSeparator = state.separatorPending === true
       state.separatorPending = false
+      // It is the last run now. The length a dropped pair left can come back
+      // once entries are merged and others written, so it is no evidence.
+      state.droppedPairAt = undefined
       const wrapWidth = state.options?.wrapWidth
       if (wrapWidth && canWrapHere(state.depthMap)) {
         // Past both the width and the prefix every word breaks or overflows.

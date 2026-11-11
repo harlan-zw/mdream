@@ -734,11 +734,12 @@ export const tagHandlers: Record<number, TagHandler> = {
       // `<code>` elements must be separated with a space so CommonMark parses
       // them as two code spans rather than merging into one.
       if ((state.depthMap?.[TAG_LI] || 0) > 0) {
-        const lastEntry = state.buffer.at(-1)
-        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
-          && lastChar !== '*' && lastChar !== '_' && lastChar !== '~'
-          && lastChar !== '[' && lastChar !== '>') {
+        // Read past an entry a trim emptied, as the paragraph enter does.
+        const last = lastOutputChar(state.buffer)
+        // Space, newline, tab, `*`, `_`, `~`, `[` and `>`.
+        if (last !== -1 && last !== 32 && last !== 10 && last !== 9
+          && last !== 42 && last !== 95 && last !== 126
+          && last !== 91 && last !== 62) {
           return { _tag: 'CodeSpanEnter', output: ` ${MARKDOWN_INLINE_CODE}` }
         }
       }
@@ -1034,9 +1035,10 @@ export const tagHandlers: Record<number, TagHandler> = {
       // still needs its separator after the fence has already opened.
       if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)
         && !state.preFencePending && state.preFenceOpener !== node) {
-        const lastEntry = state.buffer[enterOutputEnd(node, state) - 1]
-        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
+        // A trim leaves an emptied entry behind, which a stream's drain
+        // removes, so the last character is read past it.
+        const last = lastOutputChar(state.buffer, enterOutputEnd(node, state))
+        if (last !== -1 && last !== 32 && last !== 10) {
           return `\n\n${state.listIndent}`
         }
       }
