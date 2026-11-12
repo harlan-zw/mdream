@@ -204,6 +204,18 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<ul><li><span><span>Aa</span> </span><p>Bb</p></li></ul>',
     '<ul><li><span><span>Aa</span> </span><i></i> <p>Bb</p></li></ul>',
   ], ['markdown', 'text']],
+  'block break after text with a space inside an inline wrapper': [[
+    '<span><h2>y z</h2></span>B',
+    '<span><p>y z</p></span>B',
+    '<span><div>y z</div></span><b>B</b>',
+  ], ['markdown', 'text']],
+  'block break after text with a space inside a wrapper the text format differs on': [[
+    '<label><h2>y z</h2></label>B',
+    '<small><h3>a b c</h3></small> B',
+    '<p><b><p>y z</p></b><br>B</p>',
+    '<center><p>y z</p></center><br>B',
+    '<pre><center><ul><li>y z</li></ul></center></pre>',
+  ], ['markdown']],
   'link title after a pair dropped in an earlier block': [[
     '<blockquote><br><em>h</em><i></i></blockquote><a href="/x" title="x">x</a>',
   ], ['markdown']],

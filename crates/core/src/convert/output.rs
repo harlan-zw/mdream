@@ -6953,7 +6953,13 @@ impl ConvertState {
         let should_trim = !(is_block || h_is_inline && is_enter || is_enter && collapses)
           && !(has_spacing && is_enter);
 
-        if should_trim && self.last_content_cache_len > 0 {
+        // Newlines a block boundary wrote after the text are that block's
+        // break, not whitespace the text ended with. Only a boundary that
+        // writes something itself, as a raw HTML closer does, takes them.
+        if should_trim
+          && self.last_content_cache_len > 0
+          && !(self.break_after_last_text && output_str.is_empty())
+        {
           let cache_len = self.last_content_cache_len;
           let buf_len = self.buffer.len();
           // The cached run can include a fence opener (see `trim_floor`).
