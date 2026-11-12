@@ -1,6 +1,7 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{
-  CleanConfig, FilterConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig, TagOverrideConfig,
+  CleanConfig, ExtractionConfig, FilterConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig,
+  TagOverrideConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
@@ -1438,6 +1439,558 @@ fn link_text_drops_the_space_before_an_empty_element() {
   );
 }
 
+// ── Inline delimiters around removed content ──
+
+#[test]
+fn space_after_removed_content_stays_outside_the_opening_delimiter() {
+  let options = HtmlToMarkdownOptions::default();
+  for html in [
+    r#"<p>Install. <strong><svg><path d="M0"/></svg> Warning:</strong> read</p>"#,
+    "<p>Install. <strong><script>x</script> Warning:</strong> read</p>",
+    "<p>Install. <strong><span></span> Warning:</strong> read</p>",
+    // With nothing to merge into, the space moves in front of the delimiter.
+    "<p>Install.<strong><svg></svg> Warning:</strong> read</p>",
+    "<p>Install.<strong> Warning:</strong> read</p>",
+  ] {
+    assert_every_chunking(html, &options, "Install. **Warning:** read");
+  }
+  let hidden = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_every_chunking(
+    "<p>Install. <strong><span hidden>!</span> Warning:</strong> read</p>",
+    &hidden,
+    "Install. **Warning:** read",
+  );
+  // Text that is only spaces still parts the words.
+  assert_every_chunking("<p>x<em><span hidden>h</span> </em>y</p>", &hidden, "x y");
+  assert_every_chunking(
+    "<p>x<em><span hidden>h</span> <span>y</span></em></p>",
+    &hidden,
+    "x *y*",
+  );
+  assert_eq!(
+    md("<p>Install. <em><svg></svg> Warning:</em> read</p>"),
+    "Install. *Warning:* read"
+  );
+  assert_eq!(
+    md("<p>Install. <del><svg></svg> Warning:</del> read</p>"),
+    "Install. ~~Warning:~~ read"
+  );
+  assert_eq!(
+    md("<p><strong><svg></svg> Warning:</strong> read</p>"),
+    "**Warning:** read"
+  );
+  assert_eq!(
+    md("<p>x<em><strong><svg></svg> y</strong></em> z</p>"),
+    "x ***y*** z"
+  );
+  assert_eq!(
+    md("<ul><li><strong><svg></svg> y</strong></li></ul>"),
+    "- **y**"
+  );
+  // Removed content alone leaves an empty pair, dropped like any other.
+  assert_eq!(
+    md("<p>a <strong><svg></svg></strong> b</p>"),
+    md("<p>a <strong></strong> b</p>")
+  );
+  // A code span keeps the spaces of its content.
+  assert_eq!(
+    md("<p>Install. <code><svg></svg> Warning:</code> read</p>"),
+    "Install. ` Warning:` read"
+  );
+}
+
+#[test]
+fn moved_space_stays_out_of_the_start_of_link_text() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    (
+      "<p><a href=\"/x\"><strong><svg></svg> now</strong></a></p>",
+      "[**now**](/x)",
+    ),
+    (
+      "<p>Go<a href=\"/x\"><strong> now</strong></a></p>",
+      "Go [**now**](/x)",
+    ),
+    // Nothing else parts the words, so the space stays after the bracket.
+    (
+      "<p><em>x</em><a href=\"/x\"><strong> now</strong></a></p>",
+      "*x*[ **now**](/x)",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn blank_opening_emphasis_keeps_the_word_separator() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a<strong> <span>b</span></strong></p>", "a **b**"),
+    ("<p>a<strong> </strong>b</p>", "a b"),
+    ("<p>a<em> <span>b</span></em></p>", "a *b*"),
+    ("<p>a<b>\n<span>b</span></b></p>", "a **b**"),
+    ("<p>a<i>\t <span>b</span></i></p>", "a *b*"),
+    ("<p>a<cite>   <span>b</span></cite></p>", "a *b*"),
+    ("<p>a<strong> <svg></svg>b</strong></p>", "a **b**"),
+    ("<p>a<strong> <em>b</em></strong></p>", "a ***b***"),
+    (
+      "<p>a<strong><em> <span>b</span></em></strong></p>",
+      "a ***b***",
+    ),
+    (
+      "<p><em>x</em><strong> <span>b</span></strong></p>",
+      "*x* **b**",
+    ),
+    // Already parted, or at the start of the line: nothing to add.
+    ("<p>a <strong> <span>b</span></strong></p>", "a **b**"),
+    ("<p><strong> <span>b</span></strong></p>", "**b**"),
+    ("<p>a<br><strong> <span>b</span></strong></p>", "a  \n**b**"),
+    // An empty pair owes its separator to what follows it, once.
+    ("<p>a<strong> </strong> b</p>", "a b"),
+    ("<p>a<em> </em><strong> </strong>b</p>", "a b"),
+    ("<p>a<strong> </strong><em></em> b</p>", "a b"),
+    ("<p>a<strong> </strong></p>", "a"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  assert_eq!(
+    md("<ul><li>a<strong> <span>b</span></strong></li></ul>"),
+    "- a **b**"
+  );
+  assert_eq!(md("<h2>a<strong> </strong>b</h2>"), "## a b");
+  assert_eq!(
+    md("<table><tr><th>h</th></tr><tr><td>a<strong> <span>b</span></strong></td></tr></table>"),
+    "| h |\n| --- |\n| a **b** |"
+  );
+  assert_eq!(
+    md(r#"<p><a href="/x">a<strong> <span>b</span></strong></a></p>"#),
+    "[a **b**](/x)"
+  );
+  assert_eq!(
+    md(r#"<p><a href="/x"><span>x</span><strong> </strong><em></em></a></p>"#),
+    "[x](/x)"
+  );
+}
+
+#[test]
+fn blank_behind_an_element_that_writes_nothing_keeps_the_word_separator() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    (
+      r#"<p>Click<strong><span class="w"> <a href="/x">here</a></span></strong> now</p>"#,
+      "Click **[here](/x)** now",
+    ),
+    (
+      "<p>a<strong><span> <span>b</span></span></strong></p>",
+      "a **b**",
+    ),
+    ("<p>a<strong><span> </span></strong>b</p>", "a b"),
+    ("<p>a<strong><span> </span>b</strong></p>", "a **b**"),
+    (
+      "<p>a<em><span> <strong>b</strong></span></em></p>",
+      "a ***b***",
+    ),
+    (
+      "<p>a<strong><font> <span>b</span></font></strong></p>",
+      "a **b**",
+    ),
+    (
+      "<p>a<strong><span>\n</span><span>b</span></strong></p>",
+      "a **b**",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn blank_that_follows_no_opener_is_owed_to_later_text() {
+  let options = HtmlToMarkdownOptions::default();
+  // A line break or the end of the block drops it, later text that brings its
+  // own space needs no other, and code keeps its content as written.
+  for (html, expected) in [
+    // A nested pair of the same kind writes no delimiter of its own.
+    ("<p><i>x<i> <svg></svg></i></i></p>", "*x*"),
+    ("<p>a<b>x<b> <svg></svg></b></b>z</p>", "a**x**z"),
+    ("<p><i>a<i> <svg></svg> x</i></i></p>", "*a x*"),
+    (
+      "<p>x<b>y<b> <strong></strong><br>z</b></b></p>",
+      "x**y  \nz**",
+    ),
+    // Code keeps its content as written, and the blank is none of it.
+    ("<p><code>a<del> </del></code>z</p>", "`a `z"),
+    (
+      "<p><code>a<strong> <svg></svg> b</strong></code></p>",
+      "`a** b**`",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  let no_strong_delimiters = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "strong".to_string(),
+        TagOverrideConfig {
+          enter: Some(String::new()),
+          exit: Some(String::new()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<p>a<strong> <svg></svg> b</strong></p>",
+    "a<strong> <svg></svg> b</strong>",
+  ] {
+    assert_every_chunking(html, &no_strong_delimiters, "a b");
+  }
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  assert_every_chunking(
+    r##"<p>a<b>x<b> <a href="#"></a></b></b></p>"##,
+    &clean,
+    "a**x**",
+  );
+  // The link clean drops is no text; the `z` after the pair is.
+  assert_every_chunking(
+    r##"<p><i>x<i> <a href="#"></a></i></i>z</p>"##,
+    &clean,
+    "*x* z",
+  );
+}
+
+#[test]
+fn quote_around_a_moved_separator_is_dropped_when_empty() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a<q><em> </em></q>b</p>", "a b"),
+    ("<p>a<strong><q><em> </em></q></strong>b</p>", "a b"),
+    ("<p>a<strong><q><em> </em></q>c</strong>b</p>", "a **c**b"),
+    (
+      "<p>a<strong><q><em> </em></q><em>c</em></strong>b</p>",
+      "a ***c***b",
+    ),
+    (
+      "<p>a<em><q><strong> <svg></svg></strong></q></em> b</p>",
+      "a b",
+    ),
+    ("<p><q><cite>&#32;</cite></q></p>", ""),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  // Text output writes no delimiters, so the separator stays where it was written.
+  assert_eq!(
+    text(r##"<p>a <q><span>y </span><q><a href="#"></a></q></q>z</p>"##),
+    "a \"y \"z"
+  );
+  assert_eq!(
+    text(r##"<p><q><i>y </i><q><a href="#"></a></q></q></p>"##),
+    "\"y \""
+  );
+}
+
+#[test]
+fn blank_opening_an_inline_wrapper_keeps_the_word_separator() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<p>a<span> <span>b</span></span></p>", "a b"),
+    ("<p>a<span> <strong>b</strong></span></p>", "a **b**"),
+    ("<p>a<font> <b>x</b></font></p>", "a **x**"),
+    ("<p>a<label> <span>b</span></label></p>", "a b"),
+    ("<p>a<abbr> <span>b</span></abbr></p>", "a b"),
+    ("<p>a<small> <span>b</span></small></p>", "a b"),
+    ("<p>a<u> <span>b</span></u></p>", "a<u> b</u>"),
+    ("<p>a<span><span> <span>b</span></span></span></p>", "a b"),
+    (
+      "<p>a<font><small> <label><b>x</b></label></small></font></p>",
+      "a **x**",
+    ),
+    ("<p>a<span>\n  <span>b</span></span>c</p>", "a bc"),
+    ("<p>a<span> </span>b</p>", "a b"),
+    ("<p>a<span> <strong></strong></span>b</p>", "a b"),
+    (
+      "<p>a<strong>x<span> <span>b</span></span></strong></p>",
+      "a**x b**",
+    ),
+    ("<p><strong>a<span> </span></strong>b</p>", "**a** b"),
+    (
+      r#"<p>a<span> <img src="/i.png" alt="i"></span></p>"#,
+      "a ![i](/i.png)",
+    ),
+    // Already parted, or at the start of the line: nothing to add.
+    ("<p>a <span> <span>b</span></span></p>", "a b"),
+    ("<p><span> <strong>b</strong></span></p>", "**b**"),
+    ("<p>a<br><span> <span>b</span></span></p>", "a  \nb"),
+    ("<p>a<span> </span></p>", "a"),
+    // A link or quote opener already parts it from a word, and code keeps its
+    // content as written.
+    (r#"<p>a<a href="/x"> <span>b</span></a></p>"#, "a [b](/x)"),
+    ("<p>a<q> <span>b</span></q></p>", "a \"b\""),
+    ("<p>a<code> <span>b</span></code></p>", "a`b`"),
+    ("<p><code>a<span> <span>b</span></span></code></p>", "`ab`"),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+  assert_eq!(
+    md("<ul><li>a<span> <span>b</span></span></li></ul>"),
+    "- a b"
+  );
+  assert_eq!(md("<h2>a<span> <span>b</span></span></h2>"), "## a b");
+  assert_eq!(
+    md("<blockquote><p>a<span> <span>b</span></span></p></blockquote>"),
+    "> a b"
+  );
+  assert_eq!(
+    md("<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>"),
+    "| h |\n| --- |\n| a b |"
+  );
+  assert_eq!(md("a<span> <span>b</span></span>"), "a b");
+}
+
+#[test]
+fn blank_opening_an_inline_wrapper_is_no_wrap_boundary() {
+  // A line break may not take its place and set the text at a line start.
+  for (html, width, expected) in [
+    (
+      "<p>aaaa<span> <span>1. b</span></span></p>",
+      6,
+      "aaaa 1.\nb",
+    ),
+    ("<p>aaaaaa<span> <span>b</span></span></p>", 6, "aaaaaa b"),
+    (
+      "<ul><li>aaaa<span> <span>1. b</span></span></li></ul>",
+      8,
+      "- aaaa 1.\n  b",
+    ),
+    (
+      r#"<p><a href="https://example.com/docs/getting-started/installation/index.html">Read the docs</a><span> <span>1. Install the CLI</span></span></p>"#,
+      80,
+      "[Read the docs](https://example.com/docs/getting-started/installation/index.html) 1.\nInstall the CLI",
+    ),
+    // Nor at one an empty pair took along and gave back.
+    (
+      "<p>aaaa<span> <strong></strong><span>1. b</span></span></p>",
+      6,
+      "aaaa 1.\nb",
+    ),
+    (
+      "<p>aaaa<span> <strong><svg></svg></strong><span>1. b</span></span></p>",
+      6,
+      "aaaa 1.\nb",
+    ),
+    ("<p>aaaa<strong> </strong>1. b</p>", 6, "aaaa 1.\nb"),
+    (
+      "<p>aaaa<b>x </b><strong></strong>1. b</p>",
+      6,
+      "aaaa**x** 1.\nb",
+    ),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_wrap_width(width);
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn separator_before_a_raw_line_break_is_preserved() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<h2>w<strong>a </strong><br>b</h2>", "## w**a** <br>b"),
+    ("<h2>w<strong> </strong><br>b</h2>", "## w <br>b"),
+    ("<h2>w<span> <br>b</span></h2>", "## w <br>b"),
+    (
+      "<table><tr><th>h</th></tr><tr><td>w<strong>a </strong><br>b</td></tr></table>",
+      "| h |\n| --- |\n| w**a** <br>b |",
+    ),
+  ] {
+    assert_every_chunking(html, &options, expected);
+  }
+}
+
+#[test]
+fn blank_after_a_literal_override_opener_is_dropped() {
+  let with_override = |tag: &str, config: TagOverrideConfig| {
+    HtmlToMarkdownOptions::default()
+      .with_plugins(PluginConfig::default().with_tag_override(tag, config))
+  };
+  // The opener may already be streamed, so the blank cannot move in front of
+  // it, and after it the blank would split it from the content.
+  let span = with_override("span", TagOverrideConfig::wrap("**", "**"));
+  for (html, expected) in [
+    ("<p>a<span> <i>x</i></span>z</p>", "a***x***z"),
+    ("<p>a<span> <b>x</b></span></p>", "a****x****"),
+    ("<p>a<span> <span>x</span></span>z</p>", "a****x****z"),
+    ("<p>a<span> </span>z</p>", "a****z"),
+    ("<p>a<b><span> <i>x</i></span></b>z</p>", "a*****x*****z"),
+  ] {
+    assert_every_chunking(html, &span, expected);
+  }
+  assert_every_chunking(
+    "<p>a<u> <i>x</i></u>z</p>",
+    &with_override("u", TagOverrideConfig::wrap("__", "__")),
+    "a__*x*__z",
+  );
+  assert_every_chunking(
+    "<p>a<sup> <span>2</span></sup>z</p>",
+    &with_override("sup", TagOverrideConfig::wrap("^", "^")),
+    "a^2^z",
+  );
+  assert_every_chunking(
+    "<p>a<b> <i>x</i></b>z</p>",
+    &with_override("b", TagOverrideConfig::wrap("<B>", "</B>")),
+    "a<B>*x*</B>z",
+  );
+  // An override that writes no opener keeps the separator.
+  assert_every_chunking(
+    "<p>a<span> <i>x</i></span>z</p>",
+    &with_override("span", TagOverrideConfig::wrap("", "")),
+    "a *x*z",
+  );
+  assert_every_chunking(
+    "<p>a<span> <i>x</i></span>z</p>",
+    &with_override(
+      "span",
+      TagOverrideConfig {
+        exit: Some("!".to_string()),
+        ..Default::default()
+      },
+    ),
+    "a *x*!z",
+  );
+}
+
+#[test]
+fn code_like_content_is_left_as_written() {
+  assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a** x**`");
+  assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a* x*`");
+  assert_eq!(md("<p><var>a<b><svg></svg> x</b></var></p>"), "`a** x**`");
+  assert_eq!(md("<p><code>a<strong> x</strong></code></p>"), "`a** x**`");
+}
+
+#[test]
+fn text_inline_separators_survive_every_chunk_width() {
+  for (html, expected) in [
+    ("a<figcaption> </figcaption>b", "ab"),
+    (
+      "<figure>a<figcaption><span> </span></figcaption>b</figure>",
+      "ab",
+    ),
+    (
+      "a<figcaption><span> <span>b</span></span></figcaption>c",
+      "a\n\nb\n\nc",
+    ),
+    ("<p>a<span>x </span>&nbsp;<span>b</span></p>", "ax \u{a0}b"),
+    ("<p>a<span> <span>b</span></span></p>", "a b"),
+    ("<p>a<span> <strong>b</strong></span></p>", "a b"),
+    ("<p>a<font> <b>x</b></font></p>", "a x"),
+    ("<p>a<label> <span>b</span></label></p>", "a b"),
+    ("<p>a<abbr> <span>b</span></abbr></p>", "a b"),
+    ("<p>a<small> <span>b</span></small></p>", "a b"),
+    ("<p>a<u> <span>b</span></u></p>", "a b"),
+    ("<p>a<span><span> <span>b</span></span></span></p>", "a b"),
+    ("<p>a<span>\n  <span>b</span></span>c</p>", "a bc"),
+    ("<p>a<span> </span>b</p>", "a b"),
+    ("<p>a<span> <strong></strong></span>b</p>", "a b"),
+    (
+      "<p>a<strong>x<span> <span>b</span></span></strong></p>",
+      "ax b",
+    ),
+    ("<p><strong>a<span> </span></strong>b</p>", "a b"),
+    ("<p>a <span> <span>b</span></span></p>", "a b"),
+    ("<p><span> <strong>b</strong></span></p>", "b"),
+    ("<p>a<br><span> <span>b</span></span></p>", "a\nb"),
+    ("<p>a<span> </span></p>", "a"),
+    ("<p>a<span> </span></p><p>b</p>", "a\n\nb"),
+    ("a<span> <span>b</span></span>", "a b"),
+    ("<span> <span>b</span></span>", "b"),
+    ("<p>a<span> </span>&nbsp;<span>b</span></p>", "a \u{a0}b"),
+    ("<p>a<span>x </span>&#160;<span>b</span></p>", "ax \u{a0}b"),
+    ("<p>a<span>x </span>\u{a0}<span>b</span></p>", "ax \u{a0}b"),
+    ("<p>a<span>&nbsp;<span>b</span></span></p>", "a\u{a0}b"),
+    ("<p><span>&nbsp;<span>b</span></span></p>", "b"),
+    ("<p>a<code> <span>b</span></code></p>", "a b"),
+    ("<p><code>a<span> <span>b</span></span></code></p>", "a b"),
+    ("<pre>a<span> <span>b</span></span></pre>", "a b"),
+    ("<p>a<q> <span>b</span></q></p>", "a \"b\""),
+    ("<p>a<q><span> </span></q>b</p>", "a b"),
+    ("<p>a<a href=\"/x\"> <span>b</span></a></p>", "a b"),
+    (
+      "<p>a<span> <img src=\"/i.png\" alt=\"i\"></span></p>",
+      "a i",
+    ),
+    ("<ul><li>a<span> <span>b</span></span></li></ul>", "a b"),
+    ("<h2>a<span> <span>b</span></span></h2>", "a b"),
+    (
+      "<blockquote><p>a<span> <span>b</span></span></p></blockquote>",
+      "a b",
+    ),
+    (
+      "<table><tr><th>h</th></tr><tr><td>a<span> <span>b</span></span></td></tr></table>",
+      "h\na b",
+    ),
+    (
+      "<figure>x<figcaption><span> <span>b</span></span></figcaption></figure>",
+      "x\n\nb",
+    ),
+    ("<p>a</p><p><span> <span>b</span></span></p>", "a\n\nb"),
+    (
+      "<p>a</p><p><span>&nbsp;<span>b</span></span></p>",
+      "a\n\n\u{a0}b",
+    ),
+  ] {
+    assert_eq!(text(html), expected, "html={html}");
+    let chars: Vec<char> = html.chars().collect();
+    for width in 1..=chars.len() {
+      let mut stream = MarkdownStreamProcessor::new_with_format(
+        HtmlToMarkdownOptions::default(),
+        mdream::types::OutputFormat::Text,
+      );
+      let mut output = String::new();
+      for chunk in chars.chunks(width) {
+        output.push_str(&stream.process_chunk(&chunk.iter().collect::<String>()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "html={html} width={width}");
+    }
+  }
+}
+
+#[test]
+fn text_wraps_recovered_separators_at_every_chunk_width() {
+  for (html, expected) in [
+    ("<p>aaa<span> <span>b</span></span></p>", "aaa\nb"),
+    ("<p>aaa<span> </span>b</p>", "aaa\nb"),
+    ("<p>aaa<span> <span>bb cc</span></span></p>", "aaa\nbb\ncc"),
+    ("<p>aa<span> <span>b</span></span></p>", "aa\nb"),
+    ("<p>a<span> <span>b</span></span></p>", "a b"),
+    ("<pre>aaa<span> <span>b</span></span></pre>", "aaa b"),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_wrap_width(3);
+    assert_eq!(html_to_text(html, options.clone()), expected, "html={html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new_with_format(
+        options.clone(),
+        mdream::types::OutputFormat::Text,
+      );
+      let mut output = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "html={html} width={width}");
+    }
+  }
+}
+
 #[test]
 fn recovered_separators_match_ordinary_separators_before_inline_producers() {
   for producer in [
@@ -1668,5 +2221,1315 @@ fn raw_html_blocks_end_before_following_markdown() {
     for width in 1..=html.len() {
       assert_eq!(md_streamed(html, width), expected, "{html}, width {width}");
     }
+  }
+}
+
+/// A separator written on its own is no part of the link text, so the
+/// redundant-title check keeps a `title` the text merely starts with, and
+/// still drops one the whole text repeats.
+#[test]
+fn redundant_link_title_ignores_a_standalone_separator() {
+  let cases = [
+    (
+      "<a href=\"/x\" title=\"Q\"><div>x</div> ",
+      "[x Q](/x \"Q\")",
+    ),
+    ("<i><<a title=e href=/\"><p>U</p> ", "*< [U e](/\" \"e\")*"),
+    ("<a href=\"/x\" title=\"Q\">Q</a>", "[Q](/x)"),
+    ("<a title=\"T\" href=\"/x\">T </a>", "[T](/x)"),
+    // A drain between the separator and the text must not change the answer.
+    (
+      "<a href title=\"Aa Bbbbbbbbb\"><span>< </span><o>Aa Bbbbbbbbb</",
+      "[< Aa Bbbbbbbbb](<> \"Aa Bbbbbbbbb\")",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(md(html), expected, "{html}");
+    for width in 1..=html.len() {
+      assert_eq!(md_streamed(html, width), expected, "{html}, width {width}");
+    }
+  }
+}
+
+/// A blank at the fragment root is a word separator the output places, so
+/// both engines keep it, including after a block element that writes nothing.
+#[test]
+fn retained_blank_at_the_fragment_root_separates_words() {
+  let cases = [
+    ("<span><svg>x</svg> <span>c</span></span>", "x c"),
+    ("<span><svg>x</svg> <b>c</b></span>", "x **c**"),
+    ("<span><svg>x</svg> y</span>", "x y"),
+    ("<span> <span>c</span></span>", "c"),
+    // Only a whitespace-only blank is exempt; a text node that starts with a
+    // blank still loses it at a line start.
+    ("<span><div>x</div> y</span>", "x\n\ny"),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(md(html), expected, "{html}");
+    for width in 1..=html.len() {
+      assert_eq!(md_streamed(html, width), expected, "{html}, width {width}");
+    }
+  }
+}
+
+/// An element that writes nothing is no boundary in text output either, so an
+/// empty quotation around it still drops its pair.
+#[test]
+fn text_output_drops_an_empty_quotation_around_a_dropped_element() {
+  let cases = [
+    ("<p>a<q><strong> <svg></svg></strong></q> b</p>", "a  b"),
+    ("<p>a<q><svg></svg></q>b</p>", "a b"),
+    ("<p>a<q></q>b</p>", "a b"),
+    ("<p>a<q>x</q>b</p>", "a \"x\"b"),
+    (
+      "<p>a<em><q><strong> <svg></svg></strong></q></em> b</p>",
+      "a  b",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(text(html), expected, "{html}");
+  }
+}
+
+// Review regressions: check the same expected output at every short split.
+#[test]
+fn review_div_empty() {
+  let html = r#"<ul><li><span>Aa </span><i></i><div><span>Bb</span></div></li></ul>"#;
+  let expected = "- Aa Bb";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_div_icons() {
+  let html =
+    r#"<ul><li><span>Aa </span><i><svg></svg></i><div><i><svg></svg></i>Bb</div></li></ul>"#;
+  let expected = "- Aa Bb";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_div_buttons() {
+  let html = r#"<button><div>Aa</div> </button> <button><div><span>Bb</span></div></button>"#;
+  let expected = "Aa Bb";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_div_main() {
+  let html = r#"<ul><li><span>Aa </span><div><i></i>Bb</div></li></ul>"#;
+  let expected = "- Aa Bb";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_icon() {
+  let html = r#"<figure><img src="/a.png"><button><svg></svg> </button><figcaption>Caption text</figcaption></figure>"#;
+  let expected = "![](/a.png)\n\n*Caption text*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_em() {
+  let html = r#"<figure><img src="/a.png"><button><svg></svg> </button><figcaption><em>The x.</em></figcaption></figure>"#;
+  let expected = "![](/a.png)\n\n**The x.**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_main() {
+  let html = r#"<button><span>x</span> </button><figcaption>Caption text</figcaption>"#;
+  let expected = "x\n\n*Caption text*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_table_cell_inline_openers() {
+  for (content, expected) in [
+    (
+      "<figure><button>A </button><figcaption><code>B</code></figcaption></figure>",
+      "| A *`B`* |\n| --- |",
+    ),
+    (
+      "<figure><button>A </button><figcaption><em>B</em></figcaption></figure>",
+      "| A **B** |\n| --- |",
+    ),
+    (
+      r#"<img src="/a.png"><button><svg></svg> </button><figcaption><em>B</em></figcaption>"#,
+      "| ![](/a.png) **B** |\n| --- |",
+    ),
+    (
+      r#"<img src="/a.png"><button><svg></svg> </button><figcaption><code>B</code></figcaption>"#,
+      "| ![](/a.png) *`B`* |\n| --- |",
+    ),
+  ] {
+    let html = format!("<table><tr><td>{content}</td></tr></table>");
+    assert_eq!(md(&html), expected, "content={content}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(&html, width), expected, "chunk width={width}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split}");
+    }
+  }
+}
+
+#[test]
+fn review_link_raw() {
+  let html = r#"<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>"#;
+  let expected = "D [<mark></mark>7](/x)";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_title_read() {
+  let html = r#"<p><a href="/x" title="Read more "><span>Read more </span></a></p>"#;
+  let expected = "[Read more](/x)";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_title_e() {
+  for (html, expected) in [
+    (r#"<a href="/x" title="e ">e</a>"#, "[e](/x)"),
+    (r#"<a title="e ">e</a>"#, "e"),
+  ] {
+    assert_eq!(md(html), expected);
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split}");
+    }
+  }
+}
+
+#[test]
+fn review_raw_script() {
+  let html = r#"<p>a<span> <script>s</script><span> <b>D</b></span></span></p>"#;
+  let expected = "a **D**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_raw_style() {
+  let html = r#"<p>a<span> <style>s</style><span> <b>D</b></span></span></p>"#;
+  let expected = "a **D**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn unread_raw_text_of_blanks_ends_the_whitespace_run() {
+  // A body nothing reads ends the whitespace run before it, even when it is
+  // all whitespace. An empty body ends nothing.
+  for tag in [
+    "style", "iframe", "noscript", "noembed", "datalist", "noframes",
+  ] {
+    for (body, expected) in [
+      (" ", "a **D**"),
+      ("\n\t", "a **D**"),
+      ("s ", "a **D**"),
+      ("", "a**D**"),
+    ] {
+      let html = format!("<p>a<span> <{tag}>{body}</{tag}><span> <b>D</b></span></span></p>");
+      assert_every_split(&html, &HtmlToMarkdownOptions::default(), expected);
+    }
+  }
+  // `<title>` text is metadata the parser reads, so its blanks still collapse.
+  assert_every_split(
+    "<p>a<span> <title> </title><span> <b>D</b></span></span></p>",
+    &HtmlToMarkdownOptions::default(),
+    "a**D**",
+  );
+}
+
+#[test]
+fn dropped_raw_text_ends_the_whitespace_run_in_every_mode() {
+  // Whether the body is skipped or an extraction selector reads it, the
+  // Markdown is the same: it must not depend on the selectors.
+  for plugins in [
+    PluginConfig {
+      filter: Some(FilterConfig::exclude(&["nav"])),
+      ..Default::default()
+    },
+    PluginConfig {
+      extraction: Some(ExtractionConfig::new(&["a[href]"])),
+      ..Default::default()
+    },
+    PluginConfig {
+      extraction: Some(ExtractionConfig::new(&["span"])),
+      ..Default::default()
+    },
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(plugins),
+      ..Default::default()
+    };
+    for tag in [
+      "style", "iframe", "noscript", "noembed", "datalist", "noframes",
+    ] {
+      for (body, expected) in [(" ", "a **D**"), ("s ", "a **D**"), ("", "a**D**")] {
+        let html = format!("<p>a<span> <{tag}>{body}</{tag}><span> <b>D</b></span></span></p>");
+        assert_every_split(&html, &options, expected);
+      }
+    }
+  }
+}
+
+#[test]
+fn opener_run_survives_repeated_blanks_without_leaking_to_siblings() {
+  for depth in [2, 8, 254] {
+    let html = format!(
+      "<p>a{}{}b{}<span> </span>c</p><p><span> <b>d</b></span></p>",
+      "<s><cite>".repeat(depth),
+      " <svg></svg>".repeat(32),
+      "</cite></s>".repeat(depth)
+    );
+    let expected = format!(
+      "a {}b{} c\n\n**d**",
+      "~~*".repeat(depth),
+      "*~~".repeat(depth)
+    );
+    assert_eq!(md(&html), expected);
+    for width in [1, 2, 3, 11] {
+      assert_eq!(
+        md_streamed(&html, width),
+        expected,
+        "depth={depth}, width={width}"
+      );
+    }
+    if depth <= 8 {
+      for split in 0..=html.len() {
+        let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut out = p.process_chunk(&html[..split]);
+        out.push_str(&p.process_chunk(&html[split..]));
+        out.push_str(&p.finish());
+        assert_eq!(out, expected, "depth={depth}, split={split}");
+      }
+    }
+  }
+}
+
+#[test]
+fn empty_raw_text_closer_does_not_count_as_body_text() {
+  for tag in ["script", "style"] {
+    let html = format!("<p>a<span> <{tag}></{tag}><span> <b>D</b></span></span></p>");
+    let expected = "a**D**";
+    assert_eq!(md(&html), expected);
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(&html, width), expected, "{tag}, width={width}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "{tag}, split={split}");
+    }
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_em() {
+  let html = r#"<strong><button>A </button><figcaption><em></em></figcaption></strong>"#;
+  let expected = "**A**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_code() {
+  let html = r#"<strong><span>A </span><figcaption><code></code></figcaption></strong>"#;
+  let expected = "**A**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_outer_em() {
+  let html = r#"<em><button>A </button><figcaption><em></em></figcaption></em>"#;
+  let expected = "*A*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_caption() {
+  let html = r#"<strong><button>A </button><figcaption></figcaption></strong>"#;
+  let expected = "**A**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_following_text() {
+  let html = r#"<strong><button>A </button><figcaption><em></em></figcaption>B</strong>"#;
+  let expected = "**A B**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_empty_svg() {
+  let html = r#"<table><tr><td><button>A </button><figcaption><b><svg></svg></b>B</figcaption></td></tr></table>"#;
+  let expected = "| A *B* |\n| --- |";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_ol_code() {
+  let html =
+    r#"<ol><li><button>A<i></i> </button><figcaption><code>B</code></figcaption></li></ol>"#;
+  let expected = "1. A\n\n   *`B`*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_ul_code() {
+  let html =
+    r#"<ul><li><button>A<i></i> </button><figcaption><code>B</code></figcaption></li></ul>"#;
+  let expected = "- A\n\n  *`B`*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_ol_code_no_empty() {
+  let html = r#"<ol><li><button>A </button><figcaption><code>B</code></figcaption></li></ol>"#;
+  let expected = "1. A\n\n   *`B`*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_lifecycle_ul_code_empty_em() {
+  let html =
+    r#"<ul><li><button>A </button><figcaption><em> </em><code>B</code></figcaption></li></ul>"#;
+  let expected = "- A\n\n  *`B`*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected, "chunk width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn review_caption_additional_0() {
+  let html = r#"<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>"#;
+  let expected = "`[Lima](/f) *[  \nLima](/f)*`";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn review_caption_additional_1() {
+  let html =
+    r#"<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>"#;
+  let expected = "[Lima](/f) *<mark></mark>*";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn review_caption_additional_2() {
+  let html = r#"<figcaption><s>1. Lima </s><figcaption><svg></svg> Lima</figcaption></figcaption>"#;
+  let expected = "*~~1. Lima~~ *Lima**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn review_caption_additional_3() {
+  let html = r#"<code><a href="/f" title="Lima "></a></code>"#;
+  let expected = "`[Lima ](/f \"Lima \")`";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn code_span_link_drops_title_repeating_trimmed_text() {
+  for (html, expected) in [
+    (
+      r#"<code><a href="/f" title="Lima "><span>Lima </span></a></code>"#,
+      "`[Lima](/f)`",
+    ),
+    (
+      r#"<code>x<a href="/f" title="Lima ">Lima </a>y</code>"#,
+      "`x [Lima](/f) y`",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn review_caption_additional_4() {
+  let html = r#"<button>A </button><figcaption><em><br>B</em></figcaption>"#;
+  let expected = "A\n\n  \n**B**";
+  assert_eq!(md(html), expected);
+  for width in [1, 2, 3, 11] {
+    assert_eq!(md_streamed(html, width), expected);
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected);
+  }
+}
+
+#[test]
+fn caption_excluded_wrapper_0() {
+  use mdream::{PluginConfig, TagOverrideConfig};
+  let html = r#"<q><kbd>1. Lima
+</kbd><figcaption><samp><script></script><img src="/n"></samp></figcaption></q>"#;
+  let expected = "\"`1. Lima` *`![](/n)`*\"";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("x-q", TagOverrideConfig::alias("blockquote")),
+    ),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for width in [1, 2, 3, 11] {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn caption_excluded_wrapper_1() {
+  use mdream::{PluginConfig, TagOverrideConfig};
+  let html = r#"<var><a href="/f" title="Lima "></a><figcaption><strong><style></style></strong>1. Lima</figcaption></var>"#;
+  let expected = "`[Lima](/f) *1. Lima*%";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig::default().with_tag_override(
+      "var",
+      TagOverrideConfig {
+        exit: Some("%".into()),
+        ..Default::default()
+      },
+    )),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for width in [1, 2, 3, 11] {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn caption_excluded_wrapper_2() {
+  use mdream::{PluginConfig, TagOverrideConfig};
+  let html = r#"<q><kbd><code><li><script>x</script><script>x</script></li><svg></svg></code><figcaption>1. Lima
+</figcaption></kbd><figcaption><samp><cite><script>x</script><img src="/n"></cite><button>
+ Lima</button></samp><samp>
+<strong><script>x</script> </strong></samp></figcaption></q>"#;
+  let expected = "\"``- `*1. Lima*` *`*![](/n)* Lima`*\"";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("x-q", TagOverrideConfig::alias("blockquote")),
+    ),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for width in [1, 2, 3, 11] {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn caption_excluded_wrapper_3() {
+  use mdream::{PluginConfig, TagOverrideConfig};
+  let html = r#"<var><strong><samp><li><i></i> </li><a href="/f" title="Lima ">  </a></samp><figcaption><strong> <style></style></strong><cite><svg></svg>1. Lima</cite></figcaption></strong><s><var><blockquote><style></style>Kilo</blockquote><div> Lima Lima</div></var><script>x</script></s></var>"#;
+  let expected = "`**`- [Lima](/f)` **1. Lima****~~`>  Kilo Lima Lima%~~%";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig::default().with_tag_override(
+      "var",
+      TagOverrideConfig {
+        exit: Some("%".into()),
+        ..Default::default()
+      },
+    )),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  for width in [1, 2, 3, 11] {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = String::new();
+    for chunk in html.as_bytes().chunks(width) {
+      out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+    }
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "width={width}");
+  }
+  for split in 0..=html.len() {
+    let mut p = MarkdownStreamProcessor::new(options.clone());
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "split={split}");
+  }
+}
+
+#[test]
+fn caption_emphasis_after_leading_break() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default().with_tag_override("code", TagOverrideConfig::wrap("^", "^")),
+    ),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      r#"<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>
+<br></ul> </a></figcaption></kbd>"#,
+      "```Kilo![](/n)Kilo`\" [Lima](/f)\"`   \n***Kilo**[  \nLima](/f)*`",
+    ),
+    (
+      r#"<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite></figcaption>"#,
+      "**Kilo**",
+    ),
+    (
+      r#"<figcaption><cite><kbd><svg></svg></kbd><br><br>Kilo</cite></figcaption>"#,
+      "**Kilo**",
+    ),
+    (
+      r#"<figcaption><cite><kbd><svg></svg></kbd><br></cite></figcaption>"#,
+      "",
+    ),
+    (
+      r#"<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite> Lima</figcaption>"#,
+      "**Kilo* Lima*",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      let mut p = MarkdownStreamProcessor::new(options.clone());
+      let mut out = String::new();
+      for chunk in html.as_bytes().chunks(width) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "width={width} {html}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(options.clone());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split} {html}");
+    }
+  }
+}
+
+#[test]
+fn caption_delimiter_context() {
+  for (html, expected) in [
+    (
+      r#"<code>A<br><figcaption><em><br>B</em></figcaption></code>"#,
+      "`A\n**\nB**`",
+    ),
+    (
+      r#"<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>"#,
+      "`**\nB**C`",
+    ),
+    (
+      r#"<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>"#,
+      "A   \n**B**",
+    ),
+    (
+      r#"A<figcaption><br><em><br>B</em></figcaption>"#,
+      "A  \n  \n**B**",
+    ),
+    // A child that renders nothing leaves the separator to the caption.
+    (
+      r#"<button>A </button><figcaption><script></script></figcaption>B"#,
+      "A B",
+    ),
+    (
+      r#"<h2><button>A </button><figcaption><style>s</style><code>B</code></figcaption></h2>"#,
+      "## A *`B`*",
+    ),
+    (
+      r#"<table><tr><td><button>A </button><figcaption><script>s</script><em>B</em></figcaption></td></tr></table>"#,
+      "| A **B** |\n| --- |",
+    ),
+    // So does a block inside a delimiter the caption already opened with.
+    (
+      r#"<a href="/r"><em>A </em><figcaption><s><p>N</p></s></figcaption></a>"#,
+      "[*A* *~~N~~*](/r)",
+    ),
+    (
+      r#"<h3><em>A </em><figcaption><s><ul><em>N</em></ul></s></figcaption></h3>"#,
+      "### *A* *~~*N*~~*",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split} {html}");
+    }
+  }
+}
+
+#[test]
+fn trimmed_separator_survives_an_empty_pair_before_a_block_on_the_same_line() {
+  for (html, expected) in [
+    (
+      r#"<ul><li><div><span>Aa </span><i></i></div><span>Bb</span></li></ul>"#,
+      "- Aa Bb",
+    ),
+    (
+      r#"<ul><li><a href="/x">Aa </a><i></i><div></div><span>Bb</span></li></ul>"#,
+      "- [Aa](/x) Bb",
+    ),
+    (
+      r#"<h2><span>Aa </span><b><i></i></b><section></section><span>Bb</span></h2>"#,
+      "## Aa Bb",
+    ),
+    (
+      r#"<table><tr><td><span>Aa </span><i></i><div></div><b>Bb</b></td></tr></table>"#,
+      "| Aa **Bb** |\n| --- |",
+    ),
+    (
+      r#"<table><tr><td><span>Aa </span><q></q><ul><b>Bb</b></ul> Cc</td></tr></table>"#,
+      "| Aa <ul>**Bb**</ul> Cc |\n| --- |",
+    ),
+    (
+      r#"<strong><button><span>Aa</span> </button><b><svg></svg></b><span><script>s</script><code></code></span>Bb</strong>"#,
+      "**Aa Bb**",
+    ),
+    // A line end still takes it.
+    (
+      r#"<ul><li><span>Aa </span><i></i><div></div></li><li>x</li></ul>"#,
+      "- Aa\n- x",
+    ),
+    (
+      r#"<ul><li><span>Aa </span><i></i><hr>Bb</li></ul>"#,
+      "- Aa\n\n  ---\n\n  Bb",
+    ),
+    // So does the block when no pair took the separator along, or when the
+    // separator is a blank that opened an inline element.
+    (
+      r#"<ul><li><span>Aa </span><div></div><span>Bb</span></li></ul>"#,
+      "- AaBb",
+    ),
+    (
+      r#"<ul><li>Aa<span> <div></div></span>Bb</li></ul>"#,
+      "- AaBb",
+    ),
+    (
+      r#"<ul><li>Aa<span> <i></i><div></div></span>Bb</li></ul>"#,
+      "- AaBb",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split} {html}");
+    }
+  }
+}
+
+#[test]
+fn decoded_blank_keeps_a_code_span_beside_a_dropped_element() {
+  for (html, expected) in [
+    (r#"<p>h<kbd>&#32;<svg></svg></kbd>B</p>"#, "h` `B"),
+    (r#"<p>h<code><svg></svg>&#32;</code>B</p>"#, "h` `B"),
+    (r#"<p>h<q>&#32;<svg></svg></q>B</p>"#, "h \" \"B"),
+    (r#"<p><code><script>x</script>&#32;</code></p>"#, "` `"),
+    (
+      r#"<ul><li><kbd>&#32;<svg></svg></kbd>B</li></ul>"#,
+      "- ` `B",
+    ),
+    (r#"<p><b><kbd><svg></svg>&#32;</kbd></b>B</p>"#, "**` `**B"),
+    (r#"<p>h<kbd>&#32;<b><svg></svg></b></kbd>B</p>"#, "h` `B"),
+    // No text, literal whitespace, or an emphasis pair still leave it empty.
+    (r#"<p>a<code><svg></svg></code>b</p>"#, "ab"),
+    (r#"<p>a<kbd><svg></svg> </kbd>b</p>"#, "ab"),
+    (r#"<p><code>&#32;</code></p>"#, ""),
+    (r#"<p>x <code>&#32;</code> y</p>"#, "x  y"),
+    (r#"<p>h<kbd>&#32;</kbd>B</p>"#, "hB"),
+    (r#"<p>h<q>&#9;</q>B</p>"#, "h B"),
+    (r#"<p>h<em>&#32;<svg></svg></em>B</p>"#, "h B"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+    for split in 0..=html.len() {
+      let mut p = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut out = p.process_chunk(&html[..split]);
+      out.push_str(&p.process_chunk(&html[split..]));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "split={split} {html}");
+    }
+  }
+}
+
+#[test]
+fn quote_after_an_opener_run_keeps_its_own_space() {
+  for (html, expected) in [
+    (
+      r#"<em><strong><blockquote>L</blockquote></strong></em>"#,
+      "***>  L***",
+    ),
+    (
+      r#"<cite><cite><blockquote>K</blockquote></cite></cite>"#,
+      "**>  K**",
+    ),
+    (
+      r#"<s><b><blockquote>x</blockquote></b></s>"#,
+      "~~**>  x**~~",
+    ),
+    (r#"<em><blockquote>L</blockquote></em>"#, "*>  L*"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn link_title_after_a_dropped_empty_pair_is_kept() {
+  for (html, expected) in [
+    (
+      r#"<a href="/f" title="Lima ">Lima<i></i></a>"#,
+      r#"[Lima](/f "Lima ")"#,
+    ),
+    (
+      r#"<a href="/f" title="Lima ">Lima<var></var></a>"#,
+      r#"[Lima](/f "Lima ")"#,
+    ),
+    (
+      r#"<a href="/f" title="Lima"><span>Lima </span><svg></svg></a>"#,
+      "[Lima](/f)",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
+  for (html, expected) in [
+    (
+      "<p>h<code>&#32;<kbd>&#32;</kbd><svg></svg></code>B</p>",
+      "h` `B",
+    ),
+    ("<p>h<code>&#32;<i><svg></svg></i></code>B</p>", "h` `B"),
+    (
+      "<p>h<kbd>&#32;<samp><svg></svg>&#32;</samp></kbd>B</p>",
+      "h` ` ``B",
+    ),
+    (
+      "<p>h<kbd><samp>&#32;</samp><svg></svg>&#32;</kbd>B</p>",
+      "h` `B",
+    ),
+    ("<p>h<s><kbd>&#32;<svg></svg></kbd></s>B</p>", "h ~~` `~~B"),
+    ("<p>h<kbd>&#32;<s><svg></svg></s></kbd>B</p>", "h` `B"),
+    (
+      "<p>h<kbd>&#32;<samp><var><svg></svg></var></samp></kbd>B</p>",
+      "h` `B",
+    ),
+    (
+      "<p>h<kbd><samp>&#32;<var>&#32;<svg></svg></var></samp></kbd>B</p>",
+      "h`` ` ```B",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn written_space_after_a_leading_blank_survives_an_element_that_starts_no_line() {
+  for (html, expected) in [
+    ("Aa<span> </span> <form><span>Bb</span></form>", "Aa Bb"),
+    (
+      "Aa<span> </span> <fieldset><span>Bb</span></fieldset>",
+      "Aa Bb",
+    ),
+    ("Aa<span> </span> <select><span>Bb</span></select>", "Aa Bb"),
+    ("Aa<span> </span>\n<form><span>Bb</span></form>", "Aa Bb"),
+    ("Aa<span> </span> <form></form><span>Bb</span>", "Aa Bb"),
+    ("Aa<strong> </strong> <form><span>Bb</span></form>", "Aa Bb"),
+    (
+      "Aa<span> </span> <address>Bb</address>",
+      "Aa <address>Bb</address>",
+    ),
+    (
+      "<ul><li>Aa<span> </span> <form><span>Bb</span></form></li></ul>",
+      "- Aa Bb",
+    ),
+    (
+      "<table><tr><td>Aa<span> </span> <blockquote>Bb</blockquote></td></tr></table>",
+      "| Aa > Bb |\n| --- |",
+    ),
+    (
+      r#"<a href="/x">Aa<span> </span> <form><span>Bb</span></form></a>"#,
+      "[Aa Bb](/x)",
+    ),
+    (
+      "<strong>Aa<span> </span> <form><span>Bb</span></form></strong>",
+      "**Aa Bb**",
+    ),
+    // The blank alone writes nothing there, and a decoded one stays owed.
+    ("Aa<span> </span><form><span>Bb</span></form>", "AaBb"),
+    ("<strong>h<span> </span>&#32;</strong>x", "**h** x"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+  for (html, expected) in [
+    ("Aa<span> </span> <form><span>Bb</span></form>", "Aa Bb"),
+    ("Aa<span> </span> <form></form><span>Bb</span>", "Aa Bb"),
+    (
+      "<ul><li>Aa<span> </span> <form><span>Bb</span></form></li></ul>",
+      "Aa Bb",
+    ),
+    ("Aa<span> </span><form><span>Bb</span></form>", "AaBb"),
+  ] {
+    assert_text_every_split(html, expected);
+  }
+}
+
+#[test]
+fn paragraph_in_a_list_item_opens_its_block_after_a_trimmed_inline_element() {
+  for (html, expected) in [
+    (
+      "<ul><li><span><span>Aa</span> </span><p>Bb</p></li></ul>",
+      "- Aa\n\n  Bb",
+    ),
+    (
+      "<ul><li><span><span>Aa</span> </span><i></i> <p>Bb</p></li></ul>",
+      "- Aa\n\n  Bb",
+    ),
+    (
+      "<ol><li><span><span>Aa</span> </span><i></i><p>Bb</p><p>Cc</p></li></ol>",
+      "1. Aa\n\n   Bb\n\n   Cc",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn link_title_is_compared_once_text_follows_a_dropped_empty_pair() {
+  for (html, expected) in [
+    (
+      r#"<blockquote><br><em>h</em><i></i></blockquote><a href="/x" title="x">x</a>"#,
+      ">   \n> *h*\n\n[x](/x)",
+    ),
+    (
+      r#"<blockquote><br><em>x</em><i></i></blockquote><a href="/x" title="x">x</a>"#,
+      ">   \n> *x*\n\n[x](/x)",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn inline_code_in_a_list_item_keeps_its_separator_after_an_element_that_writes_nothing() {
+  for (html, expected) in [
+    (
+      "<ul><li><code>Aa</code> <table></table><code>Bb</code></li></ul>",
+      "- `Aa` `Bb`",
+    ),
+    (
+      "<ul><li>Aa<span> </span> <p><code>Bb</code></p></li></ul>",
+      "- Aa `Bb`",
+    ),
+    (
+      "<ul><li>Aa<span> </span> <section><code>Bb</code></section></li></ul>",
+      "- Aa `Bb`",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn decoded_blank_after_a_leading_blank_survives_an_element_that_starts_no_line() {
+  for (html, expected) in [
+    ("Aa<span> </span>&#32;<form><span>Bb</span></form>", "Aa Bb"),
+    (
+      "Aa<span> </span>&#32; <form><span>Bb</span></form>",
+      "Aa Bb",
+    ),
+    ("Aa<span> </span>&#9;<form><span>Bb</span></form>", "Aa Bb"),
+    ("Aa<span> </span>&#32;<form></form><span>Bb</span>", "Aa Bb"),
+    (
+      "<b>Aa</b><i> </i>&#32;<form><span>Bb</span></form>",
+      "**Aa** Bb",
+    ),
+    (
+      "Aa<span> </span>&#32;<address>Bb</address>",
+      "Aa <address>Bb</address>",
+    ),
+    (
+      "<ul><li>Aa<span> </span>&#32;<form><span>Bb</span></form></li></ul>",
+      "- Aa Bb",
+    ),
+    (
+      "<table><tr><td>Aa<span> </span>&#32;<form><span>Bb</span></form></td></tr></table>",
+      "| Aa Bb |\n| --- |",
+    ),
+    // An emphasis closer still leaves it outside, and a line end takes it.
+    ("<strong>h<span> </span>&#32;</strong>x", "**h** x"),
+    ("Aa<span> </span>&#32;<p>Bb</p>", "Aa\n\nBb"),
+    // A space written after it is still output like any other.
+    (
+      "<strong>Aa<span> </span>&#32;<i></i> <blockquote></blockquote>Bb</strong>",
+      "**Aa Bb**",
+    ),
+    (
+      "Aa<span> </span>&#32;<blockquote>Bb</blockquote>",
+      "Aa\n\n> Bb",
+    ),
+    // So does the line a deferred fence opens.
+    (
+      "<ul><li>Aa<span> </span>&#32;<pre>Bb</pre></li></ul>",
+      "- Aa\n\n  ```\n  Bb\n  ```",
+    ),
+    (
+      "<ul><li><span>Aa </span><i></i><pre>Bb</pre></li></ul>",
+      "- Aa\n\n  ```\n  Bb\n  ```",
+    ),
+    (
+      "<h2><span>Aa </span><i></i><pre>Bb</pre></h2>",
+      "## Aa```\nBb\n```",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+  for (html, expected) in [
+    ("Aa<span> </span>&#32;<form><span>Bb</span></form>", "Aa Bb"),
+    ("Aa<span> </span>&#32;<form></form><span>Bb</span>", "Aa Bb"),
+    (
+      "<ul><li>Aa<span> </span>&#32;<form><span>Bb</span></form></li></ul>",
+      "Aa Bb",
+    ),
+    ("<strong>h<span> </span>&#32;</strong>x", "h x"),
+  ] {
+    assert_text_every_split(html, expected);
   }
 }

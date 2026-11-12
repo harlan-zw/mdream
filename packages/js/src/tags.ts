@@ -770,11 +770,12 @@ export const tagHandlers: Record<number, TagHandler> = {
       // `<code>` elements must be separated with a space so CommonMark parses
       // them as two code spans rather than merging into one.
       if ((state.depthMap?.[TAG_LI] || 0) > 0) {
-        const lastEntry = state.buffer.at(-1)
-        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        if (lastChar && lastChar !== ' ' && lastChar !== '\n' && lastChar !== '\t'
-          && lastChar !== '*' && lastChar !== '_' && lastChar !== '~'
-          && lastChar !== '[' && lastChar !== '>') {
+        // Read past an entry a trim emptied, as the paragraph enter does.
+        const last = lastOutputChar(state.buffer)
+        // Space, newline, tab, `*`, `_`, `~`, `[` and `>`.
+        if (last !== -1 && last !== 32 && last !== 10 && last !== 9
+          && last !== 42 && last !== 95 && last !== 126
+          && last !== 91 && last !== 62) {
           return { _tag: 'CodeSpanEnter', output: ` ${MARKDOWN_INLINE_CODE}` }
         }
       }
@@ -844,11 +845,34 @@ export const tagHandlers: Record<number, TagHandler> = {
         return safeAnchorOutput(node, state.options, false, true)
       const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
       let title = node.attributes?.title
-      // Check if title matches the last content to avoid duplication. As in
-      // Rust, the title is compared without its trailing whitespace, and an
-      // empty pair dropped right before leaves no last content to compare.
-      if (title && state.droppedPairAt !== state.buffer!.length
-        && state.lastContentCache === title.replace(/[\t\n\f\r ]+$/, '')) {
+      // A real code span preserves the cached trailing space, and Rust
+      // compares what its buffer holds. Only a run still whole there and not
+      // trimmed at this exit keeps the space: the label an empty link takes
+      // from its title.
+      let preservesCodeWhitespace = false
+      if (state.depthMap?.[TAG_CODE] && !state.depthMap[TAG_PRE] && !state.lastTextNode?.containsWhitespace) {
+        const buffer = state.buffer!
+        let tail = buffer.length - 1
+        while (tail >= 0 && !buffer[tail])
+          tail--
+        let parent = buffer[tail] === state.lastContentCache ? node.parent : undefined
+        while (parent) {
+          if (parent.tagId === TAG_CODE && parent.tagHandler?.enter === tagHandlers[TAG_CODE]!.enter) {
+            preservesCodeWhitespace = true
+            break
+          }
+          parent = parent.parent
+        }
+      }
+      const cachedText = preservesCodeWhitespace
+        ? state.lastContentCache
+        : state.lastContentCache?.replace(/[ \t\n\f\r]+$/, '')
+      // Drop a title that repeats the link's last text run. A separator
+      // written on its own is no part of that text, so `[x e](u "e")` keeps
+      // its title while `[e](u "e")` still drops the duplicate. As in Rust, an
+      // empty pair dropped right before leaves no last run to compare.
+      if (title && !state.cacheFollowsSeparator && state.droppedPairAt !== state.buffer!.length
+        && cachedText === title.replace(/[ \t\n\f\r]+$/, '')) {
         title = ''
       }
       // GFM autolink shorthand: when the link text equals href and href is a
@@ -1047,9 +1071,10 @@ export const tagHandlers: Record<number, TagHandler> = {
       // still needs its separator after the fence has already opened.
       if ((state.depthMap?.[TAG_LI] || 0) > 0 && !isInsideTableCell(state)
         && !state.preFencePending && state.preFenceOpener !== node) {
-        const lastEntry = state.buffer[enterOutputEnd(node, state) - 1]
-        const lastChar = lastEntry?.charAt(lastEntry.length - 1) || ''
-        if (lastChar && lastChar !== ' ' && lastChar !== '\n') {
+        // A trim leaves an emptied entry behind, which a stream's drain
+        // removes, so the last character is read past it.
+        const last = lastOutputChar(state.buffer, enterOutputEnd(node, state))
+        if (last !== -1 && last !== 32 && last !== 10) {
           return `\n\n${state.listIndent}`
         }
       }
