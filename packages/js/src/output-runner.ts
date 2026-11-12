@@ -25,6 +25,7 @@ function createParseState(processor: OutputProcessor, options: OutputOptions): P
     tagHandlers: options.tagHandlers,
     tagOverrideHandlers: options.tagOverrideHandlers,
     plainText: options.plainText,
+    keepLeadingBlanks: processor.state.outputFormat === 'text',
     urlBaseTarget: processor.state,
   }
 }

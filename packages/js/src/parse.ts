@@ -68,10 +68,14 @@ import {
 } from './const'
 import { parserTagHandlers } from './parser-tags'
 import { resolveUrl } from './url'
-import { decodeHTMLEntities, traverseUpToFirstBlockNode } from './utils'
+import { decodeHTMLEntities, hasNonWhitespace, traverseUpToFirstBlockNode } from './utils'
 
 // The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
 const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
+
+// Longest `<base href>` adopted, in UTF-8 bytes after resolution, as in the Rust
+// engine. Every relative URL repeats the base, so an unbounded one multiplies the output.
+const MAX_BASE_HREF_LENGTH = 2048
 
 // Keep rich element nodes to the same practical depth as browsers. One exact
 // flattened root preserves balanced recovery beyond it without allowing
@@ -79,8 +83,8 @@ const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
 const MAX_ELEMENT_DEPTH = 512
 
 // The first `<base href>` replaces `origin` when it resolves to an `http(s)://host`
-// URL; anything else is ignored. A <base> inside a link is ignored too: the
-// link's open and close must resolve alike.
+// URL of at most MAX_BASE_HREF_LENGTH bytes; anything else is ignored. A <base>
+// inside a link is ignored too: the link's open and close must resolve alike.
 function captureBaseHref(state: ParseState, href: string | undefined): void {
   const target = state.urlBaseTarget
   // At MAX_ELEMENT_DEPTH the element is flattened, and so is everything below it.
@@ -100,8 +104,14 @@ function captureBaseHref(state: ParseState, href: string | undefined): void {
   while (start < end && href.charCodeAt(start) <= 0x20) start++
   while (end > start && href.charCodeAt(end - 1) <= 0x20) end--
   const base = resolveUrl(href.slice(start, end), target.options.origin)
-  if (HTTP_BASE_RE.test(base))
+  // A UTF-16 unit is at least one UTF-8 byte, so the length check bounds the encode.
+  if (
+    HTTP_BASE_RE.test(base)
+    && base.length <= MAX_BASE_HREF_LENGTH
+    && new TextEncoder().encode(base).length <= MAX_BASE_HREF_LENGTH
+  ) {
     target.options = { ...target.options, origin: base }
+  }
 }
 
 // A tag outside the dictionary with no override renders only its text, inline
@@ -156,6 +166,13 @@ function shouldProtectDecodedEntityReferences(state: ParseState): boolean {
     && !depthMap[TAG_PRE]
     && !depthMap[TAG_CODE]
     && !isInsideRawHtmlBlock(depthMap)
+}
+
+// A blank that opens an inline element can be the only word separator,
+// whether the element writes a delimiter, like `<strong>`, or nothing, like a
+// `<span>`. The output decides where it goes, or that it writes nothing.
+function keepsLeadingBlank(node: ElementNode): boolean {
+  return node.tagHandler?.isInline ?? node.tagId === -1
 }
 
 const SCRIPT_DATA = 0
@@ -549,6 +566,10 @@ export function finalizeParse(
     if (state.currentNode?.tagHandler?.isNonNesting) {
       if (state.rawtextEndTagPending)
         text = ''
+      // A cut prefix of the element's end tag set no text state while it
+      // could still become the tag. Excluded text nothing reads stays unread.
+      else if (!(state.discardExcludedText && state.currentNode.tagHandler.excludesTextNodes) && hasNonWhitespace(text))
+        state.textBufferContainsNonWhitespace = true
     }
     else {
       const incompleteTagIndex = findIncompleteTagResidualIndex(trailing)
@@ -684,6 +705,10 @@ export interface ParseState {
   tagOverrideHandlers?: Map<string, TagHandler>
   /** Whether emitted text should skip Markdown-only escaping */
   plainText?: boolean
+  keepLeadingBlanks?: boolean
+  /** Reuse ancestry for repeated retained blanks before any visible child. */
+  leadingBlankParent?: ElementNode
+  leadingBlankAncestors?: ElementNode[]
   /** Output state whose `options.origin` the first usable `<base href>` replaces. */
   urlBaseTarget?: { options: EngineOptions }
   /** Only the first `<base href>` counts, even when it is not usable. */
@@ -710,6 +735,8 @@ export interface ParseState {
   carriedCdataTail?: string
   /** The trailing run is an unfinished end tag of the open rawtext element. */
   rawtextEndTagPending?: boolean
+  /** A raw-text body the output drops left the previous chunk on a whitespace character. */
+  inertBodyBlankPending?: boolean
   /** The last token was an end tag that closed nothing; the next text joins. */
   endTagClosedNothing?: boolean
 }
@@ -746,6 +773,14 @@ function scriptSequenceEnd(html: string, nameStart: number): number {
   return delimiter === GT_CHAR || delimiter === SLASH_CHAR || isWhitespace(delimiter)
     ? delimiterIndex + 1
     : SCRIPT_SEQUENCE_NO_MATCH
+}
+
+// Raw text the output drops, whether or not a plugin reads it. Script data
+// has its own scanner, and `<title>` text is metadata, not dropped text.
+function inInertRawText(state: ParseState): boolean {
+  const node = state.currentNode
+  const handler = node?.tagHandler
+  return !!handler?.isNonNesting && !!handler.excludesTextNodes && node!.tagId !== TAG_TITLE && !isScriptElement(node!)
 }
 
 function isScriptElement(node: ElementNode): boolean {
@@ -853,8 +888,17 @@ function pushScriptTextChunk(state: ParseState, text: string): void {
 
 function scanScriptChunk(html: string, start: number, state: ParseState): number {
   const result = findScriptEndTag(html, start, state)
-  if (state.discardExcludedText && state.currentNode?.tagHandler?.excludesTextNodes)
+  if (state.discardExcludedText && state.currentNode?.tagHandler?.excludesTextNodes) {
+    const end = result === SCRIPT_SCAN_COMPLETE ? html.length : result <= SCRIPT_SEQUENCE_INCOMPLETE ? -result - 2 : result
+    // Discarded script bytes still end the preceding whitespace run, just
+    // as pushScriptTextChunk does when one-shot or plugins retain the body.
+    if (end > start) {
+      state.lastCharWasWhitespace = false
+      state.justClosedTag = false
+      state.textBufferContainsWhitespace = false
+    }
     return result
+  }
   if (result === SCRIPT_SCAN_COMPLETE) {
     pushScriptTextChunk(state, html.substring(start))
   }
@@ -1305,8 +1349,13 @@ function parseHtmlInternal(
         // it closes nothing yet, and at end of input it stays literal.
         if (peekEnd === chunkLength) {
           settledLength = textBuffer.length
-          state.textBufferContainsNonWhitespace = true
-          state.lastCharWasWhitespace = false
+          // A prefix of this element's own end tag is retained for the next
+          // chunk. Its syntax has consumed no body text yet; at end of input
+          // finalizeParse counts it as the text it turned out to be.
+          if (!state.currentNode.name.startsWith(normalizeTagName(htmlChunk.substring(i + 2, peekEnd)))) {
+            state.textBufferContainsNonWhitespace = true
+            state.lastCharWasWhitespace = false
+          }
           textBuffer += htmlChunk.substring(i)
           break
         }
@@ -1316,6 +1365,14 @@ function parseHtmlInternal(
         if (!matchesClosingTag(state.currentNode, peekTagName, peekTagId, peekHandler?.aliasTagId !== undefined)) {
           textBuffer += htmlChunk[i++]
           continue
+        }
+        // A body the output drops ends the whitespace run before it even when
+        // it is all whitespace, as script data does. The byte before its end
+        // tag is body, or the `>` of its start tag when the body is empty.
+        if (inInertRawText(state)) {
+          if (state.inertBodyBlankPending || (i > 0 && isWhitespace(htmlChunk.charCodeAt(i - 1))))
+            state.lastCharWasWhitespace = false
+          state.inertBodyBlankPending = false
         }
       }
 
@@ -1486,6 +1543,12 @@ function parseHtmlInternal(
   }
   if (remainingHtml.length > 0 && isWhitespace(remainingHtml.charCodeAt(0)))
     state.lastCharWasWhitespace = false
+  // The next chunk cannot look back at the body byte before its end tag.
+  if (inInertRawText(state)) {
+    const last = chunkLength - remainingHtml.length - 1
+    if (last >= 0 && isWhitespace(htmlChunk.charCodeAt(last)))
+      state.inertBodyBlankPending = true
+  }
   state.trailingText = textBuffer
 
   return remainingHtml
@@ -1652,7 +1715,10 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     || state.currentNode?.excludedFromMarkdown
   const inPreTag = (state.depthMap[TAG_PRE] || 0) > 0
 
-  if (!inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex) {
+  // Whitespace-only text before an element's first child is indentation, but
+  // in inline content after earlier text it is the only word separator.
+  const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
+  if (isLeadingBlank && ((state.plainText && !state.keepLeadingBlanks) || !keepsLeadingBlank(state.currentNode))) {
     return
   }
 
@@ -1661,7 +1727,17 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     return
   }
 
-  const parentsToIncrement = traverseUpToFirstBlockNode(state.currentNode)
+  let parentsToIncrement: ElementNode[]
+  if (isLeadingBlank && !state.resolvedPlugins?.length) {
+    if (state.leadingBlankParent !== state.currentNode) {
+      state.leadingBlankParent = state.currentNode
+      state.leadingBlankAncestors = traverseUpToFirstBlockNode(state.currentNode)
+    }
+    parentsToIncrement = state.leadingBlankAncestors!
+  }
+  else {
+    parentsToIncrement = traverseUpToFirstBlockNode(state.currentNode)
+  }
   const firstBlockParent = parentsToIncrement.at(-1)!
 
   // The first text of a block drops its leading whitespace. With no block
@@ -1678,6 +1754,32 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     if (start > 0) {
       text = text.substring(start)
     }
+  }
+
+  // The output moves the separator in front of the delimiter; the counters stay
+  // as if the blank were dropped, so it is no content of the element.
+  if (isLeadingBlank) {
+    if (text) {
+      const blank: TextNode = {
+        type: TEXT_NODE,
+        value: text,
+        parent: state.currentNode,
+        index: state.currentNode.currentWalkIndex!,
+        depth: state.depth,
+        containsWhitespace,
+        excludedFromMarkdown: excludesTextNodes,
+        leadingBlank: true,
+      }
+      handleEvent({ type: NodeEventEnter, node: blank })
+      // Plugins can turn the retained separator into actual link content. It
+      // counts when the output writes it: not skipped, and not ASCII blank.
+      if (!blank.excludedFromMarkdown && hasNonWhitespace(blank.value)) {
+        state.currentNode.currentWalkIndex!++
+        for (const parent of parentsToIncrement)
+          parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
+      }
+    }
+    return
   }
 
   if (state.hasEncodedHtmlEntity) {
