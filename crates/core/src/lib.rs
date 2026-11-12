@@ -733,6 +733,10 @@ mod fast_path_parity {
     // The same `<pre>` text inside a list item, a quote and a table cell.
     "<ul><li><pre><code>one\n  <span>two</span></code></pre></li></ul><blockquote><pre>q <b>r</b> 2.</pre></blockquote><table><tr><td><pre><code>c <i>d</i></code></pre></td></tr></table>",
     "<pre>1<span>2</span>&#50;<b>)</b>\n3<span>.4</span><div>x</div> y &amp; <span>z</span></pre>",
+    "<p>a <my-w>b <x-y>c</x-y> d</my-w> e</p><h2>Head <x-h>h</x-h></h2><ul><li><x-l>one</x-l></li><li>two <x-l> three </x-l></li></ul>",
+    "<blockquote><svg><path d=\"M0\"/></svg> q <x-q>r</x-q></blockquote><table><tr><td><x-c>c</x-c></td><td> <x-c> d </x-c></td></tr></table>",
+    "<pre><x-code>a  b</x-code></pre><p>z <x-w>one<x-w>two</x-w>three</x-w></p><details><summary><x-s>s</x-s></summary>body <x-b> b</x-b></details>",
+    "<p><strong>a<x-w>b</strong>c</x-w>d <x-open>unclosed <em>e</em></p><p>after</p>",
   ];
 
   fn fixtures() -> Vec<String> {

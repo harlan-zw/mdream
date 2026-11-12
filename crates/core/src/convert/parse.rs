@@ -1666,6 +1666,8 @@ impl ConvertState {
           self.emit_enter_simple::<false>(true);
         } else if tag_id == Some(TAG_LI) && self.li_fast_path_ok() {
           self.emit_enter_simple::<true>(false);
+        } else if tag_id.is_none() && self.custom_element_fast_path_ok() {
+          self.emit_enter_simple::<false>(false);
         } else {
           self.emit_enter_element();
         }
@@ -1674,6 +1676,8 @@ impl ConvertState {
           self.emit_enter_simple::<false>(false);
         } else if tag_id == Some(TAG_LI) && self.li_simple_state_ok() {
           self.emit_enter_simple::<true>(false);
+        } else if tag_id.is_none() && self.custom_element_fast_path_ok() {
+          self.emit_enter_simple::<false>(false);
         } else {
           self.emit_enter_element();
         }
@@ -1918,6 +1922,8 @@ impl ConvertState {
         && self.li_fast_path_ok()
       {
         self.emit_exit_simple::<true>(false);
+      } else if node_tag_id.is_none() && self.custom_element_fast_path_ok() {
+        self.emit_exit_simple::<false>(false);
       } else {
         self.close_node_general_exit();
       }
@@ -1930,6 +1936,8 @@ impl ConvertState {
         && self.li_simple_state_ok()
       {
         self.emit_exit_simple::<true>(false);
+      } else if node_tag_id.is_none() && self.custom_element_fast_path_ok() {
+        self.emit_exit_simple::<false>(false);
       } else {
         self.close_node_general_exit();
       }
