@@ -5810,6 +5810,174 @@ fn wrap_at_a_moved_link_separator_matches_every_partition() {
 }
 
 #[test]
+fn review_literal_override_whitespace() {
+  {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "sup".into(),
+          TagOverrideConfig {
+            enter: Some("**".into()),
+            exit: Some("**".into()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(
+        "<p>a<sup><span> <span>2</span></span></sup>z</p>",
+        options.clone()
+      ),
+      "a**2**z"
+    );
+    assert_stream_matches_every_split("<p>a<sup><span> <span>2</span></span></sup>z</p>", options);
+  }
+  {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "sup".into(),
+          TagOverrideConfig {
+            enter: Some("**".into()),
+            exit: Some("**".into()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown(
+        "<p>a<sup><span><span> <span>2</span></span></span></sup>z</p>",
+        options.clone()
+      ),
+      "a**2**z"
+    );
+    assert_stream_matches_every_split(
+      "<p>a<sup><span><span> <span>2</span></span></span></sup>z</p>",
+      options,
+    );
+  }
+  {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(vec![(
+          "br".into(),
+          TagOverrideConfig {
+            enter: Some("".into()),
+            exit: Some("".into()),
+            ..Default::default()
+          },
+        )]),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    assert_eq!(
+      html_to_markdown("<p>a<em>x </em><br>b</p>", options.clone()),
+      "a*x* b"
+    );
+    assert_stream_matches_every_split("<p>a<em>x </em><br>b</p>", options);
+  }
+}
+
+#[test]
+fn literal_override_drops_blank_after_empty_sibling() {
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "sup".into(),
+        TagOverrideConfig {
+          enter: Some("**".into()),
+          exit: Some("**".into()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    // A sibling that writes nothing leaves the opener ending the output.
+    (
+      "<p>a<sup><span></span><span> <span>2</span></span></sup>z</p>",
+      "a**2**z",
+    ),
+    (
+      "<p>a<sup><svg></svg><span> <span>2</span></span></sup>z</p>",
+      "a**2**z",
+    ),
+    ("<p>a<sup><b></b> <span>2</span></sup>z</p>", "a**2**z"),
+    ("<p>a<sup><a> <span>2</span></a></sup>z</p>", "a**2**z"),
+    // An emphasis run right after the opener takes no space in front.
+    ("<p>a<sup><em> <span>2</span></em></sup>z</p>", "a***2***z"),
+    ("<p>a<sup><b> 2</b></sup>z</p>", "a****2****z"),
+    // Content written after the opener keeps the separator.
+    (
+      "<p>a<sup><span>x</span><span> <span>2</span></span></sup>z</p>",
+      "a**x 2**z",
+    ),
+    (
+      "<p>a<sup><img src=\"x.png\"><span> <span>2</span></span></sup>z</p>",
+      "a**![](x.png) 2**z",
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "html={html}"
+    );
+    assert_stream_matches_every_split(html, options.clone());
+  }
+}
+
+#[test]
+fn literal_override_end_follows_streamed_blockquote_quoting() {
+  // Past 8 KiB a stream quotes completed lines, which moves the opener.
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "sup".into(),
+        TagOverrideConfig {
+          enter: Some("^".into()),
+          exit: Some("^".into()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let mut filler = String::new();
+  for n in 0..300 {
+    write!(filler, "<p>line {n} lorem ipsum dolor sit amet</p>").unwrap();
+  }
+  for (tail, expected) in [
+    (
+      "<p>a<sup><span></span><span> <span>2</span></span></sup>z</p>",
+      "> a^2^z",
+    ),
+    ("<p>a<sup><em> <span>2</span></em></sup>z</p>", "> a^*2*^z"),
+  ] {
+    let html = format!("<blockquote>{filler}{tail}</blockquote>");
+    let one_shot = html_to_markdown(&html, options.clone());
+    assert!(one_shot.ends_with(expected), "tail={tail} out={one_shot:?}");
+    for split in html.len() - tail.len() - 13..html.len() {
+      let mut stream = MarkdownStreamProcessor::new(options.clone());
+      let mut actual = stream.process_chunk(&html[..split]);
+      actual.push_str(&stream.process_chunk(&html[split..]));
+      actual.push_str(&stream.finish());
+      assert_eq!(actual, one_shot, "split={split} tail={tail}");
+    }
+  }
+}
+
+#[test]
 fn empty_quote_after_rule_streaming() {
   assert_stream_matches_every_split(
     "<ul><li><hr><blockquote><p></p></blockquote>tail</li></ul>",
@@ -5860,6 +6028,37 @@ fn quote_exit_override_after_rule_at_every_split() {
       },
     );
   }
+}
+
+#[test]
+fn literal_override_preserves_space_after_emitting_sibling() {
+  let html = "<p>a<sup><u></u><span> <span>2</span></span></sup>z</p>";
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![
+        (
+          "sup".into(),
+          TagOverrideConfig {
+            enter: Some("**".into()),
+            exit: Some("**".into()),
+            ..Default::default()
+          },
+        ),
+        (
+          "u".into(),
+          TagOverrideConfig {
+            enter: Some("X".into()),
+            exit: Some(String::new()),
+            ..Default::default()
+          },
+        ),
+      ]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  assert_eq!(html_to_markdown(html, options.clone()), "a**X 2**z");
+  assert_stream_matches_every_split(html, options);
 }
 
 #[test]
@@ -6893,7 +7092,7 @@ fn lone_closer_after_closed_item_and_hard_break_streams() {
   for (html, expected) in [
     (
       "<ul><li><ol><li>lead<br><em>x<br><br></em><em> </em><em>x&#10;</em><em></em><ul><li><br></li><li>z</li></ul><b></b></li></ol></li></ul>",
-      "-\n  1. lead  \n     *x  \n       \n     **x\n*\n     -   \n     - z",
+      "-\n  1. lead  \n     *x  \n       \n     * *x\n*\n     -   \n     - z",
     ),
     (
       "<ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
@@ -7184,6 +7383,19 @@ fn lone_closer_with_a_nested_marker_past_its_paragraph_streams() {
   }
 }
 
+// A drained separator with output written after it, like raw HTML, no longer
+// sits in front of the text, so the redundant-title check still runs.
+#[test]
+fn link_title_check_ignores_a_drained_separator_with_output_after_it() {
+  let html = r#"<p>D<span> <a href="/x" title="7"><mark></mark>7</a></span></p>"#;
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "D [<mark></mark>7](/x)"
+  );
+  assert_stream_matches(html, HtmlToMarkdownOptions::default());
+  assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+}
+
 #[test]
 fn streaming_code_fence_after_cr() {
   for html in [
@@ -7237,7 +7449,8 @@ fn vertical_tab_before_a_droppable_opener_streams_like_one_shot() {
       "<p><b>Note\u{b}<br><i></i>\u{b}<br></b> text</p>",
       "**Note**\u{b}  \n\u{b}  \n text",
     ),
-    ("<del>\u{b}<pre>", "~~~~\u{b}"),
+    // The `<pre>` writes nothing, so the pair is empty and goes with its run.
+    ("<del>\u{b}<pre>", ""),
   ] {
     assert_eq!(html_to_markdown(html, opts.clone()), expected);
     assert_stream_matches(html, opts.clone());

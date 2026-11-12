@@ -359,5 +359,14 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     return newContent
   }
 
-  return { getMarkdownChunk }
+  // A drain rewrites the buffer, so "nothing written since an empty pair was
+  // dropped" has to be restated against the length it leaves.
+  function drainKeepingDroppedPair(final = false): string {
+    const pending = state.droppedPairAt === state.buffer.length
+    const chunk = getMarkdownChunk(final)
+    state.droppedPairAt = pending ? state.buffer.length : undefined
+    return chunk
+  }
+
+  return { getMarkdownChunk: drainKeepingDroppedPair }
 }

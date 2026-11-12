@@ -182,11 +182,33 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// A word separator sits right before the opener, moved there or written for
+  /// a pending one. When the pair turns out empty it goes with the opener and
+  /// is owed to the content after it.
+  follows_separator: bool,
+  /// That separator was trimmed from a closed inline element.
+  separator_trimmed: bool,
+  /// Openers in the contiguous emphasis run this one ends, itself included.
+  /// An index count, so drains and shifts that move both offsets keep it.
+  run_len: u32,
   /// The opener carries the block break a heading in a list item owed, so
   /// dropping the empty pair owes it again.
   restores_heading_break: bool,
   /// Where vertical-tab-only text first kept it open (`usize::MAX` if never); charged to the cap.
   vertical_tab_start: usize,
+  /// An entity-decoded blank is all this code-like span holds so far.
+  decoded_blank: bool,
+  /// A span around this one holds such a blank. Only the innermost span takes
+  /// text, so this stays as read when the marker opened.
+  blank_outside: bool,
+}
+
+struct LiteralOpener {
+  depth: usize,
+  end: usize,
+  /// The opener's bytes after its last newline, which `end` must still follow.
+  #[cfg(debug_assertions)]
+  tail: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -196,6 +218,7 @@ enum CaptionState {
     output_start: usize,
     content_start: usize,
     restore_space: bool,
+    restore_pending_whitespace: bool,
   },
   Committed,
 }
@@ -1112,6 +1135,9 @@ pub struct ConvertState {
   is_first_text_in_element: bool,
   in_non_nesting: bool,
   rawtext_end_tag_pending: bool,
+  /// Body bytes of the open raw-text element took the general text path,
+  /// which leaves the whitespace run open after a whitespace byte.
+  raw_text_body_read: bool,
   script_data_state: u8,
   in_pre: bool,
   overflow_tag_id: Option<u8>,
@@ -1262,6 +1288,29 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// That separator is a blank that opened an inline element, or one an empty
+  /// pair took along and gave back, so it is written on its own.
+  pending_leading_blank: bool,
+  /// The pending separator was trimmed from a closed inline element, written
+  /// in front of a pair, and given back when the pair turned out empty. It
+  /// stood in the output, so only a line end takes it.
+  pending_pair_separator: bool,
+  /// A decoded blank joined the pending separator a blank that opened an
+  /// inline element owes. It is content, so only a line end takes it.
+  pending_decoded_blank: bool,
+  /// The separator at `pending_space_end` was trimmed from a closed inline
+  /// element, or given back as one that was.
+  pending_space_trimmed: bool,
+  /// Stream position (see `drained`) after the space the current element's
+  /// enter wrote for a pending separator, so an opener written right after it
+  /// can take it along.
+  pending_space_end: usize,
+  /// Stream position after the last separator written on its own, which is
+  /// not part of the text after it.
+  separator_end: usize,
+  /// The cached run follows a separator written on its own, so the
+  /// redundant-title check must not treat it as the link's whole text.
+  cache_follows_separator: bool,
   /// Deferred spacing after a committed figcaption.
   caption_boundary: CaptionBoundary,
 
@@ -1318,6 +1367,19 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
+  /// Open markers, counted from the outermost, that a block writing nothing
+  /// closed inside. A count above the open ones covers them all.
+  silent_markers: usize,
+  /// Each open inline element's literal `tagOverrides` opener, with the
+  /// stream position after it, which still ends the output while nothing has
+  /// been written since.
+  literal_opener_ends: Vec<LiteralOpener>,
+  /// Buffer bytes drained so far. A stream position is this plus a buffer
+  /// index, so a drain moves none of them.
+  drained: usize,
+  /// The last drained bytes, so debug checks can read just before the buffer.
+  #[cfg(debug_assertions)]
+  drained_tail: Vec<u8>,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1493,6 +1555,9 @@ pub struct ConvertState {
   /// Bytes read to decide whether held line-break runs are final.
   #[cfg(test)]
   break_run_scanned: usize,
+  /// Open markers a block that writes nothing walked to find a decoded blank.
+  #[cfg(test)]
+  silent_block_walked: usize,
   /// Bytes behind a code span's opener when the span closes, which closing
   /// reads and moves.
   #[cfg(test)]
@@ -1580,6 +1645,7 @@ impl ConvertState {
       is_first_text_in_element: false,
       in_non_nesting: false,
       rawtext_end_tag_pending: false,
+      raw_text_body_read: false,
       script_data_state: SCRIPT_DATA,
       in_pre: false,
       overflow_tag_id: None,
@@ -1676,6 +1742,13 @@ impl ConvertState {
       break_after_last_text: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      pending_leading_blank: false,
+      pending_pair_separator: false,
+      pending_decoded_blank: false,
+      pending_space_trimmed: false,
+      pending_space_end: usize::MAX,
+      separator_end: usize::MAX,
+      cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
@@ -1703,6 +1776,11 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      silent_markers: 0,
+      literal_opener_ends: Vec::new(),
+      drained: 0,
+      #[cfg(debug_assertions)]
+      drained_tail: Vec::new(),
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -1768,6 +1846,8 @@ impl ConvertState {
       quoted_bytes: 0,
       #[cfg(test)]
       break_run_scanned: 0,
+      #[cfg(test)]
+      silent_block_walked: 0,
       #[cfg(test)]
       code_span_closed_bytes: 0,
       #[cfg(test)]
@@ -2331,6 +2411,10 @@ impl ConvertState {
           continue;
         }
 
+        if self.in_non_nesting {
+          self.raw_text_body_read = true;
+        }
+
         if cc == AMPERSAND_CHAR {
           self.has_encoded_html_entity = true;
         }
@@ -2493,6 +2577,17 @@ impl ConvertState {
           if current_name.is_some_and(|name| name.eq_ignore_ascii_case(peek_name)) {
             // Matching closing tag: fall through to normal closing tag processing
             self.complete_text_node(&mut text_buffer);
+            // Skipped raw text ends the whitespace run before it. Text an
+            // extraction read instead ends it too, so the output does not
+            // depend on the selectors.
+            if self.raw_text_body_read
+              && self
+                .stack
+                .last()
+                .is_some_and(|node| node.excludes_text_nodes)
+            {
+              self.last_char_was_whitespace = false;
+            }
             if self.held_output_exceeded {
               return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
             }
@@ -3825,6 +3920,14 @@ impl ConvertState {
       self.bare_marker_text = text;
     }
     self.note_link_release(drain_end);
+    #[cfg(debug_assertions)]
+    {
+      let tail = &self.buffer.as_bytes()[drain_end.saturating_sub(64)..drain_end];
+      let excess = (self.drained_tail.len() + tail.len()).saturating_sub(64);
+      self.drained_tail.drain(..excess);
+      self.drained_tail.extend_from_slice(tail);
+    }
+    self.drained += drain_end;
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;
