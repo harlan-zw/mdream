@@ -2600,10 +2600,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (emptyTableRow)
       return
-    // Built-in wrapper identities already prove their output. Cache the
-    // other cases, avoiding a property allocation on each common inline node.
+    // The wrapper test knows which built-in tags write inline Markdown. Cache
+    // what a plugin or an overridden enter wrote, as Rust reads an override.
     if (eventType === NodeEventEnter && output && handler?.collapsesInnerWhiteSpace
-      && (hasPluginOutput || handler !== tagHandlers[tagId] || (!INLINE_MARKER_TYPE[tagId] && tagId !== TAG_A))) {
+      && (hasPluginOutput || handler.literalEnter)) {
       element.hasEnterOutput = output.some(fragment => fragment.length > 0)
     }
     if (captionBreakRun
@@ -2954,7 +2954,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // or if we're at the end of a block
           const collapsesWhiteSpace = node.tagHandler?.collapsesInnerWhiteSpace
           const hasSpacing = node.tagHandler?.spacing && Array.isArray(node.tagHandler.spacing)
-          const isBlockElement = !isInlineElement && !collapsesWhiteSpace && configuredNewLines > 0
+          // At an exit Rust has popped the node and reads its parent here.
+          const isBlockElement = !isInlineElement && configuredNewLines > 0
+            && !(eventType === NodeEventExit ? node.parent?.tagHandler?.collapsesInnerWhiteSpace : collapsesWhiteSpace)
           // Don't trim before elements that have collapsesInnerWhiteSpace on enter
           // Also don't trim before block elements that have their own spacing configuration
           // At a quote's content start the last fragment is the sibling separator,

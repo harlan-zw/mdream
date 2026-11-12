@@ -6568,17 +6568,20 @@ impl ConvertState {
     }
     // A heading's own collapse keeps its block spacing, but in a table cell that
     // newline would end the row. The count holds the heading only while it is
-    // open: at its exit the heading is already popped, so a count of 1 there is
-    // a collapsing ancestor. Only an ancestor writing visible inline Markdown
+    // open: at its exit the heading is already popped, so the count there is
+    // its collapsing ancestors. Only one writing visible inline Markdown
     // (`<a>`, `<b>`, `<code>`) suppresses the blank line, since its text
-    // continues inline; a marker-less wrapper (label, small, abbr, time, bdo,
-    // ruby, rt, rp) lets the heading close its block.
+    // continues inline; marker-less wrappers (label, small, abbr, time, bdo,
+    // ruby, rt, rp, a raw `<dt>` or `<address>`) let the heading close its
+    // block, however many there are. Text output keeps the one-ancestor rule:
+    // there the engines already differ at that depth.
     let is_heading = matches!(tag_id, Some(id) if (TAG_H1..=TAG_H6).contains(&id));
     let heading_owns_collapse =
       is_enter && is_heading && self.collapse_non_span_depth == 1 && !self.in_table_cell();
     let heading_exit_in_markerless_collapse = !is_enter
       && is_heading
-      && self.collapse_non_span_depth == 1
+      && (self.collapse_non_span_depth == 1
+        || (self.collapse_non_span_depth > 1 && !plain_text!(self)))
       && !self.in_table_cell()
       && !self.collapse_wrapper_emits_inline_markdown();
     // On enter the node is already counted as a collapsing ancestor of itself.
@@ -6662,21 +6665,16 @@ impl ConvertState {
     }
   }
 
-  /// The depth-1 collapsing ancestor at a heading's exit is the only open
-  /// non-span contributor, so the innermost match is it. Returns `false` when
-  /// none is found, keeping the previous suppression.
+  /// Whether a collapsing ancestor open at a heading's exit, spans aside,
+  /// writes inline Markdown around it.
   #[inline]
   fn collapse_wrapper_emits_inline_markdown(&self) -> bool {
-    self
-      .stack
-      .iter()
-      .rev()
-      .find(|node| {
-        node.collapses_inner_white_space
-          && !node.excluded_from_markdown
-          && node.tag_id != Some(TAG_SPAN)
-      })
-      .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
+    self.stack.iter().any(|node| {
+      node.collapses_inner_white_space
+        && !node.excluded_from_markdown
+        && node.tag_id != Some(TAG_SPAN)
+        && self.wrapper_emits_inline_markdown(node)
+    })
   }
 
   /// Whether the heading at the top of the stack (`is_enter`) or just popped
