@@ -2678,6 +2678,9 @@ fn decoded_blank_keeps_a_code_span_beside_a_dropped_element() {
     (r#"<p>a<code><svg></svg></code>b</p>"#, "ab"),
     (r#"<p>a<kbd><svg></svg> </kbd>b</p>"#, "ab"),
     (r#"<p><code>&#32;</code></p>"#, ""),
+    (r#"<p>x <code>&#32;</code> y</p>"#, "x  y"),
+    (r#"<p>h<kbd>&#32;</kbd>B</p>"#, "hB"),
+    (r#"<p>h<q>&#9;</q>B</p>"#, "h B"),
     (r#"<p>h<em>&#32;<svg></svg></em>B</p>"#, "h B"),
   ] {
     assert_eq!(md(html), expected, "{html}");

@@ -1085,6 +1085,9 @@ it.each([
   ['<p>a<code><svg></svg></code>b</p>', 'ab'],
   ['<p>a<kbd><svg></svg> </kbd>b</p>', 'ab'],
   ['<p><code>&#32;</code></p>', ''],
+  ['<p>x <code>&#32;</code> y</p>', 'x  y'],
+  ['<p>h<kbd>&#32;</kbd>B</p>', 'hB'],
+  ['<p>h<q>&#9;</q>B</p>', 'h B'],
   ['<p>h<em>&#32;<svg></svg></em>B</p>', 'h B'],
 ])('keeps a code span whose decoded blank sits beside a dropped element: %s', async (html, expected) => {
   expect(htmlToMarkdown(html)).toBe(expected)
