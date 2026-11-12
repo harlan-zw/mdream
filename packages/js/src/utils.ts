@@ -297,10 +297,11 @@ export function parseUnsignedInteger(raw: string | undefined): number | undefine
 }
 
 /**
- * Drop leading whitespace as the Rust engine's `str::trim_start` does: Unicode
- * White_Space, which counts U+0085 but not the U+FEFF that `trimStart` strips.
+ * Length of the leading whitespace the Rust engine's `str::trim_start` drops:
+ * Unicode White_Space, which counts U+0085 but not the U+FEFF that `trimStart`
+ * strips.
  */
-export function trimOutputStart(value: string): string {
+export function outputLeadLength(value: string): number {
   let start = 0
   while (start < value.length) {
     const code = value.charCodeAt(start)
@@ -314,6 +315,11 @@ export function trimOutputStart(value: string): string {
     }
     start++
   }
+  return start
+}
+
+export function trimOutputStart(value: string): string {
+  const start = outputLeadLength(value)
   return start === 0 ? value : value.slice(start)
 }
 

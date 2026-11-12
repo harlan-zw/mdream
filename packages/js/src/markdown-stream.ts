@@ -1,7 +1,7 @@
 import type { BlockquoteFrame, BufferScanState, MarkdownState, MarkdownStreamContext } from './markdown-processor'
 import { TAG_B, TAG_CITE, TAG_DEL, TAG_DFN, TAG_EM, TAG_I, TAG_PRE, TAG_S, TAG_STRIKE, TAG_STRONG } from './const'
 import { isAsciiWhitespace, lineOpensRawHtmlBlock, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
-import { isInsideHeading, noteBufferRewrite, trimOutputStart } from './utils'
+import { isInsideHeading, noteBufferRewrite, outputLeadLength, trimOutputStart } from './utils'
 
 interface QuoteScan {
   owner: BlockquoteFrame
@@ -204,6 +204,12 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     return start
   }
 
+  /** Record a compaction of `content[..end]` that drops emitted output. */
+  function noteDrained(content: string, end: number): void {
+    if (!state.drainedContent && end > outputLeadLength(content))
+      state.drainedContent = true
+  }
+
   function getMarkdownChunk(final = false): string {
     // A fragment link resolves against headings that may come later, so
     // `fragments` holds the whole document back, as Rust does.
@@ -296,6 +302,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       if (wrapping)
         retainedStart = Math.min(retainedStart, content.lastIndexOf('\n', stableLength + leadingTrimmed - 1))
       const removed = compactQuotePrefix(heldFragment, content, Math.max(0, retainedStart))
+      noteDrained(content, removed)
       lastYieldedLength -= removed
     }
     if (hasYieldedContent && !fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre) && (!wrapping || leadingTrimmed === 0)) {
@@ -320,6 +327,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         const stableTailLength = Math.max(0, Math.min(stableLength, fragmentStart) - tailStart)
         const stableTail = emittedTail.slice(0, stableTailLength)
         const mutableTail = emittedTail.slice(stableTailLength)
+        noteDrained(currentContent, tailStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (stableTail)
@@ -334,6 +342,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       else if (!retainMutableFragments) {
         const tailStart = Math.max(0, contextStart)
         const emittedTail = currentContent.slice(tailStart, stableLength)
+        noteDrained(currentContent, tailStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (emittedTail)

@@ -2431,6 +2431,52 @@ fn streaming_block_markers_at_a_deep_list_content_column_are_escaped() {
   }
 }
 
+// The output trim removes the whitespace that leads the document, so a block
+// marker behind any amount of it starts the document and is escaped, at every
+// cut. The same whitespace is kept anywhere else, where four spaces of it make
+// the marker inert.
+#[test]
+fn streaming_block_markers_behind_trimmed_leading_whitespace_are_escaped() {
+  let deep = format!("<p>{}1<b></b>. x</p>", "&#32;".repeat(40));
+  // The drain takes `abc` with it, so what stays buffered is not the document's start.
+  let drained = format!("<p>abc{}1<b></b>. x</p>", "&#32;".repeat(40));
+  let drained_expected = format!("abc{}1. x", " ".repeat(40));
+  for (html, expected) in [
+    ("<p>&#32;&#32;&#32;&#32;# x</p>", "\\# x"),
+    ("&#32;&#32;&#32;&#32;# x", "\\# x"),
+    ("<p>&#9;- x</p>", "\\- x"),
+    ("<p>&nbsp;&gt; x</p>", "\\> x"),
+    ("<p>&nbsp;# x</p>", "\\# x"),
+    ("<p>&nbsp;1. x</p>", "1\\. x"),
+    ("<p>&#10;&#32;&#32;&#32;&#32;1. x</p>", "1\\. x"),
+    ("<p>&#32;&#32;&#32;&#32;---</p>", "\\---"),
+    ("<p>&#32;&#32;&#32;&#32;<b></b># x</p>", "\\# x"),
+    ("<p>&#32;&#32;&#32;&#32;1<b></b>. x</p>", "1\\. x"),
+    (deep.as_str(), "1\\. x"),
+    ("<p>&#13;&#10;5<b></b>. x</p>", "5\\. x"),
+    (drained.as_str(), drained_expected.as_str()),
+    ("<p>&#32;&#32;&#32;&#32;x # y</p>", "x # y"),
+    ("<p>a</p><p>&#32;&#32;&#32;&#32;# x</p>", "a\n\n    # x"),
+    (
+      "<blockquote>&#32;&#32;&#32;&#32;# x</blockquote>",
+      ">     # x",
+    ),
+    ("<ul><li>&#32;&#32;&#32;&#32;# x</li></ul>", "-     # x"),
+    (
+      "<table><caption>&#10;# x</caption><tr><td>c</td></tr></table>",
+      "&#10;\\# x\n\n| c |\n| --- |",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // A `<p>` or `<div>` that opens a `<pre>` fence in a list item leaves its
 // separator to the fence, at every cut.
 #[test]
