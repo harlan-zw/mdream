@@ -1232,6 +1232,14 @@ impl ConvertState {
       && self.fast_path_state_ok()
   }
 
+  /// A custom tag with no override takes the simple emitters, as `<span>` does:
+  /// no output of its own and inline spacing `NO_SPACING`. Overrides are keyed
+  /// by name, so any override keeps the general path.
+  #[inline(always)]
+  pub(crate) fn custom_element_fast_path_ok(&self) -> bool {
+    !self.has_tag_overrides && self.fast_path_state_ok()
+  }
+
   /// A plain `<li>` takes the simple emitters with the item steps added. Kept
   /// out of `SIMPLE_EMIT_TAG` so the other tags never test for it.
   /// Same gate as `common_fast_path_ok(Some(TAG_LI))`. The li slot is decided
@@ -1472,7 +1480,9 @@ impl ConvertState {
           self.li_simple_state_ok() && self.stack[stack_len - 1].tag_id == Some(TAG_LI)
         } else {
           let tag_id = self.stack[stack_len - 1].tag_id;
-          self.element_fast_path_ok(tag_id) || self.text_element_fast_path_ok(tag_id)
+          self.element_fast_path_ok(tag_id)
+            || self.text_element_fast_path_ok(tag_id)
+            || (tag_id.is_none() && self.custom_element_fast_path_ok())
         }
     );
     if self.stack[stack_len - 1].excluded_from_markdown {
@@ -1728,7 +1738,9 @@ impl ConvertState {
     } else if li {
       self.li_simple_state_ok() && node.tag_id == Some(TAG_LI)
     } else {
-      self.element_fast_path_ok(node.tag_id) || self.text_element_fast_path_ok(node.tag_id)
+      self.element_fast_path_ok(node.tag_id)
+        || self.text_element_fast_path_ok(node.tag_id)
+        || (node.tag_id.is_none() && self.custom_element_fast_path_ok())
     });
     if node.excluded_from_markdown || node.enter_skipped {
       self.last_node_is_inline = node.is_inline;
