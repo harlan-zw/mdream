@@ -2779,6 +2779,30 @@ fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
 }
 
 #[test]
+fn block_break_survives_an_inline_wrapper_closing_after_text_with_a_space() {
+  for (html, expected) in [
+    ("<label><h2>y z</h2></label>B", "## y z\n\nB"),
+    ("<label><h2>yz</h2></label>B", "## yz\n\nB"),
+    ("<span><p>y z</p></span>B", "y z\n\nB"),
+    ("<span><div>y z</div></span><b>B</b>", "y z\n\n**B**"),
+    ("<small><h3>a b c</h3></small> B", "### a b c\n\nB"),
+    ("<center><p>y z</p></center><br>B", "y z\n\n  \nB"),
+    (
+      "<pre><center><ul><li>y z</li></ul></center></pre>",
+      "```\n\n- y z\n\n\n```",
+    ),
+    // The space that ends the text is still trimmed.
+    ("<label><h2>y z </h2></label>B", "## y z\n\nB"),
+    ("<p><b>y z </b>B</p>", "**y z** B"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
 fn written_space_after_a_leading_blank_survives_an_element_that_starts_no_line() {
   for (html, expected) in [
     ("Aa<span> </span> <form><span>Bb</span></form>", "Aa Bb"),
