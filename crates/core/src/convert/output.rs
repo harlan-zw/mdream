@@ -1299,8 +1299,15 @@ impl ConvertState {
       && self.buffer.ends_with(emitted)
     {
       let mut marker_start = self.buffer.len() - emitted.len();
-      let merges =
-        reopens && matches!(inline_marker_type, 1 | 2 | 4) && matches!(emitted, "*" | "**");
+      // A quote that began after the closer writes its prefix between the two
+      // delimiters, so they do not touch.
+      let merges = reopens
+        && matches!(inline_marker_type, 1 | 2 | 4)
+        && matches!(emitted, "*" | "**")
+        && !self
+          .blockquotes
+          .last()
+          .is_some_and(|frame| frame.content_start >= marker_start);
       // A separator moved in front of the reopened pair parts the two runs.
       if merges
         && let Some(reopened) = self.open_markers.last()

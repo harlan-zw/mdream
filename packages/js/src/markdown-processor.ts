@@ -3701,9 +3701,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         let closer = buff.length - 2
         while (closer >= 0 && buff[closer] === '')
           closer--
-        // An overridden exit is no closer the next opener could take back.
+        // An overridden exit is no closer the next opener could take back. A
+        // quote that began after the closer writes its prefix between the two
+        // delimiters, and so does a caption still to be opened.
         const merges = (markerType === 1 || markerType === 2 || markerType === 4)
           && (handlerOutput === '*' || handlerOutput === '**') && !handler?.literalExit
+          && !(state.blockquotes.length && state.blockquotes[state.blockquotes.length - 1]!.fragment > closer)
+          && !captionNeedsPreparation()
         const reopened = openMarkerCount ? openMarkers[openMarkerCount - 1]! : 0
         // A separator moved in front of the reopened pair parts the two runs.
         if (merges && (reopened & MARKER_TYPE_MASK) === MARKER_TYPE_MASK

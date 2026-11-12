@@ -751,6 +751,12 @@ describe.each(engines)('touching emphasis pairs $name', (engineConfig) => {
     ['<strong>Aa</strong><dfn><strong>Bb</strong></dfn>', '**Aa******Bb****'],
     ['<figcaption><em>Aa</em><em>Bb</em></figcaption>', '**Aa**Bb**'],
     ['<strong><em>Aa</em><em>Bb</em></strong>', '***AaBb***'],
+    // A quote that began after the closer writes its prefix between the pairs.
+    ['<h2><b>Aa</b><blockquote><b>Bb</b></blockquote></h2>', '## **Aa**> **Bb**'],
+    ['<h2><i>Aa</i><blockquote><i>Bb</i></blockquote></h2>', '## *Aa*> *Bb*'],
+    ['<h2><b>Aa</b><blockquote><b>Bb</b><b>Cc</b></blockquote></h2>', '## **Aa**> **BbCc**'],
+    // A caption still to be opened writes its opener there.
+    ['<b>Aa</b><figcaption><b>Bb</b></figcaption>', '**Aa**\n\n***Bb***'],
     // The separator a blank pair leaves goes with it when a silent block follows.
     ['<b>Aa</b><i> </i><svg></svg><b>Bb</b>', '**AaBb**'],
     // A reopened pair has no opener for the separator to be moved in front of.
