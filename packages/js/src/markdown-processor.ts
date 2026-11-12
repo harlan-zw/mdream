@@ -1715,6 +1715,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let blankMarkerCount = 0
   // The fragment holding the space the current event's pending separator wrote.
   let pendingSpaceFragment = -1
+  // The current event wrote no space for a pending separator because its own
+  // output starts with one.
+  let pendingSpaceOwned = false
   // That separator was trimmed from a closed inline element, or given back as
   // one that was.
   let pendingSpaceTrimmed = false
@@ -3081,6 +3084,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         // A word separator in front of the opener, moved there or written for
         // a pending one, goes with it and is owed to the content after the pair.
         const hoisted = markerType <= 4 && buff[marker >> 3]?.charCodeAt(0) === 32
+        // An opener that starts with its own space, as inline code in a list
+        // item does, stood in for a pending separator.
+        const owned = markerType > 4 && openMarkerFollowsSpace[slot] && buff[marker >> 3]?.charCodeAt(0) === 32
         // Only a heading separator adds a newline to an opener. Whitespace
         // moved before the opener must not hide the separator it carries.
         const restoresHeadingBreak = buff[marker >> 3]?.includes('\n')
@@ -3093,10 +3099,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             state.pendingPairSeparator = false
             state.pendingDecodedBlank = false
           }
-          if (openMarkerFollowsSpace[slot] && buff[idx - 1] === ' ') {
-            idx--
-            state.outputPositions?.replace(idx, buff.length, [])
-            buff.length = idx
+          if (openMarkerFollowsSpace[slot] && (owned || buff[idx - 1] === ' ')) {
+            if (!owned) {
+              idx--
+              state.outputPositions?.replace(idx, buff.length, [])
+              buff.length = idx
+            }
             state.pendingInlineWhitespace = true
             state.pendingLeadingBlank = true
             state.pendingPairSeparator = openMarkerSeparatorTrimmed[slot]
@@ -3193,6 +3201,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       newLines = 0
 
     pendingSpaceFragment = -1
+    pendingSpaceOwned = false
     // Invisible children cannot consume the separator a pending caption owns.
     if (state.pendingInlineWhitespace && !(captionFrameCount !== 0
       && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
@@ -3225,6 +3234,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             pendingSpaceFragment = state.buffer.length - 1
             // A decoded blank does not make it one: given back as trimmed, it
             // would keep a space written after the pair from being output.
+            pendingSpaceTrimmed = !state.pendingLeadingBlank || pairOwed
+          }
+          else if (firstOutput === ' ') {
+            // The output's own space takes the separator's place. An empty
+            // pair dropped with it owes the separator again.
+            pendingSpaceOwned = true
             pendingSpaceTrimmed = !state.pendingLeadingBlank || pairOwed
           }
           state.pendingInlineWhitespace = false
@@ -3553,6 +3568,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           ? openMarkerRunLength[openMarkerCount - 1]! + 1
           : 1
         const followsSpace = pendingSpaceFragment === buff.length - 2
+          || (pendingSpaceOwned && handlerOutput.charCodeAt(0) === 32)
         openMarkerFollowsSpace[openMarkerCount] = followsSpace
         openMarkerSeparatorTrimmed[openMarkerCount] = followsSpace && pendingSpaceTrimmed
         if (silentMarkerCount > openMarkerCount)

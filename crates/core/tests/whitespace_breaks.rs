@@ -2898,6 +2898,49 @@ fn inline_code_in_a_list_item_keeps_its_separator_after_an_element_that_writes_n
 }
 
 #[test]
+fn empty_inline_code_in_a_list_item_gives_the_separator_back() {
+  for (html, expected) in [
+    (
+      "<ul><li>Aa<span> </span><code></code>Bb</li></ul>",
+      "- Aa Bb",
+    ),
+    (
+      "<ul><li>Aa<span> </span>&#32;<code></code>Bb</li></ul>",
+      "- Aa Bb",
+    ),
+    (
+      "<ol><li>Aa<i> </i><code><svg></svg></code><b>Bb</b></li></ol>",
+      "1. Aa **Bb**",
+    ),
+    (
+      "<ul><li>x<ul><li>Aa<span> </span><code> </code>Bb</li></ul></li></ul>",
+      "- x\n  - Aa Bb",
+    ),
+    // No separator was pending, so the opener's own space goes with it.
+    ("<ul><li>Aa<code></code>Bb</li></ul>", "- AaBb"),
+    // A line end still takes the separator.
+    (
+      "<ul><li>Aa<span> </span><code></code><p>Bb</p></li></ul>",
+      "- Aa\n\n  Bb",
+    ),
+    // A pair that stays keeps the space as its own.
+    (
+      "<ul><li>Aa<span> </span><code>x</code>Bb</li></ul>",
+      "- Aa `x`Bb",
+    ),
+    (
+      "<ul><li>Aa<span> </span><code></code><code>Bb</code></li></ul>",
+      "- Aa `Bb`",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
 fn decoded_blank_after_a_leading_blank_survives_an_element_that_starts_no_line() {
   for (html, expected) in [
     ("Aa<span> </span>&#32;<form><span>Bb</span></form>", "Aa Bb"),

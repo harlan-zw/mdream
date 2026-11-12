@@ -1278,6 +1278,7 @@ impl ConvertState {
     keeps_markers: bool,
   ) {
     let separator_end = std::mem::replace(&mut self.pending_space_end, usize::MAX);
+    let separator_owned = std::mem::take(&mut self.pending_space_owned);
     if let Some(id) = marker_tag
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && let Some(emitted) = output
@@ -1286,11 +1287,15 @@ impl ConvertState {
       && self.buffer.ends_with(emitted)
     {
       let marker_start = self.buffer.len() - emitted.len();
-      let follows_separator = separator_end == self.drained + marker_start;
+      let separator_written = separator_end == self.drained + marker_start;
       #[cfg(debug_assertions)]
-      if follows_separator {
+      if separator_written {
         self.check_written_before(separator_end, b" ");
       }
+      // An opener that starts with its own space, as inline code in a list
+      // item does, stood in for the pending separator.
+      let follows_separator =
+        separator_written || (separator_owned && emitted.as_bytes()[0] == b' ');
       let run_len = match self.open_markers.last() {
         Some(outer)
           if inline_marker_type <= 4 && outer.kind <= 4 && outer.content_start == marker_start =>
@@ -1672,12 +1677,19 @@ impl ConvertState {
       if content.iter().all(|&b| is_whitespace(b)) {
         // `output_start` keeps the opener's own separator, not the spacing `write_output` adds.
         let mut end = open_marker.output_start;
-        if open_marker.follows_separator && end > 0 && self.buffer.as_bytes()[end - 1] == b' ' {
-          end -= 1;
-          self.pending_inline_whitespace = true;
-          self.pending_leading_blank = true;
-          self.pending_pair_separator = open_marker.separator_trimmed;
-          self.pending_decoded_blank = false;
+        if open_marker.follows_separator {
+          let bytes = self.buffer.as_bytes();
+          // The separator is the opener's own space or the one in front of it.
+          let owned = bytes.get(end) == Some(&b' ');
+          if owned || (end > 0 && bytes[end - 1] == b' ') {
+            if !owned {
+              end -= 1;
+            }
+            self.pending_inline_whitespace = true;
+            self.pending_leading_blank = true;
+            self.pending_pair_separator = open_marker.separator_trimmed;
+            self.pending_decoded_blank = false;
+          }
         }
         self.truncate_buffer(end);
         if open_marker.starts_at_hard_break {
@@ -6714,6 +6726,7 @@ impl ConvertState {
     // sit outside its Markdown delimiter. Resolve it only when later visible
     // inline output begins; block boundaries and line breaks subsume it.
     self.pending_space_end = usize::MAX;
+    self.pending_space_owned = false;
     let pending_caption = output_str.is_empty()
       && configured_new_lines == 0
       && (!is_enter
@@ -6767,6 +6780,11 @@ impl ConvertState {
             // would keep a space written after the pair from being output.
             self.pending_space_trimmed = !self.pending_leading_blank || pair_owed;
           }
+        } else if first == b' ' && self.is_markdown() {
+          // The output's own space takes the separator's place. An empty pair
+          // dropped with it owes the separator again.
+          self.pending_space_owned = true;
+          self.pending_space_trimmed = !self.pending_leading_blank || pair_owed;
         }
         self.pending_inline_whitespace = false;
       }
