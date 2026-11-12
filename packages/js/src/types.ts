@@ -106,6 +106,8 @@ export interface CleanTarget {
   depthMap: Uint16Array
   /** The last buffer entry the converter wrote. */
   lastContentCache?: string
+  /** Buffer length right after an empty marker pair was dropped. */
+  droppedPairAt?: number
   options?: EngineOptions
   /** @internal */
   outputPositions?: OutputPositions
@@ -219,6 +221,12 @@ export interface TextNode extends Node {
   context?: PluginContext
   /** Follows an end tag that closed nothing, so it gets no separator. */
   joinsPrevious?: boolean
+  /**
+   * Whitespace that opens an inline element, other than one with a literal
+   * `tagOverrides` opener. While it stays whitespace it is placed as a word
+   * separator, and is not written as text.
+   */
+  leadingBlank?: boolean
   /**
    * First text with no block ancestor: it drops its leading whitespace when
    * the output is at the start of a line.
@@ -346,6 +354,16 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
 
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
+  /** Buffer length right after an empty marker pair was dropped. */
+  droppedPairAt?: number
+
+  /**
+   * A separator was just written on its own, so the next text does not start
+   * the run the redundant-title check compares.
+   */
+  separatorPending?: boolean
+  /** The cached run follows such a separator, whether or not a drain took it. */
+  cacheFollowsSeparator?: boolean
 
   /** Reference to the last processed node */
   lastNode?: Node

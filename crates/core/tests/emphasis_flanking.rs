@@ -99,7 +99,7 @@ const CASES: &[(&str, &str)] = &[
   // A dropped empty pair leaves the closer before it pending again.
   ("<p><strong>b!</strong><em></em>c</p>", "**b!**&#99;"),
   ("<p><strong>b!</strong><del></del>c</p>", "**b!**&#99;"),
-  ("<p><strong>b!</strong><em> </em>c</p>", "**b!**&#99;"),
+  ("<p><strong>b!</strong><em> </em>c</p>", "**b!** c"),
   ("<p><strong>b!</strong><em><b></b></em>c</p>", "**b!**&#99;"),
   ("<p><strong>b!</strong><code></code>c</p>", "**b!**&#99;"),
   ("<p>a<strong><em></em>(b)</strong>c</p>", "a**(b)**&#99;"),

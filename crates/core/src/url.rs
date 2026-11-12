@@ -5,6 +5,10 @@
 
 use std::borrow::Cow;
 
+/// Longest `<base href>` adopted, in bytes, after resolution. Every relative URL
+/// repeats the base, so an unbounded one multiplies the output by its length.
+pub(crate) const MAX_BASE_HREF_LEN: usize = 2048;
+
 /// Tracking query parameter prefixes that `CleanConfig::urls` strips.
 const TRACKING_PREFIXES: [&str; 6] = ["utm_", "fbclid", "gclid", "mc_eid", "msclkid", "oly_"];
 
@@ -736,10 +740,14 @@ fn join_origin_prefix(origin: &str, url: &str) -> String {
   resolved
 }
 
-/// Resolve a `<base href>` against `origin`. Only an `http(s)://host` result is
-/// usable as a base; anything else is `None`, so resolution stays on `origin`.
+/// Resolve a `<base href>` against `origin`. Only an `http(s)://host` result of at
+/// most [`MAX_BASE_HREF_LEN`] bytes is usable as a base; anything else is `None`,
+/// so resolution stays on `origin`.
 pub(crate) fn resolve_base_href(href: &str, origin: Option<&str>) -> Option<String> {
   let resolved = resolve_url(href.trim_matches(|c: char| c <= ' '), origin, false);
+  if resolved.len() > MAX_BASE_HREF_LEN {
+    return None;
+  }
   let (scheme, authority) = BaseUrl::split(&resolved)?.root.split_once("://")?;
   // The host follows any userinfo and precedes any port; an empty host is no origin.
   let host = authority

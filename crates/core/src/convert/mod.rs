@@ -187,9 +187,33 @@ struct OpenMarker {
   starts_at_hard_break: bool,
   /// The pending closer this opener cleared, back in force if the pair drops.
   pending: u8,
+  /// A word separator sits right before the opener, moved there or written for
+  /// a pending one. When the pair turns out empty it goes with the opener and
+  /// is owed to the content after it.
+  follows_separator: bool,
+  /// That separator was trimmed from a closed inline element.
+  separator_trimmed: bool,
+  /// Openers in the contiguous emphasis run this one ends, itself included.
+  /// An index count, so drains and shifts that move both offsets keep it.
+  run_len: u32,
   /// The opener carries the block break a heading in a list item owed, so
   /// dropping the empty pair owes it again.
   restores_heading_break: bool,
+  /// Where vertical-tab-only text first kept it open (`usize::MAX` if never); charged to the cap.
+  vertical_tab_start: usize,
+  /// An entity-decoded blank is all this code-like span holds so far.
+  decoded_blank: bool,
+  /// A span around this one holds such a blank. Only the innermost span takes
+  /// text, so this stays as read when the marker opened.
+  blank_outside: bool,
+}
+
+struct LiteralOpener {
+  depth: usize,
+  end: usize,
+  /// The opener's bytes after its last newline, which `end` must still follow.
+  #[cfg(debug_assertions)]
+  tail: Vec<u8>,
 }
 
 #[derive(Clone, Copy)]
@@ -199,6 +223,7 @@ enum CaptionState {
     output_start: usize,
     content_start: usize,
     restore_space: bool,
+    restore_pending_whitespace: bool,
   },
   Committed,
 }
@@ -213,6 +238,37 @@ struct StreamingBreakRun {
   output_end: usize,
   unit: String,
   count: usize,
+}
+
+/// Output cut by a rewrite that writes it back, from `take_tail_with_breaks`.
+struct MovedTail {
+  text: String,
+  /// The break runs, one break each, at offsets into `text`.
+  runs: Vec<StreamingBreakRun>,
+  /// Per written-out run: its buffer offset and the repeats added up to it.
+  repeats: Vec<(usize, usize)>,
+  start: usize,
+  end: usize,
+}
+
+impl MovedTail {
+  /// Where the span ending at buffer offset `at` ends in `text`, if it ends in the cut bytes.
+  fn offset(&self, at: usize) -> Option<usize> {
+    if at <= self.start || at > self.end {
+      return None;
+    }
+    Some(self.offset_from(at))
+  }
+
+  fn offset_from(&self, at: usize) -> usize {
+    let added = self
+      .repeats
+      .iter()
+      .take_while(|&&(run_start, _)| run_start < at)
+      .last()
+      .map_or(0, |&(_, added)| added);
+    at - self.start + added
+  }
 }
 
 #[derive(Clone, Copy)]
@@ -406,6 +462,60 @@ impl TailRun {
   fn note_drain(&mut self, removed: usize) {
     self.start = self.start.saturating_sub(removed);
     self.end = self.end.saturating_sub(removed);
+  }
+}
+
+/// The first vertical tab in the trailing whitespace run, carried between calls like [`TailRun`].
+#[derive(Clone, Copy, Debug, Default)]
+struct VerticalTabRun {
+  end: usize,
+  start: usize,
+  first_tab: Option<usize>,
+}
+
+impl VerticalTabRun {
+  fn first_tab(&mut self, bytes: &[u8]) -> Option<usize> {
+    let end = bytes.len();
+    let floor = if self.end <= end { self.end } else { 0 };
+    let mut start = end;
+    let mut first_tab = None;
+    while start > floor && (bytes[start - 1].is_ascii_whitespace() || bytes[start - 1] == 11) {
+      start -= 1;
+      if bytes[start] == 11 {
+        first_tab = Some(start);
+      }
+    }
+    if start == floor && floor != 0 {
+      start = self.start;
+      first_tab = self.first_tab.or(first_tab);
+    }
+    debug_assert!(
+      start == 0 || !(bytes[start - 1].is_ascii_whitespace() || bytes[start - 1] == 11)
+    );
+    debug_assert!(first_tab.is_none_or(|at| bytes[at] == 11));
+    self.end = end;
+    self.start = start;
+    self.first_tab = first_tab;
+    first_tab
+  }
+
+  fn note_rewrite(&mut self, offset: usize) {
+    if offset < self.start {
+      *self = Self::default();
+    } else {
+      self.end = self.end.min(offset);
+      self.first_tab = self.first_tab.filter(|&at| at < offset);
+    }
+  }
+
+  fn note_drain(&mut self, removed: usize) {
+    if removed > self.start {
+      *self = Self::default();
+    } else {
+      self.start -= removed;
+      self.end -= removed;
+      self.first_tab = self.first_tab.map(|at| at - removed);
+    }
   }
 }
 
@@ -770,6 +880,9 @@ pub struct ConvertState {
   is_first_text_in_element: bool,
   in_non_nesting: bool,
   rawtext_end_tag_pending: bool,
+  /// Body bytes of the open raw-text element took the general text path,
+  /// which leaves the whitespace run open after a whitespace byte.
+  raw_text_body_read: bool,
   script_data_state: u8,
   in_pre: bool,
   overflow_tag_id: Option<u8>,
@@ -875,7 +988,10 @@ pub struct ConvertState {
   /// The trailing whitespace, `<pre>` space and heading `#` runs `get_markdown_chunk`
   /// holds back.
   held_whitespace: TailRun,
+  held_emphasis_blank: TailRun,
   held_emphasis_whitespace: TailRun,
+  /// The vertical tab run `max_node_bytes` charges while emphasis is open.
+  charged_vertical_tabs: VerticalTabRun,
   held_spaces: TailRun,
   held_heading_run: TailRun,
   /// The line a dropped caption hands its heading break back to. Empty captions
@@ -917,6 +1033,29 @@ pub struct ConvertState {
   /// delimiters close before the separator and streaming output has no
   /// speculative trailing whitespace.
   pending_inline_whitespace: bool,
+  /// That separator is a blank that opened an inline element, or one an empty
+  /// pair took along and gave back, so it is written on its own.
+  pending_leading_blank: bool,
+  /// The pending separator was trimmed from a closed inline element, written
+  /// in front of a pair, and given back when the pair turned out empty. It
+  /// stood in the output, so only a line end takes it.
+  pending_pair_separator: bool,
+  /// A decoded blank joined the pending separator a blank that opened an
+  /// inline element owes. It is content, so only a line end takes it.
+  pending_decoded_blank: bool,
+  /// The separator at `pending_space_end` was trimmed from a closed inline
+  /// element, or given back as one that was.
+  pending_space_trimmed: bool,
+  /// Stream position (see `drained`) after the space the current element's
+  /// enter wrote for a pending separator, so an opener written right after it
+  /// can take it along.
+  pending_space_end: usize,
+  /// Stream position after the last separator written on its own, which is
+  /// not part of the text after it.
+  separator_end: usize,
+  /// The cached run follows a separator written on its own, so the
+  /// redundant-title check must not treat it as the link's whole text.
+  cache_follows_separator: bool,
   /// Deferred spacing after a committed figcaption.
   caption_boundary: CaptionBoundary,
 
@@ -974,6 +1113,19 @@ pub struct ConvertState {
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
   pending_emphasis: u8,
+  /// Open markers, counted from the outermost, that a block writing nothing
+  /// closed inside. A count above the open ones covers them all.
+  silent_markers: usize,
+  /// Each open inline element's literal `tagOverrides` opener, with the
+  /// stream position after it, which still ends the output while nothing has
+  /// been written since.
+  literal_opener_ends: Vec<LiteralOpener>,
+  /// Buffer bytes drained so far. A stream position is this plus a buffer
+  /// index, so a drain moves none of them.
+  drained: usize,
+  /// The last drained bytes, so debug checks can read just before the buffer.
+  #[cfg(debug_assertions)]
+  drained_tail: Vec<u8>,
   /// Figcaptions defer their opener until content commits the caption.
   caption_frames: Vec<CaptionFrame>,
   /// Unresolved trailing hard breaks retain one physical representative.
@@ -1089,6 +1241,9 @@ pub struct ConvertState {
   /// Bytes read to decide whether held line-break runs are final.
   #[cfg(test)]
   break_run_scanned: usize,
+  /// Open markers a block that writes nothing walked to find a decoded blank.
+  #[cfg(test)]
+  silent_block_walked: usize,
   /// Bytes behind a code span's opener when the span closes, which closing
   /// reads and moves.
   #[cfg(test)]
@@ -1176,6 +1331,7 @@ impl ConvertState {
       is_first_text_in_element: false,
       in_non_nesting: false,
       rawtext_end_tag_pending: false,
+      raw_text_body_read: false,
       script_data_state: SCRIPT_DATA,
       in_pre: false,
       overflow_tag_id: None,
@@ -1245,7 +1401,9 @@ impl ConvertState {
       heading_runs: [(0, 0); 2],
       heading_run_dirty_from: usize::MAX,
       held_whitespace: TailRun::default(),
+      held_emphasis_blank: TailRun::default(),
       held_emphasis_whitespace: TailRun::default(),
+      charged_vertical_tabs: VerticalTabRun::default(),
       held_spaces: TailRun::default(),
       held_heading_run: TailRun::default(),
       caption_line: BlockLineMemo::default(),
@@ -1270,6 +1428,13 @@ impl ConvertState {
       break_after_last_text: false,
       last_node_is_inline: false,
       pending_inline_whitespace: false,
+      pending_leading_blank: false,
+      pending_pair_separator: false,
+      pending_decoded_blank: false,
+      pending_space_trimmed: false,
+      pending_space_end: usize::MAX,
+      separator_end: usize::MAX,
+      cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
@@ -1295,6 +1460,11 @@ impl ConvertState {
       streaming: false,
       open_markers: Vec::new(),
       pending_emphasis: 0,
+      silent_markers: 0,
+      literal_opener_ends: Vec::new(),
+      drained: 0,
+      #[cfg(debug_assertions)]
+      drained_tail: Vec::new(),
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
@@ -1339,6 +1509,8 @@ impl ConvertState {
       quoted_bytes: 0,
       #[cfg(test)]
       break_run_scanned: 0,
+      #[cfg(test)]
+      silent_block_walked: 0,
       #[cfg(test)]
       code_span_closed_bytes: 0,
       #[cfg(test)]
@@ -1895,6 +2067,10 @@ impl ConvertState {
           continue;
         }
 
+        if self.in_non_nesting {
+          self.raw_text_body_read = true;
+        }
+
         if cc == AMPERSAND_CHAR {
           self.has_encoded_html_entity = true;
         }
@@ -2057,6 +2233,17 @@ impl ConvertState {
           if current_name.is_some_and(|name| name.eq_ignore_ascii_case(peek_name)) {
             // Matching closing tag: fall through to normal closing tag processing
             self.complete_text_node(&mut text_buffer);
+            // Skipped raw text ends the whitespace run before it. Text an
+            // extraction read instead ends it too, so the output does not
+            // depend on the selectors.
+            if self.raw_text_body_read
+              && self
+                .stack
+                .last()
+                .is_some_and(|node| node.excludes_text_nodes)
+            {
+              self.last_char_was_whitespace = false;
+            }
             if self.held_output_exceeded {
               return self.drop_after_held_output_exceeded(text_buffer, chunk_length);
             }
@@ -2848,7 +3035,9 @@ impl ConvertState {
     self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
+    self.held_emphasis_blank.note_rewrite(offset);
     self.held_emphasis_whitespace.note_rewrite(offset);
+    self.charged_vertical_tabs.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
     self.held_heading_run.note_rewrite(offset);
     self.caption_line.note_rewrite(offset);
@@ -2879,7 +3068,9 @@ impl ConvertState {
     }
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
     self.held_whitespace.note_drain(removed);
+    self.held_emphasis_blank.note_drain(removed);
     self.held_emphasis_whitespace.note_drain(removed);
+    self.charged_vertical_tabs.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
     self.caption_line.note_drain(removed);
@@ -2914,6 +3105,13 @@ impl ConvertState {
     if len <= cap {
       return false;
     }
+    // A closing delimiter moves this whole run, so streaming holds all of it.
+    if self
+      .vertical_tab_hold_start()
+      .is_some_and(|start| len.saturating_sub(start) > cap)
+    {
+      return true;
+    }
     let mut floor = len;
     // A link holds while its text is blank, since its close may still drop it.
     // Other link holds end within the link's URL length.
@@ -2937,6 +3135,48 @@ impl ConvertState {
       floor = floor.min(content_start.max(reach));
     }
     len - floor > cap
+  }
+
+  /// Whether a closer may still move trailing vertical tabs out, as `write_emphasis_exit` does.
+  #[inline]
+  fn emphasis_moves_vertical_tabs(&self) -> bool {
+    !plain_text!(self)
+      && (self.depth_map[TAG_PRE as usize] == 0 || self.pre_fence_owner_depth == 0)
+      && (self.depth_map[TAG_EM as usize] != 0
+        || self.depth_map[TAG_I as usize] != 0
+        || self.depth_map[TAG_STRONG as usize] != 0
+        || self.depth_map[TAG_B as usize] != 0
+        || self.depth_map[TAG_CITE as usize] != 0
+        || self.depth_map[TAG_DFN as usize] != 0
+        || self.depth_map[TAG_DEL as usize] != 0
+        || self.depth_map[TAG_S as usize] != 0
+        || self.depth_map[TAG_STRIKE as usize] != 0)
+  }
+
+  /// Start of held output a closer may move: the trailing run's first tab or a marker's tab text.
+  pub(super) fn vertical_tab_hold_start(&mut self) -> Option<usize> {
+    if !self.emphasis_moves_vertical_tabs() {
+      return None;
+    }
+    let marker = self
+      .open_markers
+      .first()
+      .map(|marker| marker.vertical_tab_start)
+      .filter(|&start| start != usize::MAX);
+    let run = if self
+      .buffer
+      .as_bytes()
+      .last()
+      .is_some_and(|&byte| byte.is_ascii_whitespace() || byte == 11)
+    {
+      self.charged_vertical_tabs.first_tab(self.buffer.as_bytes())
+    } else {
+      None
+    };
+    match (marker, run) {
+      (Some(marker), Some(run)) => Some(marker.min(run)),
+      (marker, run) => marker.or(run),
+    }
   }
 
   /// Quote only what a chunk could already hand out. The tail past here is
@@ -2990,26 +3230,6 @@ impl ConvertState {
     let mut stable_end = self
       .held_whitespace
       .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
-    // Separate predicates keep cached runs valid when emphasis closes.
-    if stable_end > 0
-      && self.buffer.as_bytes()[stable_end - 1] == 11
-      && !plain_text!(self)
-      && (self.depth_map[TAG_EM as usize] != 0
-        || self.depth_map[TAG_I as usize] != 0
-        || self.depth_map[TAG_STRONG as usize] != 0
-        || self.depth_map[TAG_B as usize] != 0
-        || self.depth_map[TAG_CITE as usize] != 0
-        || self.depth_map[TAG_DFN as usize] != 0
-        || self.depth_map[TAG_DEL as usize] != 0
-        || self.depth_map[TAG_S as usize] != 0
-        || self.depth_map[TAG_STRIKE as usize] != 0)
-    {
-      stable_end = self
-        .held_emphasis_whitespace
-        .start(self.buffer.as_bytes(), buf_len, |byte| {
-          byte.is_ascii_whitespace() || byte == 11
-        });
-    }
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
       // line-leading run is the exception: list continuation indentation is
@@ -3062,6 +3282,21 @@ impl ConvertState {
     // the line start when the item resolves, so the line stays mutable.
     if self.item_marker_line_held() {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
+    }
+    // After the holds above: a droppable opener or link after the run can leave it trailing.
+    if self.emphasis_moves_vertical_tabs() {
+      let blank = self
+        .held_emphasis_blank
+        .start(self.buffer.as_bytes(), stable_end, |b| {
+          b.is_ascii_whitespace()
+        });
+      if blank > 0 && self.buffer.as_bytes()[blank - 1] == 11 {
+        stable_end = self
+          .held_emphasis_whitespace
+          .start(self.buffer.as_bytes(), blank, |byte| {
+            byte.is_ascii_whitespace() || byte == 11
+          });
+      }
     }
     // A heading's exit escapes the trailing `#` run GFM would read as an ATX
     // closing sequence, so hold the run (and the spacing that decides whether it
@@ -3270,6 +3505,14 @@ impl ConvertState {
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
+    #[cfg(debug_assertions)]
+    {
+      let tail = &self.buffer.as_bytes()[drain_end.saturating_sub(64)..drain_end];
+      let excess = (self.drained_tail.len() + tail.len()).saturating_sub(64);
+      self.drained_tail.drain(..excess);
+      self.drained_tail.extend_from_slice(tail);
+    }
+    self.drained += drain_end;
     self.buffer.drain(..drain_end);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;
@@ -3280,6 +3523,9 @@ impl ConvertState {
     for marker in &mut self.open_markers {
       marker.output_start -= drain_end;
       marker.content_start -= drain_end;
+      if marker.vertical_tab_start != usize::MAX {
+        marker.vertical_tab_start = marker.vertical_tab_start.saturating_sub(drain_end);
+      }
     }
     for frame in &mut self.caption_frames {
       if let CaptionState::Tentative {

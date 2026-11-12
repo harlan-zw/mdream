@@ -101,3 +101,45 @@ fn text_pieces_preserve_extractions_and_filtered_main_content() {
     }
   }
 }
+
+#[test]
+fn retained_leading_blanks_reach_extraction_and_header_metadata() {
+  use mdream::splitter::{SplitterOptions, split_markdown};
+  let html = "<h2>Aa<span> <span>Bb</span></span></h2><p>body</p>";
+  let opts = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      extraction: Some(ExtractionConfig::new(&["h2"])),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let result = html_to_markdown_result(html, opts.clone());
+  assert_eq!(result.markdown, "## Aa Bb\n\nbody");
+  assert_eq!(result.extracted.unwrap()[0].text_content, "Aa Bb");
+  let chunks = split_markdown(&result.markdown, &SplitterOptions::default());
+  assert_eq!(
+    chunks[0].metadata.headers.as_ref().unwrap(),
+    &[("h2".into(), "Aa Bb".into())]
+  );
+  let chunkings: Vec<Vec<&str>> = [1, 2, 3, 11]
+    .iter()
+    .map(|&width| {
+      html
+        .as_bytes()
+        .chunks(width)
+        .map(|chunk| std::str::from_utf8(chunk).unwrap())
+        .collect()
+    })
+    .chain((0..=html.len()).map(|split| vec![&html[..split], &html[split..]]))
+    .collect();
+  for chunks in chunkings {
+    let mut stream = MarkdownStreamProcessor::new(opts.clone());
+    let mut markdown = String::new();
+    for chunk in chunks {
+      markdown.push_str(&stream.process_chunk(chunk));
+    }
+    markdown.push_str(&stream.finish());
+    assert_eq!(markdown, result.markdown);
+    assert_eq!(stream.take_extracted().unwrap()[0].text_content, "Aa Bb");
+  }
+}
