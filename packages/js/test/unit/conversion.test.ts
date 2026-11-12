@@ -218,6 +218,24 @@ describe('root conversion', () => {
     })).toBe('[Guide](https://example.com/guide)')
   })
 
+  it.each([1, 37, 4096])('does not repeat a base href past 2048 bytes in every link, chunk size %i', async (chunkSize) => {
+    // Each relative URL used to repeat the whole base: 64 KiB of input made 16 MiB.
+    const html = `<base href="https://cdn.example/${'a'.repeat(4096)}/">${'<a href=x>t</a>'.repeat(4096)}`
+    const expected = Array.from({ length: 4096 }).fill('[t](x)').join(' ')
+    expect(htmlToMarkdown(html)).toBe(expected)
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (let i = 0; i < html.length; i += chunkSize)
+          controller.enqueue(html.slice(i, i + chunkSize))
+        controller.close()
+      },
+    })
+    let markdown = ''
+    for await (const chunk of streamHtmlToMarkdown(stream))
+      markdown += chunk
+    expect(markdown).toBe(expected)
+  })
+
   it('rejects clean rules that did not come from clean()', () => {
     expect(() => htmlToMarkdown('<p>x</p>', { clean: true as any })).toThrow('@mdream/js/clean')
   })
