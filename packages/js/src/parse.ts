@@ -2110,9 +2110,10 @@ function processOpeningTag(
         }
       }
     }
-    else {
-      // Remaining recovery tags are all in CLOSES_P, so they close an open <p>
-      // first, then any heading/list-item implied end.
+    else if (CLOSES_P[tagId] === 1) {
+      // A <select> or an <optgroup> with no select open reaches this point and
+      // closes nothing. The rest close an open <p> first, then any
+      // heading/list-item implied end.
       if (parserTagDepth(state, TAG_P) > 0) {
         closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
       }
