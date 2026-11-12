@@ -1123,6 +1123,24 @@ export function isAsciiWhitespace(code: number): boolean {
   return code === 32 || code === 9 || code === 10 || code === 12 || code === 13
 }
 
+// How many characters of blanks and openers may follow an emphasis closer for
+// an opener to still take it back. More than a few empty elements never write
+// that much, and without a bound a run of quotes would hold a stream.
+const CLOSED_MARKER_REACH = 32
+
+/**
+ * Whether the fragment holds only blanks and the delimiters an inline element
+ * opens with. Output made of these alone may still be taken back.
+ */
+function isTransientOutput(fragment: string): boolean {
+  for (let index = 0; index < fragment.length; index++) {
+    const code = fragment.charCodeAt(index)
+    if (code !== 42 && code !== 126 && code !== 96 && code !== 34 && !isAsciiWhitespace(code))
+      return false
+  }
+  return true
+}
+
 export function trimAsciiWhitespaceEnd(value: string): string {
   let end = value.length
   while (end > 0 && isAsciiWhitespace(value.charCodeAt(end - 1)))
@@ -1700,6 +1718,44 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // Open inline-marker enter positions, packed as (buffer fragment index << 3 | kind).
   const openMarkers: number[] = []
   let openMarkerCount = 0
+  // The fragments of the emphasis closers that end the output, one right
+  // after the other. An opener of the same delimiter written next would touch
+  // its closer, which CommonMark reads as one run, so the pair is reopened.
+  const closedMarkers: number[] = []
+  let closedMarkerCount = 0
+  // The delimiter and the type of the pair reopened last.
+  let reopenedDelimiter = ''
+  let reopenedType = 0
+  // The opener fragment and the stack slot of a pair that was reopened and
+  // then written out again because a pair of its own delimiter opened right
+  // inside it.
+  let unmergedOpener = -1
+  let unmergedSlot = -1
+
+  /**
+   * The fragment of the first closer an opener may still take back, or
+   * `Infinity`. The closers stay as long as only blanks and openers that may
+   * close empty came after them.
+   */
+  function heldClosedMarker(): number {
+    if (closedMarkerCount === 0)
+      return Infinity
+    const buffer = state.buffer
+    let reach = CLOSED_MARKER_REACH
+    for (let index = closedMarkers[closedMarkerCount - 1]! + 1; index < buffer.length; index++) {
+      const fragment = buffer[index]!
+      reach -= fragment.length
+      if (reach < 0 || !isTransientOutput(fragment)) {
+        closedMarkerCount = 0
+        return Infinity
+      }
+    }
+    if (closedMarkers[closedMarkerCount - 1]! >= buffer.length) {
+      closedMarkerCount = 0
+      return Infinity
+    }
+    return closedMarkers[0]!
+  }
   // Per open marker: the opener follows the space a pending separator wrote.
   const openMarkerFollowsSpace: boolean[] = []
   // Per open marker: that separator was trimmed from a closed inline element.
@@ -2091,10 +2147,21 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const depthMap = state.depthMap
     const index = openMarkerCount - 1
     let fragment = openMarkers[index]! >> 3
+    const reopened = (openMarkers[index]! & MARKER_TYPE_MASK) === MARKER_TYPE_MASK
     // Code-like spans keep their content as written.
-    if (fragment !== buffer.length - 1 || (openMarkers[index]! & MARKER_TYPE_MASK) > 4
+    if ((reopened ? fragment !== buffer.length : fragment !== buffer.length - 1 || (openMarkers[index]! & MARKER_TYPE_MASK) > 4)
       || depthMap[TAG_CODE] || depthMap[TAG_PRE] || depthMap[TAG_KBD] || depthMap[TAG_SAMP] || depthMap[TAG_VAR]) {
       return false
+    }
+    // A reopened pair wrote no opener, so the space goes where it begins.
+    if (reopened) {
+      const before = lastOutputChar(buffer)
+      if (before !== -1 && before !== 32 && before !== 10 && before !== 9) {
+        buffer.push(' ')
+        openMarkers[index] = buffer.length << 3 | MARKER_TYPE_MASK
+        openMarkerFollowsSpace[index] = true
+      }
+      return true
     }
     // A quote that is this run's content writes its own prefix at that
     // position; a space in front of it would sit inside the opener.
@@ -2149,7 +2216,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     const end = state.buffer.length - 1
     const link = openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment
-    if (!(openMarkerCount && openMarkers[openMarkerCount - 1]! >> 3 === end) && !(link >= 0 && link === end)
+    // A reopened pair wrote no opener that could end the output.
+    const opener = openMarkerCount ? openMarkers[openMarkerCount - 1]! : MARKER_TYPE_MASK
+    if (!((opener & MARKER_TYPE_MASK) !== MARKER_TYPE_MASK && opener >> 3 === end) && !(link >= 0 && link === end)
       && !(literalOpeners.length && followsLiteralOpener(end + 1))) {
       state.pendingInlineWhitespace = true
       state.pendingLeadingBlank = true
@@ -2434,16 +2503,17 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         if (openMarkerCount && hasNonWhitespace(textNode.value)) {
           // Vertical tabs alone leave an emphasis pair empty once its closer
           // moves them out, so the exit still has to see the open marker.
+          // Types 5 and 6 are no emphasis; 7 marks a reopened emphasis pair.
           const first = textNode.value.charCodeAt(0)
           if ((first !== 11 && !isAsciiWhitespace(first))
-            || (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) > 4
+            || ((openMarkers[openMarkerCount - 1]! + 1) & MARKER_TYPE_MASK) > 5
             || !isVerticalTabRun(textNode.value)) {
             openMarkerCount = 0
           }
           commitCaptionFrames()
         }
         else if (openMarkerCount && textNode.containsWhitespace !== true && textNode.value
-          && (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) > 4) {
+          && ((openMarkers[openMarkerCount - 1]! + 1) & MARKER_TYPE_MASK) > 5) {
           // Only a block closing inside the span settles the blank as content.
           if (silentMarkerCount >= openMarkerCount)
             openMarkerCount = 0
@@ -2493,6 +2563,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    */
   function processEvent(event: NodeEvent): void {
     const { type: eventType, node } = event
+    // Output that is no blank or opener, even if taken back later, came
+    // between a closer and the next opener.
+    if (closedMarkerCount)
+      heldClosedMarker()
     if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
       && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
       pendingRawHtmlBoundary = false
@@ -3077,43 +3151,87 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && !handler?.literalExit) {
         const slot = --openMarkerCount
-        const marker = openMarkers[slot]!
-        // A word separator in front of the opener, moved there or written for
-        // a pending one, goes with it and is owed to the content after the pair.
-        const hoisted = markerType <= 4 && buff[marker >> 3]?.charCodeAt(0) === 32
-        // Only a heading separator adds a newline to an opener. Whitespace
-        // moved before the opener must not hide the separator it carries.
-        const restoresHeadingBreak = buff[marker >> 3]?.includes('\n')
-        let idx = dropEmptyMarker(buff, marker, markerType, state.outputPositions)
-        if (idx >= 0) {
-          noteBufferRewrite(state)
-          if (hoisted) {
-            state.pendingInlineWhitespace = true
-            state.pendingLeadingBlank = true
-            state.pendingPairSeparator = false
-            state.pendingDecodedBlank = false
+        const packed = openMarkers[slot]!
+        if ((packed & MARKER_TYPE_MASK) === MARKER_TYPE_MASK) {
+          // A reopened pair left empty gets back the closer it took, where it
+          // stood, and what an empty pair would drop goes.
+          const start = packed >> 3
+          let index = start
+          while (index < buff.length && !hasNonWhitespace(buff[index]!))
+            index++
+          if (index === buff.length && (markerType === 1 || markerType === 2 || markerType === 4)) {
+            // A separator moved in front of the pair is owed to what follows it.
+            const owesSeparator = openMarkerFollowsSpace[slot] && buff[start - 1] === ' '
+            const at = owesSeparator ? start - 1 : start
+            state.outputPositions?.replace(at, buff.length, [handlerOutput!])
+            buff.length = at
+            buff.push(handlerOutput!)
+            noteBufferRewrite(state)
+            state.lastContentCache = handlerOutput
+            if (closedMarkerCount && closedMarkers[closedMarkerCount - 1] !== at - 1)
+              closedMarkerCount = 0
+            closedMarkers[closedMarkerCount++] = at
+            if (owesSeparator) {
+              state.pendingInlineWhitespace = true
+              state.pendingLeadingBlank = true
+              state.pendingPairSeparator = openMarkerSeparatorTrimmed[slot]
+              state.pendingDecodedBlank = false
+            }
+            return
           }
-          if (openMarkerFollowsSpace[slot] && buff[idx - 1] === ' ') {
-            idx--
-            state.outputPositions?.replace(idx, buff.length, [])
-            buff.length = idx
-            state.pendingInlineWhitespace = true
-            state.pendingLeadingBlank = true
-            state.pendingPairSeparator = openMarkerSeparatorTrimmed[slot]
-            state.pendingDecodedBlank = false
-          }
-          if (restoresHeadingBreak)
-            state.headingBreakPending = true
-          resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
-          state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
-          state.droppedPairAt = buff.length
-          restoreQuoteParentBoundary()
-          return
         }
-        if (markerType <= 4 && dropVerticalTabMarker(buff, marker, markerType, handlerOutput!, state.outputPositions)) {
-          noteBufferRewrite(state)
-          state.lastContentCache = buff[buff.length - 1]
-          return
+        else {
+          // A word separator in front of the opener, moved there or written for
+          // a pending one, goes with it and is owed to the content after the pair.
+          const hoisted = markerType <= 4 && buff[packed >> 3]?.charCodeAt(0) === 32
+          // Only a heading separator adds a newline to an opener. Whitespace
+          // moved before the opener must not hide the separator it carries.
+          const restoresHeadingBreak = buff[packed >> 3]?.includes('\n')
+          let idx = dropEmptyMarker(buff, packed, markerType, state.outputPositions)
+          if (idx >= 0) {
+            noteBufferRewrite(state)
+            if (hoisted) {
+              state.pendingInlineWhitespace = true
+              state.pendingLeadingBlank = true
+              state.pendingPairSeparator = false
+              state.pendingDecodedBlank = false
+            }
+            if (openMarkerFollowsSpace[slot] && buff[idx - 1] === ' ') {
+              idx--
+              state.outputPositions?.replace(idx, buff.length, [])
+              buff.length = idx
+              state.pendingInlineWhitespace = true
+              state.pendingLeadingBlank = true
+              state.pendingPairSeparator = openMarkerSeparatorTrimmed[slot]
+              state.pendingDecodedBlank = false
+            }
+            if (restoresHeadingBreak)
+              state.headingBreakPending = true
+            resetRetractedCaptionFrames(captionFrames, captionFrameCount, idx)
+            state.lastContentCache = idx > 0 ? buff[idx - 1] : undefined
+            state.droppedPairAt = buff.length
+            restoreQuoteParentBoundary()
+            // The empty pair was all that kept the pair around it from
+            // continuing the one before, so that pair is reopened after all.
+            if (unmergedSlot === openMarkerCount - 1 && unmergedOpener === buff.length - 1
+              && openMarkers[unmergedSlot]! >> 3 === unmergedOpener
+              && closedMarkerCount && closedMarkers[closedMarkerCount - 1] === unmergedOpener - 1
+              && buff[unmergedOpener] === buff[unmergedOpener - 1]) {
+              closedMarkerCount--
+              state.outputPositions?.replace(unmergedOpener - 1, buff.length, [])
+              buff.length = unmergedOpener - 1
+              noteBufferRewrite(state)
+              state.lastContentCache = buff[buff.length - 1]
+              openMarkers[unmergedSlot] = buff.length << 3 | MARKER_TYPE_MASK
+              unmergedSlot = -1
+            }
+            return
+          }
+          if (markerType <= 4 && dropVerticalTabMarker(buff, packed, markerType, handlerOutput!, state.outputPositions)) {
+            noteBufferRewrite(state)
+            state.lastContentCache = buff[buff.length - 1]
+            return
+          }
         }
         openMarkerCount = 0
       }
@@ -3217,15 +3335,21 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         else if (firstOutput) {
           // An empty opener run ending the output takes the separator in front.
           if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)
-            && !(literalOpeners.length && followsLiteralOpener(state.buffer.length))
-            && !(openMarkerCount && hoistOpenerSpace())) {
-            state.buffer.push(' ')
-            state.lastContentCache = ' '
-            lastChar = ' '
-            pendingSpaceFragment = state.buffer.length - 1
-            // A decoded blank does not make it one: given back as trimmed, it
-            // would keep a space written after the pair from being output.
-            pendingSpaceTrimmed = !state.pendingLeadingBlank || pairOwed
+            && !(literalOpeners.length && followsLiteralOpener(state.buffer.length))) {
+            if (openMarkerCount && hoistOpenerSpace()) {
+              // A reopened pair has no opener between the space and this output.
+              if ((openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) === MARKER_TYPE_MASK)
+                lastChar = ' '
+            }
+            else {
+              state.buffer.push(' ')
+              state.lastContentCache = ' '
+              lastChar = ' '
+              pendingSpaceFragment = state.buffer.length - 1
+              // A decoded blank does not make it one: given back as trimmed, it
+              // would keep a space written after the pair from being output.
+              pendingSpaceTrimmed = !state.pendingLeadingBlank || pairOwed
+            }
           }
           state.pendingInlineWhitespace = false
         }
@@ -3538,6 +3662,28 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
+    // The default closer of an overridden enter matches no opener.
+    if (eventType === NodeEventExit && handlerOutput !== undefined && !handler?.literalExit && !handler?.literalEnter) {
+      const closedType = INLINE_MARKER_TYPE[tagId]
+      if ((closedType === 1 || closedType === 2 || closedType === 4) && buff[buff.length - 1] === handlerOutput) {
+        // A trim leaves emptied fragments between two closers.
+        let previous = buff.length - 2
+        while (previous >= 0 && buff[previous] === '')
+          previous--
+        if (closedMarkerCount && closedMarkers[closedMarkerCount - 1] !== previous)
+          closedMarkerCount = 0
+        // A closer behind a blank or a hard break closes nothing in CommonMark,
+        // and one behind a code span keeps that span from touching the next.
+        const before = lastOutputChar(buff, buff.length - 1)
+        // A pair that closes behind a pair of its own delimiter ends in a
+        // longer run, which CommonMark may read apart.
+        if (closedMarkerCount && buff[closedMarkers[closedMarkerCount - 1]!] === handlerOutput)
+          closedMarkerCount = 0
+        else if (before !== -1 && before !== 96 && !isAsciiWhitespace(before))
+          closedMarkers[closedMarkerCount++] = buff.length - 1
+      }
+    }
+
     // Track open inline markers for empty pair detection. Inline code in a
     // list may own a leading separator (" `"), so retain the whole output
     // fragment as the drop boundary.
@@ -3547,19 +3693,88 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         && (tagId !== TAG_CODE
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
-        const previous = openMarkers[openMarkerCount - 1]
-        openMarkerRunLength[openMarkerCount] = openMarkerCount > 0 && markerType <= 4
-          && (previous! & MARKER_TYPE_MASK) <= 4 && previous! >> 3 === buff.length - 2
-          ? openMarkerRunLength[openMarkerCount - 1]! + 1
-          : 1
-        const followsSpace = pendingSpaceFragment === buff.length - 2
-        openMarkerFollowsSpace[openMarkerCount] = followsSpace
-        openMarkerSeparatorTrimmed[openMarkerCount] = followsSpace && pendingSpaceTrimmed
         if (silentMarkerCount > openMarkerCount)
           silentMarkerCount = openMarkerCount
         if (blankMarkerCount > openMarkerCount)
           blankMarkerCount = 0
-        openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
+        // A trim leaves emptied fragments between the closer and the opener.
+        let closer = buff.length - 2
+        while (closer >= 0 && buff[closer] === '')
+          closer--
+        // An overridden exit is no closer the next opener could take back. A
+        // quote that began after the closer writes its prefix between the two
+        // delimiters, and so does a caption still to be opened.
+        const merges = (markerType === 1 || markerType === 2 || markerType === 4)
+          && (handlerOutput === '*' || handlerOutput === '**') && !handler?.literalExit
+          && !(state.blockquotes.length && state.blockquotes[state.blockquotes.length - 1]!.fragment > closer)
+          && !captionNeedsPreparation()
+        const reopened = openMarkerCount ? openMarkers[openMarkerCount - 1]! : 0
+        // A separator moved in front of the reopened pair parts the two runs.
+        if (merges && (reopened & MARKER_TYPE_MASK) === MARKER_TYPE_MASK
+          && closer < reopened >> 3 && reopenedDelimiter === handlerOutput
+          && !openMarkerFollowsSpace[openMarkerCount - 1]) {
+          // A pair that opens with a pair of its own delimiter writes a longer
+          // run, which CommonMark may read apart, so it is written as before.
+          // The closer stays on record in case the inner pair closes empty.
+          const opener = buff.length - 1
+          state.outputPositions?.replace(opener, opener, [handlerOutput, handlerOutput])
+          buff.splice(opener, 0, handlerOutput, handlerOutput)
+          noteBufferRewrite(state)
+          if (closedMarkerCount && closedMarkers[closedMarkerCount - 1] !== closer)
+            closedMarkerCount = 0
+          closedMarkers[closedMarkerCount++] = opener
+          unmergedOpener = opener + 1
+          unmergedSlot = openMarkerCount - 1
+          openMarkers[unmergedSlot] = unmergedOpener << 3 | reopenedType
+          openMarkerRunLength[unmergedSlot] = 1
+          openMarkerFollowsSpace[unmergedSlot] = false
+          openMarkerSeparatorTrimmed[unmergedSlot] = false
+          openMarkerRunLength[openMarkerCount] = 2
+          openMarkerFollowsSpace[openMarkerCount] = false
+          openMarkerSeparatorTrimmed[openMarkerCount] = false
+          openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
+        }
+        else if (merges && closedMarkerCount && closedMarkers[closedMarkerCount - 1] === closer
+          && buff[closer] === handlerOutput
+          && (markerType === 1
+            ? state.depthMap[TAG_STRONG]! + state.depthMap[TAG_B]! + state.depthMap[TAG_DFN]!
+            // A caption is written in `*` as well.
+            : state.depthMap[TAG_EM]! + state.depthMap[TAG_I]! + state.depthMap[TAG_CITE]!
+              + state.depthMap[TAG_FIGCAPTION]!) < 2) {
+          // Neither delimiter is written. The type no pair has marks the
+          // reopened one, which already has content and cannot be dropped.
+          reopenedDelimiter = handlerOutput
+          reopenedType = markerType
+          closedMarkerCount--
+          state.outputPositions?.replace(closer, buff.length, [])
+          buff.length = closer
+          noteBufferRewrite(state)
+          state.lastContentCache = buff[buff.length - 1]
+          // A pair reopened around this one begins where its closer stood.
+          for (let index = openMarkerCount - 1; index >= 0 && openMarkers[index]! >> 3 > buff.length; index--)
+            openMarkers[index] = buff.length << 3 | MARKER_TYPE_MASK
+          if (unmergedSlot >= openMarkerCount)
+            unmergedSlot = -1
+          openMarkerRunLength[openMarkerCount] = 1
+          openMarkerFollowsSpace[openMarkerCount] = false
+          openMarkerSeparatorTrimmed[openMarkerCount] = false
+          openMarkers[openMarkerCount++] = buff.length << 3 | MARKER_TYPE_MASK
+        }
+        else {
+          // A marker pushed into the slot replaces the pair it described.
+          if (unmergedSlot >= openMarkerCount)
+            unmergedSlot = -1
+          // A reopened pair wrote no opener, so it is no part of a run.
+          const previous = openMarkers[openMarkerCount - 1]
+          openMarkerRunLength[openMarkerCount] = openMarkerCount > 0 && markerType <= 4
+            && (previous! & MARKER_TYPE_MASK) <= 4 && previous! >> 3 === buff.length - 2
+            ? openMarkerRunLength[openMarkerCount - 1]! + 1
+            : 1
+          const followsSpace = pendingSpaceFragment === buff.length - 2
+          openMarkerFollowsSpace[openMarkerCount] = followsSpace
+          openMarkerSeparatorTrimmed[openMarkerCount] = followsSpace && pendingSpaceTrimmed
+          openMarkers[openMarkerCount++] = (buff.length - 1) << 3 | markerType
+        }
       }
       else if (openMarkerCount
         && !(tagId === TAG_A && cleanEmptyLinkText)
@@ -3635,6 +3850,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       ? Infinity
       : Math.min(
           openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
+          heldClosedMarker(),
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
           state.emptyItemFragment ?? Infinity,
           state.codeFence?.fragment ?? Infinity,

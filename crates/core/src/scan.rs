@@ -15,6 +15,13 @@ pub(crate) const fn is_whitespace(c: u8) -> bool {
   (MASK >> c) & 1 == 1
 }
 
+/// Whether the byte is a blank or a delimiter an inline element opens with.
+/// Output made of these alone may still be taken back.
+#[inline]
+pub(crate) const fn is_transient_output(c: u8) -> bool {
+  is_whitespace(c) || matches!(c, b'*' | b'~' | b'`' | b'"')
+}
+
 const fn whitespace_and(extra: &[u8]) -> [bool; 256] {
   let mut table = [false; 256];
   let mut byte = 0u8;

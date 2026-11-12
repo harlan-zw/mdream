@@ -435,7 +435,8 @@ impl ConvertState {
     let Some(innermost) = self.open_markers.last() else {
       return false;
     };
-    // Code-like spans keep their content as written.
+    // Code-like spans keep their content as written. A reopened pair wrote no
+    // opener, so it is a run of its own and the space goes where it begins.
     if innermost.kind > 4
       || innermost.content_start != self.buffer.len()
       || self.depth_map[TAG_CODE as usize] != 0
@@ -482,7 +483,18 @@ impl ConvertState {
       // moves nothing but the run's own markers. An enclosing `<q>` that starts
       // with the run keeps its content start, so the space is its content and
       // that pair still reads as empty once the run drops with it.
-      if self.replace_code_span_content(start..start, " ") {
+      // A closer that ends where the space goes in stays on record: the run
+      // may still drop with the space and leave it ending the output again.
+      let closers = self
+        .closed_markers
+        .last()
+        .is_some_and(|closer| closer[1] == start)
+        .then(|| std::mem::take(&mut self.closed_markers));
+      let moved = self.replace_code_span_content(start..start, " ");
+      if let Some(closers) = closers {
+        self.closed_markers = closers;
+      }
+      if moved {
         for marker in &mut self.open_markers[outermost..] {
           marker.output_start += 1;
           marker.content_start += 1;
@@ -522,7 +534,7 @@ impl ConvertState {
     let follows_opener = self
       .open_markers
       .last()
-      .is_some_and(|marker| marker.content_start == end)
+      .is_some_and(|marker| marker.reopened == 0 && marker.content_start == end)
       || (self.link.open && self.link.bracket_emitted && self.link.bracket_pos + 1 == end)
       || self.follows_literal_opener(end);
     if !follows_opener {
@@ -1276,6 +1288,7 @@ impl ConvertState {
     output: Option<&str>,
     output_start: usize,
     keeps_markers: bool,
+    reopens: bool,
   ) {
     let separator_end = std::mem::replace(&mut self.pending_space_end, usize::MAX);
     if let Some(id) = marker_tag
@@ -1285,15 +1298,114 @@ impl ConvertState {
       && self.buffer.len() > output_start
       && self.buffer.ends_with(emitted)
     {
-      let marker_start = self.buffer.len() - emitted.len();
+      let mut marker_start = self.buffer.len() - emitted.len();
+      // A quote that began after the closer writes its prefix between the two
+      // delimiters, so they do not touch.
+      let merges = reopens
+        && matches!(inline_marker_type, 1 | 2 | 4)
+        && matches!(emitted, "*" | "**")
+        && !self
+          .blockquotes
+          .last()
+          .is_some_and(|frame| frame.content_start >= marker_start);
+      // A separator moved in front of the reopened pair parts the two runs.
+      if merges
+        && let Some(reopened) = self.open_markers.last()
+        && reopened.reopened as usize == emitted.len()
+        && reopened.content_start == marker_start
+        && !reopened.follows_separator
+      {
+        // A pair that opens with a pair of its own delimiter writes a longer
+        // run, which CommonMark may read apart, so it is written as before.
+        // The three delimiters count against a code span's budget as they
+        // did when first written.
+        let unmerged = reopened.reopened;
+        let cache = self.last_content_cache_len;
+        self.truncate_buffer(marker_start);
+        let closer = self.push_code_span_content(emitted, true);
+        let opener_start = self.buffer.len();
+        let opener = self.push_code_span_content(emitted, true);
+        let inner = self.push_code_span_content(emitted, true);
+        self.last_content_cache_len = if inner == 0 { 0 } else { cache };
+        if opener == 0 {
+          self.open_markers.pop();
+        } else if let Some(reopened) = self.open_markers.last_mut() {
+          reopened.reopened = 0;
+          reopened.output_start = opener_start;
+          reopened.content_start = opener_start + opener;
+          // The closer stays on record in case the inner pair closes empty.
+          if closer != 0 {
+            reopened.unmerged = unmerged;
+            if self
+              .closed_markers
+              .last()
+              .is_some_and(|closer| closer[1] != marker_start)
+            {
+              self.closed_markers.clear();
+            }
+            self
+              .closed_markers
+              .push([marker_start, marker_start + closer]);
+          }
+        }
+        if inner == 0 {
+          return;
+        }
+        marker_start = self.buffer.len() - emitted.len();
+      } else if merges
+        && let Some(&[start, end]) = self.closed_markers.last()
+        && end == marker_start
+        && start >= self.last_yielded_length
+        && self.buffer.as_bytes()[start..end] == *emitted.as_bytes()
+        && !self.inside_same_delimiter(inline_marker_type)
+      {
+        self.closed_markers.pop();
+        self.truncate_buffer(start);
+        self.last_content_cache_len = 0;
+        // A pair reopened around this one begins where its closer stood.
+        for marker in self.open_markers.iter_mut().rev() {
+          if marker.output_start <= start {
+            break;
+          }
+          marker.output_start = start;
+          marker.content_start = start;
+        }
+        let blank_outside = self
+          .open_markers
+          .last()
+          .is_some_and(|outer| outer.decoded_blank || outer.blank_outside);
+        if self.silent_markers > self.open_markers.len() {
+          self.silent_markers = self.open_markers.len();
+        }
+        self.open_markers.push(OpenMarker {
+          output_start: start,
+          content_start: start,
+          kind: inline_marker_type,
+          starts_at_hard_break: false,
+          follows_separator: false,
+          separator_trimmed: false,
+          run_len: 1,
+          restores_heading_break: false,
+          vertical_tab_start: usize::MAX,
+          reopened: emitted.len() as u8,
+          unmerged: 0,
+          decoded_blank: false,
+          blank_outside,
+        });
+        return;
+      }
       let follows_separator = separator_end == self.drained + marker_start;
       #[cfg(debug_assertions)]
       if follows_separator {
         self.check_written_before(separator_end, b" ");
       }
       let run_len = match self.open_markers.last() {
+        // A reopened pair wrote no opener, so it is no part of a run.
         Some(outer)
-          if inline_marker_type <= 4 && outer.kind <= 4 && outer.content_start == marker_start =>
+          if inline_marker_type <= 4
+            && outer.kind <= 4
+            && outer.reopened == 0
+            && outer.content_start == marker_start =>
         {
           outer.run_len + 1
         }
@@ -1318,6 +1430,8 @@ impl ConvertState {
         // No marker opens with a newline; only a prefixed heading break does.
         restores_heading_break: emitted.starts_with('\n'),
         vertical_tab_start: usize::MAX,
+        reopened: 0,
+        unmerged: 0,
         decoded_blank: false,
         blank_outside,
       });
@@ -1326,6 +1440,79 @@ impl ConvertState {
       && output.is_some_and(|o| has_visible(o.as_bytes()))
     {
       self.open_markers.clear();
+    }
+  }
+
+  /// Whether the emphasis element being entered sits in one of its own delimiter.
+  #[inline]
+  fn inside_same_delimiter(&self, inline_marker_type: u8) -> bool {
+    let depth = |tag: u8| u32::from(self.depth_map[tag as usize]);
+    let open = if inline_marker_type == 1 {
+      depth(TAG_STRONG) + depth(TAG_B) + depth(TAG_DFN)
+    } else {
+      // A caption is written in `*` as well.
+      depth(TAG_EM) + depth(TAG_I) + depth(TAG_CITE) + depth(TAG_FIGCAPTION)
+    };
+    open > 1
+  }
+
+  /// The empty pair just dropped was all that kept the pair around it from
+  /// continuing the one before, so that pair is reopened after all.
+  #[inline]
+  fn reopen_unmerged_marker(&mut self) {
+    if let Some(marker) = self.open_markers.last_mut()
+      && marker.unmerged != 0
+      && marker.content_start == self.buffer.len()
+      && let Some(&[start, end]) = self.closed_markers.last()
+      && end == marker.output_start
+      && start >= self.last_yielded_length
+    {
+      marker.reopened = marker.unmerged;
+      marker.unmerged = 0;
+      marker.output_start = start;
+      marker.content_start = start;
+      self.closed_markers.pop();
+      self.truncate_buffer(start);
+      self.last_content_cache_len = 0;
+    }
+  }
+
+  /// Remember the emphasis closer an exit wrote at the end of the output.
+  #[inline(always)]
+  fn note_closed_marker(&mut self, marker_tag: Option<u8>, emitted: Option<&str>) {
+    if let Some(id) = marker_tag
+      && matches!(Self::inline_marker_type(id), Some(1 | 2 | 4))
+      && let Some(emitted) = emitted
+      && !emitted.is_empty()
+      && self.buffer.ends_with(emitted)
+    {
+      let end = self.buffer.len();
+      let start = end - emitted.len();
+      if self
+        .closed_markers
+        .last()
+        .is_some_and(|closer| closer[1] != start)
+      {
+        self.closed_markers.clear();
+      }
+      // A pair that closes behind a pair of its own delimiter ends in a
+      // longer run, which CommonMark may read apart.
+      if self
+        .closed_markers
+        .last()
+        .is_some_and(|closer| self.buffer.as_bytes()[closer[0]..closer[1]] == *emitted.as_bytes())
+      {
+        self.closed_markers.clear();
+        return;
+      }
+      // A closer behind a blank or a hard break closes nothing in CommonMark,
+      // and one behind a code span keeps that span from touching the next.
+      if start != 0
+        && !matches!(self.buffer.as_bytes()[start - 1], b'`')
+        && !is_whitespace(self.buffer.as_bytes()[start - 1])
+      {
+        self.closed_markers.push([start, end]);
+      }
     }
   }
 
@@ -1639,7 +1826,7 @@ impl ConvertState {
       tag_id.and_then(Self::inline_marker_type).is_some()
     });
 
-    self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
+    self.record_enter_marker(tag_id, output.as_deref(), output_start, false, true);
 
     // An element that writes nothing, like a dropped `<svg>`, is no boundary.
     if !is_inline && (configured_new_lines > 0 || has_own_output) && !self.open_markers.is_empty() {
@@ -1667,7 +1854,38 @@ impl ConvertState {
     let Some(open_marker) = self.open_markers.pop() else {
       return false;
     };
-    if open_marker.kind == inline_marker_type && open_marker.content_start <= self.buffer.len() {
+    if open_marker.reopened != 0 {
+      // A reopened pair left empty gets back the closer it took, where it
+      // stood, and what an empty pair would drop goes.
+      if open_marker.kind == inline_marker_type
+        && open_marker.content_start <= self.buffer.len()
+        && let Some(emitted) = emitted
+        && self.buffer.as_bytes()[open_marker.content_start..]
+          .iter()
+          .all(|&b| is_whitespace(b))
+      {
+        // A separator moved in front of the pair is owed to what follows it.
+        let mut end = open_marker.content_start;
+        let owes_separator =
+          open_marker.follows_separator && end > 0 && self.buffer.as_bytes()[end - 1] == b' ';
+        if owes_separator {
+          end -= 1;
+        }
+        self.truncate_buffer(end);
+        self.last_content_cache_len = self.push_code_span_content(emitted, true);
+        self.last_node_is_inline = is_inline;
+        self.note_closed_marker(marker_tag, Some(emitted));
+        if owes_separator {
+          self.pending_inline_whitespace = true;
+          self.pending_leading_blank = true;
+          self.pending_pair_separator = open_marker.separator_trimmed;
+          self.pending_decoded_blank = false;
+        }
+        return true;
+      }
+    } else if open_marker.kind == inline_marker_type
+      && open_marker.content_start <= self.buffer.len()
+    {
       let content = &self.buffer.as_bytes()[open_marker.content_start..];
       if content.iter().all(|&b| is_whitespace(b)) {
         // `output_start` keeps the opener's own separator, not the spacing `write_output` adds.
@@ -1690,6 +1908,7 @@ impl ConvertState {
         self.reset_empty_tentative_caption_frames();
         self.restore_quote_parent_boundary();
         self.last_node_is_inline = is_inline;
+        self.reopen_unmerged_marker();
         return true;
       }
       if inline_marker_type <= 4 && content.iter().all(|&b| is_whitespace(b) || b == 11) {
@@ -1798,6 +2017,7 @@ impl ConvertState {
         false,
       );
     }
+    self.note_closed_marker(tag_id, output.as_deref());
     self.settle_empty_text_pending(output_start, || false);
   }
 
@@ -2419,7 +2639,14 @@ impl ConvertState {
     let code_span_marker = self.code_span_marker_ok();
     let marker_tag = tag_id.filter(|&id| !enter_is_literal && (id != TAG_CODE || code_span_marker));
     let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
-    self.record_enter_marker(marker_tag, output.as_deref(), output_start, keeps_markers);
+    // An overridden exit is no closer the next opener could take back.
+    self.record_enter_marker(
+      marker_tag,
+      output.as_deref(),
+      output_start,
+      keeps_markers,
+      !exit_is_overridden,
+    );
 
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.
@@ -2757,6 +2984,7 @@ impl ConvertState {
     };
 
     let is_inline = node.is_inline;
+    let enter_is_overridden = override_config.is_some_and(|ov| ov.enter.is_some());
     let raw_html_anchor = tag_id == Some(TAG_A)
       && self.in_raw_html_block()
       && override_config.is_none_or(|ov| ov.enter.is_none());
@@ -3145,6 +3373,8 @@ impl ConvertState {
     } else {
       self.write_output(false, is_inline, configured_new_lines, effective, false);
     }
+    // The default closer of an overridden enter matches no opener.
+    self.note_closed_marker(marker_tag.filter(|_| !enter_is_overridden), effective);
     if consumes_caption_boundary {
       if !is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR)) {
         self.caption_boundary = CaptionBoundary::None;
@@ -4562,6 +4792,7 @@ impl ConvertState {
     let mut walk = self.open_markers.len() - 1;
     while walk > 0
       && self.open_markers[walk - 1].kind <= 4
+      && self.open_markers[walk - 1].reopened == 0
       && self.open_markers[walk - 1].content_start == self.open_markers[walk].output_start
     {
       walk -= 1;
@@ -4595,7 +4826,8 @@ impl ConvertState {
     assert!(
       self.open_markers[..outermost]
         .iter()
-        .all(|marker| marker.output_start < start && marker.content_start <= start)
+        .all(|marker| marker.content_start <= start
+          && (marker.output_start < start || marker.reopened != 0))
     );
     assert!(
       self
@@ -4925,7 +5157,20 @@ impl ConvertState {
 
   #[inline]
   pub(super) fn truncate_buffer(&mut self, len: usize) {
-    self.note_buffer_rewrite(len);
+    // Blanks and openers that closed empty leave the closers before them as
+    // they were; any other output taken back came between them and an opener.
+    if self.closed_markers.last().is_some_and(|closer| {
+      closer[1] <= len && self.buffer.len() - closer[1] <= CLOSED_MARKER_REACH
+    }) && self.buffer.as_bytes()[len..]
+      .iter()
+      .all(|&byte| is_transient_output(byte))
+    {
+      let closers = std::mem::take(&mut self.closed_markers);
+      self.note_buffer_rewrite(len);
+      self.closed_markers = closers;
+    } else {
+      self.note_buffer_rewrite(len);
+    }
     self.buffer.truncate(len);
     // Output that grows back to a trimmed position is not what ended there.
     let end = self.drained + len;
@@ -5279,10 +5524,9 @@ impl ConvertState {
       // Keep a leading break before tentative emphasis, where its whitespace
       // cannot invalidate the delimiter's CommonMark left-flanking rule.
       // Code spans keep their order so separate breaks cannot form a blank line.
-      let opener = self
-        .open_markers
-        .last()
-        .filter(|marker| marker.kind <= 4 && marker.content_start == self.buffer.len());
+      let opener = self.open_markers.last().filter(|marker| {
+        marker.kind <= 4 && marker.reopened == 0 && marker.content_start == self.buffer.len()
+      });
       let anchor = opener
         .filter(|_| before_text && self.code_spans.is_empty())
         .and_then(|_| {

@@ -237,6 +237,20 @@ describe('streaming drain parity', () => {
     expect(await streamConvert(html, 1)).toBe(expected)
   })
 
+  it('does not hold the text after a closed emphasis pair', async () => {
+    // Quotes are among the characters that keep an emphasis closer within
+    // reach of the next opener, so a run of them must stop holding it.
+    const html = `<p><em>a</em>${'"<!---->'.repeat(20_000)}</p>`
+    let markdown = ''
+    let yields = 0
+    for await (const chunk of streamHtmlToMarkdown(chunkedStream(html, 1024))) {
+      markdown += chunk
+      yields++
+    }
+    expect(markdown).toBe(htmlToMarkdown(html))
+    expect(yields).toBeGreaterThan(50)
+  })
+
   it('bounds retained output while streaming a raw HTML anchor body', () => {
     const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
     const parseState: ParseState = {

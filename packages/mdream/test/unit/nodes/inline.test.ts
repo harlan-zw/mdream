@@ -712,3 +712,87 @@ describe.each(engines)('list markers alone on their line after a decoded bare CR
     expect(htmlToMarkdown('<small>a&#13;<ul><li></li></ul></small>', { engine, plugins })).toBe('a\r<li>')
   })
 })
+
+describe.each(engines)('touching emphasis pairs $name', (engineConfig) => {
+  it.each([
+    ['<strong>Aa</strong><strong>Bb</strong>', '**AaBb**'],
+    ['<b>Aa</b><strong>Bb</strong>', '**AaBb**'],
+    ['<em>Aa</em><i>Bb</i>', '*AaBb*'],
+    ['<em>Aa</em><cite>Bb</cite>', '*AaBb*'],
+    ['<strong>Aa</strong><strong>Bb</strong><strong>Cc</strong>', '**AaBbCc**'],
+    ['<strong>Aa</strong><span></span><strong>Bb</strong>', '**AaBb**'],
+    ['<strong>Aa</strong><strong> Bb</strong>', '**Aa Bb**'],
+    ['<strong><em>Aa</em></strong><strong><em>Bb</em></strong>', '***AaBb***'],
+    ['<strong><em>Aa</em></strong><strong>Bb</strong>', '***Aa*Bb**'],
+    ['<strong>Aa</strong><strong><em>Bb</em></strong>', '**Aa*Bb***'],
+    // A reopened pair that stays empty is closed again where it was.
+    ['<strong>Aa</strong><strong></strong>', '**Aa**'],
+    ['<strong>Aa</strong><strong> </strong>x', '**Aa** x'],
+    ['<b>Aa</b><b>&#9;</b>x', '**Aa**x'],
+    ['<a href="/x"><em>Cc</em><cite>&#32;</cite></a>', '[*Cc*](/x)'],
+    ['<strong>Aa</strong><strong>&#32;</strong><strong>Bb</strong>', '**Aa** **Bb**'],
+    ['<ul><li><strong>Aa</strong><strong>Bb</strong></li></ul>', '- **AaBb**'],
+    ['<a href="/x"><strong>Aa</strong><strong>Bb</strong></a>', '[**AaBb**](/x)'],
+    // An element between the two that writes nothing to keep leaves them
+    // touching all the same.
+    ['<strong>Aa</strong><i></i><strong>Bb</strong>', '**AaBb**'],
+    ['<b>Aa</b><i> </i><b>Bb</b><b>Cc</b>', '**Aa** **BbCc**'],
+    ['<strong>Aa</strong><q></q><strong>Bb</strong>', '**AaBb**'],
+    // Visible output between the two, another delimiter, or a closer that
+    // closes nothing keeps both pairs.
+    ['<strong>Aa</strong> <strong>Bb</strong>', '**Aa** **Bb**'],
+    ['<strong>Aa</strong><em>Bb</em>', '**Aa***Bb*'],
+    ['<strong>Aa</strong><i>x</i><strong>Bb</strong>', '**Aa***x***Bb**'],
+    // A pair inside one of its own delimiter, or right against one, is part
+    // of a longer run already and stays as it was.
+    ['<em><cite>Aa</cite></em><em>Bb</em>', '**Aa***Bb*'],
+    ['<cite>Aa</cite><em><cite>Bb</cite></em>', '*Aa***Bb**'],
+    ['<em>Aa<cite>Bb</cite><i>Cc</i> x</em>', '*Aa*Bb**Cc* x*'],
+    ['<strong>Aa</strong><dfn><strong>Bb</strong></dfn>', '**Aa******Bb****'],
+    ['<figcaption><em>Aa</em><em>Bb</em></figcaption>', '**Aa**Bb**'],
+    ['<strong><em>Aa</em><em>Bb</em></strong>', '***AaBb***'],
+    // A quote that began after the closer writes its prefix between the pairs.
+    ['<h2><b>Aa</b><blockquote><b>Bb</b></blockquote></h2>', '## **Aa**> **Bb**'],
+    ['<h2><i>Aa</i><blockquote><i>Bb</i></blockquote></h2>', '## *Aa*> *Bb*'],
+    ['<h2><b>Aa</b><blockquote><b>Bb</b><b>Cc</b></blockquote></h2>', '## **Aa**> **BbCc**'],
+    // A caption still to be opened writes its opener there.
+    ['<b>Aa</b><figcaption><b>Bb</b></figcaption>', '**Aa**\n\n***Bb***'],
+    // The separator a blank pair leaves goes with it when a silent block follows.
+    ['<b>Aa</b><i> </i><svg></svg><b>Bb</b>', '**AaBb**'],
+    // A reopened pair has no opener for the separator to be moved in front of.
+    ['<em>Aa</em><cite><strong> </strong><s>Bb</s></cite>', '*Aa ~~Bb~~*'],
+    ['<i>Aa</i><i><s></s> </i><i>Bb</i>', '*Aa* *Bb*'],
+    // An empty pair is no such run once it is dropped.
+    ['<i>Aa</i><em><i> </i>Bb</em><i>Cc</i>', '*Aa* *BbCc*'],
+    ['<i>Aa</i><em><i></i></em><i>Cc</i>', '*AaCc*'],
+    ['<cite>Aa</cite><em><cite></cite><cite>Bb</cite></em>', '*Aa***Bb**'],
+    ['<ul><li>Aa<em>Aa </em><strong>Bb</strong><i></i><dfn><strong>*</strong><strong><dfn>&#32;</dfn>\n<cite>x<br></cite>Bb</strong></dfn> tail</li></ul>', '- Aa*Aa* **Bb******\\*** ***x  \n  *Bb**** tail'],
+    // Two code spans would touch.
+    ['<em><kbd>Aa</kbd></em><cite><kbd>Bb</kbd></cite>', '*`Aa`**`Bb`*'],
+    ['<s>Aa</s><s>Bb</s>', '~~Aa~~ ~~Bb~~'],
+    ['<strong>Aa<br></strong><strong>Bb</strong>', '**Aa  \n****Bb**'],
+    ['<strong>Aa</strong><a href="/x"><strong>Bb</strong></a>', '**Aa**[**Bb**](/x)'],
+  ])('reopens the pair instead of writing a run of delimiters: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const streamed = await collect(streamHtmlToMarkdown(chunkedStream([html.slice(0, split), html.slice(split)]), { engine }))
+      expect(streamed, `split=${split}`).toBe(expected)
+    }
+    expect(await collect(streamHtmlToMarkdown(chunkedStream([...html]), { engine })), 'one character at a time').toBe(expected)
+  })
+
+  it.each([
+    // The default closer of an overridden enter has no opener to give back.
+    ['<em>Aa</em><i>Bb</i>', { em: { enter: '^' } }, '^Aa**Bb*'],
+    ['<i>Aa</i><em>Bb</em><i>Cc</i>', { em: { enter: '*' } }, '*Aa**Bb**Cc*'],
+    // An overridden exit would end the reopened pair.
+    ['<em>Aa</em><i>Bb</i>', { i: { exit: '$' } }, '*Aa**Bb$'],
+    ['<em>Aa</em><i>Bb</i>', { em: { exit: '$' } }, '*Aa$*Bb*'],
+  ])('leaves a pair with an overridden delimiter as it is: %s %o', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, plugins: { tagOverrides } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    expect(await collect(streamHtmlToMarkdown(chunkedStream([...html]), options)), 'one character at a time').toBe(expected)
+  })
+})

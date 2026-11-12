@@ -1657,6 +1657,139 @@ fn raw_html_blocks_end_before_following_markdown() {
   }
 }
 
+#[test]
+fn touching_emphasis_pairs_of_one_delimiter_are_reopened() {
+  let options = HtmlToMarkdownOptions::default();
+  for (html, expected) in [
+    ("<strong>Aa</strong><strong>Bb</strong>", "**AaBb**"),
+    ("<b>Aa</b><strong>Bb</strong>", "**AaBb**"),
+    ("<em>Aa</em><i>Bb</i>", "*AaBb*"),
+    ("<em>Aa</em><cite>Bb</cite>", "*AaBb*"),
+    (
+      "<strong>Aa</strong><strong>Bb</strong><strong>Cc</strong>",
+      "**AaBbCc**",
+    ),
+    (
+      "<strong>Aa</strong><span></span><strong>Bb</strong>",
+      "**AaBb**",
+    ),
+    ("<strong>Aa</strong><strong> Bb</strong>", "**Aa Bb**"),
+    (
+      "<strong><em>Aa</em></strong><strong><em>Bb</em></strong>",
+      "***AaBb***",
+    ),
+    (
+      "<strong><em>Aa</em></strong><strong>Bb</strong>",
+      "***Aa*Bb**",
+    ),
+    (
+      "<strong>Aa</strong><strong><em>Bb</em></strong>",
+      "**Aa*Bb***",
+    ),
+    // A reopened pair that stays empty is closed again where it was.
+    ("<strong>Aa</strong><strong></strong>", "**Aa**"),
+    ("<strong>Aa</strong><strong> </strong>x", "**Aa** x"),
+    ("<b>Aa</b><b>&#9;</b>x", "**Aa**x"),
+    (
+      r#"<a href="/x"><em>Cc</em><cite>&#32;</cite></a>"#,
+      "[*Cc*](/x)",
+    ),
+    (
+      "<strong>Aa</strong><strong>&#32;</strong><strong>Bb</strong>",
+      "**Aa** **Bb**",
+    ),
+    (
+      "<ul><li><strong>Aa</strong><strong>Bb</strong></li></ul>",
+      "- **AaBb**",
+    ),
+    (
+      r#"<a href="/x"><strong>Aa</strong><strong>Bb</strong></a>"#,
+      "[**AaBb**](/x)",
+    ),
+    // An element between the two that writes nothing to keep leaves them
+    // touching all the same.
+    ("<strong>Aa</strong><i></i><strong>Bb</strong>", "**AaBb**"),
+    ("<b>Aa</b><i> </i><b>Bb</b><b>Cc</b>", "**Aa** **BbCc**"),
+    ("<strong>Aa</strong><q></q><strong>Bb</strong>", "**AaBb**"),
+    // Visible output between the two, another delimiter, or a closer that
+    // closes nothing keeps both pairs.
+    ("<strong>Aa</strong> <strong>Bb</strong>", "**Aa** **Bb**"),
+    ("<strong>Aa</strong><em>Bb</em>", "**Aa***Bb*"),
+    (
+      "<strong>Aa</strong><i>x</i><strong>Bb</strong>",
+      "**Aa***x***Bb**",
+    ),
+    // A pair inside one of its own delimiter, or right against one, is part
+    // of a longer run already and stays as it was.
+    ("<em><cite>Aa</cite></em><em>Bb</em>", "**Aa***Bb*"),
+    ("<cite>Aa</cite><em><cite>Bb</cite></em>", "*Aa***Bb**"),
+    ("<em>Aa<cite>Bb</cite><i>Cc</i> x</em>", "*Aa*Bb**Cc* x*"),
+    (
+      "<strong>Aa</strong><dfn><strong>Bb</strong></dfn>",
+      "**Aa******Bb****",
+    ),
+    (
+      "<figcaption><em>Aa</em><em>Bb</em></figcaption>",
+      "**Aa**Bb**",
+    ),
+    ("<strong><em>Aa</em><em>Bb</em></strong>", "***AaBb***"),
+    // A quote that began after the closer writes its prefix between the pairs.
+    (
+      "<h2><b>Aa</b><blockquote><b>Bb</b></blockquote></h2>",
+      "## **Aa**> **Bb**",
+    ),
+    (
+      "<h2><i>Aa</i><blockquote><i>Bb</i></blockquote></h2>",
+      "## *Aa*> *Bb*",
+    ),
+    (
+      "<h2><b>Aa</b><blockquote><b>Bb</b><b>Cc</b></blockquote></h2>",
+      "## **Aa**> **BbCc**",
+    ),
+    // A caption still to be opened writes its opener there.
+    (
+      "<b>Aa</b><figcaption><b>Bb</b></figcaption>",
+      "**Aa**\n\n***Bb***",
+    ),
+    // The separator a blank pair leaves goes with it when a silent block follows.
+    ("<b>Aa</b><i> </i><svg></svg><b>Bb</b>", "**AaBb**"),
+    // A reopened pair has no opener for the separator to be moved in front of.
+    (
+      "<em>Aa</em><cite><strong> </strong><s>Bb</s></cite>",
+      "*Aa ~~Bb~~*",
+    ),
+    ("<i>Aa</i><i><s></s> </i><i>Bb</i>", "*Aa* *Bb*"),
+    // An empty pair is no such run once it is dropped.
+    ("<i>Aa</i><em><i> </i>Bb</em><i>Cc</i>", "*Aa* *BbCc*"),
+    ("<i>Aa</i><em><i></i></em><i>Cc</i>", "*AaCc*"),
+    (
+      "<cite>Aa</cite><em><cite></cite><cite>Bb</cite></em>",
+      "*Aa***Bb**",
+    ),
+    (
+      "<ul><li>Aa<em>Aa </em><strong>Bb</strong><i></i><dfn><strong>*</strong><strong><dfn>&#32;</dfn>\n<cite>x<br></cite>Bb</strong></dfn> tail</li></ul>",
+      "- Aa*Aa* **Bb******\\*** ***x  \n  *Bb**** tail",
+    ),
+    // Two code spans would touch.
+    (
+      "<em><kbd>Aa</kbd></em><cite><kbd>Bb</kbd></cite>",
+      "*`Aa`**`Bb`*",
+    ),
+    ("<s>Aa</s><s>Bb</s>", "~~Aa~~ ~~Bb~~"),
+    (
+      "<strong>Aa<br></strong><strong>Bb</strong>",
+      "**Aa  \n****Bb**",
+    ),
+    (
+      r#"<strong>Aa</strong><a href="/x"><strong>Bb</strong></a>"#,
+      "**Aa**[**Bb**](/x)",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    assert_every_split(html, &options, expected);
+  }
+}
+
 /// A separator written on its own is no part of the link text, so the
 /// redundant-title check keeps a `title` the text merely starts with, and
 /// still drops one the whole text repeats.
@@ -2337,6 +2470,84 @@ fn code_span_link_drops_title_repeating_trimmed_text() {
     for width in [1, 2, 3, 11] {
       assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
     }
+  }
+}
+
+#[test]
+fn an_emphasis_pair_with_an_overridden_delimiter_is_not_reopened() {
+  let overridden = |tag: &str, config: TagOverrideConfig| HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(tag.to_string(), config)]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let enter = |value: &str| TagOverrideConfig {
+    enter: Some(value.to_string()),
+    ..Default::default()
+  };
+  let exit = |value: &str| TagOverrideConfig {
+    exit: Some(value.to_string()),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    // The default closer of an overridden enter has no opener to give back.
+    (
+      "<em>Aa</em><i>Bb</i>",
+      overridden("em", enter("^")),
+      "^Aa**Bb*",
+    ),
+    (
+      "<i>Aa</i><em>Bb</em><i>Cc</i>",
+      overridden("em", enter("*")),
+      "*Aa**Bb**Cc*",
+    ),
+    // An overridden exit would end the reopened pair.
+    (
+      "<em>Aa</em><i>Bb</i>",
+      overridden("i", exit("$")),
+      "*Aa**Bb$",
+    ),
+    (
+      "<em>Aa</em><i>Bb</i>",
+      overridden("em", exit("$")),
+      "*Aa$*Bb*",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    assert_every_split(html, &options, expected);
+  }
+}
+
+// The delimiters a pair gets back count against a code span's budget, as
+// they did when first written.
+#[test]
+fn an_emphasis_pair_written_out_again_stays_within_the_node_cap() {
+  for (html, cap, expected) in [
+    (
+      "<code><em>abcde</em><em><cite>x</cite></em></code>",
+      8,
+      "`*abcde**`",
+    ),
+    (
+      "<code><em>abcde</em><em><cite>x</cite></em></code>",
+      9,
+      "`*abcde***`",
+    ),
+    (
+      "<code><strong>abc</strong><strong><b>x</b></strong></code>",
+      9,
+      "`**abc****`",
+    ),
+    ("<code><em>abcde</em><em>x</em></code>", 8, "`*abcdex*`"),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_max_node_bytes(cap);
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{html} cap={cap}"
+    );
+    assert_every_split(html, &options, expected);
   }
 }
 

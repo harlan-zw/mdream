@@ -2,8 +2,9 @@ use crate::consts::*;
 use crate::entities::decode_html_entities_into;
 use crate::scan::{
   AttrBudget, DiscardedCloseTag, DiscardedCommentState, PendingTagScan, TagCarry,
-  discarded_cdata_end, discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
-  process_comment_or_doctype, process_tag_attributes, resume_tag_attributes, tag_is_complete,
+  discarded_cdata_end, discarded_close_tag_end, discarded_comment_end, discarded_gt,
+  is_transient_output, is_whitespace, process_comment_or_doctype, process_tag_attributes,
+  resume_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
@@ -98,6 +99,10 @@ const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
 /// one within a word or two; giving up keeps the scan off the hot path for
 /// input that offers none.
 const TEXT_RUN_SPLIT_SCAN: usize = 64;
+/// How many bytes of blanks and openers may follow an emphasis closer for an
+/// opener to still take it back. More than a few empty elements never write
+/// that much, and without a bound a run of quotes would hold a stream.
+const CLOSED_MARKER_REACH: usize = 32;
 
 /// Offset after which a text run may be cut. A space settles entity decoding
 /// and escaper lookahead, so any content may be cut there; otherwise, if
@@ -196,6 +201,13 @@ struct OpenMarker {
   restores_heading_break: bool,
   /// Where vertical-tab-only text first kept it open (`usize::MAX` if never); charged to the cap.
   vertical_tab_start: usize,
+  /// The length of the delimiter, if the pair continues the one before it.
+  /// Its opener would have touched that closer, so neither was written and
+  /// the pair cannot be dropped as empty. Zero for any other pair.
+  reopened: u8,
+  /// The length of the delimiter, if the pair was reopened and then written
+  /// out again because a pair of its own delimiter opened right inside it.
+  unmerged: u8,
   /// An entity-decoded blank is all this code-like span holds so far.
   decoded_blank: bool,
   /// A span around this one holds such a blank. Only the innermost span takes
@@ -1046,6 +1058,10 @@ pub struct ConvertState {
 
   // Streaming
   last_yielded_length: usize,
+  /// The emphasis closers that end the output, one right after the other, as
+  /// `[start, end]`. An opener of the same delimiter written next would touch
+  /// its closer, which CommonMark reads as one run, so the pair is reopened.
+  closed_markers: Vec<[usize; 2]>,
   /// Whether any non-leading output has already been returned to the caller.
   /// Once streaming starts, whitespace at the front of a drained buffer is
   /// content, not document-leading whitespace.
@@ -1421,6 +1437,7 @@ impl ConvertState {
       cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
+      closed_markers: Vec::new(),
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
       cut_line_lead: CutLineLead::Uncut,
@@ -3017,6 +3034,23 @@ impl ConvertState {
     if offset < self.hard_break_end {
       self.hard_break_end = usize::MAX;
     }
+    // A rewrite that reaches a closer, or the output right after it, comes
+    // between it and the next opener. `truncate_buffer` keeps the closers
+    // when only blanks and openers go.
+    if self
+      .closed_markers
+      .last()
+      .is_some_and(|closer| self.buffer.len().saturating_sub(closer[1]) > CLOSED_MARKER_REACH)
+    {
+      self.closed_markers.clear();
+    }
+    while self
+      .closed_markers
+      .last()
+      .is_some_and(|closer| offset <= closer[1])
+    {
+      self.closed_markers.pop();
+    }
   }
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
@@ -3039,6 +3073,17 @@ impl ConvertState {
     self.caption_line.note_drain(removed);
     self.marker_line.note_drain(removed);
     self.leading_whitespace = 0;
+    if self
+      .closed_markers
+      .first()
+      .is_some_and(|closer| closer[0] < removed)
+    {
+      self.closed_markers.clear();
+    }
+    for closer in &mut self.closed_markers {
+      closer[0] -= removed;
+      closer[1] -= removed;
+    }
     if self.hard_break_end != usize::MAX {
       self.hard_break_end = self
         .hard_break_end
@@ -3241,6 +3286,16 @@ impl ConvertState {
     if let Some(bracket_pos) = self.open_link_hold_floor() {
       stable_end = stable_end.min(hold_before(&self.buffer, bracket_pos));
     }
+    // An opener that follows may still take back the closers before it, as
+    // long as only blanks and openers that may close empty came after them.
+    if let Some(closer) = self.closed_markers.last() {
+      let after = &self.buffer.as_bytes()[closer[1]..];
+      if after.len() <= CLOSED_MARKER_REACH && after.iter().all(|&byte| is_transient_output(byte)) {
+        stable_end = stable_end.min(self.closed_markers[0][0]);
+      } else {
+        self.closed_markers.clear();
+      }
+    }
     // A marker still alone on its line has its separating newline inserted at
     // the line start when the item resolves, so the line stays mutable.
     if self.item_marker_line_held() {
@@ -3350,6 +3405,8 @@ impl ConvertState {
   }
 
   pub fn get_final_markdown_chunk(&mut self) -> String {
+    // No opener follows the end of the document.
+    self.closed_markers.clear();
     if !plain_text!(self) && !self.is_html() && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       self.get_markdown()
     } else {
