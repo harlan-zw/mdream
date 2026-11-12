@@ -2162,7 +2162,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const hasVisibleText = textNode.containsWhitespace === false || hasNonWhitespace(textNode.value)
         if (openLinkFragment >= 0 && hasVisibleText)
           openLinkFragment = -openLinkFragment - 2
-        if (openMarkerCount && hasVisibleText) {
+        // A decoded ASCII blank is no more content for an open pair than a
+        // written one: Rust drops `<code>&#32;</code>` like `<code> </code>`.
+        if (openMarkerCount && hasNonWhitespace(textNode.value)) {
           // Vertical tabs alone leave an emphasis pair empty once its closer
           // moves them out, so the exit still has to see the open marker.
           const first = textNode.value.charCodeAt(0)
