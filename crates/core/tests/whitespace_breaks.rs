@@ -1256,3 +1256,35 @@ fn an_emphasis_pair_with_an_overridden_delimiter_is_not_reopened() {
     assert_every_split(html, &options, expected);
   }
 }
+
+// The delimiters a pair gets back count against a code span's budget, as
+// they did when first written.
+#[test]
+fn an_emphasis_pair_written_out_again_stays_within_the_node_cap() {
+  for (html, cap, expected) in [
+    (
+      "<code><em>abcde</em><em><cite>x</cite></em></code>",
+      8,
+      "`*abcde**`",
+    ),
+    (
+      "<code><em>abcde</em><em><cite>x</cite></em></code>",
+      9,
+      "`*abcde***`",
+    ),
+    (
+      "<code><strong>abc</strong><strong><b>x</b></strong></code>",
+      9,
+      "`**abc****`",
+    ),
+    ("<code><em>abcde</em><em>x</em></code>", 8, "`*abcdex*`"),
+  ] {
+    let options = HtmlToMarkdownOptions::default().with_max_node_bytes(cap);
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{html} cap={cap}"
+    );
+    assert_every_split(html, &options, expected);
+  }
+}

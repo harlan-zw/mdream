@@ -1163,33 +1163,46 @@ impl ConvertState {
       let merges =
         reopens && matches!(inline_marker_type, 1 | 2 | 4) && matches!(emitted, "*" | "**");
       if merges
-        && let Some(reopened) = self.open_markers.last_mut()
+        && let Some(reopened) = self.open_markers.last()
         && reopened.reopened as usize == emitted.len()
         && reopened.content_start == marker_start
       {
         // A pair that opens with a pair of its own delimiter writes a longer
         // run, which CommonMark may read apart, so it is written as before.
-        // The closer stays on record in case the inner pair closes empty.
-        reopened.unmerged = reopened.reopened;
-        reopened.reopened = 0;
-        reopened.output_start = marker_start + emitted.len();
-        reopened.content_start = marker_start + 2 * emitted.len();
+        // The three delimiters count against a code span's budget as they
+        // did when first written.
+        let unmerged = reopened.reopened;
         let cache = self.last_content_cache_len;
         self.truncate_buffer(marker_start);
-        for _ in 0..3 {
-          self.buffer.push_str(emitted);
+        let closer = self.push_code_span_content(emitted, true);
+        let opener_start = self.buffer.len();
+        let opener = self.push_code_span_content(emitted, true);
+        let inner = self.push_code_span_content(emitted, true);
+        self.last_content_cache_len = if inner == 0 { 0 } else { cache };
+        if opener == 0 {
+          self.open_markers.pop();
+        } else if let Some(reopened) = self.open_markers.last_mut() {
+          reopened.reopened = 0;
+          reopened.output_start = opener_start;
+          reopened.content_start = opener_start + opener;
+          // The closer stays on record in case the inner pair closes empty.
+          if closer != 0 {
+            reopened.unmerged = unmerged;
+            if self
+              .closed_markers
+              .last()
+              .is_some_and(|closer| closer[1] != marker_start)
+            {
+              self.closed_markers.clear();
+            }
+            self
+              .closed_markers
+              .push([marker_start, marker_start + closer]);
+          }
         }
-        self.last_content_cache_len = cache;
-        if self
-          .closed_markers
-          .last()
-          .is_some_and(|closer| closer[1] != marker_start)
-        {
-          self.closed_markers.clear();
+        if inner == 0 {
+          return;
         }
-        self
-          .closed_markers
-          .push([marker_start, marker_start + emitted.len()]);
         marker_start = self.buffer.len() - emitted.len();
       } else if merges
         && let Some(&[start, end]) = self.closed_markers.last()
