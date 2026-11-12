@@ -7,22 +7,40 @@ import {
   NO_SPACING,
   NodeEventEnter,
   NodeEventExit,
+  TAG_A,
+  TAG_B,
   TAG_BLOCKQUOTE,
   TAG_BR,
+  TAG_CITE,
   TAG_CODE,
+  TAG_DEL,
+  TAG_DFN,
   TAG_DIV,
+  TAG_EM,
   TAG_FIGCAPTION,
   TAG_H1,
   TAG_H6,
+  TAG_I,
   TAG_IMG,
+  TAG_INS,
+  TAG_KBD,
   TAG_LI,
+  TAG_MARK,
   TAG_P,
   TAG_PRE,
   TAG_Q,
+  TAG_S,
+  TAG_SAMP,
   TAG_SPAN,
+  TAG_STRIKE,
+  TAG_STRONG,
+  TAG_SUB,
+  TAG_SUP,
   TAG_TABLE,
   TAG_TD,
   TAG_TH,
+  TAG_U,
+  TAG_VAR,
   TEXT_NODE,
 } from './const'
 import { resolveUrl } from './url'
@@ -190,7 +208,24 @@ function canWrapHere(depthMap: Uint16Array): boolean {
   return !isInsideHeading(depthMap)
 }
 
-function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [number, number] {
+// Tags whose Markdown output wraps their content in inline markers. A heading
+// inside one stays on its line in both engines, in Markdown and in text.
+const WRITES_INLINE_MARKERS = new Uint8Array(MAX_TAG_ID + 1)
+for (const tagId of [TAG_STRONG, TAG_B, TAG_EM, TAG_I, TAG_DEL, TAG_S, TAG_STRIKE, TAG_INS, TAG_SUB, TAG_SUP, TAG_CODE, TAG_KBD, TAG_SAMP, TAG_VAR, TAG_MARK, TAG_U, TAG_CITE, TAG_DFN, TAG_Q])
+  WRITES_INLINE_MARKERS[tagId] = 1
+
+// Parity with the Rust engine's `wrapper_emits_inline_markdown`.
+function wrapperWritesInlineMarkers(node: ElementNode, options: EngineOptions): boolean {
+  const override = options.tagOverrides?.[node.name]
+  if (override && typeof override !== 'string' && (override.enter || override.exit))
+    return true
+  const tagId = node.tagId
+  if (tagId === TAG_A)
+    return node.attributes?.href !== undefined
+  return tagId !== undefined && tagId >= 0 && WRITES_INLINE_MARKERS[tagId] === 1
+}
+
+function newlineConfig(node: ElementNode, depthMap: Uint16Array, options: EngineOptions): readonly [number, number] {
   const tagId = node.tagId
   // A caption's boundary is deferred until it emits content, so its own
   // enter and exit spacing stay at zero.
@@ -203,6 +238,8 @@ function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [numb
 
   const block = tagId !== undefined
     && ((tagId >= TAG_H1 && tagId <= TAG_H6) || tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI)
+  const heading = tagId !== undefined && tagId >= TAG_H1 && tagId <= TAG_H6
+  let closesBlock = false
   let parent = node.parent
   while (parent) {
     if (parent.tagHandler?.collapsesInnerWhiteSpace) {
@@ -210,10 +247,20 @@ function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [numb
         parent = parent.parent
         continue
       }
+      // Under one wrapper that writes no markers a heading still closes its
+      // block, as in Rust. In a table cell the newline would end the row.
+      if (heading && !closesBlock && !depthMap[TAG_TD] && !depthMap[TAG_TH]
+        && !wrapperWritesInlineMarkers(parent, options)) {
+        closesBlock = true
+        parent = parent.parent
+        continue
+      }
       return NO_SPACING
     }
     parent = parent.parent
   }
+  if (closesBlock)
+    return [0, (node.tagHandler?.spacing ?? DEFAULT_BLOCK_SPACING)[1]]
   if (node.tagHandler?.spacing)
     return node.tagHandler.spacing
   return tagId === -1 ? NO_SPACING : DEFAULT_BLOCK_SPACING
@@ -286,7 +333,7 @@ function isInlineElement(element: ElementNode): boolean {
 
 function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined, afterLiteralOpener = false): void {
   const buffer = state.buffer
-  const config = newlineConfig(element, state.depthMap)
+  const config = newlineConfig(element, state.depthMap, state.options)
   const wantedNewlines = config[eventType] || 0
   // An empty inline element between the text and a block boundary clears
   // `lastTextNode`, so the boundary itself drops the space it sits on.
@@ -640,7 +687,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       // An element that writes nothing, like a dropped <svg>, is no boundary.
       const isInline = isInlineElement(element)
       const blockWrites = element.tagId !== -1 && !isInline
-        && ((output !== undefined && output.length > 0) || newlineConfig(element, state.depthMap)[event.type] > 0)
+        && ((output !== undefined && output.length > 0) || newlineConfig(element, state.depthMap, state.options)[event.type] > 0)
       if ((output && hasNonWhitespace(output)) || blockWrites) {
         openQuotes.length = 0
         openQuoteNodes.length = 0
