@@ -222,6 +222,34 @@ describe('plugin reuse', () => {
   })
 })
 
+describe('raw HTML block before a closer', () => {
+  it.each([
+    ['<figcaption>k<h2>t</h2><address>A</address></figcaption>', '*k ## t\n\n<address>A</address>*'],
+    ['<figcaption>k<br><dl><dt>A</dt></dl></figcaption>', '*k  \n<dl><dt>A</dt></dl>*'],
+    ['<b>k<br><dl><dt>A</dt></dl></b>', '**k  \n<dl><dt>A</dt></dl>**'],
+    ['<a href="/x">k<br><address></address></a>', '[k  \n<address></address>](/x)'],
+    ['<blockquote><figcaption><h2>t</h2><address></address></figcaption></blockquote>', '> *## t\n>\n> <address></address>*'],
+    // Content after the block still starts on a line of its own.
+    ['<figcaption>k<h2>t</h2><address>A</address>z</figcaption>', '*k ## t\n\n<address>A</address>\n\nz*'],
+    ['<b>k<br><dl><dt>A</dt></dl><i>z</i></b>', '**k  \n<dl><dt>A</dt></dl>\n\n*z***'],
+  ])('keeps the closer on the line of the block: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const size of [1, 2, 3, 7]) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let index = 0; index < html.length; index += size)
+            controller.enqueue(html.slice(index, index + size))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output, `size=${size}`).toBe(expected)
+    }
+  })
+})
+
 describe('writer ownership', () => {
   const cases: [string, string][] = [
     ['<table><tr></tr></table>', ''],

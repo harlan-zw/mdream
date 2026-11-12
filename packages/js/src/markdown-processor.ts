@@ -3482,7 +3482,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (rawHtmlQuoteBoundary)
       finishRawHtmlBlock(`${output?.join('') ?? ''}>`, true)
 
-    if (pendingRawHtmlBoundary && !endsRawHtmlBlock && output) {
+    // Only an enter starts content after the block, as in Rust. A closer
+    // written at an exit stays on the block's line.
+    if (pendingRawHtmlBoundary && !endsRawHtmlBlock && output && eventType === NodeEventEnter) {
       if (newLines >= 2) {
         pendingRawHtmlBoundary = false
       }

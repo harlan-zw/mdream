@@ -200,6 +200,17 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<ul><li><span>Aa </span><i></i><pre>Bb</pre></li></ul>',
     '<h2><span>Aa </span><i></i><pre>Bb</pre></h2>',
   ], ['markdown', 'text']],
+  'raw HTML block before a closer': [[
+    '<figcaption>k<h2>t</h2><address>A</address></figcaption>',
+    '<figure><img src="/a.png"><figcaption>k<br><dl><dt>A</dt></dl></figcaption></figure>',
+    '<b>k<br><dl><dt>A</dt></dl></b>',
+    '<em>k<br><address></address></em>',
+    '<a href="/x">k<br><address></address></a>',
+    '<blockquote><figcaption><h2>t</h2><address></address></figcaption></blockquote>',
+    '<ul><li><figcaption>k<hr><dl><dt>A</dt></dl></figcaption></li></ul>',
+    '<figcaption>k<h2>t</h2><address>A</address>z</figcaption>',
+    '<b>k<br><dl><dt>A</dt></dl><i>z</i></b>',
+  ], ['markdown']],
   'paragraph after a trimmed element in a list item': [[
     '<ul><li><span><span>Aa</span> </span><p>Bb</p></li></ul>',
     '<ul><li><span><span>Aa</span> </span><i></i> <p>Bb</p></li></ul>',
