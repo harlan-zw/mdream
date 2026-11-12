@@ -1,6 +1,6 @@
 import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it, vi } from 'vitest'
-import { engines, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 const RE_BOLD_TEXT = /\*\*bold text\*\*/
 const RE_LINK_WITH_URL = /\[Link text\]\(https:\/\/example\.com\)/
@@ -306,6 +306,35 @@ const BYTE_PARITY_CASES: Array<string | { html: string, options: { plugins: { ta
   '<ol><li>a</li></ol><em><ol><li>b</li></ol></em>',
   '<ul><li><hr><blockquote>q</blockquote></li></ul>',
 ]
+
+const BYTE_PARITY_OVERRIDE_CASES = [
+  ['<p>a<sup><span> <span>2</span></span></sup>z</p>', 'sup', '**', 'a**2**z'],
+  ['<p>a<sup><span><span> <span>2</span></span></span></sup>z</p>', 'sup', '**', 'a**2**z'],
+  ['<p>a<sup><span></span><span> <span>2</span></span></sup>z</p>', 'sup', '**', 'a**2**z'],
+  ['<p>a<sup><svg></svg><span> <span>2</span></span></sup>z</p>', 'sup', '**', 'a**2**z'],
+  ['<p>a<sup><em> <span>2</span></em></sup>z</p>', 'sup', '**', 'a***2***z'],
+  ['<p>a<em>x </em><br>b</p>', 'br', '', 'a*x* b'],
+] as const
+
+it.each(BYTE_PARITY_OVERRIDE_CASES)('preserves override bytes at every split: %s', async (html, tag, marker, expected) => {
+  const options = { plugins: { tagOverrides: { [tag]: { enter: marker, exit: marker } } } }
+  for (const { engine } of engines) {
+    expect(htmlToMarkdown(html, { ...options, engine })).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { ...options, engine }))
+        actual += chunk
+      expect(actual, `split=${split}`).toBe(expected)
+    }
+  }
+})
 
 // Main already differs for these inputs. Pin both outputs while retaining
 // every streaming assertion; these entries are not new parity regressions.
