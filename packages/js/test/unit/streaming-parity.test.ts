@@ -4,6 +4,7 @@ import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, NodeEventExit, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/plugins'
+import { filterPlugin } from '../../src/plugins/filter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
 type ParityFormat = 'markdown' | 'html' | 'text'
@@ -1027,6 +1028,44 @@ describe('flattened declaration carry', () => {
         for (let offset = 0; offset <= declaration.length; offset++)
           expect(await streamConvertAtSplit(html, before.length + offset, options)).toBe(expected)
       }
+    }
+  })
+})
+
+describe('raw-text end tags cut between chunks', () => {
+  const tags = ['style', 'iframe', 'noscript', 'noembed', 'title', 'script', 'textarea', 'xmp']
+  const bodies = ['', ' ', 'x', 'x ', ' x', '</', '</x ']
+  const shapes = [
+    (tag: string, body: string) => `<p>a <${tag}>${body}</${tag}><b> D</b></p>`,
+    (tag: string, body: string) => `<p>a<span> <${tag}>${body}</${tag}><span> <b>D</b></span></span></p>`,
+  ]
+
+  it.each<[string, () => ParityOptions]>([
+    ['no plugin', () => ({})],
+    ['a plugin that reads text', () => ({ plugins: [createPlugin({ processTextNode() {} })] })],
+    ['the filter plugin', () => ({ plugins: [filterPlugin({ exclude: ['nav'] })] })],
+  ])('keeps the whitespace run with %s', async (_, options) => {
+    for (const tag of tags) {
+      for (const body of bodies) {
+        for (const shape of shapes) {
+          const html = shape(tag, body)
+          const expected = convertOnce(html, options())
+          for (let split = 0; split <= html.length; split++)
+            expect(await streamConvertAtSplit(html, split, options()), `${html} split=${split}`).toBe(expected)
+        }
+      }
+    }
+  })
+
+  it('keeps a cut end-tag prefix as text at the end of the input', async () => {
+    for (const [html, expected] of [
+      ['<p>a <textarea></texta', 'a \\</texta'],
+      ['<p>a <textarea>x </texta', 'a x \\</texta'],
+      ['<p>a <textarea><', 'a <'],
+    ] as [string, string][]) {
+      expect(convertOnce(html), html).toBe(expected)
+      for (let split = 0; split <= html.length; split++)
+        expect(await streamConvertAtSplit(html, split), `${html} split=${split}`).toBe(expected)
     }
   })
 })
