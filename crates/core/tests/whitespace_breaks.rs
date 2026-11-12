@@ -2672,7 +2672,10 @@ fn decoded_blank_keeps_a_code_span_beside_a_dropped_element() {
       r#"<ul><li><kbd>&#32;<svg></svg></kbd>B</li></ul>"#,
       "- ` `B",
     ),
-    (r#"<p><b><kbd><svg></svg>&#32;</kbd></b>B</p>"#, "**` `**B"),
+    (
+      r#"<p><b><kbd><svg></svg>&#32;</kbd></b>B</p>"#,
+      "**` `**&#66;",
+    ),
     (r#"<p>h<kbd>&#32;<b><svg></svg></b></kbd>B</p>"#, "h` `B"),
     // No text, literal whitespace, or an emphasis pair still leave it empty.
     (r#"<p>a<code><svg></svg></code>b</p>"#, "ab"),
@@ -2760,7 +2763,10 @@ fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
       "<p>h<kbd><samp>&#32;</samp><svg></svg>&#32;</kbd>B</p>",
       "h` `B",
     ),
-    ("<p>h<s><kbd>&#32;<svg></svg></kbd></s>B</p>", "h ~~` `~~B"),
+    (
+      "<p>h<s><kbd>&#32;<svg></svg></kbd></s>B</p>",
+      "h ~~` `~~&#66;",
+    ),
     ("<p>h<kbd>&#32;<s><svg></svg></s></kbd>B</p>", "h` `B"),
     (
       "<p>h<kbd>&#32;<samp><var><svg></svg></var></samp></kbd>B</p>",

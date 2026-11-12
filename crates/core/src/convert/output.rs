@@ -1276,6 +1276,7 @@ impl ConvertState {
     output: Option<&str>,
     output_start: usize,
     keeps_markers: bool,
+    pending: u8,
   ) {
     let separator_end = std::mem::replace(&mut self.pending_space_end, usize::MAX);
     if let Some(id) = marker_tag
@@ -1312,6 +1313,7 @@ impl ConvertState {
         content_start: self.buffer.len(),
         kind: inline_marker_type,
         starts_at_hard_break: self.hard_break_end == marker_start,
+        pending,
         follows_separator,
         separator_trimmed: follows_separator && self.pending_space_trimmed,
         run_len,
@@ -1327,6 +1329,18 @@ impl ConvertState {
     {
       self.open_markers.clear();
     }
+  }
+
+  fn emphasis_context(&self) -> bool {
+    !self.has_tag_overrides
+      && self.is_markdown()
+      && self.caption_frames.is_empty()
+      && self.depth_map[TAG_PRE as usize] == 0
+      && self.depth_map[TAG_CODE as usize] == 0
+      && self.depth_map[TAG_KBD as usize] == 0
+      && self.depth_map[TAG_SAMP as usize] == 0
+      && self.depth_map[TAG_VAR as usize] == 0
+      && !self.in_raw_html_block()
   }
 
   /// Put the list separator owed by a hard break in front of a block's fragment.
@@ -1581,6 +1595,7 @@ impl ConvertState {
     };
 
     let output_start = self.buffer.len();
+    let pending = self.pending_emphasis;
     self.write_output(
       true,
       is_inline,
@@ -1602,6 +1617,12 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, false);
       self.link.bracket_emitted = emitted_bracket;
+      if emitted_bracket
+        && self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS)
+          != 0
+      {
+        self.link.closer_before = pending;
+      }
       if emitted_bracket && heading_break_prefix_len != 0 {
         self.link.heading_break_prefix_len = heading_break_prefix_len;
         self.link.starts_at_hard_break =
@@ -1639,7 +1660,7 @@ impl ConvertState {
       tag_id.and_then(Self::inline_marker_type).is_some()
     });
 
-    self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
+    self.record_enter_marker(tag_id, output.as_deref(), output_start, false, pending);
 
     // An element that writes nothing, like a dropped `<svg>`, is no boundary.
     if !is_inline && (configured_new_lines > 0 || has_own_output) && !self.open_markers.is_empty() {
@@ -1664,6 +1685,17 @@ impl ConvertState {
     if !emitted.is_some_and(|emitted| !emitted.is_empty()) {
       return false;
     }
+    if inline_marker_type <= 4 {
+      let mark = if inline_marker_type == 3 { b'~' } else { b'*' };
+      if self
+        .last_output_byte()
+        .is_some_and(|byte| byte != mark && byte.is_ascii_punctuation())
+        && emitted.is_some_and(|value| value.as_bytes().first() == Some(&mark))
+        && self.emphasis_context()
+      {
+        self.pending_emphasis = mark;
+      }
+    }
     let Some(open_marker) = self.open_markers.pop() else {
       return false;
     };
@@ -1687,6 +1719,7 @@ impl ConvertState {
           self.heading_break_pending = true;
         }
         self.last_content_cache_len = 0;
+        self.pending_emphasis = open_marker.pending;
         self.reset_empty_tentative_caption_frames();
         self.restore_quote_parent_boundary();
         self.last_node_is_inline = is_inline;
@@ -2230,6 +2263,7 @@ impl ConvertState {
     let raw_html_quote_boundary =
       self.pending_raw_html_boundary && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE);
     let output_start = self.buffer.len();
+    let pending = self.pending_emphasis;
     self.write_output(
       true,
       is_inline,
@@ -2388,6 +2422,12 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, raw_html_link_open);
       self.link.bracket_emitted = emitted_bracket;
+      if emitted_bracket
+        && self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS)
+          != 0
+      {
+        self.link.closer_before = pending;
+      }
       if emitted_bracket && heading_break_prefix_len != 0 {
         self.link.heading_break_prefix_len = heading_break_prefix_len;
         self.link.starts_at_hard_break =
@@ -2419,7 +2459,13 @@ impl ConvertState {
     let code_span_marker = self.code_span_marker_ok();
     let marker_tag = tag_id.filter(|&id| !enter_is_literal && (id != TAG_CODE || code_span_marker));
     let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
-    self.record_enter_marker(marker_tag, output.as_deref(), output_start, keeps_markers);
+    self.record_enter_marker(
+      marker_tag,
+      output.as_deref(),
+      output_start,
+      keeps_markers,
+      pending,
+    );
 
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.
@@ -2560,6 +2606,22 @@ impl ConvertState {
     self.note_buffer_rewrite(bracket_pos);
     self.buffer.remove(bracket_pos);
     self.last_content_cache_len = text_len;
+    let closer = self.link.closer_before;
+    if closer != 0
+      && bracket_pos > 0
+      && self.buffer.as_bytes()[bracket_pos - 1] == closer
+      && self.buffer.as_bytes()[bracket_pos].is_ascii_alphanumeric()
+    {
+      let mut reference = String::with_capacity(6);
+      reference.push_str("&#");
+      push_decimal(
+        &mut reference,
+        u32::from(self.buffer.as_bytes()[bracket_pos]),
+      );
+      reference.push(';');
+      replace_buffer_range(&mut self.buffer, bracket_pos..bracket_pos + 1, &reference);
+      self.last_content_cache_len += reference.len() - 1;
+    }
     self.end_link();
     self.last_node_is_inline = is_inline;
   }
@@ -2607,6 +2669,8 @@ impl ConvertState {
       link_end: self.buffer.len(),
       fragment: fragment.to_string(),
       has_title,
+      bracket_closer: self.link.closer_before,
+      text_closer: self.link.closer_after,
     });
   }
 
@@ -2658,6 +2722,10 @@ impl ConvertState {
       if title.is_empty() && self.try_autolink_rewrite(resolved, capped_code_span, is_inline) {
         return;
       }
+      if self.clean_flags & CLEAN_FRAGMENTS != 0 {
+        self.link.closer_after = self.pending_emphasis;
+      }
+      self.pending_emphasis = 0;
       if capped_code_span {
         let mut close = String::with_capacity(resolved.len() + title.len() + LINK_CLOSE_OVERHEAD);
         close.push(']');
@@ -3009,7 +3077,7 @@ impl ConvertState {
         // `None` there instead of panicking, and a heading with no content left
         // has no slug to record.
         if let Some(text) = self.buffer.get(self.heading_buffer_start..) {
-          let slug = slugify_heading(text);
+          let slug = slugify_markdown_heading(text);
           if !slug.is_empty() {
             self.heading_slugs.push(slug);
           }
@@ -3380,8 +3448,112 @@ impl ConvertState {
     self.escape_gfm_text_into(text, scratch, ordered_digits)
   }
 
+  fn take_emphasis_reference(&mut self, text: &str) -> u8 {
+    let mark = std::mem::take(&mut self.pending_emphasis);
+    if text
+      .as_bytes()
+      .first()
+      .is_some_and(u8::is_ascii_alphanumeric)
+      && self.last_output_byte() == Some(mark)
+    {
+      text.as_bytes()[0]
+    } else {
+      0
+    }
+  }
+
+  fn write_emphasis_reference(buffer: &mut String, code: u8, text: &str) {
+    buffer.push_str("&#");
+    push_decimal(buffer, u32::from(code));
+    buffer.push(';');
+    buffer.push_str(&text[1..]);
+  }
+
+  /// `clean.fragments` removal for links that cancelled a pending closer.
+  /// `removals` are sorted ranges and `closers` holds `(removal end, closer)`
+  /// sorted by position. The first byte that survives a removal, however many
+  /// adjacent removals it follows, is written as a numeric reference when it
+  /// is ASCII alphanumeric and the closer now precedes it.
+  #[cold]
+  #[inline(never)]
+  pub(super) fn remove_fragment_wrappers(
+    buffer: &str,
+    removals: &[(usize, usize)],
+    closers: &[(usize, u8)],
+  ) -> String {
+    let mut out = String::with_capacity(buffer.len() + 5 * closers.len());
+    let mut read = 0usize;
+    let mut closer = 0u8;
+    let mut next = 0usize;
+    let push = |out: &mut String, text: &str, closer: u8| {
+      let first = text.as_bytes()[0];
+      if closer != 0 && first.is_ascii_alphanumeric() && out.as_bytes().last() == Some(&closer) {
+        Self::write_emphasis_reference(out, first, text);
+      } else {
+        out.push_str(text);
+      }
+    };
+    for &(remove_start, remove_end) in removals {
+      if remove_end <= read {
+        continue;
+      }
+      if remove_start > read {
+        push(&mut out, &buffer[read..remove_start], closer);
+        closer = 0;
+      }
+      read = remove_end;
+      while next < closers.len() && closers[next].0 <= remove_end {
+        if closers[next].0 == remove_end {
+          closer = closers[next].1;
+        }
+        next += 1;
+      }
+    }
+    if read < buffer.len() {
+      push(&mut out, &buffer[read..], closer);
+    }
+    out
+  }
+
+  /// `text` with its first byte as a numeric reference when it would follow
+  /// the pending closer directly. Call it once no separator precedes `text`.
+  #[cold]
+  #[inline(never)]
+  fn emphasis_text<'a>(&mut self, text: &'a str) -> Cow<'a, str> {
+    let code = self.take_emphasis_reference(text);
+    if code == 0 {
+      return Cow::Borrowed(text);
+    }
+    let mut referenced = String::with_capacity(text.len() + 5);
+    Self::write_emphasis_reference(&mut referenced, code, text);
+    Cow::Owned(referenced)
+  }
+
+  #[cold]
+  #[inline(never)]
+  fn push_emphasis_text(&mut self, text: &str, add_space: bool) {
+    let start = self.buffer.len();
+    if add_space {
+      self.pending_emphasis = 0;
+      self.buffer.push(' ');
+      self.buffer.push_str(text);
+    } else {
+      let code = self.take_emphasis_reference(text);
+      if code != 0 {
+        Self::write_emphasis_reference(&mut self.buffer, code, text);
+      } else {
+        self.buffer.push_str(text);
+      }
+    }
+    self.last_content_cache_len = self.buffer.len() - start;
+  }
+
   #[inline(always)]
   fn push_text_uncapped(&mut self, text: &str, add_space: bool) {
+    if self.pending_emphasis != 0 {
+      self.push_emphasis_text(text, add_space);
+      return;
+    }
     if add_space {
       self.buffer.push(' ');
       self.last_content_cache_len = text.len() + 1;
@@ -3868,8 +4040,12 @@ impl ConvertState {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
     } else if !owns_space && self.should_add_spacing_before_text(last_char, text) {
+      self.pending_emphasis = 0;
       let written = self.push_code_span_content(" ", true);
       self.last_content_cache_len = written + self.push_code_span_content(text, false);
+    } else if self.pending_emphasis != 0 {
+      let text = self.emphasis_text(text);
+      self.last_content_cache_len = self.push_code_span_content(&text, false);
     } else {
       self.last_content_cache_len = self.push_code_span_content(text, false);
     }
@@ -5783,6 +5959,17 @@ impl ConvertState {
     // A caption owns the space before its first text, as on the unwrapped path.
     let first_needs_space = leading_space
       || (!owns_leading_space && self.should_add_spacing_before_text(last_char, text));
+    // A separator or a break already lets the closer flank.
+    let emphasis_storage;
+    let text = if self.pending_emphasis == 0 {
+      text
+    } else if first_needs_space {
+      self.pending_emphasis = 0;
+      text
+    } else {
+      emphasis_storage = self.emphasis_text(text);
+      emphasis_storage.as_ref()
+    };
     let prefix = self.continuation_prefix();
     let prefix_len = prefix.chars().count();
     let buf_start = self.buffer.len();
@@ -6758,6 +6945,7 @@ impl ConvertState {
           && !self.follows_literal_opener(self.buffer.len())
           && (self.open_markers.is_empty() || !self.hoist_opener_space())
         {
+          self.pending_emphasis = 0;
           self.push_code_span_content(" ", true);
           self.separator_end = self.drained + self.buffer.len();
           // Only Markdown drops an empty pair with the separator in front of it.
@@ -6784,6 +6972,18 @@ impl ConvertState {
     {
       self.last_node_is_inline = is_inline;
       return;
+    }
+
+    // Only contiguous closing delimiters may extend a pending closer. Events
+    // that returned above write nothing, so they leave it pending.
+    if self.pending_emphasis != 0
+      && (configured_new_lines != 0
+        || (!output_str.is_empty()
+          && (is_enter
+            || output_str.as_bytes().first() != Some(&self.pending_emphasis)
+            || output_str.as_bytes().last() != Some(&self.pending_emphasis))))
+    {
+      self.pending_emphasis = 0;
     }
 
     let (emphasis_whitespace_start, emphasis_has_vertical_tab) = if closes_emphasis {
@@ -7014,6 +7214,11 @@ impl ConvertState {
 
   #[inline]
   pub(crate) fn needs_spacing(&self, last_byte: u8, first_byte: u8) -> bool {
+    // A strikethrough opener touches its content; a closer or a literal
+    // tilde keeps the separator.
+    if last_byte == b'~' && !self.open_markers.is_empty() {
+      return first_byte == b'~';
+    }
     if matches!(last_byte, b' ' | b'\n' | b'\t') {
       return false;
     }

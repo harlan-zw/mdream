@@ -43,6 +43,25 @@ describe('gfm hard breaks', () => {
       .toBe('`first\nsecond`')
   })
 
+  it('separates raw inline HTML after a pipe outside tables', async () => {
+    const html = '<h2>a|<br>b</h2>'
+    const options = { tagOverrides: { br: { spacing: [0, 0] as [number, number] } } }
+    expect(htmlToMarkdown(html, options)).toBe('## a| <br>b')
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        output += chunk
+      expect(output, `split at ${split}`).toBe('## a| <br>b')
+    }
+  })
+
   it('preserves plugin output in place of the built-in break', () => {
     expect(htmlToMarkdown('<p>first<br>second</p>', {
       plugins: [{
