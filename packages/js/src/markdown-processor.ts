@@ -62,7 +62,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, dropSourceLead, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -2287,6 +2287,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (textNode.trimsAtLineStart)
       trimTextAtLineStart(textNode, state.buffer)
+    // A link's `[` already parts the label from what precedes it, so the
+    // source whitespace that leads the label separates nothing.
+    if (textNode.sourceLead && openLinkFragment !== -1
+      && (openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment) === state.buffer.length - 1) {
+      dropSourceLead(textNode)
+    }
     if (textNode.value) {
       if (textNode.excludedFromMarkdown)
         return

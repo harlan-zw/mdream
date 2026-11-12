@@ -832,6 +832,36 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(markdown).toBe('[Link](#section "Go to section")')
   })
 
+  // A link's `[` already parts the label from what precedes it, so source
+  // whitespace that leads the label is dropped, whatever empty element stands
+  // before it. Whitespace decoded from a character reference is content, and
+  // whitespace after an image or a word still separates.
+  it.each([
+    ['<a href="/f"><i class="fa"></i> Lima</a>', '[Lima](/f)'],
+    ['<a href="/f"><span></span> Lima</a>', '[Lima](/f)'],
+    ['<a href="/f"><svg></svg> Lima</a>', '[Lima](/f)'],
+    ['<a href="/f"><div></div> Lima</a>', '[Lima](/f)'],
+    ['<p>x<a href="/f"><span></span> Lima</a></p>', 'x [Lima](/f)'],
+    ['<p><a href="/f"><svg></svg> Docs</a> <a href="/g"><svg></svg> Blog</a></p>', '[Docs](/f) [Blog](/g)'],
+    ['<a href="/f"><span></span>&#32;Lima</a>', '[ Lima](/f)'],
+    ['<a href="/f"><img src="/i.png" alt="i"> Lima</a>', '[![i](/i.png) Lima](/f)'],
+    ['<a href="/f"><b>x</b> Lima</a>', '[**x** Lima](/f)'],
+  ])('drops the source space that leads a link label for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (const character of html)
+          controller.enqueue(character)
+        controller.close()
+      },
+    })
+    let streamed = ''
+    for await (const chunk of streamHtmlToMarkdown(stream, { engine }))
+      streamed += chunk
+    expect(streamed).toBe(expected)
+  })
+
   it('handles multiple links with text in paragraph', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<p><a href="#top">Top</a> and <a href="#bottom">Bottom</a></p>'
