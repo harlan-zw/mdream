@@ -3306,6 +3306,82 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
   );
 }
 
+// One-shot conversion keeps no link hold, so the guard took the blank text of
+// a link for the item's content before `emptyLinkText` dropped the link.
+#[test]
+fn an_item_emptied_by_a_dropped_link_does_not_underline_the_text_above() {
+  let clean = || {
+    Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    })
+  };
+  let fast_path = HtmlToMarkdownOptions {
+    clean: clean(),
+    ..Default::default()
+  };
+  // Any tag override sends a link through the general enter path.
+  let general_path = HtmlToMarkdownOptions {
+    clean: clean(),
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(
+        "kbd".to_string(),
+        TagOverrideConfig {
+          enter: Some("<".to_string()),
+          ..Default::default()
+        },
+      )]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li><a href=\"/f\">&nbsp;</a></li></ul></li></ul>",
+      "- a\n\n  -",
+    ),
+    (
+      "<ul><li>a<ul><li><a href=\"/f\">&#11;</a></li></ul></li></ul>",
+      "- a\n\n  -",
+    ),
+    (
+      "<ul><li>a<ul><li><a href=\"/f\" title=\"t\">&#11;<span> </span></a></li><li>b</li></ul></li></ul>",
+      "- a\n\n  -\n  - b",
+    ),
+    (
+      "<ol><li>a<ol><li><a href=\"/f\">&nbsp;</a></li></ol></li></ol>",
+      "1. a\n\n   1.",
+    ),
+    (
+      "<ul><li><ul><li><a href=\"/f\">&nbsp;</a></li></ul></li></ul>",
+      "-\n\n  -",
+    ),
+    // Text after the dropped link still settles the marker's line.
+    (
+      "<ul><li>a<ul><li><a href=\"/f\">&nbsp;</a>b</li></ul></li></ul>",
+      "- a\n  - b",
+    ),
+    // A link that keeps its text is no empty item.
+    (
+      "<ul><li>a<ul><li><a href=\"/f\">&nbsp;b</a></li></ul></li></ul>",
+      "- a\n  - [\u{a0}b](/f)",
+    ),
+  ] {
+    for options in [&fast_path, &general_path] {
+      assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+      for chunk in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(options.clone());
+        let mut streamed = String::new();
+        for part in html.as_bytes().chunks(chunk) {
+          streamed.push_str(&stream.process_chunk(std::str::from_utf8(part).unwrap()));
+        }
+        streamed.push_str(&stream.finish());
+        assert_eq!(streamed, expected, "chunk={chunk} {html}");
+      }
+    }
+  }
+}
+
 #[test]
 fn a_rule_inside_a_list_item_keeps_its_own_block() {
   // Without the blank line `<hr>` reads as a setext underline instead.

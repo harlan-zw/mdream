@@ -1467,6 +1467,11 @@ impl ConvertState {
         self.link.url_max_len = href.map_or(0, |href| {
           URL_RESOLVE_SLACK + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
         });
+      } else if self.empty_item_hazard {
+        // One-shot keeps no link hold, but the guard of the open item has to
+        // know that `emptyLinkText` may still drop this link and leave it empty.
+        self.link.empty_text_pending =
+          emitted_bracket && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
       }
 
       if !(self.open_markers.is_empty() || self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
@@ -2224,6 +2229,11 @@ impl ConvertState {
             URL_RESOLVE_SLACK + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
           });
         }
+      } else if self.empty_item_hazard {
+        // One-shot keeps no link hold, but the guard of the open item has to
+        // know that `emptyLinkText` may still drop this link and leave it empty.
+        self.link.empty_text_pending =
+          emitted_bracket && !exit_is_overridden && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
       }
     }
 
