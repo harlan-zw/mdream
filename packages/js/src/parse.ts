@@ -144,6 +144,17 @@ const ATTRIBUTE_BEFORE_VALUE = 3
 const ATTRIBUTE_QUOTED_VALUE = 4
 const ATTRIBUTE_UNQUOTED_VALUE = 5
 
+// The plain-prose source `commitPlainTextPrefix` may split: ASCII letters,
+// spaces and commas.
+function isPlainSource(html: string, start: number, end: number): boolean {
+  for (let offset = start; offset < end; offset++) {
+    const code = html.charCodeAt(offset)
+    if (code !== SPACE_CHAR && !isAsciiAlpha(code) && code !== 44 /* comma */)
+      return false
+  }
+  return true
+}
+
 function isAsciiAlpha(code: number): boolean {
   return (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
@@ -546,7 +557,8 @@ export function finalizeParse(
       processTextBuffer(scriptText, state, handleEvent)
     }
   }
-  else if (leftover.length > 0) {
+  // A carried run is trailing text the leftover no longer holds.
+  else if (leftover.length > 0 || state.carriedText !== undefined) {
     const trailing = state.trailingText || ''
     let text = trailing
     // Rawtext (textarea, title, xmp) opens nothing but its own end tag, so an
@@ -568,6 +580,11 @@ export function finalizeParse(
       processTextBuffer(text, state, handleEvent)
   }
   state.trailingText = undefined
+  state.carriedText = undefined
+  state.carriedPlain = undefined
+  // An unterminated CDATA section is dropped at end of input, as its residual is.
+  state.carriedCdata = undefined
+  state.carriedCdataTail = undefined
   while (state.currentNode) {
     closeNode(state.currentNode, state, handleEvent)
   }
@@ -702,6 +719,20 @@ export interface ParseState {
    * collapses whitespace like any other text.
    */
   trailingText?: string
+  /**
+   * Stream-owned opt-in: keep a scanned text run in `carriedText` and return
+   * only the unfinished markup after it, so the next chunk continues the run
+   * instead of scanning it again from its start.
+   */
+  carryText?: boolean
+  /** Parsed text of the run scanned so far, which the next parse continues. */
+  carriedText?: string
+  /** Whether the carried run's source holds only ASCII letters, spaces and commas. */
+  carriedPlain?: boolean
+  /** Content of an open CDATA section a carrying stream has scanned so far. */
+  carriedCdata?: string[]
+  /** The last two characters of `carriedCdata`, where a split `]]>` starts. */
+  carriedCdataTail?: string
   /** The trailing run is an unfinished end tag of the open rawtext element. */
   rawtextEndTagPending?: boolean
   /** A raw-text body the output drops left the previous chunk on a whitespace character. */
@@ -945,7 +976,17 @@ export function commitPlainTextPrefix(
   onEvent: (event: NodeEvent) => void,
 ): string {
   const text = state.trailingText
-  if (!state.textBufferContainsWhitespace || remainingHtml.length < 65536 || !text || text.length < 65536
+  const carried = state.carriedText
+  // A carried run is no longer in `remainingHtml`; its source was checked as it
+  // was scanned. The text is never longer than its source.
+  if (carried !== undefined) {
+    if (remainingHtml || !state.carriedPlain)
+      return remainingHtml
+  }
+  else if (remainingHtml.length < 65536) {
+    return remainingHtml
+  }
+  if (!state.textBufferContainsWhitespace || !text || text.length < 65536
     || (state.currentNode?.tagId !== TAG_P && state.currentNode?.tagId !== TAG_LI)
     || state.hasEncodedHtmlEntity || state.flattenedTagName
     || state.depthMap[TAG_PRE] || state.depthMap[TAG_CODE]
@@ -965,6 +1006,13 @@ export function commitPlainTextPrefix(
   state.trailingText = suffix
   state.textBufferContainsWhitespace = false
   state.textBufferContainsNonWhitespace = suffix.length > 0
+  if (carried !== undefined) {
+    // The suffix holds no space, so its source is itself, and the scan state
+    // already follows its last character.
+    state.carriedText = suffix
+    state.carriedPlain = true
+    return ''
+  }
   state.lastCharWasWhitespace = true
   return suffix
 }
@@ -994,6 +1042,8 @@ function parseHtmlInternal(
   // Markdown that would be transformed again on the next chunk.
   let runStart = 0
   let declarationPending = false
+  // Length of `textBuffer` before an unfinished construct at `i` was appended.
+  let settledLength = -1
 
   // Initialize state
   state.depthMap ??= new Uint16Array(MAX_TAG_ID)
@@ -1004,8 +1054,10 @@ function parseHtmlInternal(
   state.scriptDataState ??= SCRIPT_DATA
   state.listItemCounts ??= undefined
   state.rawtextEndTagPending = false
-  // The text buffer starts empty: earlier seals belong to bytes re-scanned here.
-  state.entitySeals = undefined
+  // The text buffer starts empty: earlier seals belong to bytes re-scanned
+  // here. A carried run is not scanned again, so its seals still hold.
+  if (state.carriedText === undefined)
+    state.entitySeals = undefined
   // Process chunk character by character
   let i = 0
   const chunkLength = htmlChunk.length
@@ -1015,6 +1067,30 @@ function parseHtmlInternal(
       return scanResult <= SCRIPT_SEQUENCE_INCOMPLETE ? htmlChunk.substring(-scanResult - 2) : ''
     textBuffer = takeScriptText(state)
     i = scanResult
+  }
+  else if (state.carriedText !== undefined) {
+    textBuffer = state.carriedText
+    state.carriedText = undefined
+  }
+  else if (state.carriedCdata !== undefined) {
+    // Only the new bytes are searched for the terminator, after the last two
+    // the content holds, since a `]]>` can be split across chunks.
+    const parts = state.carriedCdata
+    const tail = state.carriedCdataTail!
+    const joined = tail + htmlChunk
+    const end = joined.indexOf(']]>')
+    if (end === -1) {
+      parts.push(htmlChunk)
+      state.carriedCdataTail = joined.slice(-2)
+      state.trailingText = ''
+      return ''
+    }
+    state.carriedCdata = undefined
+    state.carriedCdataTail = undefined
+    const content = parts.join('')
+    processCdataSection(content.slice(0, content.length - tail.length) + joined.slice(0, end), state, handleEvent)
+    i = end - tail.length + 3
+    runStart = i
   }
 
   while (i < chunkLength) {
@@ -1079,6 +1155,7 @@ function parseHtmlInternal(
 
     // Look ahead to determine tag type
     if (i + 1 >= chunkLength) {
+      settledLength = textBuffer.length
       textBuffer += htmlChunk[i]
       break
     }
@@ -1095,6 +1172,7 @@ function parseHtmlInternal(
           peekEnd++
         }
         if (peekEnd === chunkLength) {
+          settledLength = textBuffer.length
           textBuffer += htmlChunk.substring(i)
           break
         }
@@ -1144,7 +1222,20 @@ function parseHtmlInternal(
               state.trailingText = boundary
               return boundary
             }
+            // A carrying stream keeps the content it read, so the next chunk
+            // only looks for the terminator. The text before the section is
+            // final once the section opens.
+            if (state.carryText) {
+              if (textBuffer.length > 0)
+                processTextBuffer(textBuffer, state, handleEvent)
+              const content = htmlChunk.substring(i + 9)
+              state.carriedCdata = [content]
+              state.carriedCdataTail = content.slice(-2)
+              state.trailingText = ''
+              return ''
+            }
             declarationPending = true
+            settledLength = textBuffer.length
             textBuffer += htmlChunk.substring(i)
             break
           }
@@ -1161,6 +1252,7 @@ function parseHtmlInternal(
         if (chunkLength - i < 9 && '<![CDATA['.startsWith(htmlChunk.substring(i))) {
           // Chunk boundary fell inside the `<![CDATA[` opener.
           declarationPending = true
+          settledLength = textBuffer.length
           textBuffer += htmlChunk.substring(i)
           break
         }
@@ -1172,6 +1264,7 @@ function parseHtmlInternal(
         : ''
       if (declaration && declaration.length < 9 && '<!doctype'.startsWith(declaration)) {
         declarationPending = true
+        settledLength = textBuffer.length
         textBuffer += htmlChunk.substring(i)
         break
       }
@@ -1196,7 +1289,9 @@ function parseHtmlInternal(
       }
       else {
         declarationPending = true
-        if (discardDeclaration && htmlChunk.length - i >= 4) {
+        // No output reads a comment or a doctype, so a carrying stream keeps
+        // only what decides where one ends, plugins or not.
+        if ((discardDeclaration || state.carryText) && htmlChunk.length - i >= 4) {
           const comment = htmlChunk.charCodeAt(i + 2) === DASH_CHAR && htmlChunk.charCodeAt(i + 3) === DASH_CHAR
           // Preserve initial comment states. Later overlap comes only from
           // body bytes, so opener dashes cannot form a false terminator.
@@ -1206,8 +1301,11 @@ function parseHtmlInternal(
           if (textBuffer.length > 0 && isWhitespace(htmlChunk.charCodeAt(runStart)))
             state.lastCharWasWhitespace = false
           state.trailingText = textBuffer
+          if (carryRun(textBuffer, state))
+            return boundary
           return htmlChunk.substring(runStart, i) + boundary
         }
+        settledLength = textBuffer.length
         textBuffer += result.remainingText
         break
       }
@@ -1223,6 +1321,8 @@ function parseHtmlInternal(
         if (textBuffer.length > 0 && isWhitespace(htmlChunk.charCodeAt(runStart)))
           state.lastCharWasWhitespace = false
         state.trailingText = textBuffer
+        if (carryRun(textBuffer, state))
+          return '<!x'
         return `${htmlChunk.substring(runStart, i)}<!x`
       }
       i = end + 1
@@ -1232,6 +1332,7 @@ function parseHtmlInternal(
     // CLOSING TAG
     else if (nextCharCode === SLASH_CHAR) {
       if (i + 2 === chunkLength) {
+        settledLength = textBuffer.length
         textBuffer += htmlChunk.substring(i)
         break
       }
@@ -1247,6 +1348,7 @@ function parseHtmlInternal(
         // An end tag name cut off by the input end is still text of this run:
         // it closes nothing yet, and at end of input it stays literal.
         if (peekEnd === chunkLength) {
+          settledLength = textBuffer.length
           // A prefix of this element's own end tag is retained for the next
           // chunk. Its syntax has consumed no body text yet; at end of input
           // finalizeParse counts it as the text it turned out to be.
@@ -1316,6 +1418,7 @@ function parseHtmlInternal(
         i2++
       }
       if (tagNameEnd === -1) {
+        settledLength = textBuffer.length
         textBuffer += htmlChunk.substring(i)
         break
       }
@@ -1386,8 +1489,27 @@ function parseHtmlInternal(
   // leading whitespace character in the raw remainder was accepted from a
   // non-whitespace state, so restore that state before the re-scan.
   let remainingHtml = textBuffer.length > 0 ? htmlChunk.substring(runStart) : ''
+  // A carrying stream keeps the parsed run instead, and returns only the
+  // unfinished markup after it: a run longer than a chunk is then scanned once,
+  // not again from its start on every chunk. The parser state is already the
+  // one the run ends in, so the next chunk continues it as one-shot would.
+  // Raw text an output keeps, such as a `<textarea>`, carries the same way:
+  // only its own end tag can end the run, and a cut one comes back whole.
+  // Script data has its own scanner, and discarded raw text keeps only that
+  // end tag below.
   const excludedRawText = state.discardExcludedText
     && (state.flattenedRawExcludesText || (state.currentNode?.tagHandler?.isNonNesting && state.currentNode.tagHandler.excludesTextNodes))
+  const settled = i >= chunkLength ? textBuffer.length : settledLength
+  if (state.carryText && settled > 0 && !excludedRawText
+    && !(state.currentNode && isScriptElement(state.currentNode))) {
+    const end = Math.min(i, chunkLength)
+    state.carriedPlain = (state.carriedPlain ?? true) && isPlainSource(htmlChunk, runStart, end)
+    state.carriedText = textBuffer.slice(0, settled)
+    remainingHtml = htmlChunk.substring(end)
+  }
+  else {
+    state.carriedPlain = undefined
+  }
   if (excludedRawText && remainingHtml && !declarationPending && !(state.currentNode && isScriptElement(state.currentNode))) {
     // Only a possible end tag can affect the next chunk. Body bytes are
     // excluded, and no plugin observes their text events on this path.
@@ -1430,6 +1552,19 @@ function parseHtmlInternal(
   state.trailingText = textBuffer
 
   return remainingHtml
+}
+
+/**
+ * Keeps the run a discarded token interrupted, in a carrying stream, instead
+ * of returning its source to be scanned again: carried text is no longer in
+ * the chunk. Whether the run was kept.
+ */
+function carryRun(textBuffer: string, state: ParseState): boolean {
+  if (!state.carryText || textBuffer.length === 0)
+    return false
+  state.carriedText = textBuffer
+  state.carriedPlain = false
+  return true
 }
 
 /**
@@ -1529,6 +1664,8 @@ function endReferencesAtSeals(text: string, seals: number[]): string {
 }
 
 function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (event: NodeEvent) => void): void {
+  // The next run starts fresh.
+  state.carriedPlain = undefined
   if (state.entitySeals) {
     textBuffer = endReferencesAtSeals(textBuffer, state.entitySeals)
     state.entitySeals = undefined

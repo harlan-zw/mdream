@@ -238,6 +238,81 @@ describe('gfm text escaping', () => {
     }
   })
 
+  // The document's leading trim drops any whitespace before the first line,
+  // not just spaces, so a marker behind it opens that line.
+  it.each([
+    ['<p>&#12;# x</p>', '\\# x'],
+    ['<p>&nbsp;# x</p>', '\\# x'],
+    ['<p><span>&#12;</span># x</p>', '\\# x'],
+    ['<p><span>&#9;</span>&gt; x</p>', '\\> x'],
+    ['<p><span>&#9;</span>- x</p>', '\\- x'],
+    ['<p>&#11;1. x</p>', '1\\. x'],
+    ['<p>&#8195;1) x</p>', '1\\) x'],
+    ['<p>&#12;+ x</p>', '\\+ x'],
+    ['<p>&#12;* x</p>', '\\* x'],
+    ['<p>&#12;---</p>', '\\---'],
+    ['<p>&#12;=</p>', '\\='],
+    ['<p>&#12;===</p>', '\\==='],
+    ['<p>&#12;    # x</p>', '\\# x'],
+    ['<p><span>&#12;</span><span> </span>- x</p>', '\\- x'],
+    ['&#12;# x', '\\# x'],
+    ['<span>&#9;</span><span>#</span> x', '\\# x'],
+    ['<!-- c -->&#12;# x', '\\# x'],
+    ['<table><caption>&#10;# x</caption><tr><td>a</td></tr></table>', '\\# x\n\n| a |\n| --- |'],
+    // A prefix written before the text keeps the whitespace, and the marker
+    // with it, as content.
+    ['<ul><li>&#12;# x</li></ul>', '- \f# x'],
+    ['<blockquote>&#12;# x</blockquote>', '> \f# x'],
+    ['<table><tr><td>&#12;# x</td></tr></table>', '| \f# x |\n| --- |'],
+    ['<p>a</p><p>&#12;# x</p>', 'a\n\n\f# x'],
+  ])('escapes a marker behind the document\'s leading whitespace: %j', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
+  // Tailwind's emphasis goes before the escaped text, so the whitespace past
+  // it is no longer the document's lead: a caption's newline stays encoded.
+  it.each([
+    ['<table><caption class="italic">&#10;a</caption><tr><td>a</td></tr></table>', '*&#10;a*\n\n| a |\n| --- |'],
+    ['<table><caption><span class="font-bold">&#10;# x</span></caption><tr><td>a</td></tr></table>', '**&#10;\\# x**\n\n| a |\n| --- |'],
+    ['<p class="font-bold">&#12;# x</p>', '**\f# x**'],
+    ['<p class="italic">&#12;- x</p>', '*\f- x*'],
+    // A class with no generated markup leaves the lead as it is.
+    ['<p class="text-lg">&#12;# x</p>', '\\# x'],
+  ])('keeps the lead behind a generated prefix as content: %j', async (html, expected) => {
+    const options = { plugins: [tailwindPlugin()] }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize, options), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
+  // A list marker after a decoded `\r` leads its line, so an empty heading's
+  // own run stays bare there. Once the heading wrote text, that `\r` and the
+  // run came from the text, which still needs the escape where the marker
+  // opens an item: as a bullet or a 1 after a paragraph line, as any marker
+  // after a blank line or out of a list item or a quote. A top-level `<pre>`
+  // keeps the line in its fence.
+  it.each([
+    ['<code><h2>x&#13;- #</h2>y</code>', '`## x\r- \\# y`'],
+    ['<code><h2>x&#13;1) #</h2>y</code>', '`## x\r1) \\# y`'],
+    ['<code><h2>x&#13;10. #</h2>y</code>', '`## x\r10. # y`'],
+    ['<code><h2>x&#13;&#13;9) #</h2>y</code>', '`## x\r\r9) \\# y`'],
+    ['<ul><li><code><h2>x&#13;9) #</h2>y</code></li></ul>', '- `## x\r9) \\# y`'],
+    ['<blockquote><code><h2>x&#13;9) #</h2>y</code></blockquote>', '> `## x\r9) \\# y`'],
+    ['<ul><li><pre><h2>x&#13;- #</h2>y</pre></li></ul>', '- ```\n  ## x\r- \\# y\n  ```'],
+    ['<code><h2>x&#13;+ #&#13;</h2></code>', '`## x\r+ \\#`'],
+    ['<code><ul><li><h2>x&#13;- #</h2>y</li></ul></code>', '`- ## x\r- \\# y`'],
+    ['<kbd><h2>x&#13;1. #</h2></kbd>', '`## x\r1\\. \\#`'],
+    ['<pre><h2>x&#13;- #</h2>y</pre>', '```\n\n## x\r- #\n\ny\n```'],
+    ['<code>a&#13;<ol><li><h2></h2></li></ol></code>', '`a\r 1. ## `'],
+    ['<b>a&#13;<ul><li><h2>&#13;</h2>x</li></ul></b>', '**a\r - ## \r x**'],
+  ])('keeps a heading\'s text run after a decoded `\\r` and a marker: %j', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunk size ${chunkSize}`).toBe(expected)
+  })
+
   it('widens code delimiters across every stream boundary', async () => {
     for (const html of [
       '<p>before <code>a `b` c</code> after</p>',

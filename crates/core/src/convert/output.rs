@@ -11,6 +11,23 @@ fn starts_with_heading_prefix(value: &str) -> bool {
   hashes > 0 && hashes <= 6 && matches!(bytes.get(hashes), Some(b' ' | b'\t'))
 }
 
+/// Whether the list marker ending at `end` may open an item on a paragraph's
+/// next line: a bullet, or an ordered marker numbered 1.
+fn marker_interrupts_paragraph(bytes: &[u8], end: usize) -> bool {
+  if matches!(bytes[end - 1], b'-' | b'+' | b'*') {
+    return true;
+  }
+  let digits_end = end - 1;
+  let mut index = digits_end;
+  while index > 0 && bytes[index - 1].is_ascii_digit() {
+    index -= 1;
+  }
+  bytes[digits_end - 1] == b'1'
+    && bytes[index..digits_end - 1]
+      .iter()
+      .all(|&byte| byte == b'0')
+}
+
 /// Bytes rejected from a fenced-code info string.
 ///
 /// Two classes, for two different reasons:
@@ -2149,13 +2166,23 @@ impl ConvertState {
       && self.depth_map[TAG_PRE as usize] == 0
       && output.as_deref().is_some_and(|value| value.ends_with('\n'))
     {
-      // A table cell keeps its tabs: the one before a non-first cell is the
-      // column separator, as at the row boundary.
-      if plain_text!(self) && self.depth_map[TAG_TABLE as usize] == 0 {
-        self.trim_trailing_blanks();
-      } else {
-        self.trim_trailing_spaces();
+      // Preformatted source newlines stay content after </pre> closes.
+      if self.last_text_node_contains_whitespace
+        && !self.last_text_node_in_pre
+        && let Some((start, end)) = self.last_text_output_range
+        && end == self.buffer.len()
+      {
+        let start = start.max(self.trim_floor());
+        if let Some(text) = self.buffer.get(start..end) {
+          let end = start + trim_ascii_whitespace_end(text);
+          self.last_content_cache_len = self
+            .last_content_cache_len
+            .saturating_sub(self.buffer.len() - end);
+          self.clamp_item_marker_end(end);
+          self.truncate_buffer(end);
+        }
       }
+      self.trim_before_break();
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
@@ -2251,6 +2278,14 @@ impl ConvertState {
           opener[line..].to_vec()
         },
       });
+    }
+
+    if plain_text!(self)
+      && !enter_is_literal
+      && matches!(tag_id, Some(TAG_TD | TAG_TH))
+      && output.as_deref() == Some("\t")
+    {
+      self.text_cell_start = self.buffer.len();
     }
 
     if tag_id == Some(TAG_IMG)
@@ -2434,6 +2469,10 @@ impl ConvertState {
 
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
+    }
+
+    if tag_id.is_some_and(|id| id.wrapping_sub(TAG_H1) < 6) {
+      self.heading_has_text = false;
     }
 
     // Clean: track heading start for slug collection
@@ -3143,7 +3182,13 @@ impl ConvertState {
     {
       self.write_emphasis_exit(is_inline, configured_new_lines, output);
     } else {
-      self.write_output(false, is_inline, configured_new_lines, effective, false);
+      self.write_output(
+        false,
+        is_inline,
+        configured_new_lines,
+        effective,
+        has_override,
+      );
     }
     if consumes_caption_boundary {
       if !is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR)) {
@@ -3365,6 +3410,7 @@ impl ConvertState {
     text: &str,
     hazard: bool,
     inside_raw_html_block: bool,
+    text_leads: bool,
     scratch: &mut String,
     ordered_digits: u8,
   ) -> bool {
@@ -3377,7 +3423,7 @@ impl ConvertState {
     {
       self.gfm_escape_slow_path_calls += 1;
     }
-    self.escape_gfm_text_into(text, scratch, ordered_digits)
+    self.escape_gfm_text_into(text, text_leads, scratch, ordered_digits)
   }
 
   #[inline(always)]
@@ -3399,6 +3445,9 @@ impl ConvertState {
     depth: usize,
     index: usize,
   ) {
+    if !self.heading_has_text && !text.bytes().all(|byte| byte.is_ascii_whitespace()) {
+      self.heading_has_text = true;
+    }
     if !self.open_markers.is_empty() || self.held_break_bytes != 0 {
       let bytes = text.as_bytes();
       if let Some(first) = bytes.iter().position(|&b| !is_whitespace(b)) {
@@ -3435,8 +3484,12 @@ impl ConvertState {
         }
       }
     }
+    let start = self.buffer.len().checked_sub(self.last_content_cache_len);
     self.last_text_node_contains_whitespace = contains_whitespace;
+    self.last_text_node_in_pre = self.depth_map[TAG_PRE as usize] > 0;
+    self.last_text_output_range = start.map(|start| (start, self.buffer.len()));
     self.has_last_text_node = true;
+    self.last_text_node_held = false;
     self.break_after_last_text = false;
     self.last_text_node_depth = depth;
     self.last_text_node_index = index;
@@ -3495,11 +3548,12 @@ impl ConvertState {
     let hazard = ordered_digits > 0
       || has_inline_gfm_hazard
       || context_hazard
-      || self.starts_with_gfm_block_candidate(text);
+      || self.starts_with_gfm_block_candidate(text, true);
     let mut text = if self.escape_text_node(
       text,
       hazard,
       inside_raw_html_block,
+      true,
       &mut escape_scratch,
       ordered_digits,
     ) {
@@ -3799,6 +3853,9 @@ impl ConvertState {
     let in_quote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
     let context_has_gfm_hazard =
       |text: &str| !inside_raw_html_block && context_gfm_hazard(text, in_table, in_link, in_quote);
+    // A generated prefix goes before the escaped text, so the text no longer
+    // starts the document's first line.
+    let text_leads = generated_prefix.is_none_or(str::is_empty);
     let mut escape_scratch = std::mem::take(&mut self.escape_scratch);
     let ordered_digits = if matches!(last_char, Some(b'0'..=b'9'))
       && matches!(text.as_bytes().first(), Some(b'0'..=b'9' | b'.' | b')'))
@@ -3819,11 +3876,12 @@ impl ConvertState {
       && (ordered_digits > 0
         || has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
-        || self.starts_with_gfm_block_candidate(text));
+        || self.starts_with_gfm_block_candidate(text, text_leads));
     let mut text = if self.escape_text_node(
       text,
       hazard,
       inside_raw_html_block,
+      text_leads,
       &mut escape_scratch,
       ordered_digits,
     ) {
@@ -3961,7 +4019,13 @@ impl ConvertState {
 
   /// Escape GFM syntax into `out`; returns false and leaves `out` alone if none is needed.
   #[inline]
-  fn escape_gfm_text_into(&self, text: &str, out: &mut String, mut ordered_digits: u8) -> bool {
+  fn escape_gfm_text_into(
+    &self,
+    text: &str,
+    text_leads: bool,
+    out: &mut String,
+    mut ordered_digits: u8,
+  ) -> bool {
     let in_table = self.depth_map[TAG_TABLE as usize] > 0;
     let in_link = self.depth_map[TAG_A as usize] > 0;
     let in_blockquote = self.depth_map[TAG_BLOCKQUOTE as usize] > 0;
@@ -3977,6 +4041,14 @@ impl ConvertState {
     let mut escaped = false;
     let mut copied_until = 0usize;
     let mut index = 0usize;
+    // The document's leading trim drops all whitespace before the first line,
+    // so a marker behind any run of it still starts that line. Whitespace-only
+    // text holds no marker, which keeps it off the buffer scan.
+    let rest = text.trim_start();
+    if text_leads && !rest.is_empty() && self.in_document_lead() {
+      index = text.len() - rest.len();
+      line_indent = Some(0);
+    }
 
     while index < bytes.len() {
       let byte = bytes[index];
@@ -4045,13 +4117,13 @@ impl ConvertState {
             end - index <= 6 && Self::is_markdown_marker_whitespace(bytes.get(end).copied());
         } else if byte == b'-' || byte == b'+' {
           should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied())
-            || (byte == b'-' && Self::is_dash_line(&bytes[index..]));
+            || (byte == b'-' && Self::is_dash_line::<true>(&bytes[index..]));
         } else if byte == b'>' {
           should_escape = true;
         } else if byte == b'=' {
           // A node ending inside the run still escapes, since inline nodes can
           // split one setext underline.
-          should_escape = Self::is_equals_line(&bytes[index..]);
+          should_escape = Self::is_equals_line::<true>(&bytes[index..]);
         }
       } else if !should_escape && ordered_digits > 0 && (byte == b'.' || byte == b')') {
         should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied());
@@ -4095,15 +4167,31 @@ impl ConvertState {
   }
 
   #[inline]
-  fn starts_with_gfm_block_candidate(&self, text: &str) -> bool {
+  fn starts_with_gfm_block_candidate(&self, text: &str, text_leads: bool) -> bool {
     // Text-side reject first: prose that cannot open a block skips the buffer
     // scan entirely, which is most text nodes.
     match text.as_bytes().first() {
-      Some(b' ' | b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9') => {}
-      _ => return false,
+      Some(b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9') => {}
+      Some(_) => {
+        // Only a marker can follow the leading whitespace, which also keeps
+        // whitespace-only text off the buffer scan. Before the first line the
+        // document's leading trim drops any run of it, not just spaces.
+        let rest = text.trim_start();
+        if !matches!(
+          rest.as_bytes().first(),
+          Some(b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9')
+        ) {
+          return false;
+        }
+        let lead = text_leads && self.in_document_lead();
+        if lead || text.as_bytes()[0] != b' ' {
+          return lead;
+        }
+      }
+      None => return false,
     }
     let Some(mut indent) = self.markdown_line_indent() else {
-      return false;
+      return text_leads && self.in_document_lead();
     };
     for byte in text.bytes() {
       if byte == b' ' && indent < 3 {
@@ -4126,9 +4214,11 @@ impl ConvertState {
   #[inline(never)]
   fn escape_trailing_heading_hashes(&mut self) {
     let bytes = self.buffer.as_bytes();
-    // Cheap reject: almost no heading ends in `#`.
+    // Cheap reject: almost no heading ends in `#`. The run ends where the trims
+    // leave the line, so skip what they take: a form feed or a line end there
+    // still makes the run the closing sequence.
     let mut end = bytes.len();
-    while end > 0 && matches!(bytes[end - 1], b' ' | b'\t') {
+    while end > 0 && matches!(bytes[end - 1], b' ' | b'\t' | b'\n' | b'\x0C' | b'\r') {
       end -= 1;
     }
     if end == 0 || bytes[end - 1] != b'#' {
@@ -4139,8 +4229,13 @@ impl ConvertState {
       marker -= 1;
     }
     let trailing_space = bytes[bytes.len() - 1] == b' ';
+    // A line end after the run leaves it on an earlier line: still never a
+    // closing sequence, but its spaces are not the marker's to trim.
+    let own_line = !bytes[end..]
+      .iter()
+      .any(|&byte| matches!(byte, b'\n' | b'\r'));
     if self.marker_opens_block_line(marker) {
-      if trailing_space {
+      if trailing_space && own_line {
         self.trim_trailing_spaces();
       }
       return;
@@ -4148,12 +4243,69 @@ impl ConvertState {
     // Past the block lead, only a run after whitespace closes the heading. That
     // includes a run right after the opening prefix and its space. Inside a code
     // fence the heading is code, where a backslash would be literal text.
-    if marker > 0
-      && matches!(self.buffer.as_bytes()[marker - 1], b' ' | b'\t')
-      && !self.in_pre_code_fence()
-    {
-      self.replace_code_span_content(marker..marker, "\\");
+    let bytes = self.buffer.as_bytes();
+    if marker == 0 || !matches!(bytes[marker - 1], b' ' | b'\t') {
+      return;
     }
+    // A list marker after a decoded `\r` also leads its line, which
+    // `opens_block_line` does not read, so the run of an empty heading stays
+    // its own. Once the heading wrote text, that `\r` came from the text and
+    // so did the run. In a list item or a quote the unindented line leaves
+    // the container, a `<pre>` fence included, so the marker opens an item and
+    // the run needs its escape. At the top level a fence keeps the line, and a
+    // marker that cannot open an item after the paragraph line leaves it text.
+    let mut lead = marker;
+    while lead > 0 && bytes[lead - 1] == b' ' {
+      lead -= 1;
+    }
+    let in_container =
+      self.depth_map[TAG_LI as usize] != 0 || self.depth_map[TAG_BLOCKQUOTE as usize] != 0;
+    let leads_line =
+      lead > 0 && self.list_marker_line_start(bytes, lead, self.pending_marker_indent());
+    if leads_line
+      && (!self.heading_has_text
+        || (!in_container
+          && (self.depth_map[TAG_PRE as usize] != 0 || !self.marker_opens_item(bytes, lead))))
+    {
+      return;
+    }
+    // A marker line that left the container left the fence too.
+    if self.in_pre_code_fence() && !(leads_line && in_container) {
+      return;
+    }
+    self.replace_code_span_content(marker..marker, "\\");
+  }
+
+  /// Whether the list marker ending at `end`, which leads its line, opens an
+  /// item there. After a paragraph line only a bullet or an ordered marker
+  /// numbered 1 does; after a blank line any marker does.
+  fn marker_opens_item(&self, bytes: &[u8], end: usize) -> bool {
+    if marker_interrupts_paragraph(bytes, end) {
+      return true;
+    }
+    let mut index = end - 1;
+    while index > 0 && bytes[index - 1].is_ascii_digit() {
+      index -= 1;
+    }
+    while index > 0 && bytes[index - 1] == b' ' {
+      index -= 1;
+    }
+    // Step over the line end before the marker, a `\r\n` as one.
+    if index > 0 && bytes[index - 1] == b'\n' {
+      index -= 1;
+      if index > 0 && bytes[index - 1] == b'\r' {
+        index -= 1;
+      }
+    } else if index > 0 && bytes[index - 1] == b'\r' {
+      index -= 1;
+    }
+    while index > 0 && matches!(bytes[index - 1], b' ' | b'\t') {
+      index -= 1;
+    }
+    if index == 0 {
+      return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
+    }
+    matches!(bytes[index - 1], b'\n' | b'\r')
   }
 
   /// Whether output lands inside the code block of a `<pre>` fence; see
@@ -4684,20 +4836,31 @@ impl ConvertState {
     }
   }
 
+  /// Only a space or a tab ends a marker in CommonMark, but the escape takes a
+  /// form feed too: a break or the block's end trims it with the rest of the
+  /// trailing whitespace, which leaves the marker ending its line.
   #[inline]
   fn is_markdown_marker_whitespace(byte: Option<u8>) -> bool {
-    matches!(byte, None | Some(b' ' | b'\t' | b'\n' | b'\r'))
+    matches!(byte, None | Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0C'))
+  }
+
+  /// Whether `byte` is a blank on a marker line. The escape passes
+  /// `FORM_FEED`, since a break or the block's end can trim a form feed; the
+  /// wrap guard counts only spaces and tabs.
+  #[inline]
+  fn is_marker_line_blank<const FORM_FEED: bool>(byte: u8) -> bool {
+    byte == b' ' || byte == b'\t' || (FORM_FEED && byte == b'\x0C')
   }
 
   /// A line of only `-` and blanks is a list marker, a thematic break, or a
   /// setext underline, so its leading `-` always needs an escape.
   #[inline]
-  fn is_dash_line(value: &[u8]) -> bool {
+  fn is_dash_line<const FORM_FEED: bool>(value: &[u8]) -> bool {
     for &byte in value {
       if byte == b'\n' || byte == b'\r' {
         break;
       }
-      if byte != b'-' && byte != b' ' && byte != b'\t' {
+      if byte != b'-' && !Self::is_marker_line_blank::<FORM_FEED>(byte) {
         return false;
       }
     }
@@ -4707,13 +4870,13 @@ impl ConvertState {
   /// A `=` run followed only by blanks is a setext underline; blanks inside
   /// the run make it plain text.
   #[inline]
-  fn is_equals_line(value: &[u8]) -> bool {
+  fn is_equals_line<const FORM_FEED: bool>(value: &[u8]) -> bool {
     let run = value.iter().take_while(|&&byte| byte == b'=').count();
     for &byte in &value[run..] {
       if byte == b'\n' || byte == b'\r' {
         break;
       }
-      if byte != b' ' && byte != b'\t' {
+      if !Self::is_marker_line_blank::<FORM_FEED>(byte) {
         return false;
       }
     }
@@ -4744,6 +4907,19 @@ impl ConvertState {
       index += 1;
     }
     index > start && value.get(index) == Some(&b';')
+  }
+
+  /// Whether everything buffered is whitespace the document's leading trim
+  /// drops, so the next visible text starts the first line at column zero. A
+  /// quote writes its prefix before that text, which keeps the whitespace.
+  /// Scans only the buffer's trailing whitespace, so callers ask only for text
+  /// with a visible byte: appending it ends the run the next call would scan.
+  #[inline]
+  fn in_document_lead(&self) -> bool {
+    !self.has_streamed_output
+      && !self.preserve_leading_whitespace
+      && self.depth_map[TAG_BLOCKQUOTE as usize] == 0
+      && self.buffer.trim_end().is_empty()
   }
 
   /// Current leading-space count when a GFM block marker may start here.
@@ -4995,6 +5171,26 @@ impl ConvertState {
       // buffer wherever a drain has already cut the front, and the reach-back
       // trim's `cache_len <= buf_len` guard then skips a retraction one-shot
       // performs, keeping block spacing an empty element wrote.
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
+      self.truncate_buffer(trimmed_len);
+    }
+  }
+
+  /// A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+  /// line feed, which ends block spacing or an earlier break and so stays. The
+  /// run is the same whatever the text's source whitespace; U+000B is content.
+  fn trim_before_break(&mut self) {
+    let floor = self.trim_floor().max(self.text_cell_start);
+    if self.buffer.len() > floor {
+      let bytes = self.buffer.as_bytes();
+      let mut trimmed_len = bytes.len();
+      while trimmed_len > floor && matches!(bytes[trimmed_len - 1], b' ' | b'\t' | b'\x0C' | b'\r')
+      {
+        trimmed_len -= 1;
+      }
       self.last_content_cache_len = self
         .last_content_cache_len
         .saturating_sub(self.buffer.len() - trimmed_len);
@@ -5751,8 +5947,8 @@ impl ConvertState {
   #[cold]
   fn is_setext_marker_run(bytes: &[u8]) -> bool {
     match bytes[0] {
-      b'-' => Self::is_dash_line(bytes),
-      b'=' => Self::is_equals_line(bytes),
+      b'-' => Self::is_dash_line::<false>(bytes),
+      b'=' => Self::is_equals_line::<false>(bytes),
       _ => false,
     }
   }
@@ -6700,6 +6896,11 @@ impl ConvertState {
     closes_emphasis: bool,
   ) {
     let output_str = output.unwrap_or("");
+    // Structural output ends the source text range, even when its cached
+    // content length remains available to other spacing rules.
+    if configured_new_lines > 0 || !output_str.is_empty() {
+      self.last_text_output_range = None;
+    }
     if is_enter {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
@@ -6865,6 +7066,13 @@ impl ConvertState {
     let mut new_lines = configured_new_lines.saturating_sub(last_new_lines);
 
     if new_lines > 0 {
+      // A tail held past a transparent exit ends here: kept, a later trim
+      // would take this boundary's output for that tail.
+      if self.last_text_node_held {
+        self.last_text_node_contains_whitespace = false;
+        self.has_last_text_node = false;
+        self.last_text_node_held = false;
+      }
       // An empty buffer at true document start has no preceding block to
       // separate from, so the leading block newlines are suppressed. Mid-stream
       // the buffer can be empty only because earlier output was already yielded
@@ -6980,8 +7188,13 @@ impl ConvertState {
             }
           }
         }
-        self.last_text_node_contains_whitespace = false;
-        self.has_last_text_node = false;
+        // Transparent exits leave the source tail available to an enclosing delimiter.
+        if plain_text!(self) || is_enter || !is_inline || literal || !output_str.is_empty() {
+          self.last_text_node_contains_whitespace = false;
+          self.has_last_text_node = false;
+        } else {
+          self.last_text_node_held = true;
+        }
       }
 
       if is_enter
@@ -7799,7 +8012,8 @@ mod tests {
     let html = format!("<p>x{}y</p>", "<br>&#9;".repeat(4096));
     assert_eq!(state.process_html(&html), html.len());
     let out = state.get_markdown_chunk();
-    assert!(out.starts_with("x  \n\t"), "{:.20}", out);
+    // Each break takes its preceding tab; the final tab belongs to the text.
+    assert_eq!(out, format!("x{}\ty", "  \n".repeat(4096)));
     assert!(
       state.break_run_scanned <= html.len(),
       "read {} bytes for {} of input",
