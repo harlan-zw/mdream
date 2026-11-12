@@ -878,6 +878,26 @@ describe.each(engines)('links $name', (engineConfig) => {
     }
   })
 
+  it('ignores a base href longer than 2048 bytes', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const atLimit = `https://cdn.example/${'a'.repeat(2027)}/`
+    expect(htmlToMarkdown(`<base href="${atLimit}"><a href="x">t</a>`, { engine })).toBe(`[t](${atLimit}x)`)
+    // Measured in UTF-8 bytes: 1013 two-byte chars plus one byte reach 2048, one more char passes it.
+    const wideAtLimit = `https://cdn.example/${'é'.repeat(1013)}a/`
+    expect(htmlToMarkdown(`<base href="${wideAtLimit}"><a href="x">t</a>`, { engine })).toBe(`[t](${wideAtLimit}x)`)
+    expect(htmlToMarkdown(`<base href="https://cdn.example/${'é'.repeat(1014)}/"><a href="x">t</a>`, { engine })).toBe('[t](x)')
+    // An unusable first base also blocks a later one.
+    const html = `<base href="https://cdn.example/${'a'.repeat(2028)}/"><base href="https://ignored.example/"><a href="x">t</a> <img src="y.png">`
+    expect(htmlToMarkdown(html, { engine })).toBe('[t](x) ![](y.png)')
+    expect(htmlToMarkdown(html, { engine, origin: 'https://example.com/doc/' }))
+      .toBe('[t](https://example.com/doc/x) ![](https://example.com/doc/y.png)')
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe('t y.png')
+    expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe('<a href="x">t</a> <img src="y.png" alt="">')
+    // The limit applies after resolution against the origin.
+    expect(htmlToMarkdown(`<base href="/${'d'.repeat(2028)}/"><a href="x">t</a>`, { engine, origin: 'https://example.com/doc/' }))
+      .toBe('[t](https://example.com/doc/x)')
+  })
+
   it('uses a base captured before filtering or main-content isolation', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<head><base href="/docs/"></head><main><a href="page">Link</a></main>'
