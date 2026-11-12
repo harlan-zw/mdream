@@ -51,6 +51,7 @@ import {
   TAG_SCRIPT,
   TAG_SECTION,
   TAG_SELECT,
+  TAG_SPAN,
   TAG_STYLE,
   TAG_SUMMARY,
   TAG_TABLE,
@@ -694,6 +695,10 @@ export interface ParseState {
   leadingBlankAncestors?: ElementNode[]
   /** Output state whose `options.origin` the first usable `<base href>` replaces. */
   urlBaseTarget?: { options: EngineOptions }
+  /** Output state counting open elements, other than `<span>`, that collapse block spacing. */
+  collapseDepthTarget?: { collapseNonSpanDepth: number }
+  /** Open elements counted in `collapseDepthTarget`, innermost last. */
+  collapseCountedNodes?: ElementNode[]
   /** Only the first `<base href>` counts, even when it is not usable. */
   baseHrefSeen?: boolean
   /**
@@ -1885,6 +1890,12 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   }
   if (tagId === TAG_OL || tagId === TAG_UL)
     state.listItemCounts!.pop()
+  // Undo what the opening counted: a plugin may have swapped the handler since.
+  const counted = state.collapseCountedNodes
+  if (counted?.length && counted[counted.length - 1] === node) {
+    counted.pop()
+    state.collapseDepthTarget!.collapseNonSpanDepth--
+  }
 
   state.depth--
   state.endTagClosedNothing = false
@@ -2318,6 +2329,16 @@ function processOpeningTag(
   // processAttributes hooks are handled at the processor level
 
   handleEvent({ type: NodeEventEnter, node: tag })
+
+  // Count after the enter event, whose processAttributes hooks may replace the
+  // handler, and record the node so its close undoes exactly this count. A hook
+  // on a later descendant that swaps this element's handler while it is open is
+  // not followed: the count keeps what this enter saw.
+  const collapseTarget = state.collapseDepthTarget
+  if (collapseTarget && tag.tagHandler?.collapsesInnerWhiteSpace && tag.tagId !== TAG_SPAN && !tag.excludedFromMarkdown) {
+    collapseTarget.collapseNonSpanDepth++
+    ;(state.collapseCountedNodes ||= []).push(tag)
+  }
 
   const parentNode = tag
   parentNode.currentWalkIndex = 0

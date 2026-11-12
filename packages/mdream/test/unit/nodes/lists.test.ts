@@ -3,6 +3,68 @@ import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
 
 describe.each(engines)('lists $name', (engineConfig) => {
   it.each([
+    ['<ul><li><ol><li>lead<br><em>x<br><br></em><em> </em><em>x&#10;</em><em></em><ul><li><br></li><li>z</li></ul><b></b></li></ol></li></ul>', '-\n  1. lead  \n     *x  \n       \n     * *x\n*\n     -   \n     - z'],
+    ['<ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-   \n    \n  *x\n*\n\n  - \n    > q'],
+    ['<ul><li><br><br><em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  *x\n*\n\n  -'],
+    ['<ul><li>&#10;<br><em>x&#10;</em><ul><li></li></ul></li></ul>', '- \n  \n  *x\n*\n\n  -'],
+    ['<ul><li><br><br>a&#10;<em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  a\n*x\n*\n\n  -'],
+    ['<ul><li><br><br>a<br><em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  a  \n  *x\n*\n\n  -'],
+    ['<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>', '-\n  - y  \n    *x  \n      \n    *  \n    1.   \n    2.'],
+  ])('keeps lone closers after closed items and hard breaks: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '- *x  \n  *\n\n  - \n    > q'],
+    ['<ol><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '1. *x  \n   *\n\n   - \n     > q'],
+    ['lead<br><ul><li> <ol><li><br></li><li><em>x<br></em><ul><li><blockquote>q</blockquote></li><li>z</li></ul></li></ol></li></ul>', 'lead  \n\n-\n  1.   \n  2. *x  \n     *\n\n     - \n       > q\n     - z'],
+    ['<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-\n  - \n    > q'],
+    ['<ol start="10"><li><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10. *x\r\n*\n    - \n      > q'],
+    ['<blockquote><ul><li><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></blockquote>', '> - *x\r\n> *\n>   - \n>     > q'],
+    ['<ul><li><blockquote><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></blockquote></li></ul>', '- \n  > *x\r\n  > *\n  >\n  > - \n  >   > q'],
+    ['<ul><li>&#13;&#10;<em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '- \r\n*x\r\n*\n\n  - \n    > q'],
+    ['<ul><li><blockquote><ol start="10"><li><em>x<br></em><ol><li><br></li></ol></li></ol></blockquote></li></ul>', '- \n  > 10. *x  \n  >     *\n  >\n  >     1.'],
+    ['<ul><li><blockquote><ol start="10"><li><em>x&#13;&#10;</em><ol><li><br></li></ol></li></ol></blockquote></li></ul>', '- \n  > 10. *x\r\n  > *\n  >     1.'],
+    ['<ul><li><blockquote><ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul></blockquote></li></ul>', '- \n  > - *x  \n  >   *\n  >\n  >   - \n  >     > q'],
+    ['<ol start="10"><li>a&#10;<em>b&#10;</em><br><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10. a\n*b\n*  \n    - \n      > q'],
+    ['<ol start="10"><li>a&#13;&#10;<em>x&#10;&#10;</em><br><ol><li></li></ol>z</li></ol>', '10. a\r\n*x\n\n*  \n    1.\n\n    z'],
+    ['<ul><li><em>&#13;y&#10;</em><ul><li><br></li><li>z</li></ul></li></ul>', '- *\ry\n*\n\n  -   \n  - z'],
+    ['<p>lead</p><em><em>x<br>&#13;&#10;</em>&#13;<ol start="10"><li><blockquote>q</blockquote></li><li>z</li></ol>z</em>', 'lead\n\n**x  \n\r\n*\r\n\n10. \n    > q 11. z z*'],
+  ])('reads an emphasis closer alone on its line as no parent marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ol start="10"><li><br><em>x&#10;</em><ul><li></li></ul><p>t</p></li></ol>', '10.   \n    *x\n*\n    -\n\n    t'],
+    ['<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *x\n*\n    - \n      > q'],
+    ['<ol start="123456789"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '123456789.   \n           *x\n*\n           - \n             > q'],
+    ['<blockquote><ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>', '> 10.   \n>     *x\n> *\n>     - \n>       > q'],
+    ['<ul><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-   \n  *x\n*\n  - \n    > q'],
+    ['<ul><li><br><em>x&#10;</em><ol><li><br></li></ol></li></ul>', '-   \n  *x\n*\n  1.'],
+    ['<ol start="10"><li><br><em>a&#10;b&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *a\nb\n*\n    - \n      > q'],
+    ['a<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', 'a\n\n10.   \n    *x\n*\n    - \n      > q'],
+    ['<ol start="10"><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n      \n    *x\n*\n    - \n      > q'],
+    ['<ul><li><ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>', '-\n  -   \n      \n    *x\n*\n    - \n      > q'],
+    ['<ul><li><ul><li><br><br><em>x<br>&#10;</em><ul><li>&#13;</li></ul></li></ul></li></ul>', '-\n  -   \n      \n    *x  \n    \n*\n    -'],
+  ])('reads a lone closer short of the item a bare marker opens as a marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['* ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n* \n    > q'],
+    ['  * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n  * \n    > q'],
+    ['    * ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '*\n    * \n    > q'],
+    ['  + ', '<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '+\n  + \n    > q'],
+    ['* ', '<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '* *x  \n  *\n* \n    > q'],
+  ])('keeps a literal %j item marker as a parent marker: %s', async (enter, html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins: { tagOverrides: { li: { enter } } } })).toBe(expected)
+  })
+
+  it.each([
     ['<ul><li>x<ol start="10"><li>y</li></ol></li></ul>', '- x\n\n  10. y'],
     ['<ul><li><span>x</span><span>z</span><ol start="10"><li>y</li></ol></li></ul>', '- xz\n\n  10. y'],
     ['<ul><li><strong>x</strong><ol start="10"><li>y</li></ol></li></ul>', '- **x**\n\n  10. y'],
@@ -232,6 +294,39 @@ line2</code></pre></li></ol>`
     expect(markdown).toBe('- <mark>`x`</mark>')
   })
 
+  it.each([
+    ['<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>', '-\n  -\n    - \\# h'],
+    ['<ul><li><ul><li><ul><li>1. x</li></ul></li></ul></li></ul>', '-\n  -\n    - 1\\. x'],
+    ['<ol><li><ol><li><ol><li>&gt; q</li></ol></li></ol></li></ol>', '1.\n   1.\n      1. \\> q'],
+    ['<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>', '-\n  -\n    - | a |\n      | --- |'],
+    ['<ul><li><ul><li><ul><li><pre>code</pre></li></ul></li></ul></li></ul>', '-\n  -\n    - ```\n      code\n      ```'],
+    ['<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>', '-\n  -\n    - ***'],
+    ['<ul><li><ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>', '-\n  -\n    - \n      > q'],
+    ['<ol start="10"><li><ol start="10"><li><table><tr><td>a</td></tr></table></li></ol></li></ol>', '10.\n    10. | a |\n        | --- |'],
+  ])('opens a block at a marker nested past three spaces: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li><ul><li></li></ul></li></ul>', '-\n  -'],
+    ['<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-\n  - \n    > q'],
+  ])('keeps a nested item under its parent\'s bare marker: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
+  it.each([
+    ['<ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul>', '- x\n  - a\n- next'],
+    ['<ul><li>x<ul><li>a</li></ul><a id="anchor"></a></li><li>next</li></ul>', '- x\n  - a\n- next'],
+    ['<ol><li>x<ol><li>a</li></ol><span></span><em></em></li><li>next</li></ol>', '1. x\n   1. a\n2. next'],
+    ['<ul><li><em><ul><li>a</li></ul></em>t</li></ul>', '- *  - a*t'],
+    ['<ul><li>x<ul><li>a</li></ul><span></span>tail</li><li>next</li></ul>', '- x\n  - a\n\n  tail\n- next'],
+  ])('keeps a list tight when nothing visible follows its nested list: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('self closing tags in lists', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = `<ul class="hds-term-items"></li>
@@ -415,23 +510,23 @@ describe.each(engines)('blocks around nested pending markers $name', (engineConf
   it.each([
     [
       '<ul><li>a<ul><li></li></ul><h2>h</h2></li></ul>',
-      '- a\n\n  - \n\n  ## h',
+      '- a\n\n  -\n\n  ## h',
     ],
     [
       '<ul><li>a<ul><li>b<ul><li></li></ul><h2>h</h2></li></ul></li></ul>',
-      '- a\n  - b\n\n    - \n\n    ## h',
+      '- a\n  - b\n\n    -\n\n    ## h',
     ],
     [
       '<ul><li>a<ul><li></li></ul><pre>x</pre></li></ul>',
-      '- a\n\n  - \n\n  ```\n  x\n  ```',
+      '- a\n\n  -\n\n  ```\n  x\n  ```',
     ],
     [
       '<ul><li>a<ul><li></li></ul><hr></li></ul>',
-      '- a\n\n  - \n\n  ---',
+      '- a\n\n  -\n\n  ***',
     ],
     [
       '<ul><li>a<ul><li></li></ul><table><tr><th>t</th></tr><tr><td>c</td></tr></table></li></ul>',
-      '- a\n\n  - \n\n  | t |\n  | --- |\n  | c |',
+      '- a\n\n  -\n\n  | t |\n  | --- |\n  | c |',
     ],
   ])('leaves the marker of a closed item: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
@@ -440,7 +535,7 @@ describe.each(engines)('blocks around nested pending markers $name', (engineConf
 
   it('keeps escaping text after a closed item', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('<ul><li>a<ul><li></li></ul># t</li></ul>', { engine })).toBe('- a\n\n  - \\# t')
+    expect(htmlToMarkdown('<ul><li>a<ul><li></li></ul># t</li></ul>', { engine })).toBe('- a\n\n  -\n\n  \\# t')
   })
 })
 
