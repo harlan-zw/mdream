@@ -60,8 +60,7 @@ pub fn html_to_text_result(html: &str, options: HtmlToMarkdownOptions) -> Mdream
 
 /// Input bytes per reserved output byte for a one-shot conversion.
 const OUTPUT_RESERVE_DIVISOR: usize = 3;
-/// Initial output and input capacity of a streaming converter.
-const STREAM_START_CAPACITY: usize = 4096;
+use convert::STREAM_START_CAPACITY;
 const MIN_ONE_SHOT_CAPACITY: usize = 1024;
 const MAX_ONE_SHOT_CAPACITY: usize = 256 * 1024;
 
@@ -161,6 +160,7 @@ impl MarkdownStreamProcessor {
       // terminator in place, rather than recopying it every chunk.
       let consumed = self.state.process_html(&self.buffer);
       self.buffer.drain(..consumed);
+      convert::release_stream_slack(&mut self.buffer);
     }
     self.state.get_markdown_chunk()
   }
@@ -243,6 +243,75 @@ pub mod fuzz_bridge {
     let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
     processor.state.disable_drain = true;
     processor
+  }
+}
+
+#[cfg(test)]
+mod stream_slack {
+  //! An idle stream holds about what it still owes, not its high-water mark.
+  use super::MarkdownStreamProcessor;
+  use crate::convert::{SLACK_FLOOR, STREAM_START_CAPACITY};
+
+  #[test]
+  fn output_buffer_shrinks_after_held_block_drains() {
+    let mut processor = MarkdownStreamProcessor::new(Default::default());
+    let mut out = processor.process_chunk(&format!("<p><strong>{}", "x ".repeat(160_000)));
+    assert!(
+      processor.state.buffer.capacity() > SLACK_FLOOR,
+      "{}",
+      processor.state.buffer.capacity()
+    );
+    out.push_str(&processor.process_chunk("</strong></p><p>after</p>"));
+    assert!(
+      processor.state.buffer.capacity()
+        <= STREAM_START_CAPACITY.max(2 * processor.state.buffer.len()),
+      "capacity {} for {} live bytes",
+      processor.state.buffer.capacity(),
+      processor.state.buffer.len()
+    );
+    out.push_str(&processor.finish());
+    assert!(out.ends_with("x**\n\nafter"), "{}", &out[out.len() - 20..]);
+  }
+
+  #[test]
+  fn carry_buffer_shrinks_after_appended_chunk() {
+    let mut processor = MarkdownStreamProcessor::new(Default::default());
+    processor.process_chunk("<p>a</p><di");
+    assert_eq!(processor.buffer, "<di");
+    processor.process_chunk(&format!("v>{}</div><sp", "y".repeat(256 * 1024)));
+    assert_eq!(processor.buffer, "<sp");
+    assert!(
+      processor.buffer.capacity() <= STREAM_START_CAPACITY.max(2 * processor.buffer.len()),
+      "{}",
+      processor.buffer.capacity()
+    );
+  }
+
+  /// A working set under the floor is not shrunk and regrown on every drain.
+  #[test]
+  fn small_working_set_keeps_capacity_across_drains() {
+    let html = format!(
+      "<h2>Intro</h2><blockquote>{}</blockquote>",
+      "<p>Words in a paragraph.</p>".repeat(4096)
+    );
+    let mut processor = MarkdownStreamProcessor::new(Default::default());
+    let (mut out, mut peak) = (String::new(), 0);
+    for chunk in html.as_bytes().chunks(1024) {
+      out.push_str(&processor.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      let capacity = processor.state.buffer.capacity();
+      assert!(capacity >= peak, "capacity fell from {peak} to {capacity}");
+      peak = capacity;
+    }
+    assert!(
+      peak > 4096,
+      "the held quote never outgrew the start capacity: {peak}"
+    );
+    out.push_str(&processor.finish());
+    assert!(
+      out.ends_with("> Words in a paragraph."),
+      "{}",
+      &out[out.len() - 30..]
+    );
   }
 }
 
@@ -582,7 +651,7 @@ mod fast_path_parity {
   use super::fast_path_diff::{convert, stream};
   use super::types::{
     CleanConfig, FilterConfig, FrontmatterConfig, HtmlToMarkdownOptions, IsolateMainConfig,
-    OutputFormat, PluginConfig, TailwindConfig,
+    OutputFormat, PluginConfig, TagOverrideConfig, TailwindConfig,
   };
 
   fn option_sets() -> Vec<(&'static str, HtmlToMarkdownOptions, OutputFormat)> {
@@ -604,6 +673,23 @@ mod fast_path_parity {
     vec![
       ("default", base(), OutputFormat::Markdown),
       ("text", base(), OutputFormat::Text),
+      ("text minimal", minimal(), OutputFormat::Text),
+      (
+        "text capped",
+        HtmlToMarkdownOptions {
+          max_node_bytes: 512,
+          ..Default::default()
+        },
+        OutputFormat::Text,
+      ),
+      (
+        "text wrap",
+        HtmlToMarkdownOptions {
+          wrap_width: 40,
+          ..Default::default()
+        },
+        OutputFormat::Text,
+      ),
       ("html", base(), OutputFormat::Html),
       ("minimal", minimal(), OutputFormat::Markdown),
       (
@@ -642,6 +728,15 @@ mod fast_path_parity {
     "<pre><code>a  b</code></pre><p>x<br>y</p><figure><img alt=a><figcaption>cap</figcaption></figure>",
     "<p>&amp; &lt;b&gt; &#91;x&#93; caf\u{e9} \u{4e2d}\u{6587}</p><h2> spaced  heading </h2><hr>",
     "<div><p>a</p>  <p>b</p></div><p>   </p><span> </span>trailing <em> </em>end",
+    // Several text nodes in `<pre>`: leading newlines, entities, a blank `<pre>`.
+    "<pre><code>\n\n  let a<span class=\"k\">=</span>&amp;b &lt;c&gt; 1<span> </span>2\n\n  </code></pre><pre>   </pre><p>x</p>",
+    // The same `<pre>` text inside a list item, a quote and a table cell.
+    "<ul><li><pre><code>one\n  <span>two</span></code></pre></li></ul><blockquote><pre>q <b>r</b> 2.</pre></blockquote><table><tr><td><pre><code>c <i>d</i></code></pre></td></tr></table>",
+    "<pre>1<span>2</span>&#50;<b>)</b>\n3<span>.4</span><div>x</div> y &amp; <span>z</span></pre>",
+    "<p>a <my-w>b <x-y>c</x-y> d</my-w> e</p><h2>Head <x-h>h</x-h></h2><ul><li><x-l>one</x-l></li><li>two <x-l> three </x-l></li></ul>",
+    "<blockquote><svg><path d=\"M0\"/></svg> q <x-q>r</x-q></blockquote><table><tr><td><x-c>c</x-c></td><td> <x-c> d </x-c></td></tr></table>",
+    "<pre><x-code>a  b</x-code></pre><p>z <x-w>one<x-w>two</x-w>three</x-w></p><details><summary><x-s>s</x-s></summary>body <x-b> b</x-b></details>",
+    "<p><strong>a<x-w>b</strong>c</x-w>d <x-open>unclosed <em>e</em></p><p>after</p>",
   ];
 
   fn fixtures() -> Vec<String> {
@@ -688,6 +783,447 @@ mod fast_path_parity {
             slow == fast,
             "stream mismatch: options={name} doc={i} chunk={size}"
           );
+        }
+      }
+    }
+  }
+
+  /// Text that isolate-main or the filter excludes skips the copy and decode
+  /// on the plain fast path. Each document must match the general path, both
+  /// one-shot and streamed at every chunk size, with entities and whitespace
+  /// inside excluded text and text right after an excluded subtree.
+  #[test]
+  fn excluded_text_fast_path_matches_general_path() {
+    let filter = |exclude: &[&str]| FilterConfig {
+      exclude: Some(exclude.iter().map(|tag| (*tag).to_string()).collect()),
+      ..Default::default()
+    };
+    let option_sets = [
+      (
+        "isolate",
+        HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            isolate_main: Some(IsolateMainConfig),
+            ..Default::default()
+          }),
+          ..Default::default()
+        },
+      ),
+      (
+        "filter inline",
+        HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            filter: Some(filter(&["span", "nav"])),
+            ..Default::default()
+          }),
+          ..Default::default()
+        },
+      ),
+      (
+        "isolate+filter",
+        HtmlToMarkdownOptions {
+          plugins: Some(PluginConfig {
+            isolate_main: Some(IsolateMainConfig),
+            filter: Some(filter(&["span", "footer", "b"])),
+            ..Default::default()
+          }),
+          ..Default::default()
+        },
+      ),
+    ];
+    let docs = [
+      // With <main>: excluded nav and footer around the main text.
+      "<nav>Menu &amp; <b>x</b></nav><main><h1>Title</h1><p>a <span>hidden &amp; x</span> <i>b</i> c</p></main><footer>F  &copy;</footer>  tail",
+      // Without <main>: text is skipped until the first heading.
+      "<div><span> skip &amp; me </span>   <h2>Head</h2><p>text &lt;<em>x</em> y</p></div><span>  </span>tail",
+      // Whitespace-only runs and text right after excluded subtrees.
+      "<header>  x  &amp;  </header>  after  <p>  </p>  <b> </b>  <h1>T</h1>\n<p>q &nbsp; r</p>",
+      "<p>one <span>two &amp; three</span> four <b>five</b> <span> </span>six</p>",
+      "<p>a<span> </span>  b</p><div>  <span>   </span> </div>",
+      "<main><p>x</p></main><main><span>y &amp;</span> z</main>",
+    ];
+    for (name, options) in option_sets {
+      for format in [OutputFormat::Markdown, OutputFormat::Text] {
+        for (i, html) in docs.iter().enumerate() {
+          let slow = convert(html, options.clone(), format, false);
+          let fast = convert(html, options.clone(), format, true);
+          assert!(
+            slow == fast,
+            "one-shot mismatch: options={name} format={format:?} doc={i}"
+          );
+          for size in [1, 3, 7, 4096] {
+            let parts = chunks(html, size);
+            let streamed_fast = stream(&parts, options.clone(), format, true);
+            let streamed_slow = stream(&parts, options.clone(), format, false);
+            assert!(
+              streamed_slow == streamed_fast,
+              "stream mismatch: options={name} format={format:?} doc={i} chunk={size}"
+            );
+            assert!(
+              streamed_fast == fast,
+              "stream differs from one-shot: options={name} format={format:?} doc={i} chunk={size}"
+            );
+          }
+        }
+      }
+    }
+  }
+
+  /// Snippets where overridden and plain tags sit side by side: nested inline
+  /// markup, links both inside and around overridden tags, lists, headings,
+  /// code, tables, quotes, images, breaks and empty elements.
+  const OVERRIDE_SNIPPETS: &[&str] = &[
+    "<p>a <em>b</em> c <strong>d</strong> e</p>",
+    "<p><a href=\"/x\">link <em>in</em> text</a> and <em><a href=\"/y\">out</a></em></p>",
+    "<ul><li>one <em>two</em></li><li><strong>three</strong> <a href=\"/z\">four</a></li></ul><ol><li><em>x</em></li></ol>",
+    "<h2>Head <em>er</em></h2><h3><a href=\"/h\">linked</a></h3><blockquote><p>q <em>x</em></p><p>r</p></blockquote>",
+    "<pre><code>a <em>b</em></code></pre><p>inline <code>c <em>d</em></code> end</p>",
+    "<table><tr><th><em>h</em></th><th>h2</th></tr><tr><td><a href=\"/c\">c</a></td><td><strong>d</strong></td></tr></table>",
+    "<p><img src=\"/i.png\" alt=\"pic\"> <em><img src=\"/j.png\" alt=\"\"></em><br><em></em><strong> </strong>end</p>",
+    "<p>x<br>y <em>z</em><br/><strong>w</strong></p>",
+    "<blockquote>Q <em>a</em><blockquote><p><strong>nested</strong></p></blockquote></blockquote><p>after</p>",
+    "<p>para <p>with <p><em>implicit</em></p>",
+    "<div><p>a <a href=\"/d\">b <em>c</em></a></p><p><em>d</em></p></div>",
+    "<p><em>1</em><em>2</em><strong><em>3</em></strong><video><source><em>v</em></video></p>",
+    "<video><em>x</em></video><x-box>boxed <em>and <strong>b</strong></em></x-box><b>bold</b> <i>it</i>",
+    "<p>a <b>bold</b> <x-alias>alias</x-alias> <em>emph</em> <strong><x-box>c</x-box></strong></p>",
+    "<dl><dt><em>t</em></dt><dd>d <a href=\"/q\">q</a></dd></dl><details><summary><em>s</em></summary>body <strong>x</strong></details>",
+    "<p><a href=\"/e\"></a><em></em><a href=\"#frag\">f</a> <a href=\"https://x\"><img alt=\"i\" src=\"a\"></a></p>",
+    "<p>  spaced <em> e </em> <strong>\n s \n</strong>tail</p>",
+    "<p>text <p style=\"x\">paragraph <span><em>sp</em></span></p><hr><li>loose</li>",
+    "<figure><img src=\"f\" alt=\"f\"><figcaption><em>cap</em> words</figcaption></figure><p>after</p>",
+    "<p>a<em>b</em>c<strong>d</strong>e</p>",
+    "<p>&amp; <em>&lt;b&gt;</em> [x] <a href=\"/b\">[bracket]</a> <code>k</code></p>",
+  ];
+
+  /// Override sets for the differential test. Each names one tag or key, so
+  /// every other tag in the document keeps its fast path.
+  fn override_sets() -> Vec<(&'static str, Vec<(String, TagOverrideConfig)>)> {
+    let one = |key: &str, config: TagOverrideConfig| vec![(key.to_string(), config)];
+    vec![
+      ("em wrap", one("em", TagOverrideConfig::wrap("_", "_"))),
+      (
+        "em exit only",
+        one(
+          "em",
+          TagOverrideConfig {
+            exit: Some("!".into()),
+            ..Default::default()
+          },
+        ),
+      ),
+      ("a wrap", one("a", TagOverrideConfig::wrap("<", ">"))),
+      ("code wrap", one("code", TagOverrideConfig::wrap("`", "`"))),
+      (
+        "li inline",
+        one(
+          "li",
+          TagOverrideConfig {
+            is_inline: Some(true),
+            ..Default::default()
+          },
+        ),
+      ),
+      (
+        "p spacing",
+        one(
+          "p",
+          TagOverrideConfig {
+            spacing: Some([1, 1]),
+            ..Default::default()
+          },
+        ),
+      ),
+      (
+        "blockquote enter",
+        one(
+          "blockquote",
+          TagOverrideConfig {
+            enter: Some("Q ".into()),
+            ..Default::default()
+          },
+        ),
+      ),
+      (
+        "strong enter and exit",
+        one(
+          "strong",
+          TagOverrideConfig {
+            enter: Some("*".into()),
+            exit: Some("*".into()),
+            ..Default::default()
+          },
+        ),
+      ),
+      (
+        "video absent from documents",
+        one("video", TagOverrideConfig::wrap("[v]", "[/v]")),
+      ),
+      (
+        "custom key",
+        one("x-box", TagOverrideConfig::wrap("<<", ">>")),
+      ),
+      (
+        "built-in alias",
+        one("b", TagOverrideConfig::alias("strong")),
+      ),
+      (
+        "custom alias",
+        one("x-alias", TagOverrideConfig::alias("em")),
+      ),
+      (
+        "mixed",
+        vec![
+          ("em".into(), TagOverrideConfig::wrap("_", "_")),
+          (
+            "li".into(),
+            TagOverrideConfig {
+              is_inline: Some(true),
+              ..Default::default()
+            },
+          ),
+          (
+            "p".into(),
+            TagOverrideConfig {
+              spacing: Some([1, 1]),
+              ..Default::default()
+            },
+          ),
+          ("x-box".into(), TagOverrideConfig::wrap("<<", ">>")),
+          ("video".into(), TagOverrideConfig::wrap("[v]", "[/v]")),
+        ],
+      ),
+    ]
+  }
+
+  #[test]
+  fn fast_paths_match_general_paths_with_overrides() {
+    for (name, overrides) in override_sets() {
+      for clean in [false, true] {
+        for format in [OutputFormat::Markdown, OutputFormat::Text] {
+          let options = || HtmlToMarkdownOptions {
+            clean: clean.then(CleanConfig::all),
+            plugins: Some(PluginConfig {
+              tag_overrides: Some(overrides.clone()),
+              ..Default::default()
+            }),
+            ..Default::default()
+          };
+          for (i, html) in OVERRIDE_SNIPPETS.iter().enumerate() {
+            let slow = convert(html, options(), format, false);
+            let fast = convert(html, options(), format, true);
+            assert!(
+              slow == fast,
+              "one-shot mismatch: overrides={name} clean={clean} format={format:?} doc={i}"
+            );
+            for size in [7, 4096] {
+              let parts = chunks(html, size);
+              let slow = stream(&parts, options(), format, false);
+              let fast = stream(&parts, options(), format, true);
+              assert!(
+                slow == fast,
+                "stream mismatch: overrides={name} clean={clean} format={format:?} doc={i} chunk={size}"
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /// `<li>` shapes for the item fast path: markers, empty and nested items,
+  /// breaks and blocks that end an item, skipped siblings, and isolated main.
+  const LI_SNIPPETS: &[&str] = &[
+    r#"<ul><li>a</li><li>b</li></ul>"#,
+    r#"<ol start="5"><li>a</li><li>b</li></ol>"#,
+    r#"<ol start="0"><li>a</li></ol>"#,
+    r#"<ol start="999999999999"><li>a</li></ol>"#,
+    r#"<ol><li>a<ol start="3"><li>b</li></ol></li></ol>"#,
+    "<ul><li></li></ul>",
+    "<p>x</p><ul><li></li></ul>",
+    "<div>x<ul><li></li></ul></div>",
+    "<ul><li>   </li><li>x</li></ul>",
+    "<ul><li>a<br></li><li>b</li></ul>",
+    "<ul><li>a<br><br></li></ul>",
+    "<ul><li>a<br><p>b</p></li></ul>",
+    "<ul><li><p>a</p><p>b</p></li><li>c</li></ul>",
+    "<ul><li><h2>x</h2></li>y</ul>",
+    "<ul><li><h2>x</h2></li><li>y</li></ul>",
+    "<ul><li>a<hr></li><li>b</li></ul>",
+    "<ul><li><hr></li></ul>",
+    "<ul><li><blockquote>q</blockquote></li><li>x</li></ul>",
+    "<ul><li><pre><code>x\ny</code></pre></li><li>z</li></ul>",
+    "<ul><li><code>a</li><li>b</code></li></ul>",
+    "<ul><li><em>x</li><li>y</em></ul>",
+    "<ul><li><em></em></li><li>x</li></ul>",
+    r#"<ul><li><a href="x">a</li><li>b</a></li></ul>"#,
+    r##"<ul><li><a href="#"></a></li></ul>"##,
+    "<ul><li>a</li> text <li>b</li></ul>",
+    "<ul><li>a</li><!-- c --><li>b</li></ul>",
+    "<ul><li>a</li><script>x</script><li>b</li></ul>",
+    "<li>a</li><li>b</li>",
+    "<div><li>a</li><li>b</li></div>",
+    "<ul><li><li>x</li></li></ul>",
+    "<table><tr><td><ul><li>a</li><li>b</li></ul></td></tr></table>",
+    r#"<ul><li><img alt="x" src="y"></li></ul>"#,
+    r#"<ul><li><input type="checkbox" checked> task</li></ul>"#,
+    "<ul><li>a<ul><li>b</li></ul></li><li>c</li></ul>",
+    "<ul><li><blockquote><ul><li>q</li></ul></blockquote></li><li>r</li></ul>",
+    r#"<ol><li>a</li><li>b<ol start="2"><li>c</li></ol></li></ol>"#,
+    "<ul><li>a\n</li>\n<li>  b  </li></ul>",
+    "<figure><figcaption><ul><li>x</li></ul></figcaption></figure>",
+    "<details><summary>s</summary><ul><li>x</li></ul></details>",
+    "<address>a</address><ul><li>x</li></ul>",
+    "<main><ul><li>a</li></ul></main><ul><li>b</li></ul>",
+    "<header>h</header><ul><li>a</li></ul><main><ul><li>b</li></ul></main>",
+  ];
+
+  /// Plain `<li>` output must match the general path under every option that
+  /// reaches it: clean, the node-byte cap, isolated main, and a tag override on
+  /// `ul` (li keeps its fast path) or on `li` (li takes the general path).
+  #[test]
+  fn li_fast_path_matches_general_path() {
+    let overrides: [(&str, Vec<(String, TagOverrideConfig)>); 3] = [
+      ("no override", Vec::new()),
+      (
+        "ul override",
+        vec![("ul".into(), TagOverrideConfig::wrap("[", "]"))],
+      ),
+      (
+        "li override",
+        vec![("li".into(), TagOverrideConfig::wrap("(", ")"))],
+      ),
+    ];
+    for (ov_name, ov) in &overrides {
+      for clean in [false, true] {
+        for max_node_bytes in [0, 16, 64] {
+          for isolate_main in [false, true] {
+            for format in [OutputFormat::Markdown, OutputFormat::Text] {
+              let options = || HtmlToMarkdownOptions {
+                clean: clean.then(CleanConfig::all),
+                max_node_bytes,
+                plugins: Some(PluginConfig {
+                  isolate_main: isolate_main.then_some(IsolateMainConfig),
+                  tag_overrides: (!ov.is_empty()).then(|| ov.clone()),
+                  ..Default::default()
+                }),
+                ..Default::default()
+              };
+              for (i, html) in LI_SNIPPETS.iter().enumerate() {
+                let label = format!(
+                  "overrides={ov_name} clean={clean} max={max_node_bytes} \
+                   isolate={isolate_main} format={format:?} doc={i}"
+                );
+                let slow = convert(html, options(), format, false);
+                let fast = convert(html, options(), format, true);
+                assert!(slow == fast, "one-shot mismatch: {label}");
+                for size in [1, 2, 3, 7, 4096] {
+                  let parts = chunks(html, size);
+                  let slow = stream(&parts, options(), format, false);
+                  let fast = stream(&parts, options(), format, true);
+                  assert!(slow == fast, "stream mismatch: {label} chunk={size}");
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /// `<li>` overrides that keep the item fast path (`is_inline` alone) and ones
+  /// that send it to the general path (spacing, enter, exit), alone and with
+  /// overrides on other tags. Fast and general output must match, one-shot and
+  /// streamed, in Markdown and Text.
+  #[test]
+  fn li_override_fast_path_matches_general_path() {
+    let li = |config: TagOverrideConfig| ("li".to_string(), config);
+    let inline = || TagOverrideConfig {
+      is_inline: Some(true),
+      ..Default::default()
+    };
+    let block = || TagOverrideConfig {
+      is_inline: Some(false),
+      ..Default::default()
+    };
+    let spacing = || TagOverrideConfig {
+      spacing: Some([1, 1]),
+      ..Default::default()
+    };
+    let enter = || TagOverrideConfig {
+      enter: Some("(".into()),
+      ..Default::default()
+    };
+    let exit = || TagOverrideConfig {
+      exit: Some(")".into()),
+      ..Default::default()
+    };
+    let all = || TagOverrideConfig {
+      enter: Some("(".into()),
+      exit: Some(")".into()),
+      spacing: Some([0, 0]),
+      is_inline: Some(true),
+      ..Default::default()
+    };
+    let around = || -> Vec<(String, TagOverrideConfig)> {
+      vec![
+        ("ul".into(), TagOverrideConfig::wrap("[", "]")),
+        ("ol".into(), TagOverrideConfig::wrap("{", "}")),
+        ("em".into(), TagOverrideConfig::wrap("_", "_")),
+      ]
+    };
+    let with_around = |mut ovs: Vec<(String, TagOverrideConfig)>, config: TagOverrideConfig| {
+      ovs.push(li(config));
+      ovs.extend(around());
+      ovs
+    };
+    let overrides: Vec<(&str, Vec<(String, TagOverrideConfig)>)> = vec![
+      ("li is_inline", vec![li(inline())]),
+      ("li is_inline false", vec![li(block())]),
+      ("li spacing", vec![li(spacing())]),
+      ("li enter", vec![li(enter())]),
+      ("li exit", vec![li(exit())]),
+      ("li all", vec![li(all())]),
+      (
+        "li is_inline with ul ol em",
+        with_around(Vec::new(), inline()),
+      ),
+      ("li enter with ul ol em", with_around(Vec::new(), enter())),
+      (
+        "li spacing with ul ol em",
+        with_around(Vec::new(), spacing()),
+      ),
+      (
+        "li is_inline with alias elsewhere",
+        vec![
+          li(inline()),
+          ("x-alias".into(), TagOverrideConfig::alias("em")),
+        ],
+      ),
+    ];
+    for (name, ov) in &overrides {
+      for format in [OutputFormat::Markdown, OutputFormat::Text] {
+        for clean in [false, true] {
+          let options = || HtmlToMarkdownOptions {
+            clean: clean.then(CleanConfig::all),
+            plugins: Some(PluginConfig {
+              tag_overrides: Some(ov.clone()),
+              ..Default::default()
+            }),
+            ..Default::default()
+          };
+          for (i, html) in LI_SNIPPETS.iter().enumerate() {
+            let label = format!("overrides={name} clean={clean} format={format:?} doc={i}");
+            let slow = convert(html, options(), format, false);
+            let fast = convert(html, options(), format, true);
+            assert!(slow == fast, "one-shot mismatch: {label}");
+            for size in [1, 3, 7, 4096] {
+              let parts = chunks(html, size);
+              let slow = stream(&parts, options(), format, false);
+              let fast = stream(&parts, options(), format, true);
+              assert!(slow == fast, "stream mismatch: {label} chunk={size}");
+            }
+          }
         }
       }
     }

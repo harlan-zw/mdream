@@ -12,6 +12,85 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
+fn filter_exclude(selectors: &[&str]) -> HtmlToMarkdownOptions {
+  HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig {
+        exclude: Some(selectors.iter().map(|s| (*s).to_string()).collect()),
+        ..Default::default()
+      }),
+      ..Default::default()
+    }),
+    ..Default::default()
+  }
+}
+
+// The filter reads `style` and `hidden` (and `class` for class selectors)
+// without keeping every attribute. A hidden element, or a class-excluded one,
+// must still drop its subtree, in any letter case.
+#[test]
+fn filter_drops_hidden_and_class_excluded_without_other_attributes() {
+  let html = "<p>a</p><div style=\"display: none\">gone</div><div HIDDEN>gone2</div><div STYLE=\"visibility:hidden\">gone3</div><div class=\"ad\">ad</div><p>b</p>";
+  assert_eq!(html_to_markdown(html, filter_exclude(&[".ad"])), "a\n\nb");
+}
+
+// An id or attribute selector can read any attribute, so the filter keeps
+// them all.
+#[test]
+fn filter_id_and_attribute_selectors_still_match() {
+  let html = "<p>a</p><div id=\"promo\">promo</div><div data-x=\"1\">x</div><p>b</p>";
+  assert_eq!(
+    html_to_markdown(html, filter_exclude(&["#promo", "[data-x]"])),
+    "a\n\nb"
+  );
+}
+
+// An anchor is dropped as a whole: no half-written tag when its href is
+// missing or unsafe, and no closing tag either.
+#[test]
+fn html_output_drops_a_rejected_anchor_without_a_partial_tag() {
+  let html = "<p><a href=\"javascript:alert(1)\" title=\"t\">x</a><a title=\"t\">y</a><a href=\"/ok\">z</a></p><h2>Head <a>in</a> <img alt=\"no src\"></h2>";
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    "<p>xy<a href=\"/ok\">z</a></p><h2 id=\"head-in\">Head in </h2>"
+  );
+}
+
+#[test]
+fn html_output_writes_numeric_attributes_and_heading_levels() {
+  let html = "<h6>Deep title</h6><h2>!!!</h2><ol start=\"120\"><li>a</li></ol><table><tr><td colspan=\"12\">w</td></tr></table>";
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    "<h6 id=\"deep-title\">Deep title</h6><h2>!!!</h2><ol start=\"120\"><li>a</li></ol><table><tr><td colspan=\"12\">w</td></tr></table>"
+  );
+}
+
+// A collapsed whitespace run is skipped a machine word at a time. Every run
+// length has to stop exactly on the byte after the run, before a tag and
+// before text, in one shot and when a chunk boundary cuts the run anywhere.
+#[test]
+fn whitespace_runs_of_every_length_collapse_to_one_space() {
+  let mixed = "\n        \t\t\t\t\t\t\t\t \r\n         ";
+  let mut runs: Vec<String> = vec![mixed.to_string()];
+  for filler in [' ', '\t', '\n'] {
+    for len in 1..=20 {
+      runs.push(std::iter::repeat_n(filler, len).collect());
+    }
+  }
+  for run in &runs {
+    let html = format!("<p>a{run}<b>b</b>{run}c{run}</p>{run}<p>d</p>");
+    assert_eq!(convert(&html), "a **b** c\n\nd", "run={run:?}");
+    let one_shot = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut streamed = processor.process_chunk(&html[..split]);
+      streamed.push_str(&processor.process_chunk(&html[split..]));
+      streamed.push_str(&processor.finish());
+      assert_eq!(streamed, one_shot, "run={run:?} split={split}");
+    }
+  }
+}
+
 fn transparent_override(name: &str, is_inline: bool) -> HtmlToMarkdownOptions {
   HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
@@ -9665,6 +9744,20 @@ fn code_fence_grows_past_runs_after_cr() {
       "{html:?}"
     );
   }
+}
+
+#[test]
+fn code_fence_counts_runs_after_lf_and_cr() {
+  // A body with a CR also splits at CR, so a run after it can be the longest one.
+  assert_eq!(
+    convert("<pre>a\n```\r`````\nc</pre><p>d</p>"),
+    "``````\na\n```\r`````\nc\n``````\n\nd"
+  );
+  // A body without a CR splits at LF only and keeps its own longest run.
+  assert_eq!(
+    convert("<pre>a\n````\nc</pre><p>d</p>"),
+    "`````\na\n````\nc\n`````\n\nd"
+  );
 }
 
 #[test]

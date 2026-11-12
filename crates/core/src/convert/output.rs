@@ -88,6 +88,46 @@ static SIMPLE_EMIT_TAG: [bool; MAX_TAG_ID] = {
   table
 };
 
+/// Block tags whose raw HTML region arms the boundary, indexed by tag id. Sized
+/// to `u8` so a lookup needs no bounds check; a compare chain cost more on every
+/// element exit.
+static RAW_HTML_BLOCK_TAG: [bool; 256] = {
+  let mut table = [false; 256];
+  table[TAG_DETAILS as usize] = true;
+  table[TAG_SUMMARY as usize] = true;
+  table[TAG_ADDRESS as usize] = true;
+  table[TAG_DL as usize] = true;
+  table[TAG_DT as usize] = true;
+  table[TAG_DD as usize] = true;
+  table
+};
+
+/// Tags with close work past the depth count: raw HTML blocks, `pre`, lists,
+/// items and quotes. One lookup skips the separate tests for every other tag.
+pub(crate) const CLOSE_NONE: u8 = 0;
+pub(crate) const CLOSE_RAW_BLOCK: u8 = 1;
+pub(crate) const CLOSE_PRE: u8 = 2;
+pub(crate) const CLOSE_OL: u8 = 3;
+pub(crate) const CLOSE_UL: u8 = 4;
+pub(crate) const CLOSE_LI: u8 = 5;
+pub(crate) const CLOSE_BLOCKQUOTE: u8 = 6;
+pub(crate) static CLOSE_TAIL_TAG: [u8; 256] = {
+  let mut table = [CLOSE_NONE; 256];
+  let mut i = 0;
+  while i < 256 {
+    if RAW_HTML_BLOCK_TAG[i] {
+      table[i] = CLOSE_RAW_BLOCK;
+    }
+    i += 1;
+  }
+  table[TAG_PRE as usize] = CLOSE_PRE;
+  table[TAG_OL as usize] = CLOSE_OL;
+  table[TAG_UL as usize] = CLOSE_UL;
+  table[TAG_LI as usize] = CLOSE_LI;
+  table[TAG_BLOCKQUOTE as usize] = CLOSE_BLOCKQUOTE;
+  table
+};
+
 /// Emphasis and strikethrough tags whose default exit closes a delimiter run.
 static EMPHASIS_EXIT_TAG: [bool; MAX_TAG_ID] = {
   let mut table = [false; MAX_TAG_ID];
@@ -298,7 +338,7 @@ const U32_MAX_DIGITS: usize = 10;
 
 /// Append `value` in decimal. `write!` routes each item number through the
 /// formatter; this writes the digits directly.
-fn push_decimal(out: &mut String, mut value: u32) {
+pub(crate) fn push_decimal(out: &mut String, mut value: u32) {
   let mut digits = [0u8; U32_MAX_DIGITS];
   let mut start = U32_MAX_DIGITS;
   loop {
@@ -513,8 +553,18 @@ impl ConvertState {
 
   fn max_line_leading_run(value: &str, marker: u8, indent: &str) -> usize {
     // A parser also ends a line at CR, so a run after one can close the fence.
-    value
-      .split(['\n', '\r'])
+    // A char-set split matches byte by byte and costs more than the memchr-backed
+    // `\n` split on every fence body, so it runs only when a CR is present.
+    if value.contains('\r') {
+      Self::max_run_of_lines(value.split(['\n', '\r']), marker, indent)
+    } else {
+      Self::max_run_of_lines(value.split('\n'), marker, indent)
+    }
+  }
+
+  #[inline(always)]
+  fn max_run_of_lines<'a>(lines: impl Iterator<Item = &'a str>, marker: u8, indent: &str) -> usize {
+    lines
       .map(|line| {
         let line = line.strip_prefix(indent).unwrap_or(line);
         let bytes = line.as_bytes();
@@ -602,9 +652,11 @@ impl ConvertState {
     language: String,
     indent: String,
   ) {
-    let marker_offset = self.buffer[output_start..content_start]
-      .rfind(MARKDOWN_CODE_BLOCK)
-      .expect("code fence opener missing from output");
+    let marker_offset = crate::scan::rfind_bytes(
+      &self.buffer.as_bytes()[output_start..content_start],
+      MARKDOWN_CODE_BLOCK.as_bytes(),
+    )
+    .expect("code fence opener missing from output");
     if !self.fences_unreliable
       && (self
         .stack
@@ -734,8 +786,10 @@ impl ConvertState {
     // document full of quotes pays for this region once.
     let mut quoted = core::mem::take(&mut self.blockquote_scratch);
     quoted.clear();
-    quoted
-      .reserve(content.len() + (frame.list_indent.len() + 2) * (content.matches('\n').count() + 1));
+    quoted.reserve(
+      content.len()
+        + (frame.list_indent.len() + 2) * (crate::scan::count_byte(content.as_bytes(), b'\n') + 1),
+    );
 
     for (index, line) in content.split('\n').enumerate() {
       if index > 0 {
@@ -995,7 +1049,9 @@ impl ConvertState {
         .as_str();
       let mut quoted = core::mem::take(&mut self.blockquote_scratch);
       quoted.clear();
-      quoted.reserve(content.len() + quoted_prefix.len() * content.matches('\n').count());
+      quoted.reserve(
+        content.len() + quoted_prefix.len() * crate::scan::count_byte(content.as_bytes(), b'\n'),
+      );
       let mut rest = content;
       while !rest.is_empty() {
         let (line, remainder) = match crate::scan::find_byte(rest.as_bytes(), b'\n') {
@@ -1045,7 +1101,10 @@ impl ConvertState {
     for frame in self.blockquotes.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
       quoted.clear();
-      quoted.reserve(content.len() + (frame.list_indent.len() + 2) * content.matches('\n').count());
+      quoted.reserve(
+        content.len()
+          + (frame.list_indent.len() + 2) * crate::scan::count_byte(content.as_bytes(), b'\n'),
+      );
       for line in content.split_inclusive('\n') {
         let line = line.strip_suffix('\n').unwrap_or(line);
         quoted.push_str(&frame.list_indent);
@@ -1126,20 +1185,74 @@ impl ConvertState {
     self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block()
   }
 
-  /// State every fast path needs: Markdown output, no overrides or pending fence, no caption.
+  /// State every simple emitter needs in Markdown and in Text: no pending
+  /// fence, no caption, and fast paths on.
   #[inline(always)]
-  fn common_fast_path_ok(&self) -> bool {
-    self.is_markdown()
-      && !self.has_tag_overrides
-      && !self.pre_fence_pending
+  fn fast_path_state_ok(&self) -> bool {
+    !self.pre_fence_pending
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
       && self.fast_paths_enabled()
   }
 
+  /// State every Markdown fast path needs: Markdown output, the shared state,
+  /// and no override on this tag.
+  #[inline(always)]
+  fn common_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
+    self.is_markdown()
+      && (!self.has_tag_overrides || self.override_slot_empty(tag_id))
+      && self.fast_path_state_ok()
+  }
+
+  /// Whether a built-in tag has no override, so its fast path may run while
+  /// other tags are overridden. Only valid when `override_fast_ok` holds.
+  #[inline(never)]
+  fn override_slot_empty(&self, tag_id: Option<u8>) -> bool {
+    self.override_fast_ok
+      && tag_id.is_some_and(|id| {
+        self
+          .override_idx
+          .as_deref()
+          .is_some_and(|idx| idx[id as usize] == NO_OVERRIDE)
+      })
+  }
+
   #[inline(always)]
   pub(crate) fn element_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
-    tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize]) && self.common_fast_path_ok()
+    tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize]) && self.common_fast_path_ok(tag_id)
+  }
+
+  /// `element_fast_path_ok` for Text output. Same tags and state, without the
+  /// Markdown test: the simple emitters write the Text forms through the same
+  /// shared steps, and the steps that differ are gated on `plain_text`.
+  #[inline(always)]
+  pub(crate) fn text_element_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
+    tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize])
+      && (!self.has_tag_overrides || self.override_slot_empty(tag_id))
+      && self.fast_path_state_ok()
+  }
+
+  /// A custom tag with no override takes the simple emitters, as `<span>` does:
+  /// no output of its own and inline spacing `NO_SPACING`. Overrides are keyed
+  /// by name, so any override keeps the general path.
+  #[inline(always)]
+  pub(crate) fn custom_element_fast_path_ok(&self) -> bool {
+    !self.has_tag_overrides && self.fast_path_state_ok()
+  }
+
+  /// A plain `<li>` takes the simple emitters with the item steps added. Kept
+  /// out of `SIMPLE_EMIT_TAG` so the other tags never test for it.
+  /// Same gate as `common_fast_path_ok(Some(TAG_LI))`. The li slot is decided
+  /// once at setup, so this reads a bool instead of the override table.
+  #[inline(always)]
+  pub(crate) fn li_fast_path_ok(&self) -> bool {
+    self.is_markdown() && self.li_simple_state_ok()
+  }
+
+  /// `li_fast_path_ok` without the Markdown test, for Text output.
+  #[inline(always)]
+  pub(crate) fn li_simple_state_ok(&self) -> bool {
+    self.li_slot_free && self.fast_path_state_ok()
   }
 
   /// Open the inline marker an enter wrote, or drop the markers its text closes.
@@ -1346,16 +1459,30 @@ impl ConvertState {
     }
   }
 
-  /// Simple-tag enter; `link` selects the `<a>` variant.
+  /// Simple-tag enter; `link` selects the `<a>` variant and `LI` the list item
+  /// variant, which adds the item marker step. Other tags compile that step out.
   #[inline(never)]
-  pub(crate) fn emit_enter_simple(&mut self, link: bool) {
+  pub(crate) fn emit_enter_simple<const LI: bool>(&mut self, link: bool) {
+    self.emit_enter_body(link, LI);
+  }
+
+  /// Body of `emit_enter_simple`. Native inlines it into each const instance.
+  /// On wasm32 both instances share this one copy and `li` is a runtime flag.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  fn emit_enter_body(&mut self, link: bool, li: bool) {
     let stack_len = self.stack.len();
     debug_assert!(
       stack_len > 0
         && if link {
           self.link_fast_path_ok(self.stack[stack_len - 1].tag_id)
+        } else if li {
+          self.li_simple_state_ok() && self.stack[stack_len - 1].tag_id == Some(TAG_LI)
         } else {
-          self.element_fast_path_ok(self.stack[stack_len - 1].tag_id)
+          let tag_id = self.stack[stack_len - 1].tag_id;
+          self.element_fast_path_ok(tag_id)
+            || self.text_element_fast_path_ok(tag_id)
+            || (tag_id.is_none() && self.custom_element_fast_path_ok())
         }
     );
     if self.stack[stack_len - 1].excluded_from_markdown {
@@ -1382,11 +1509,13 @@ impl ConvertState {
       self.confirm_div_marker_break(&mut output);
     }
 
+    // Plain text skips the list break the general enter writes here.
     if self.hard_break_end == self.buffer.len()
       && matches!(tag_id, Some(TAG_P | TAG_DIV))
       && self.depth_map[TAG_LI as usize] > 0
       && !self.in_table_cell()
       && self.depth_map[TAG_PRE as usize] == 0
+      && !plain_text!(self)
     {
       self.prepend_list_break(&mut output);
     }
@@ -1480,9 +1609,26 @@ impl ConvertState {
       return;
     }
 
+    #[cfg(test)]
+    {
+      self.simple_enters += 1;
+    }
+
     self.settle_empty_text_pending(output_start, || {
       tag_id.and_then(Self::inline_marker_type).is_some()
     });
+
+    if li {
+      #[cfg(test)]
+      {
+        self.li_simple_enters += 1;
+      }
+      // Same step as the general enter, which arms the empty-item guard. Plain
+      // text never writes an item marker, so the general enter skips it there.
+      if !plain_text!(self) && !self.in_table_cell() {
+        self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+      }
+    }
 
     self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
 
@@ -1574,18 +1720,41 @@ impl ConvertState {
     self.last_node_is_inline = is_inline;
   }
 
-  /// Simple-tag exit; `link` selects the `<a>` variant.
-  #[inline(never)]
-  pub(crate) fn emit_exit_simple(&mut self, link: bool) {
+  /// Simple-tag exit; `link` selects the `<a>` variant and `LI` the list item
+  /// variant, which adds the item steps of the general exit.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  pub(crate) fn emit_exit_simple<const LI: bool>(&mut self, link: bool) {
+    self.emit_exit_body(link, LI);
+  }
+
+  /// Body of `emit_exit_simple`; see `emit_enter_body` for the wasm32 split.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  fn emit_exit_body(&mut self, link: bool, li: bool) {
     let node = self.stack.retired();
     debug_assert!(if link {
       self.link_fast_path_ok(node.tag_id)
+    } else if li {
+      self.li_simple_state_ok() && node.tag_id == Some(TAG_LI)
     } else {
       self.element_fast_path_ok(node.tag_id)
+        || self.text_element_fast_path_ok(node.tag_id)
+        || (node.tag_id.is_none() && self.custom_element_fast_path_ok())
     });
     if node.excluded_from_markdown || node.enter_skipped {
       self.last_node_is_inline = node.is_inline;
       return;
+    }
+    if li {
+      #[cfg(test)]
+      {
+        self.li_simple_exits += 1;
+      }
+      // The general exit clears these first. Skipping that would let a pending
+      // heading break or list rule reach the text after the item.
+      self.list_rule_pending = false;
+      self.heading_break_pending = false;
     }
     let tag_id = node.tag_id;
     let is_inline = node.is_inline;
@@ -1603,6 +1772,10 @@ impl ConvertState {
       self.stack.retired_mut().attributes = attributes;
       return;
     }
+    #[cfg(test)]
+    {
+      self.simple_exits += 1;
+    }
     let output = self.get_exit_output(node, 1);
     let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
     let configured_new_lines = new_line_config[1];
@@ -1612,6 +1785,24 @@ impl ConvertState {
     }
 
     self.release_markers_on_exit(!is_inline, output.as_deref());
+
+    // Plain text writes no item marker, so the general exit skips these steps
+    // there too.
+    if li && !plain_text!(self) {
+      // A hard break already ended the item, so its continuation indent must
+      // not become a whitespace-only line. This runs before `output_start` is
+      // taken: resolving the marker can insert a newline before it.
+      if self.hard_break_end == self.buffer.len()
+        && !self.empty_item_hazard
+        && self.depth_map[TAG_PRE as usize] == 0
+        && !self.in_table_cell()
+      {
+        self.trim_trailing_spaces();
+        self.hard_break_end = self.buffer.len();
+      }
+      self.pending_raw_html_boundary = false;
+      self.resolve_item_marker(true);
+    }
 
     let output_start = self.buffer.len();
     if let Some(output) = output.as_deref()
@@ -1633,13 +1824,15 @@ impl ConvertState {
   #[inline(always)]
   pub(crate) fn link_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
     tag_id == Some(TAG_A)
-      && self.common_fast_path_ok()
+      && self.common_fast_path_ok(tag_id)
       && self.options.max_node_bytes == 0
       && !self.raw_html_block_open
       && self.depth_map[TAG_PRE as usize] == 0
   }
 
   /// Emit markdown for entering the element currently on top of self.stack.
+  // The excluded and HTML cases are answered here, so they never pay the
+  // Markdown enter's frame.
   #[inline]
   pub(crate) fn emit_enter_element(&mut self) {
     let stack_len = self.stack.len();
@@ -1659,7 +1852,11 @@ impl ConvertState {
       self.emit_html_enter();
       return;
     }
+    self.emit_markdown_enter(stack_len);
+  }
 
+  #[inline(never)]
+  fn emit_markdown_enter(&mut self, stack_len: usize) {
     if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
       self.flush_list_rule();
     }
@@ -3065,9 +3262,7 @@ impl ConvertState {
   /// Context for [`Self::emit_plain_text_inline`]: no clamp, defer, indent or wrap state.
   #[inline(always)]
   pub(crate) fn text_fast_path_ok(&self) -> bool {
-    self.is_markdown()
-      && self.options.max_node_bytes == 0
-      && self.wrap_width == 0
+    self.text_static_ok
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
       && !self.list_rule_pending
@@ -3186,7 +3381,8 @@ impl ConvertState {
     self.last_node_is_inline = false;
   }
 
-  /// Plain-text emit for [`Self::text_fast_path_ok`] contexts.
+  /// Plain-text emit for [`Self::text_fast_path_ok`] contexts. `in_pre` covers
+  /// `<pre>` text, which the general path never escapes.
   #[inline(always)]
   pub(crate) fn emit_plain_text_inline(
     &mut self,
@@ -3194,8 +3390,9 @@ impl ConvertState {
     contains_whitespace: bool,
     depth: usize,
     index: usize,
+    in_pre: bool,
   ) {
-    debug_assert!(self.text_fast_path_ok());
+    debug_assert!(in_pre || self.text_fast_path_ok());
     let has_inline_gfm_hazard = std::mem::take(&mut self.text_buffer_has_inline_gfm_hazard);
     if text.is_empty() {
       return;
@@ -3235,10 +3432,12 @@ impl ConvertState {
     } else {
       0
     };
-    let hazard = ordered_digits > 0
-      || has_inline_gfm_hazard
-      || context_hazard
-      || self.starts_with_gfm_block_candidate(text);
+    // The general path escapes nothing inside `<pre>`.
+    let hazard = !in_pre
+      && (ordered_digits > 0
+        || has_inline_gfm_hazard
+        || context_hazard
+        || self.starts_with_gfm_block_candidate(text));
     let text = if self.escape_text_node(
       text,
       hazard,
@@ -5051,10 +5250,7 @@ impl ConvertState {
   /// blank line inside the region re-enables it.
   #[inline]
   pub(crate) fn is_raw_html_block_tag(id: u8) -> bool {
-    matches!(
-      id,
-      TAG_DETAILS | TAG_SUMMARY | TAG_ADDRESS | TAG_DL | TAG_DT | TAG_DD
-    )
+    RAW_HTML_BLOCK_TAG[id as usize]
   }
 
   // Keep boundary tracking out of the common element emitters. These helpers
@@ -5356,7 +5552,9 @@ impl ConvertState {
     }
   }
 
-  #[inline]
+  // Inlined on native for the same reason as `get_exit_output`.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline)]
   pub(crate) fn get_enter_output(
     &self,
     node: &ElementNode,
@@ -5729,7 +5927,10 @@ impl ConvertState {
     }
   }
 
-  #[inline]
+  // Most tags reach the `None` arm. Inlined, that costs a jump; as a call it
+  // costs a six-register frame for every element. WASM keeps one copy for size.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline)]
   pub(crate) fn get_exit_output(
     &self,
     node: &ElementNode,
@@ -6164,8 +6365,33 @@ impl ConvertState {
         && self.stack[len - 2].tag_id == Some(TAG_PRE)
   }
 
-  #[inline]
+  // An element that writes nothing and asks for no line break only records
+  // whether it is inline. Answering that in the caller skips the frame of
+  // `write_output_general`. WASM keeps one copy, since the test at every call
+  // site costs more bytes than the call.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
   pub(crate) fn write_output(
+    &mut self,
+    is_enter: bool,
+    is_inline: bool,
+    configured_new_lines: u8,
+    output: Option<&str>,
+    literal: bool,
+  ) {
+    if configured_new_lines == 0
+      && output.is_none_or(str::is_empty)
+      && !self.pending_inline_whitespace
+      && !self.last_text_node_contains_whitespace
+    {
+      self.last_node_is_inline = is_inline;
+      return;
+    }
+    self.write_output_general(is_enter, is_inline, configured_new_lines, output, literal);
+  }
+
+  #[inline(never)]
+  fn write_output_general(
     &mut self,
     is_enter: bool,
     is_inline: bool,
@@ -6516,7 +6742,9 @@ impl ConvertState {
     true
   }
 
-  #[inline]
+  // The inline-tag answer stays in the caller: the rest saves seven registers
+  // on entry, which an inline element would pay twice for a constant.
+  #[inline(always)]
   pub(crate) fn calculate_new_line_config(
     &self,
     tag_id: Option<u8>,
@@ -6528,6 +6756,16 @@ impl ConvertState {
     if node_spacing == Some(NO_SPACING) && !matches!(tag_id, Some(TAG_PRE | TAG_LI)) {
       return NO_SPACING;
     }
+    self.block_new_line_config(tag_id, node_spacing, is_enter)
+  }
+
+  #[inline(never)]
+  fn block_new_line_config(
+    &self,
+    tag_id: Option<u8>,
+    node_spacing: Option<[u8; 2]>,
+    is_enter: bool,
+  ) -> [u8; 2] {
     if plain_text!(self)
       && tag_id == Some(TAG_PRE)
       && (self.depth_map[TAG_LI as usize] > 0 || self.depth_map[TAG_BLOCKQUOTE as usize] > 0)
@@ -6562,7 +6800,7 @@ impl ConvertState {
       && self.ordered_item_number(0) != 1
       && !self.in_table_cell()
       && !self.inside_open_inline_delimiter()
-      && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
+      && (self.block_open_needs_break() || self.hard_break_end == self.buffer.len())
     {
       return DEFAULT_BLOCK_SPACING;
     }
@@ -6899,8 +7137,8 @@ impl ConvertState {
 #[cfg(test)]
 mod tests {
   use super::{
-    BlockquoteFrame, ConvertState, CutLineLead, EMPHASIS_EXIT_TAG, TAG_A, TAG_CODE, TAG_H2, TAG_LI,
-    TAG_P, push_decimal,
+    BlockquoteFrame, ConvertState, CutLineLead, EMPHASIS_EXIT_TAG, TAG_A, TAG_ADDRESS, TAG_CODE,
+    TAG_DD, TAG_DETAILS, TAG_DL, TAG_DT, TAG_H2, TAG_LI, TAG_P, TAG_SUMMARY, push_decimal,
   };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
 
@@ -6910,6 +7148,21 @@ mod tests {
       assert_eq!(
         is_emphasis,
         matches!(ConvertState::inline_marker_type(id as u8), Some(1..=4)),
+        "tag id {id}"
+      );
+    }
+  }
+
+  #[test]
+  fn raw_html_block_tag_table_matches_the_six_tags() {
+    for id in 0..=u8::MAX {
+      let expected = matches!(
+        id,
+        TAG_DETAILS | TAG_SUMMARY | TAG_ADDRESS | TAG_DL | TAG_DT | TAG_DD
+      );
+      assert_eq!(
+        ConvertState::is_raw_html_block_tag(id),
+        expected,
         "tag id {id}"
       );
     }

@@ -94,6 +94,42 @@ const TYPICAL_NESTING_DEPTH: usize = 32;
 /// enormous run streams in a window instead of being held whole.
 const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
 
+/// Initial output and input capacity of a streaming converter.
+pub(crate) const STREAM_START_CAPACITY: usize = 4096;
+
+/// A drained stream buffer is shrunk once its capacity passes `SLACK_TRIGGER`
+/// times the live bytes, down to `SLACK_KEEP` times. Buffers under
+/// `SLACK_FLOOR` are left alone: a drain usually empties the buffer, and the
+/// next chunks would grow it back.
+const SLACK_TRIGGER: usize = 4;
+const SLACK_KEEP: usize = 2;
+pub(crate) const SLACK_FLOOR: usize = 64 * 1024;
+
+/// Offset of the `]]>` closing a CDATA section. WASM uses the byte search so
+/// that no `str::find(&str)` searcher is linked in. Native keeps `str::find`:
+/// without it, the codegen of the whole `process_html` loop changed and every
+/// fixture took 0.3-1% more instructions, even with this call out of line.
+#[inline]
+fn cdata_end(after_open: &str) -> Option<usize> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    crate::scan::find_bytes(after_open.as_bytes(), b"]]>")
+  }
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    after_open.find("]]>")
+  }
+}
+
+#[inline]
+pub(crate) fn release_stream_slack(buffer: &mut String) {
+  let len = buffer.len();
+  let capacity = buffer.capacity();
+  if capacity > SLACK_FLOOR && capacity / SLACK_TRIGGER > len {
+    buffer.shrink_to(STREAM_START_CAPACITY.max(SLACK_KEEP * len));
+  }
+}
+
 /// How much a run grows between scans for a usable word boundary. Prose offers
 /// one within a word or two; giving up keeps the scan off the hot path for
 /// input that offers none.
@@ -668,7 +704,7 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
 
   while i < bytes.len() {
     if state == SCRIPT_DATA {
-      i = crate::scan::find_byte(&bytes[i..], LT_CHAR).map_or(bytes.len(), |p| i + p);
+      i = crate::scan::find_byte_far(&bytes[i..], LT_CHAR).map_or(bytes.len(), |p| i + p);
     } else if state == SCRIPT_DATA_ESCAPED || state == SCRIPT_DATA_DOUBLE_ESCAPED {
       i = bytes[i..]
         .iter()
@@ -886,11 +922,28 @@ pub struct ConvertState {
   has_isolate_main: bool,
   pub has_frontmatter: bool,
   has_filter: bool,
+  /// Attribute bits the filter reads (`style`, `hidden`, and `class` for class
+  /// selectors); merged into every element's attribute mask.
+  filter_attr_bits: u16,
   pub has_extraction: bool,
+  /// Isolate-main, frontmatter or extraction is on: close_node runs its plugin tail.
+  close_plugin_work: bool,
   has_tag_overrides: bool,
+  /// The `override_idx` table is built and no override is an alias. Then a
+  /// built-in tag whose slot is `NO_OVERRIDE` has no override, so its fast path
+  /// can stay on while other tags are overridden. An alias breaks this: the node
+  /// carries the target's id, so the table cannot see the alias's override.
+  override_fast_ok: bool,
+  /// No override names `li`, or the override table cannot tell. Set once at
+  /// setup so each item's gate reads one bool instead of the table.
+  li_slot_free: bool,
   /// Some plugin reads arbitrary attributes, so every tag captures all of them.
   /// `frontmatter` is absent deliberately: TAG_META's mask covers what it reads.
   attrs_force_all: bool,
+  /// Attribute bits every element captures on top of its handler's: the filter
+  /// and Tailwind bits, or `ATTR_ALL` when `attrs_force_all`. Set once at setup
+  /// so the per-tag mask is one OR.
+  attr_extra_mask: u16,
 
   // Plugin tracking
   isolate_main_found: bool,
@@ -1019,6 +1072,8 @@ pub struct ConvertState {
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
   wrap_width: usize,
+  /// Markdown, no node cap, no wrap: the fixed part of the text fast-path gate.
+  pub(crate) text_static_ok: bool,
   // A single-format build folds every format check to a constant.
   #[cfg_attr(
     not(any(
@@ -1150,6 +1205,21 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Test-only count of alias lookups, open and close tags alike.
+  #[cfg(test)]
+  pub(crate) alias_lookups: std::cell::Cell<usize>,
+  /// Test-only count of `<li>` enters taken by the simple emitter.
+  #[cfg(test)]
+  pub(crate) li_simple_enters: usize,
+  /// Test-only count of `<li>` exits taken by the simple emitter.
+  #[cfg(test)]
+  pub(crate) li_simple_exits: usize,
+  /// Test-only count of non-link enters taken by the simple emitter, `<li>` included.
+  #[cfg(test)]
+  pub(crate) simple_enters: usize,
+  /// Test-only count of non-link exits taken by the simple emitter, `<li>` included.
+  #[cfg(test)]
+  pub(crate) simple_exits: usize,
   /// Test/fuzz switch: `false` routes everything through the general path.
   #[cfg(any(test, fuzzing))]
   pub(crate) fast_paths: bool,
@@ -1282,9 +1352,14 @@ impl ConvertState {
       has_frontmatter: false,
       has_filter: false,
       has_extraction: false,
+      close_plugin_work: false,
+      filter_attr_bits: ATTR_NONE,
       has_tag_overrides: false,
+      override_fast_ok: false,
+      li_slot_free: true,
       override_idx: None,
       attrs_force_all: false,
+      attr_extra_mask: ATTR_NONE,
 
       isolate_main_found: false,
       isolate_main_closed: false,
@@ -1358,6 +1433,7 @@ impl ConvertState {
       keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
+      text_static_ok: false,
       #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
       plain_text: format == OutputFormat::Text,
       format,
@@ -1406,6 +1482,16 @@ impl ConvertState {
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
+      #[cfg(test)]
+      alias_lookups: std::cell::Cell::new(0),
+      #[cfg(test)]
+      li_simple_enters: 0,
+      #[cfg(test)]
+      li_simple_exits: 0,
+      #[cfg(test)]
+      simple_enters: 0,
+      #[cfg(test)]
+      simple_exits: 0,
       #[cfg(any(test, fuzzing))]
       fast_paths: true,
       #[cfg(test)]
@@ -1448,6 +1534,7 @@ impl ConvertState {
       s.clean_flags = flags;
     }
 
+    s.text_static_ok = s.is_markdown() && options_max_node_bytes == 0 && options_wrap_width == 0;
     if let Some(plugins) = &s.options.plugins {
       s.has_plugins = true;
       s.has_tailwind = plugins.tailwind.is_some();
@@ -1455,6 +1542,8 @@ impl ConvertState {
       s.has_frontmatter = plugins.frontmatter.is_some();
       if let Some(ovs) = &plugins.tag_overrides {
         s.has_tag_overrides = true;
+        // Stays false when the table is not built below.
+        s.li_slot_free = false;
         s.fences_unreliable = ovs
           .iter()
           .any(|(_, ov)| ov.enter.is_some() || ov.exit.is_some());
@@ -1471,7 +1560,17 @@ impl ConvertState {
               idx[id as usize] = i;
             }
           }
+          // An `li` override that sets only `is_inline` emits what no override
+          // does: the open tag already copied `is_inline` onto the node. Spacing
+          // and enter/exit strings change the output, so those keep the general path.
+          let li_slot = idx[TAG_LI as usize];
+          s.li_slot_free = li_slot == NO_OVERRIDE
+            || ovs.get(li_slot as usize).is_some_and(|(_, ov)| {
+              ov.enter.is_none() && ov.exit.is_none() && ov.spacing.is_none()
+            });
           s.override_idx = Some(idx);
+          s.override_fast_ok = ovs.iter().all(|(_, ov)| ov.alias_tag_id.is_none());
+          s.li_slot_free &= s.override_fast_ok;
         }
       }
       if let Some(extraction) = &plugins.extraction {
@@ -1482,6 +1581,7 @@ impl ConvertState {
           .map(|sel| (sel.clone(), parse_css_selector_list(sel)))
           .collect();
       }
+      s.close_plugin_work = s.has_isolate_main || s.has_frontmatter || s.has_extraction;
       if let Some(filter) = &plugins.filter {
         s.has_filter = true;
         if let Some(incl) = &filter.include {
@@ -1499,10 +1599,34 @@ impl ConvertState {
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);
       }
-      // Capped parsing keeps its existing attribute budget, including names
-      // that Tailwind does not read.
+      // Filter selectors without id or attribute parts read only the bits the
+      // filter needs. HTML and text output read other attributes, so they keep
+      // every attribute. Capped parsing keeps its existing attribute budget,
+      // including names that the filter and Tailwind do not read.
+      let filter_selector_bits = s
+        .filter_exclude_parsed
+        .iter()
+        .chain(&s.filter_include_parsed)
+        .fold(ATTR_NONE, |bits, (_, parsed)| {
+          bits | crate::selector::selector_list_attr_bits(parsed)
+        });
+      let filter_needs_all = s.has_filter
+        && (s.options.max_node_bytes != 0 || !s.is_markdown() || filter_selector_bits == ATTR_ALL);
+      if s.has_filter {
+        s.filter_attr_bits = ATTR_STYLE | ATTR_HIDDEN | (filter_selector_bits & ATTR_CLASS);
+      }
       s.attrs_force_all =
-        s.has_filter || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
+        filter_needs_all || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
+      s.attr_extra_mask = if s.attrs_force_all {
+        ATTR_ALL
+      } else {
+        s.filter_attr_bits
+          | if s.has_tailwind {
+            ATTR_CLASS
+          } else {
+            ATTR_NONE
+          }
+      };
     }
     s
   }
@@ -1844,6 +1968,7 @@ impl ConvertState {
       let result = self.apply_opening_tag(
         pending.name(),
         pending.tag_id,
+        tag_handler,
         pending.is_builtin,
         i,
         resume.self_closing,
@@ -1905,13 +2030,16 @@ impl ConvertState {
           let limit = chunk_length.min(i + self.text_run_room(&text_buffer));
           i += 1;
           let mut had_space = false;
+          // Opaque, so the table address is computed once per run. Otherwise
+          // LLVM may rebuild it per byte (aarch64: +1 instruction per byte).
+          let table: &[bool; 256] = std::hint::black_box(&BATCHABLE_TEXT);
           loop {
-            while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
+            while i < limit && table[bytes[i] as usize] {
               i += 1;
             }
             // Doubled, trailing, and pre-tag spaces leave the run to the
             // general path, which keeps its collapsing semantics.
-            if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+            if i + 1 < limit && bytes[i] == SPACE_CHAR && table[bytes[i + 1] as usize] {
               had_space = true;
               i += 2;
               continue;
@@ -1983,7 +2111,13 @@ impl ConvertState {
             self.last_char_was_whitespace = false;
           }
           if !self.in_pre && self.last_char_was_whitespace {
-            i += 1;
+            // The rest of a collapsed run changes no state. Skip it here: the
+            // indentation between tags would otherwise take every byte through
+            // all the checks above.
+            i = crate::scan::whitespace_run_end(bytes, i + 1);
+            if text_buffer.is_empty() {
+              run_start = i - 1;
+            }
             continue;
           }
           if self.in_pre {
@@ -2183,7 +2317,7 @@ impl ConvertState {
         // doctype cases.
         let cdata = chunk[i + 2..].strip_prefix("[CDATA[");
         if let Some(after_open) = cdata {
-          if let Some(rel) = after_open.find("]]>") {
+          if let Some(rel) = cdata_end(after_open) {
             let token_len = "<![CDATA[".len() + rel + 3;
             self.complete_text_node(&mut text_buffer);
             if self.held_output_exceeded {
@@ -2337,7 +2471,9 @@ impl ConvertState {
         let mut is_builtin = builtin_tag_id.is_some();
         // An aliased tag renders as its target but keeps its source name for
         // its end tag; a built-in one takes the lowercase name from TAG_NAMES.
+        // With no alias in any override, the lookup can only return `None`.
         if self.has_tag_overrides
+          && !self.override_fast_ok
           && let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id)
         {
           if let Some(id) = builtin_tag_id {
@@ -3374,6 +3510,7 @@ impl ConvertState {
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
     self.buffer.drain(..drain_end);
+    release_stream_slack(&mut self.buffer);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;
     self.link.bracket_pos = self.link.bracket_pos.saturating_sub(drain_end);
@@ -3689,6 +3826,9 @@ fn push_ended_reference(out: &mut String, reference: &str, scratch: &mut String)
   }
 }
 
+// Without a cap this is one `push_str`. Inlined on native, where the call
+// saved seven registers for it; WASM keeps the single copy for size.
+#[cfg_attr(not(target_arch = "wasm32"), inline(always))]
 fn push_capped_text_node(
   buffer: &mut String,
   text: &str,
@@ -3699,6 +3839,11 @@ fn push_capped_text_node(
     buffer.push_str(text);
     return false;
   }
+  push_text_under_cap(buffer, text, cap, exhausted)
+}
+
+#[inline(never)]
+fn push_text_under_cap(buffer: &mut String, text: &str, cap: usize, exhausted: &mut bool) -> bool {
   if text.is_empty() {
     return false;
   }
@@ -3983,6 +4128,228 @@ mod tests {
 
     check(&["<p><b></b> 😀"]);
     check(&["<p><b></b> ", "😀"]);
+  }
+}
+
+#[cfg(test)]
+mod override_fast_gate_tests {
+  use super::*;
+  use crate::types::{PluginConfig, TagOverrideConfig};
+
+  fn state_with(overrides: Vec<(String, TagOverrideConfig)>) -> ConvertState {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    ConvertState::new(options, 4096, OutputFormat::Markdown)
+  }
+
+  /// Enter and exit overrides keep the per-tag gate; an alias turns it off.
+  #[test]
+  fn override_fast_ok_is_false_only_when_an_alias_is_present() {
+    let plain = state_with(vec![("em".into(), TagOverrideConfig::wrap("_", "_"))]);
+    assert!(plain.override_fast_ok);
+
+    let aliased = state_with(vec![("b".into(), TagOverrideConfig::alias("strong"))]);
+    assert!(!aliased.override_fast_ok);
+
+    let mixed = state_with(vec![
+      ("em".into(), TagOverrideConfig::wrap("_", "_")),
+      ("x-alias".into(), TagOverrideConfig::alias("em")),
+    ]);
+    assert!(!mixed.override_fast_ok);
+
+    let none = ConvertState::new(
+      HtmlToMarkdownOptions::default(),
+      4096,
+      OutputFormat::Markdown,
+    );
+    assert!(!none.override_fast_ok);
+  }
+
+  /// Only the overridden tag leaves the fast path; its neighbours keep it.
+  #[test]
+  fn only_the_overridden_tag_leaves_the_fast_path() {
+    let state = state_with(vec![("em".into(), TagOverrideConfig::wrap("_", "_"))]);
+    assert!(!state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(state.element_fast_path_ok(Some(TAG_STRONG)));
+    assert!(state.link_fast_path_ok(Some(TAG_A)));
+    assert!(!state.element_fast_path_ok(None));
+  }
+
+  /// An override for a tag the document never uses still leaves every
+  /// element on its fast path.
+  #[test]
+  fn override_for_an_absent_tag_keeps_fast_paths() {
+    let state = state_with(vec![(
+      "video".into(),
+      TagOverrideConfig::wrap("[v]", "[/v]"),
+    )]);
+    assert!(state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(!state.element_fast_path_ok(Some(TAG_VIDEO)));
+  }
+
+  /// An alias makes the id table unable to see the alias node, so no
+  /// element may take a fast path.
+  #[test]
+  fn alias_override_turns_every_fast_path_off() {
+    let state = state_with(vec![("b".into(), TagOverrideConfig::alias("strong"))]);
+    assert!(!state.element_fast_path_ok(Some(TAG_STRONG)));
+    assert!(!state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(!state.link_fast_path_ok(Some(TAG_A)));
+  }
+
+  /// Counts of `<li>` enters and exits the simple emitter took for
+  /// `<ul><li>a</li></ul>` under the given overrides and format.
+  fn li_simple_paths(
+    overrides: Vec<(String, TagOverrideConfig)>,
+    format: OutputFormat,
+  ) -> (usize, usize) {
+    let html = "<ul><li>a</li></ul>";
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(crate::types::PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let mut state = ConvertState::new(options, 4096, format);
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    (state.li_simple_enters, state.li_simple_exits)
+  }
+
+  /// A plain `<li>` takes the item fast path on both enter and exit, in
+  /// Markdown and Text. An override on `ul` leaves it there, and an override on
+  /// `li` itself sends it to the general path.
+  #[test]
+  fn plain_li_takes_the_item_fast_path() {
+    let ul = || vec![("ul".into(), TagOverrideConfig::wrap("[", "]"))];
+    let li = || vec![("li".into(), TagOverrideConfig::wrap("(", ")"))];
+    assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Markdown), (1, 1));
+    assert_eq!(li_simple_paths(ul(), OutputFormat::Markdown), (1, 1));
+    assert_eq!(li_simple_paths(li(), OutputFormat::Markdown), (0, 0));
+    assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Text), (1, 1));
+    assert_eq!(li_simple_paths(ul(), OutputFormat::Text), (1, 1));
+    assert_eq!(li_simple_paths(li(), OutputFormat::Text), (0, 0));
+  }
+
+  /// An `li` override that sets only `is_inline` changes no output (the open
+  /// tag already copies it onto the node), so the item keeps its fast path.
+  /// Spacing, enter and exit change output, so they send it to the general path.
+  #[test]
+  fn li_override_fast_path_depends_on_what_it_sets() {
+    let li_with = |config: TagOverrideConfig| vec![("li".into(), config)];
+    let inline = || {
+      li_with(TagOverrideConfig {
+        is_inline: Some(true),
+        ..Default::default()
+      })
+    };
+    let spacing = || {
+      li_with(TagOverrideConfig {
+        spacing: Some([1, 1]),
+        ..Default::default()
+      })
+    };
+    let enter = || {
+      li_with(TagOverrideConfig {
+        enter: Some("(".into()),
+        ..Default::default()
+      })
+    };
+    let exit = || {
+      li_with(TagOverrideConfig {
+        exit: Some(")".into()),
+        ..Default::default()
+      })
+    };
+    for format in [OutputFormat::Markdown, OutputFormat::Text] {
+      assert_eq!(li_simple_paths(inline(), format), (1, 1), "{format:?}");
+      assert_eq!(li_simple_paths(spacing(), format), (0, 0), "{format:?}");
+      assert_eq!(li_simple_paths(enter(), format), (0, 0), "{format:?}");
+      assert_eq!(li_simple_paths(exit(), format), (0, 0), "{format:?}");
+    }
+    // Duplicate keys: the first one decides, as in `override_for_node`.
+    let mut enter_then_inline = enter();
+    enter_then_inline.extend(inline());
+    let mut inline_then_enter = inline();
+    inline_then_enter.extend(enter());
+    assert_eq!(
+      li_simple_paths(enter_then_inline, OutputFormat::Markdown),
+      (0, 0)
+    );
+    assert_eq!(
+      li_simple_paths(inline_then_enter, OutputFormat::Markdown),
+      (1, 1)
+    );
+    // An alias elsewhere turns the override fast gate off for every tag.
+    let mut aliased = inline();
+    aliased.push(("x-alias".into(), TagOverrideConfig::alias("em")));
+    assert_eq!(li_simple_paths(aliased, OutputFormat::Markdown), (0, 0));
+  }
+
+  /// Alias lookups made while converting `<ul><li>a</li></ul>`.
+  fn alias_lookups(overrides: Vec<(String, TagOverrideConfig)>) -> usize {
+    let html = "<ul><li>a</li></ul>";
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(crate::types::PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let mut state = ConvertState::new(options, 4096, OutputFormat::Markdown);
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    state.alias_lookups.get()
+  }
+
+  /// With no alias in any override, open and close tags skip the alias lookup;
+  /// an alias anywhere keeps it on every tag.
+  #[test]
+  fn alias_lookup_is_skipped_when_no_override_aliases() {
+    let plain = vec![("em".into(), TagOverrideConfig::wrap("_", "_"))];
+    assert_eq!(alias_lookups(plain), 0);
+    let aliased = vec![("b".into(), TagOverrideConfig::alias("strong"))];
+    assert!(alias_lookups(aliased) > 0);
+  }
+
+  /// Simple-emitter enters and exits for `html`, with the fast paths on or off.
+  fn simple_takes(html: &str, format: OutputFormat, fast: bool) -> (usize, usize) {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 4096, format);
+    state.fast_paths = fast;
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    (state.simple_enters, state.simple_exits)
+  }
+
+  /// Plain inline and block tags take the simple emitter in Text as well as
+  /// Markdown. With the fast paths off nothing does. `<ul>` is a simple tag,
+  /// so the two-element list counts twice.
+  #[test]
+  fn text_takes_the_simple_path_for_plain_tags() {
+    for format in [OutputFormat::Markdown, OutputFormat::Text] {
+      assert_eq!(simple_takes("<p>a</p>", format, true), (1, 1), "{format:?}");
+      assert_eq!(
+        simple_takes("<span>a</span>", format, true),
+        (1, 1),
+        "{format:?}"
+      );
+      assert_eq!(
+        simple_takes("<ul><li>a</li></ul>", format, true),
+        (2, 2),
+        "{format:?}"
+      );
+      assert_eq!(
+        simple_takes("<p>a</p>", format, false),
+        (0, 0),
+        "{format:?}"
+      );
+    }
   }
 }
 

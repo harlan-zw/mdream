@@ -502,7 +502,7 @@ struct BaseUrl<'a> {
 impl<'a> BaseUrl<'a> {
   fn split(origin: &'a str) -> Option<Self> {
     let bytes = origin.as_bytes();
-    let mut i = origin.find("://")? + 3;
+    let mut i = crate::scan::find_bytes(bytes, b"://")? + 3;
     let mut root_end = None;
     while i < bytes.len() {
       match bytes[i] {
@@ -656,7 +656,9 @@ pub(crate) fn resolve_base_href(href: &str, origin: Option<&str>) -> Option<Stri
   if resolved.len() > MAX_BASE_HREF_LEN {
     return None;
   }
-  let (scheme, authority) = BaseUrl::split(&resolved)?.root.split_once("://")?;
+  let root = BaseUrl::split(&resolved)?.root;
+  let separator = crate::scan::find_bytes(root.as_bytes(), b"://")?;
+  let (scheme, authority) = (&root[..separator], &root[separator + 3..]);
   // The host follows any userinfo and precedes any port; an empty host is no origin.
   let host = authority
     .rsplit_once('@')

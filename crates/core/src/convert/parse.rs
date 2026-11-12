@@ -308,6 +308,8 @@ impl ConvertState {
   /// names scan the keys.
   #[inline(never)]
   pub(crate) fn alias_tag_id(&self, tag_name: &str, builtin_tag_id: Option<u8>) -> Option<u8> {
+    #[cfg(test)]
+    self.alias_lookups.set(self.alias_lookups.get() + 1);
     let overrides = self.options.plugins.as_ref()?.tag_overrides.as_ref();
     let config = match builtin_tag_id {
       Some(id) => Self::override_by_id(overrides, self.override_idx.as_deref(), id),
@@ -452,23 +454,56 @@ impl ConvertState {
   }
 
   pub(crate) fn process_text_buffer(&mut self, text_buffer: &mut String) {
-    if self.text_node_fast_path_ok() {
-      self.process_plain_text_node(text_buffer);
-    } else {
-      self.process_text_buffer_piece(text_buffer, true);
+    // `in_pre` is tested first, so text outside `<pre>` pays one check.
+    if self.in_pre {
+      if self.pre_text_node_fast_path_ok() {
+        self.process_plain_text_node::<true>(text_buffer);
+        return;
+      }
+    } else if self.text_node_fast_path_ok() {
+      self.process_plain_text_node::<false>(text_buffer);
+      return;
     }
+    self.process_text_buffer_piece(text_buffer, true);
   }
 
   /// Gate for [`Self::process_plain_text_node`]: no per-node state needs the general path.
   #[inline(always)]
   fn text_node_fast_path_ok(&self) -> bool {
     self.text_fast_path_ok()
-      && !self.in_pre
       && self.overflow_tag_id.is_none()
       && self.overflow_opaque_depth == 0
       && !self.overflow_raw_excludes_text
       && self.extraction_tracked.is_empty()
       // Tailwind-wrapped text takes the general path.
+      && self.stack.last().is_none_or(|parent| {
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
+      })
+  }
+
+  /// Gate for `process_plain_text_node::<true>`: Markdown text in an open `<pre>`.
+  /// Lists, quotes and tables add indent, prefixes or cell folding, so they stay general.
+  #[inline(always)]
+  fn pre_text_node_fast_path_ok(&self) -> bool {
+    self.in_pre
+      && self.text_static_ok
+      && self.fast_paths_enabled()
+      && self.caption_boundary == CaptionBoundary::None
+      && self.caption_frames.is_empty()
+      && !self.list_rule_pending
+      && !self.heading_break_pending
+      && !self.pending_inline_whitespace
+      && !self.pending_raw_html_boundary
+      && !self.pre_fence_pending
+      && self.depth_map[TAG_LI as usize] == 0
+      && self.depth_map[TAG_BLOCKQUOTE as usize] == 0
+      && self.depth_map[TAG_TABLE as usize] == 0
+      && !self.in_table_cell()
+      && !self.in_raw_html_block()
+      && self.overflow_tag_id.is_none()
+      && self.overflow_opaque_depth == 0
+      && !self.overflow_raw_excludes_text
+      && self.extraction_tracked.is_empty()
       && self.stack.last().is_none_or(|parent| {
         parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
       })
@@ -512,10 +547,25 @@ impl ConvertState {
     }
   }
 
-  /// [`Self::process_text_buffer_piece`] for [`Self::text_node_fast_path_ok`] nodes.
+  /// [`Self::process_text_buffer_piece`] for the fast-path gates. `IN_PRE` selects
+  /// the `<pre>` rules: whitespace-only text is code, only line breaks lead-trim,
+  /// and decoded references are not protected.
   #[inline(never)]
-  fn process_plain_text_node(&mut self, text_buffer: &mut String) {
-    debug_assert!(self.text_node_fast_path_ok());
+  fn process_plain_text_node<const IN_PRE: bool>(&mut self, text_buffer: &mut String) {
+    self.process_plain_text_body(text_buffer, IN_PRE);
+  }
+
+  /// Body of `process_plain_text_node`. Native inlines it into each const
+  /// instance. On wasm32 both instances share this one copy and `in_pre` is a
+  /// runtime flag.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  fn process_plain_text_body(&mut self, text_buffer: &mut String, in_pre: bool) {
+    debug_assert!(if in_pre {
+      self.pre_text_node_fast_path_ok()
+    } else {
+      self.text_node_fast_path_ok()
+    });
     let contains_non_whitespace = self.text_buffer_contains_non_whitespace;
     let contains_whitespace = self.text_buffer_contains_whitespace;
     let has_inline_gfm_hazard =
@@ -537,7 +587,8 @@ impl ConvertState {
       excludes_text_nodes = true;
     }
 
-    if !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty() {
+    // Whitespace-only text inside `<pre>` is code, so the general path keeps it.
+    if !in_pre && !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty() {
       return;
     }
     if text_buffer.is_empty() {
@@ -545,6 +596,16 @@ impl ConvertState {
     }
 
     let first_block_parent_index = self.first_block_parent_index;
+
+    // Excluded text emits nothing, so the copy, the whitespace trim and the
+    // entity decode would only build a string nothing reads. The counters
+    // still advance, as they do for emitted text.
+    if excludes_text_nodes {
+      self.has_encoded_html_entity = false;
+      self.advance_text_node_counters(first_block_parent_index);
+      return;
+    }
+
     let first_block_child_text_count =
       first_block_parent_index.map_or(0, |idx| self.stack[idx].child_text_node_index);
 
@@ -559,7 +620,13 @@ impl ConvertState {
     if contains_whitespace && is_first_text_in_block {
       let bytes = text.as_bytes();
       let mut start = 0;
-      while start < bytes.len() && is_whitespace(bytes[start]) {
+      while start < bytes.len()
+        && (if in_pre {
+          bytes[start] == NEWLINE_CHAR || bytes[start] == CARRIAGE_RETURN_CHAR
+        } else {
+          is_whitespace(bytes[start])
+        })
+      {
         start += 1;
       }
       if start > 0 {
@@ -567,9 +634,9 @@ impl ConvertState {
       }
     }
 
-    // Only raw HTML leaves decoded references unprotected.
+    // Only raw HTML leaves decoded references unprotected. Inside `<pre>` none are.
     if self.has_encoded_html_entity {
-      let protect = !self.raw_html_block_open;
+      let protect = !in_pre && !self.raw_html_block_open;
       if decode_html_entities_into(&text, false, protect, &mut self.entity_buffer) {
         std::mem::swap(&mut text, &mut self.entity_buffer);
       }
@@ -578,7 +645,7 @@ impl ConvertState {
 
     if !excludes_text_nodes {
       let (depth, index) = self.begin_text_emit(&text, has_inline_gfm_hazard);
-      self.emit_plain_text_inline(&text, contains_whitespace, depth, index);
+      self.emit_plain_text_inline(&text, contains_whitespace, depth, index, in_pre);
     }
 
     text.clear();
@@ -936,6 +1003,7 @@ impl ConvertState {
     self.apply_opening_tag(
       tag_name,
       tag_id,
+      tag_handler,
       is_builtin,
       scan.new_position,
       scan.self_closing,
@@ -947,16 +1015,9 @@ impl ConvertState {
   /// reads attributes the handlers do not.
   #[inline]
   pub(crate) fn attr_mask(&self, tag_handler: Option<&crate::types::TagHandler>) -> u16 {
-    if self.attrs_force_all {
-      ATTR_ALL
-    } else {
-      tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs)
-        | if self.has_tailwind {
-          ATTR_CLASS
-        } else {
-          ATTR_NONE
-        }
-    }
+    // `attr_extra_mask` is `ATTR_ALL` when every attribute is wanted, and that
+    // absorbs the handler's bits, so no branch is needed here.
+    tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs) | self.attr_extra_mask
   }
 
   /// The first `<base href>` replaces `origin` when it resolves to an HTTP(S)
@@ -982,19 +1043,92 @@ impl ConvertState {
     }
   }
 
+  /// Overflow checks for an opening tag, run only when a same-name or depth
+  /// overflow is possible. `Some` is the result of an element that was consumed.
+  #[cold]
+  #[inline(never)]
+  #[allow(clippy::too_many_arguments)]
+  fn apply_overflow_tail(
+    &mut self,
+    tag_name: &str,
+    tag_id: Option<u8>,
+    is_builtin: bool,
+    tag_handler: Option<&'static crate::types::TagHandler>,
+    self_closing: bool,
+    new_position: usize,
+    deep: bool,
+  ) -> Option<OpeningTagResult> {
+    let in_overflow = !self_closing && (self.overflow_same_name_depth > 0 || deep);
+    let overflow_plugin_mode = if in_overflow {
+      self.overflow_plugin_mode(
+        tag_name,
+        tag_id,
+        is_builtin,
+        &self.attr_scratch,
+        tag_handler,
+      )
+    } else {
+      0
+    };
+    if in_overflow && (tag_id == Some(TAG_TEMPLATE) || overflow_plugin_mode == 1) {
+      self.enter_opaque_overflow(tag_name, tag_handler);
+      return Some(OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      });
+    }
+
+    if self.overflow_same_name_depth > 0 && !self_closing {
+      if self.matches_overflow_tag(tag_name, tag_id, is_builtin) {
+        self.overflow_same_name_depth = self.overflow_same_name_depth.saturating_add(1);
+      } else if tag_handler.is_some_and(|handler| handler.is_non_nesting) {
+        self.overflow_raw_name = Some(tag_name.to_string());
+        self.overflow_raw_excludes_text =
+          tag_handler.is_some_and(|handler| handler.excludes_text_nodes);
+      }
+      return Some(OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      });
+    }
+
+    if !self_closing && deep {
+      self.enter_overflow(
+        tag_name,
+        tag_id,
+        is_builtin,
+        tag_handler,
+        overflow_plugin_mode == 2,
+      );
+      return Some(OpeningTagResult {
+        complete: true,
+        new_position,
+        self_closing: false,
+        skip: true,
+      });
+    }
+    None
+  }
+
   /// Open an element whose attributes are already scanned into `attr_scratch`:
   /// tree recovery, overflow handling and node creation.
+  // The arguments are kept separate: packing the flags into a struct measured
+  // slower, so the lint is allowed here.
+  #[allow(clippy::too_many_arguments)]
   pub(crate) fn apply_opening_tag(
     &mut self,
     tag_name: &str,
     tag_id: Option<u8>,
+    tag_handler: Option<&'static crate::types::TagHandler>,
     is_builtin: bool,
     new_position: usize,
     self_closing: bool,
     overflow: bool,
   ) -> OpeningTagResult {
-    let tag_handler = tag_id.and_then(get_tag_handler);
-
     // A retained attribute outgrew `max_node_bytes`. Drop the tag whole, as an
     // over-cap tag always has; the children it would have wrapped still parse.
     if overflow {
@@ -1028,8 +1162,8 @@ impl ConvertState {
     // page never closed its head (no </head>/<body>). Auto-close head (and anything
     // wrongly opened inside it) so body content parses as flow content with normal
     // block spacing instead of inheriting head's whitespace collapsing.
-    if self.overflow_same_name_depth == 0
-      && self.depth_map[TAG_HEAD as usize] > 0
+    if self.depth_map[TAG_HEAD as usize] > 0
+      && self.overflow_same_name_depth == 0
       && self.depth_map[TAG_TEMPLATE as usize] == 0
       && !is_head_content_tag(tag_id)
     {
@@ -1137,59 +1271,21 @@ impl ConvertState {
       }
     }
 
-    let in_overflow =
-      !self_closing && (self.overflow_same_name_depth > 0 || self.stack.len() >= MAX_ELEMENT_DEPTH);
-    let overflow_plugin_mode = if in_overflow {
-      self.overflow_plugin_mode(
+    // Read once: the stack is not resized between here and the node push.
+    let deep = self.stack.len() >= MAX_ELEMENT_DEPTH;
+    // Same-name and depth overflow are rare: one test keeps them off the common path.
+    if (self.overflow_same_name_depth > 0 || deep)
+      && let Some(result) = self.apply_overflow_tail(
         tag_name,
         tag_id,
         is_builtin,
-        &self.attr_scratch,
         tag_handler,
+        self_closing,
+        new_position,
+        deep,
       )
-    } else {
-      0
-    };
-    if in_overflow && (tag_id == Some(TAG_TEMPLATE) || overflow_plugin_mode == 1) {
-      self.enter_opaque_overflow(tag_name, tag_handler);
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
-    }
-
-    if self.overflow_same_name_depth > 0 && !self_closing {
-      if self.matches_overflow_tag(tag_name, tag_id, is_builtin) {
-        self.overflow_same_name_depth = self.overflow_same_name_depth.saturating_add(1);
-      } else if tag_handler.is_some_and(|handler| handler.is_non_nesting) {
-        self.overflow_raw_name = Some(tag_name.to_string());
-        self.overflow_raw_excludes_text =
-          tag_handler.is_some_and(|handler| handler.excludes_text_nodes);
-      }
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
-    }
-
-    if !self_closing && self.stack.len() >= MAX_ELEMENT_DEPTH {
-      self.enter_overflow(
-        tag_name,
-        tag_id,
-        is_builtin,
-        tag_handler,
-        overflow_plugin_mode == 2,
-      );
-      return OpeningTagResult {
-        complete: true,
-        new_position,
-        self_closing: false,
-        skip: true,
-      };
+    {
+      return result;
     }
 
     if let Some(id) = tag_id {
@@ -1211,7 +1307,9 @@ impl ConvertState {
     }
     self.depth += 1;
 
-    let current_walk_index = self.stack.last().map_or(0, |n| n.current_walk_index);
+    // The parent is the top node, so its walk index is the one `stack.last()` gave.
+    let parent = self.stack.len().checked_sub(1);
+    let current_walk_index = parent.map_or(0, |p| self.stack[p].current_walk_index);
     let extras = NodeExtras::for_tag(is_builtin, tag_name);
 
     let (mut h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) =
@@ -1252,7 +1350,6 @@ impl ConvertState {
     }
 
     // Filled in place: a built-then-moved node stalls store forwarding.
-    let parent = self.stack.len().checked_sub(1);
     let idx = self.stack.len();
     let parent_hidden = self.has_plugins
       && self.has_tailwind
@@ -1427,20 +1524,22 @@ impl ConvertState {
       }
     }
 
-    tag.excluded_from_markdown = in_template
+    let excluded_from_markdown = in_template
       || filter_excluded
       || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
+    tag.excluded_from_markdown = excluded_from_markdown;
     tag.enter_skipped = skip_node;
 
-    if tag.collapses_inner_white_space && !tag.excluded_from_markdown {
-      if tag.tag_id == Some(TAG_SPAN) {
+    // Read from the locals that were stored into the node, not back from it.
+    if h_collapses && !excluded_from_markdown {
+      if tag_id == Some(TAG_SPAN) {
         self.collapse_span_depth = self.collapse_span_depth.saturating_add(1);
       } else {
         self.collapse_non_span_depth = self.collapse_non_span_depth.saturating_add(1);
       }
     }
 
-    if !tag.is_inline {
+    if !h_inline {
       self.first_block_parent_index = Some(idx);
       self.block_parent_indices.push(idx);
     }
@@ -1499,10 +1598,30 @@ impl ConvertState {
 
     // Inline emit (no callback!)
     if !skip_node {
-      if self.element_fast_path_ok(tag_id) {
-        self.emit_enter_simple(false);
-      } else if self.link_fast_path_ok(tag_id) {
-        self.emit_enter_simple(true);
+      // Every fast path needs Markdown or Text, so HTML tests once here. Text
+      // takes the simple tags and items only; links stay Markdown.
+      if self.is_markdown() {
+        if self.element_fast_path_ok(tag_id) {
+          self.emit_enter_simple::<false>(false);
+        } else if self.link_fast_path_ok(tag_id) {
+          self.emit_enter_simple::<false>(true);
+        } else if tag_id == Some(TAG_LI) && self.li_fast_path_ok() {
+          self.emit_enter_simple::<true>(false);
+        } else if tag_id.is_none() && self.custom_element_fast_path_ok() {
+          self.emit_enter_simple::<false>(false);
+        } else {
+          self.emit_enter_element();
+        }
+      } else if plain_text!(self) {
+        if self.text_element_fast_path_ok(tag_id) {
+          self.emit_enter_simple::<false>(false);
+        } else if tag_id == Some(TAG_LI) && self.li_simple_state_ok() {
+          self.emit_enter_simple::<true>(false);
+        } else if tag_id.is_none() && self.custom_element_fast_path_ok() {
+          self.emit_enter_simple::<false>(false);
+        } else {
+          self.emit_enter_element();
+        }
       } else {
         self.emit_enter_element();
       }
@@ -1544,7 +1663,7 @@ impl ConvertState {
 
     self.has_encoded_html_entity = false;
 
-    if self.stack.last().is_some_and(|n| n.is_non_nesting) && !self_closing {
+    if h_non_nesting && !self_closing {
       self.in_non_nesting = true;
     }
 
@@ -1560,29 +1679,18 @@ impl ConvertState {
     }
   }
 
+  /// The general exit. It takes the retired node out of the stack, since
+  /// `emit_exit_element` needs it owned, and puts it back afterwards.
+  #[inline(always)]
+  fn close_node_general_exit(&mut self) {
+    let node = self.stack.take_retired();
+    self.emit_exit_element(&node);
+    self.stack.restore_retired(node);
+  }
+
   pub(crate) fn close_node(&mut self) {
     if self.stack.is_empty() {
       return;
-    }
-
-    // Extraction finalize
-    if !self.extraction_tracked.is_empty() {
-      let current_depth = self.stack.len();
-      if let Some(first) = self
-        .extraction_tracked
-        .iter()
-        .position(|tracked| tracked.stack_depth == current_depth)
-      {
-        let extraction_results = &mut self.extraction_results;
-        for tracked in self.extraction_tracked.drain(first..) {
-          extraction_results.push(ExtractedElement {
-            selector: tracked.selector,
-            tag_name: tracked.tag_name,
-            text_content: tracked.text_content.trim().to_string(),
-            attributes: tracked.attributes,
-          });
-        }
-      }
     }
 
     let popping_index = self.stack.len() - 1;
@@ -1634,23 +1742,46 @@ impl ConvertState {
       }
     }
 
-    if self.has_isolate_main
-      && node_tag_id == Some(TAG_MAIN)
-      && !node_excluded
-      && self.isolate_main_found
-      && !self.isolate_main_closed
-    {
-      self.isolate_main_closed = true;
-    }
+    // One flag for the plugin-only tail: a page without these plugins pays one test.
+    if self.close_plugin_work {
+      // Extraction finalize. Runs after `retire`, so the depth is one above the stack.
+      if self.has_extraction && !self.extraction_tracked.is_empty() {
+        let current_depth = self.stack.len() + 1;
+        if let Some(first) = self
+          .extraction_tracked
+          .iter()
+          .position(|tracked| tracked.stack_depth == current_depth)
+        {
+          let extraction_results = &mut self.extraction_results;
+          for tracked in self.extraction_tracked.drain(first..) {
+            extraction_results.push(ExtractedElement {
+              selector: tracked.selector,
+              tag_name: tracked.tag_name,
+              text_content: tracked.text_content.trim().to_string(),
+              attributes: tracked.attributes,
+            });
+          }
+        }
+      }
 
-    // Frontmatter generation on HEAD close
-    if self.has_frontmatter
-      && node_tag_id == Some(TAG_HEAD)
-      && !node_excluded
-      && self.frontmatter_in_head
-    {
-      self.frontmatter_in_head = false;
-      self.generate_frontmatter_yaml();
+      if self.has_isolate_main
+        && node_tag_id == Some(TAG_MAIN)
+        && !node_excluded
+        && self.isolate_main_found
+        && !self.isolate_main_closed
+      {
+        self.isolate_main_closed = true;
+      }
+
+      // Frontmatter generation on HEAD close
+      if self.has_frontmatter
+        && node_tag_id == Some(TAG_HEAD)
+        && !node_excluded
+        && self.frontmatter_in_head
+      {
+        self.frontmatter_in_head = false;
+        self.generate_frontmatter_yaml();
+      }
     }
 
     // Special: empty links — synthesize text from title/aria-label
@@ -1716,14 +1847,42 @@ impl ConvertState {
     }
 
     // The general exit needs the node owned; the fast ones read it in place.
-    if self.element_fast_path_ok(node_tag_id) {
-      self.emit_exit_simple(false);
-    } else if self.link_fast_path_ok(node_tag_id) {
-      self.emit_exit_simple(true);
+    // Same split as the enter: Markdown takes every simple path, Text the
+    // simple tags and items, and HTML none.
+    if self.is_markdown() {
+      if self.element_fast_path_ok(node_tag_id) {
+        self.emit_exit_simple::<false>(false);
+      } else if self.link_fast_path_ok(node_tag_id) {
+        self.emit_exit_simple::<false>(true);
+      } else if node_tag_id == Some(TAG_LI)
+        && !node_excluded
+        // A skipped item keeps the general exit, which clears the heading break
+        // even though no output was written for it.
+        && !node_enter_skipped
+        && self.li_fast_path_ok()
+      {
+        self.emit_exit_simple::<true>(false);
+      } else if node_tag_id.is_none() && self.custom_element_fast_path_ok() {
+        self.emit_exit_simple::<false>(false);
+      } else {
+        self.close_node_general_exit();
+      }
+    } else if plain_text!(self) {
+      if self.text_element_fast_path_ok(node_tag_id) {
+        self.emit_exit_simple::<false>(false);
+      } else if node_tag_id == Some(TAG_LI)
+        && !node_excluded
+        && !node_enter_skipped
+        && self.li_simple_state_ok()
+      {
+        self.emit_exit_simple::<true>(false);
+      } else if node_tag_id.is_none() && self.custom_element_fast_path_ok() {
+        self.emit_exit_simple::<false>(false);
+      } else {
+        self.close_node_general_exit();
+      }
     } else {
-      let node = self.stack.take_retired();
-      self.emit_exit_element(&node);
-      self.stack.restore_retired(node);
+      self.close_node_general_exit();
     }
     self.stack.release_retired();
 
@@ -1735,20 +1894,6 @@ impl ConvertState {
       if (id as usize) < MAX_TAG_ID {
         self.depth_map[id as usize] = self.depth_map[id as usize].saturating_sub(1);
       }
-      self.refresh_raw_html_block(id);
-      self.update_in_pre_on_close(id);
-      if id == TAG_OL {
-        self.ordered_starts.pop();
-        self.list_item_counts.pop();
-      } else if id == TAG_UL {
-        self.list_item_counts.pop();
-      }
-      if id == TAG_LI
-        && let Some(w) = self.list_indent_widths.pop()
-      {
-        let new_len = self.list_indent.len().saturating_sub(w as usize);
-        self.list_indent.truncate(new_len);
-      }
     }
 
     self.in_non_nesting = self.stack.last().is_some_and(|n| n.is_non_nesting);
@@ -1756,21 +1901,53 @@ impl ConvertState {
     self.has_encoded_html_entity = false;
     self.just_closed_tag = true;
 
-    // Each enclosing quote re-quotes whatever content is still unflushed when it
-    // closes, so a deep nest closed within one chunk copied its content once per
-    // level. Quote the settled lines now, as a chunk boundary here would. A quote
-    // inside a list item is re-quoted frame by frame by the flush too, so there
-    // it would only add work.
-    if node_tag_id == Some(TAG_BLOCKQUOTE)
-      && self
-        .blockquotes
-        .iter()
-        .all(|frame| frame.list_indent.is_empty())
-    {
-      self.flush_settled_blockquote_lines();
+    if let Some(id) = node_tag_id {
+      self.close_tail(id);
     }
   }
 
+  /// Close work past the depth count, for the tags `CLOSE_TAIL_TAG` names.
+  #[inline(always)]
+  fn close_tail(&mut self, id: u8) {
+    use super::output::{
+      CLOSE_BLOCKQUOTE, CLOSE_LI, CLOSE_OL, CLOSE_PRE, CLOSE_RAW_BLOCK, CLOSE_TAIL_TAG, CLOSE_UL,
+    };
+    match CLOSE_TAIL_TAG[id as usize] {
+      CLOSE_RAW_BLOCK => self.refresh_raw_html_block(id),
+      CLOSE_PRE => self.update_in_pre_on_close(id),
+      CLOSE_OL => {
+        self.ordered_starts.pop();
+        self.list_item_counts.pop();
+      }
+      CLOSE_UL => {
+        self.list_item_counts.pop();
+      }
+      CLOSE_LI => {
+        if let Some(w) = self.list_indent_widths.pop() {
+          let new_len = self.list_indent.len().saturating_sub(w as usize);
+          self.list_indent.truncate(new_len);
+        }
+      }
+      // Each enclosing quote re-quotes whatever content is still unflushed when
+      // it closes, so a deep nest closed within one chunk copied its content
+      // once per level. Quote the settled lines now, as a chunk boundary here
+      // would. A quote inside a list item is re-quoted frame by frame by the
+      // flush too, so there it would only add work.
+      CLOSE_BLOCKQUOTE
+        if self
+          .blockquotes
+          .iter()
+          .all(|frame| frame.list_indent.is_empty()) =>
+      {
+        self.flush_settled_blockquote_lines();
+      }
+      _ => {}
+    }
+  }
+
+  // A short wrapper around the name match. As a call it saved seven registers
+  // per end tag; WASM keeps the single copy for size.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
   pub(crate) fn process_closing_tag(
     &mut self,
     html_chunk: &str,
@@ -1866,7 +2043,10 @@ impl ConvertState {
       // A built-in end tag must also find a node without a custom name, so
       // `</div>` cannot close an aliased `<blockquote>`.
       needs_name_match = true;
-      if let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id) {
+      // With no alias in any override, the lookup can only return `None`.
+      if !self.override_fast_ok
+        && let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id)
+      {
         if let Some(id) = builtin_tag_id {
           name = TAG_NAMES[id as usize];
         }
