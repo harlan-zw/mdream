@@ -212,6 +212,16 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<ul><li>Aa<span> </span> <p><code>Bb</code></p></li></ul>',
     '<ul><li>Aa<span> </span> <section><code>Bb</code></section></li></ul>',
   ], ['markdown']],
+  'empty inline code in a list item after a pending separator': [[
+    '<ul><li>Aa<span> </span><code></code>Bb</li></ul>',
+    '<ul><li>Aa<span> </span>&#32;<code></code>Bb</li></ul>',
+    '<ol><li>Aa<i> </i><code><svg></svg></code><b>Bb</b></li></ol>',
+    '<ul><li>x<ul><li>Aa<span> </span><code> </code>Bb</li></ul></li></ul>',
+    '<ul><li>Aa<code></code>Bb</li></ul>',
+    '<ul><li>Aa<span> </span><code></code><p>Bb</p></li></ul>',
+    '<ul><li>Aa<span> </span><code>x</code>Bb</li></ul>',
+    '<ul><li>Aa<span> </span><code></code><code>Bb</code></li></ul>',
+  ], ['markdown', 'text']],
 }
 
 describe('javaScript engine matches Rust output', () => {

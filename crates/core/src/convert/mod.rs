@@ -1035,6 +1035,9 @@ pub struct ConvertState {
   /// enter wrote for a pending separator, so an opener written right after it
   /// can take it along.
   pending_space_end: usize,
+  /// The current element's enter wrote no space for a pending separator
+  /// because its own output starts with one.
+  pending_space_owned: bool,
   /// Stream position after the last separator written on its own, which is
   /// not part of the text after it.
   separator_end: usize,
@@ -1417,6 +1420,7 @@ impl ConvertState {
       pending_decoded_blank: false,
       pending_space_trimmed: false,
       pending_space_end: usize::MAX,
+      pending_space_owned: false,
       separator_end: usize::MAX,
       cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
