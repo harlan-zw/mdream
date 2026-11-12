@@ -613,6 +613,16 @@ const MAX_CELL_SPAN: u8 = 64;
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;
 
+/// The marker characters of an open `<ul>`/`<ol>`.
+#[derive(Clone, Copy)]
+struct ListMarker {
+  /// Character the built-in enter of its items writes.
+  selected: u8,
+  /// Character the latest marker in the list actually used, which an override
+  /// can make any other one, or 0 before an item wrote a marker.
+  written: u8,
+}
+
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
 const CLEAN_FRAGMENTS: u8 = 2;
@@ -1153,6 +1163,24 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
+  /// Marker characters of each open `<ul>`/`<ol>`, innermost last.
+  list_markers: Vec<ListMarker>,
+  /// Last marker character of the list that last closed with items, or 0 once
+  /// visible output leaving the buffer, or the close of a quote around it, ends
+  /// its run. CommonMark joins the next list of the same type into it, blank
+  /// line or not, so that list takes the other character.
+  sibling_list_marker: u8,
+  /// `<li>` depth that list closed at: a list opening at another one is no sibling.
+  sibling_list_depth: u16,
+  /// Quote frames open around that list. A list under other `>` prefixes is no
+  /// sibling, while a quote that writes nothing leaves the run to its output.
+  sibling_list_quotes: usize,
+  /// Buffer offset where output after that list may turn visible, past the
+  /// whitespace already scanned. Lowered by rewrites and shifted by drains.
+  /// Read only while `sibling_list_marker` is set.
+  list_gap_from: usize,
+  /// The latest item marker is `*`, where a rule on its line reads `* ***`.
+  last_item_star: bool,
   /// `<li>` children opened so far in each open `<ol>` or `<ul>`, innermost
   /// last. An item's position among them numbers it and marks the list's first.
   list_item_counts: Vec<u32>,
@@ -1234,6 +1262,9 @@ pub struct ConvertState {
   code_span_closed_bytes: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
+  /// Bytes read to decide whether output since a closed list ended its run.
+  #[cfg(test)]
+  list_gap_scanned: usize,
   /// Bytes `opens_block_line` reads through the space run before its end.
   #[cfg(test)]
   block_line_bytes_read: std::cell::Cell<usize>,
@@ -1467,6 +1498,12 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       ordered_starts: Vec::new(),
+      list_markers: Vec::new(),
+      sibling_list_marker: 0,
+      sibling_list_depth: 0,
+      sibling_list_quotes: 0,
+      list_gap_from: 0,
+      last_item_star: false,
       list_item_counts: Vec::new(),
 
       pre_fence_pending: false,
@@ -1498,6 +1535,8 @@ impl ConvertState {
       code_span_closed_bytes: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
+      #[cfg(test)]
+      list_gap_scanned: 0,
       #[cfg(test)]
       block_line_bytes_read: std::cell::Cell::new(0),
       #[cfg(test)]
@@ -2997,6 +3036,7 @@ impl ConvertState {
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
+    self.list_gap_from = self.list_gap_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_emphasis_blank.note_rewrite(offset);
     self.held_emphasis_whitespace.note_rewrite(offset);
@@ -3036,6 +3076,7 @@ impl ConvertState {
     self.charged_vertical_tabs.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
+    self.list_gap_from = self.list_gap_from.saturating_sub(removed);
     self.caption_line.note_drain(removed);
     self.marker_line.note_drain(removed);
     self.leading_whitespace = 0;
@@ -3468,6 +3509,7 @@ impl ConvertState {
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
+    self.note_list_gap_drain(drain_end);
     #[cfg(debug_assertions)]
     {
       let tail = &self.buffer.as_bytes()[drain_end.saturating_sub(64)..drain_end];
@@ -3897,6 +3939,57 @@ mod tests {
         html.len()
       );
     }
+  }
+
+  // A gap that only grows must not be read again at every empty list opening
+  // or block boundary, whether or not visible output ended it.
+  #[test]
+  fn a_growing_list_gap_is_read_once() {
+    let list = "<ul><li>a</li></ul>";
+    let breaks = "<br>".repeat(20_000);
+    for (name, html) in [
+      (
+        "empty lists",
+        format!("{list}{}", "<br><ul></ul>".repeat(20_000)),
+      ),
+      (
+        "after visible output",
+        format!("{list}{breaks}x{}", "<ul></ul>".repeat(20_000)),
+      ),
+      (
+        "block boundaries",
+        format!("{list}{breaks}x{}", "<em><div></div></em>".repeat(5_000)),
+      ),
+    ] {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      processor.process_chunk(&html);
+      let read = processor.state.list_gap_scanned;
+      assert!(
+        read <= 2 * html.len(),
+        "{name}: read {read} bytes of a {}-byte input",
+        html.len()
+      );
+    }
+  }
+
+  // The scanned position skips whitespace, so bytes written over it count again.
+  #[test]
+  fn list_gap_scan_reads_bytes_that_replace_scanned_ones() {
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let state = &mut processor.state;
+    state.buffer.push_str("  \n    ");
+    assert!(!state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 7);
+
+    state.truncate_buffer(3);
+    state.buffer.push('x');
+    assert!(state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 3);
+
+    // Visible output stays where the scan stopped, past any later whitespace.
+    state.buffer.push_str("  ");
+    assert!(state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 3);
   }
 
   // A held tail that only grows must not be read again on every chunk.
