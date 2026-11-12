@@ -3289,6 +3289,13 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     "- a\n-\n- b"
   );
   assert_eq!(convert("<ul><li></li><li>a</li></ul>"), "-\n- a");
+  // A parent's bare marker is no paragraph either, and a blank line under it
+  // would end that item and turn the nested one into its sibling.
+  assert_eq!(convert("<ul><li><ul><li></li></ul></li></ul>"), "-\n  -");
+  assert_eq!(
+    convert("<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>"),
+    "-\n  - \n    > q"
+  );
   // A child that is not an item does not make the first item a later one.
   assert_eq!(
     convert("<ul><li>a<ul><script>s</script><li></li></ul></li></ul>"),
@@ -3304,6 +3311,191 @@ fn an_empty_list_item_does_not_underline_the_text_above() {
     convert("<ul><li>a<ul><li><blockquote>q</blockquote><ul><li>b</li></ul></li></ul></li></ul>"),
     "- a\n\n  - \n    > q\n    - b"
   );
+}
+
+#[test]
+fn parent_text_after_empty_nested_list_stays_in_parent() {
+  for (html, expected) in [
+    ("<ul><li><ul></ul>text</li></ul>", "- text"),
+    ("<ul><li><ol></ol>text</li></ul>", "- text"),
+    ("<ul><li>before<ul></ul>text</li></ul>", "- before text"),
+    (
+      "<ul><li><ul><template><li></li></template></ul>text</li></ul>",
+      "- text",
+    ),
+    ("<ul><li><ul><span></span></ul>text</li></ul>", "- text"),
+    ("<ul><li><ul> \n </ul>text</li></ul>", "- text"),
+    (
+      "<ul><li><ul></ul><strong>text</strong></li></ul>",
+      "- **text**",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><ul></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<blockquote><ul><li><ol><li></li></ol>text</li></ul></blockquote>",
+      "> -\n>   1.\n>\n>   text",
+    ),
+    (
+      "<ul><li><blockquote><ol><li></li></ol>text</blockquote></li></ul>",
+      "- \n  >\n  > 1.\n  >\n  > text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol>text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ol start=\"10\"><li><ul><li></li></ul>text</li></ol>",
+      "10.\n    -\n\n    text",
+    ),
+    (
+      "<ul><li><ol><li>child</li></ol>text</li></ul>",
+      "-\n  1. child\n\n  text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol><strong>text</strong></li></ul>",
+      "-\n  1.\n\n  **text**",
+    ),
+    (
+      "<ul><li><ol><li></li></ol><script>hidden</script> text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ol><li></li></ol></li><li>next</li></ul>",
+      "-\n  1.\n- next",
+    ),
+    (
+      "<ul><li><pre><ul></ul>x</pre></li></ul>",
+      "- ```\n  x\n  ```",
+    ),
+    (
+      "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>",
+      "- x\n\n  - \n  \n\n  y",
+    ),
+    (
+      "<table><tr><td><ul><li><ol><li></li></ol>text</li></ul></td></tr></table>",
+      "| <ul><li><ol><li></li></ol>text</li></ul> |\n| --- |",
+    ),
+  ] {
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      transparent_override("span", true),
+    ] {
+      assert_eq!(
+        html_to_markdown(html, options.clone()),
+        expected,
+        "html={html}"
+      );
+      for split in 0..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = processor.process_chunk(&html[..split]);
+        output.push_str(&processor.process_chunk(&html[split..]));
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "html={html}, split={split}");
+      }
+    }
+  }
+}
+
+#[test]
+fn empty_inline_after_nested_list_keeps_the_list_tight() {
+  // Only visible parent text needs its own paragraph after a nested list. An
+  // element that stays empty, or a list its inline wrapper wrote inline, must
+  // not leave a blank line that turns the list loose.
+  for (html, expected) in [
+    (
+      "<ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul>",
+      "- x\n  - a\n- next",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><a id=\"anchor\"></a></li><li>next</li></ul>",
+      "- x\n  - a\n- next",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  - a\n- next",
+    ),
+    (
+      "<ol><li>x<ol><li>a</li></ol><span></span><em></em></li><li>next</li></ol>",
+      "1. x\n   1. a\n2. next",
+    ),
+    (
+      "<blockquote><ul><li>x<ul><li>a</li></ul><span></span></li><li>next</li></ul></blockquote>",
+      "> - x\n>   - a\n> - next",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
+    ),
+    (
+      "<ul><li><a href=\"/x\"><ul><li>a</li></ul></a>t</li></ul>",
+      "- [  - a](/x)t",
+    ),
+    (
+      "<ul><li>x<ul><li>a</li></ul><span></span>tail</li><li>next</li></ul>",
+      "- x\n  - a\n\n  tail\n- next",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+    for split in 0..=html.len() {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = processor.process_chunk(&html[..split]);
+      output.push_str(&processor.process_chunk(&html[split..]));
+      output.push_str(&processor.finish());
+      assert_eq!(output, expected, "html={html}, split={split}");
+    }
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut output = String::new();
+    for index in 0..html.len() {
+      output.push_str(&processor.process_chunk(&html[index..=index]));
+    }
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "html={html}, one byte per chunk");
+  }
+}
+
+#[test]
+fn block_marker_after_nested_list_stays_literal() {
+  for (text, expected) in [
+    ("# h", "\\# h"),
+    ("## h", "\\## h"),
+    ("1. x", "1\\. x"),
+    ("1) x", "1\\) x"),
+    ("999999999. x", "999999999\\. x"),
+    ("- x", "\\- x"),
+    ("+ x", "\\+ x"),
+    ("&gt; q", "\\> q"),
+    ("---", "\\---"),
+  ] {
+    let html = format!("<ol start=\"10\"><li><ul><li>child</li></ul>{text}</li></ol>");
+    let expected = format!("10.\n    - child\n\n    {expected}");
+    for options in [
+      HtmlToMarkdownOptions::default(),
+      transparent_override("span", true),
+    ] {
+      assert_eq!(
+        html_to_markdown(&html, options.clone()),
+        expected,
+        "html={html}"
+      );
+      for split in 0..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(options.clone());
+        let mut output = processor.process_chunk(&html[..split]);
+        output.push_str(&processor.process_chunk(&html[split..]));
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "html={html}, split={split}");
+      }
+    }
+  }
 }
 
 #[test]
@@ -9629,9 +9821,142 @@ fn scout9_list_tail_quote_spacing() {
 }
 
 #[test]
+fn ordered_list_after_a_dropped_block_keeps_its_blank_line() {
+  // The empty quote's rewrite forgot the break's end; the bytes still end there.
+  let html =
+    "<ul><li><br><blockquote></blockquote><ol start=\"123456789\"><li></li></ol></li></ul>";
+  assert_eq!(convert(html), "-   \n  \n\n  123456789.");
+}
+
+#[test]
+fn marker_after_a_cr_reads_only_its_own_line_above() {
+  // JS stops at the `\r` rather than reading past it for the parent's marker.
+  let html = "<ul><li><em><br><ul><li><br>&#13;<ol start=\"123456789\"><li></li></ol></li></ul></em></li></ul>";
+  assert_eq!(convert(html), "- *  \n    -   \n    \r\n\n    123456789. *");
+}
+
+#[test]
+fn open_fence_leaves_a_quoted_empty_item_guard_open() {
+  // Settled while the fence was open, the guard took the fence's line break for
+  // an empty item and wrote a quoted blank line that JS does not. The one left
+  // before the fence is the break after the closed quote, in both engines.
+  let html = "<ul><li><blockquote><ul><li><blockquote></blockquote><pre>c</pre><ol start=\"123456789\"><li></li></ol></li></ul></blockquote></li></ul>";
+  assert_eq!(
+    convert(html),
+    "- \n  > - \n  >\n  >   ```\n  >   c\n  >   ```\n  >\n  >   123456789."
+  );
+}
+
+#[test]
+fn quote_opened_on_a_hard_break_indent_keeps_the_guard_out() {
+  // Main opens the quote on the indent a hard break left. The guard's blank
+  // line goes before that indent, out of the quote, and a parent marker on
+  // such a line still reads as bare, so its nested marker follows it with no
+  // blank line, in both engines. In the second case that line carries the
+  // item's indent twice, as main writes it, so CommonMark reads `> -` as an
+  // indented code block and the parent item is lost there: the case pins
+  // what both engines write, not an item kept.
+  for (html, expected) in [
+    (
+      "<ul><li>a<blockquote><br></blockquote><blockquote><ul><li><blockquote>q</blockquote></li></ul></blockquote></li></ul>",
+      "- a\n  \n\n    > - \n  >   > q",
+    ),
+    (
+      "<ol start=\"123456789\"><li><em>x&#13;&#10;   </em><blockquote><br><br><br></blockquote><blockquote><ul><li><ul><li></li></ul></li><li>z</li></ul></blockquote>z</li></ol>",
+      "123456789. *x*\n  \n             \n             \n                      > -\n           >   -\n           > - z\n\n           z",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
 fn hard_break_trim_preserves_an_empty_item_guard() {
   let html = "<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>";
   assert_eq!(convert(html), "- x\n\n  - \n  \n\n  y");
+}
+
+#[test]
+fn emphasis_closer_alone_on_its_line_is_no_parent_marker() {
+  // A list writes only `-` and `N.` markers, so the `*` an emphasis closes with
+  // after a hard break is text, and a bare marker under it would underline it.
+  for (html, expected) in [
+    (
+      "<ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "- *x  \n  *\n\n  - \n    > q",
+    ),
+    (
+      "<ol><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "1. *x  \n   *\n\n   - \n     > q",
+    ),
+    (
+      "lead<br><ul><li> <ol><li><br></li><li><em>x<br></em><ul><li><blockquote>q</blockquote></li><li>z</li></ul></li></ol></li></ul>",
+      "lead  \n\n-\n  1.   \n  2. *x  \n     *\n\n     - \n       > q\n     - z",
+    ),
+    // A parent's own bare marker still takes the item without a blank line.
+    (
+      "<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-\n  - \n    > q",
+    ),
+    // Past a CRLF the `*` sits short of the content column of the item the
+    // line above opens, where it opens a list of its own, so the guard leaves
+    // it alone.
+    (
+      "<ol start=\"10\"><li><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10. *x\r\n*\n    - \n      > q",
+    ),
+    (
+      "<blockquote><ul><li><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></blockquote>",
+      "> - *x\r\n> *\n>   - \n>     > q",
+    ),
+    // Under a text line the `*` continues it: inside a quote, and after a
+    // parent marker alone on its line, where that text left the item.
+    (
+      "<ul><li><blockquote><em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></blockquote></li></ul>",
+      "- \n  > *x\r\n  > *\n  >\n  > - \n  >   > q",
+    ),
+    (
+      "<ul><li>&#13;&#10;<em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "- \r\n*x\r\n*\n\n  - \n    > q",
+    ),
+    // A quote in an item counts its columns past the item's indent, whether
+    // its first line carries that indent or not.
+    (
+      "<ul><li><blockquote><ol start=\"10\"><li><em>x<br></em><ol><li><br></li></ol></li></ol></blockquote></li></ul>",
+      "- \n  > 10. *x  \n  >     *\n  >\n  >     1.",
+    ),
+    (
+      "<ul><li><blockquote><ol start=\"10\"><li><em>x&#13;&#10;</em><ol><li><br></li></ol></li></ol></blockquote></li></ul>",
+      "- \n  > 10. *x\r\n  > *\n  >     1.",
+    ),
+    (
+      "<ul><li><blockquote><ul><li><em>x<br></em><ul><li><blockquote>q</blockquote></li></ul></li></ul></blockquote></li></ul>",
+      "- \n  > - *x  \n  >   *\n  >\n  >   - \n  >     > q",
+    ),
+    // The `*` answers to the whole paragraph above: the item a lazy line
+    // continues still holds it, and past a blank line none goes on.
+    (
+      "<ol start=\"10\"><li>a&#10;<em>b&#10;</em><br><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10. a\n*b\n*  \n    - \n      > q",
+    ),
+    (
+      "<ol start=\"10\"><li>a&#13;&#10;<em>x&#10;&#10;</em><br><ol><li></li></ol>z</li></ol>",
+      "10. a\r\n*x\n\n*  \n    1.\n\n    z",
+    ),
+    // An item holding only another marker, as `- *` does, opens no paragraph,
+    // so the text under it starts one at its own column.
+    (
+      "<ul><li><em>&#13;y&#10;</em><ul><li><br></li><li>z</li></ul></li></ul>",
+      "- *\ry\n*\n\n  -   \n  - z",
+    ),
+    // A nested marker after a lone `\r` keeps the blank line.
+    (
+      "<p>lead</p><em><em>x<br>&#13;&#10;</em>&#13;<ol start=\"10\"><li><blockquote>q</blockquote></li><li>z</li></ol>z</em>",
+      "lead\n\n**x  \n\r\n*\r\n\n10. \n    > q 11. z z*",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
 }
 
 #[test]
@@ -9649,6 +9974,307 @@ fn heading_after_nested_hard_break_stays_in_parent_item() {
     (
       "<ol start=\"10\"><li>a<ul><li>b<br></li></ul><h2>h</h2></li></ol>",
       "10. a\n    - b  \n\n    ## h",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn parent_block_drops_the_indent_a_closed_item_left() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n  ***",
+    ),
+    (
+      "<ul><li>a<ul><li><pre>c</pre></li></ul><h2>h</h2></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li>x</li><li><pre>c</pre></li></ul><hr></li></ul>",
+      "- a\n  - x\n  - ```\n    c\n    ```\n\n  ***",
+    ),
+    (
+      "<blockquote><ul><li>a<ul><li><pre>c</pre></li></ul><hr></li></ul></blockquote>",
+      "> - a\n>   - ```\n>     c\n>     ```\n>\n>   ***",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn hard_break_in_an_empty_nested_item_leaves_no_indent_line() {
+  for (html, expected) in [
+    (
+      "<ul><li>a<ul><li><br></li></ul><pre>d</pre></li></ul>",
+      "- a\n\n  -   \n\n  ```\n  d\n  ```",
+    ),
+    (
+      "<ul><li>a<ul><li><br></li></ul><blockquote>q</blockquote></li></ul>",
+      "- a\n\n  -   \n\n  > q",
+    ),
+    (
+      "<ul><li><p>a</p><ul><li><br></li></ul><blockquote>q</blockquote></li></ul>",
+      "- a\n\n  -   \n\n  > q",
+    ),
+    (
+      "<ul><li>a<ul><li><br></li></ul><hr></li></ul>",
+      "- a\n\n  -   \n  ---",
+    ),
+    (
+      "<ul><li>a<ul><li><br></li></ul><h2>h</h2></li></ul>",
+      "- a\n\n  -   \n\n  ## h",
+    ),
+    // A line of spaces between two markers is blank, so the second needs no
+    // separator of its own.
+    (
+      "<ol start=\"4\"><li>a<ol start=\"2\"><li><br><br></li></ol><ul><li></li></ul></li></ol>",
+      "4. a\n\n   2.   \n        \n   -",
+    ),
+    (
+      "<ul><li>a<ul><li><pre>c</pre><br></li></ul><ul><li></li></ul></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n      \n\n  -",
+    ),
+    (
+      "<ul><li>a<ul><li><pre>c</pre><br></li></ul><h2>h</h2></li></ul>",
+      "- a\n  - ```\n    c\n    ```\n\n      \n\n  ## h",
+    ),
+    (
+      "<ul><li>a<ul><li><br></li></ul><ol start=\"5\"><li>z</li></ol></li></ul>",
+      "- a\n\n  -   \n\n  5. z",
+    ),
+    (
+      "<ul><li>a<ul><li><br><br></li></ul><ul><li></li></ul></li></ul>",
+      "- a\n\n  -   \n      \n  -",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn hard_break_indent_in_an_open_inline_keeps_the_marker_guard() {
+  // A hard break inside an open inline writes the next line's indent with its
+  // line ending, so a marker after it still sits right under the text above.
+  for (html, expected) in [
+    (
+      "<ul><li><em>a<br><ul><li></li></ul></em></li></ul>",
+      "- *a  \n\n    - *",
+    ),
+    (
+      "<ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul>",
+      "- *a  \n\n    -   \n    x*",
+    ),
+    (
+      "<ul><li><em><br><ul><li></li></ul></em></li></ul>",
+      "- *  \n\n    - *",
+    ),
+    (
+      "<ul><li><em><br><ul><li><br>x</li></ul></em></li></ul>",
+      "- *  \n\n    -   \n    x*",
+    ),
+    (
+      "<ul><li><em>a<br> &#32;<ul><li><br>x</li></ul></em></li></ul>",
+      "- *a  \n\n    -   \n    x*",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
+fn hard_break_indent_past_the_content_column_leaves_the_marker_line() {
+  // That indent adds to the nested marker's own. Four columns past the parent
+  // item's content column, the marker's line only continues the text above,
+  // and a blank line would turn it into an indented code block.
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><em>a<br><ul><li></li></ul></em></li></ol>",
+      "10. *a  \n        - *",
+    ),
+    (
+      "<ul><li><ul><li><em>a<br><ul><li></li></ul></em></li></ul></li></ul>",
+      "-\n  - *a  \n        - *",
+    ),
+    (
+      "<ul><li><ul><li><em>a<br><ul><li><br>x</li></ul></em></li></ul></li></ul>",
+      "-\n  - *a  \n        -   \n      x*",
+    ),
+    // Outside an inline the break's indent gives way to the marker's, which
+    // still sits right under the text above.
+    (
+      "<ol start=\"10\"><li>a<br><ul><li></li></ul></li></ol>",
+      "10. a  \n\n    -",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
+fn hard_break_indent_counts_from_the_column_the_parent_marker_was_written_at() {
+  // A list inside an open inline writes its marker after the delimiter, past
+  // the column the list indent assumes. A `*` with spaces after it is itself a
+  // list marker, so the item's content starts that much further right, and a
+  // nested marker within three columns of it still underlines the text above.
+  for (html, expected) in [
+    (
+      "<ul><li><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul>",
+      "- *  1. x  \n\n          -   \n*",
+    ),
+    (
+      "<blockquote><ul><li><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul></blockquote>",
+      "> - *  1. x  \n>\n>           -   \n> *",
+    ),
+    (
+      "<ol start=\"10\"><li><em><ul><li>x<br><ul><li><br></li></ul></li></ul></em></li></ol>",
+      "10. *    - x  \n\n            -   \n*",
+    ),
+    // `**` is no list marker, so the item after it is text, and the nested
+    // marker's line only continues it.
+    (
+      "<ul><li><strong><ol><li>x<br><ul><li><br></li></ul></li></ol></strong></li></ul>",
+      "- **  1. x  \n          -   \n**",
+    ),
+    // A parent marker alone at the end of such a line is no paragraph.
+    (
+      "<ul><li><em><ol><li><br><ol><li><br></li></ol></li></ol></em></li></ul>",
+      "- *  1.   \n          1.   \n*",
+    ),
+    (
+      "<ul><li><em><ol><li></li><li><br><ol><li><br></li></ol></li></ol></em></li></ul>",
+      "- *  1.   2.   \n          1.   \n*",
+    ),
+    // A quote inside the parent holds the text above, at the indent it strips.
+    (
+      "<ul><li><em><ol><li><blockquote>x<br><ol><li><br></li></ol></blockquote></li></ol></em></li></ul>",
+      "- *  1. \n     > x  \n     >      1.*",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
+fn hard_break_indent_counts_from_the_container_holding_the_parent_line() {
+  for (html, expected) in [
+    // Text before a parent marker on its line keeps it from being a marker, so the
+    // text belongs to the container around the list, here the document.
+    (
+      "<em><ol><li><br><ul><li></li></ul></li></ol></em>",
+      "*1.   \n      - *",
+    ),
+    // After an earlier sibling's text the marker is text in that sibling.
+    (
+      "<ul><li><em><ol><li>a</li><li>x<br><ul><li><br></li></ul></li></ol></em></li></ul>",
+      "- *  1. a  2. x  \n\n          -   \n*",
+    ),
+    // A quote's first line gets the list indent its later lines already carry.
+    (
+      "<ul><li><blockquote><em><ol><li>x<br><ul><li><br></li></ul></li></ol></em></blockquote></li></ul>",
+      "- \n  > *  1. x  \n  >\n  >         -   \n  > *",
+    ),
+    // A marker numbered other than 1 under text stays in that paragraph.
+    (
+      "<ul><li>y<br><em><ol start=\"10\"><li>x<br><ul><li></li></ul></li></ol></em></li></ul>",
+      "- y  \n  *  10. x  \n            - *",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
+fn nested_marker_line_that_cannot_underline_keeps_its_place() {
+  for (html, expected) in [
+    // Left of the parent's content column the line is lazy.
+    (
+      "<ul><li><em><ol start=\"999\"><li></li><li><strong>x<br><ol start=\"10\"><li><br></li><li>z</li></ol></li></ol></em></li></ul>",
+      "- *  999.   1000. **x  \n                10.   \n        11. z***",
+    ),
+    // An ordered marker's line underlines nothing, and a blank line would push its
+    // content, short of the marker's column, into an indented code block.
+    (
+      "<ul><li><em><ol><li>x<br><ol start=\"123456789\"><li><blockquote>a</blockquote></li></ol></li></ol></em></li></ul>",
+      "- *  1. x  \n          123456789. \n                > a*",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
+fn hard_break_indent_outside_an_open_inline_starts_the_marker_line() {
+  for (html, expected) in [
+    // Outside an open inline a text parent marker's column bounds the line too.
+    (
+      "a<span><ol start=\"999\"><li>x<br><ul><li><br></li></ul></li></ol></span>",
+      "a\n999. x  \n     -",
+    ),
+    (
+      "<blockquote>a<span><ol start=\"999\"><li>a</li><li>x<br><em></em><ul><li><br></li></ul></li></ol></span></blockquote><p>q</p>",
+      "> a\n> 999. a\n> 1000. x  \n>       -\n\nq",
+    ),
+    // An item closing after the break trims that indent, so the marker writes
+    // its own.
+    (
+      "<ul><li><em><ul><li><em><ol><li>x<br></li></ol><ul><li><br></li></ul></em></li></ul></em></li></ul>",
+      "- *  - *    1. x  \n\n    -   \n**",
+    ),
+    // So does an empty pair dropping the breaks inside it.
+    (
+      "<ul><li><em><ul><li><em><ol><li>x<br></li></ol><em><br></em><ul><li><br></li></ul></em></li></ul></em></li></ul>",
+      "- *  - *    1. x  \n\n    -   \n**",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+  }
+}
+
+#[test]
+fn nested_list_tail_in_a_raw_html_block_matches_the_plain_context() {
+  for (html, expected) in [
+    (
+      "<details><summary>s</summary><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></details>",
+      "<details>\n\n<summary>s</summary>\n\n\n\n- x\n  - a\n- next\n\n</details>",
+    ),
+    (
+      "<dl><dd><ul><li>x<ul><li>a</li></ul><p></p></li><li>next</li></ul></dd></dl>",
+      "<dl><dd>\n\n- x\n  - a\n- next\n\n</dd></dl>",
+    ),
+    (
+      "<details><ul><li>x<ul><li>a</li></ul>tail</li></ul></details>",
+      "<details>\n\n- x\n  - a\n\n  tail\n\n</details>",
+    ),
+    (
+      "<dl><dd><ul><li>x<ul><li></li></ul>t</li></ul></dd></dl>",
+      "<dl><dd>\n\n- x\n\n  -\n\n  t\n\n</dd></dl>",
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html}");
@@ -9815,8 +10441,587 @@ fn block_leaves_the_marker_of_a_closed_nested_item() {
 fn text_after_a_closed_nested_item_stays_escaped() {
   assert_eq!(
     convert("<ul><li>a<ul><li></li></ul># t</li></ul>"),
-    "- a\n\n  - \\# t"
+    "- a\n\n  -\n\n  \\# t"
   );
+}
+
+#[test]
+fn long_text_before_an_ordered_list_does_not_count_as_an_item() {
+  let text = "word ".repeat(16_384);
+  let html = format!("<ol>{text}<li>item</li></ol>");
+  assert_eq!(convert(&html).rsplit('\n').next(), Some("1. item"));
+}
+
+#[test]
+fn a_marker_nested_past_three_spaces_still_opens_its_item() {
+  // A third-level marker is indented by its ancestors' items. Its content
+  // starts a block like a top-level item's does, so it is escaped and blocks
+  // stay on the marker's line.
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>",
+      "-\n  -\n    - \\# h",
+    ),
+    (
+      "<ul><li><ul><li><ul><li>1. x</li></ul></li></ul></li></ul>",
+      "-\n  -\n    - 1\\. x",
+    ),
+    (
+      "<ol><li><ol><li><ol><li>&gt; q</li></ol></li></ol></li></ol>",
+      "1.\n   1.\n      1. \\> q",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - | a |\n      | --- |",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><pre>code</pre></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ```\n      code\n      ```",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - ***",
+    ),
+    (
+      "<ul><li><ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>",
+      "-\n  -\n    - \n      > q",
+    ),
+    (
+      "<ol start=\"10\"><li><ol start=\"10\"><li><table><tr><td>a</td></tr></table></li></ol></li></ol>",
+      "10.\n    10. | a |\n        | --- |",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn empty_nested_list_tail_stays_in_parent_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><ol><li></li></ol>text</li></ul>",
+      "-\n  1.\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><a></a><script>hidden</script><abbr></abbr></li><li>next</li></ul>",
+      "-\n  -\n- next",
+    ),
+    (
+      "<ul><li><ul><li></li></ul>text</li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><span>te</span><span>xt</span></li></ul>",
+      "-\n  -\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li></li></ul><em>text</em></li></ul>",
+      "-\n  -\n\n  *text*",
+    ),
+    (
+      "<ol start=\"10\"><li><ul><li></li></ul>text</li></ol>",
+      "10.\n    -\n\n    text",
+    ),
+    (
+      "<blockquote><ul><li><ul><li></li></ul>text</li></ul></blockquote>",
+      "> -\n>   -\n>\n>   text",
+    ),
+    (
+      "<ul><li><ul><li><ul><li></li></ul>text</li></ul></li></ul>",
+      "-\n  -\n    -\n\n    text",
+    ),
+    ("<ul><li><ul><li></li></ul></li></ul>", "-\n  -"),
+    ("<ul><li><ul></ul>text</li></ul>", "- text"),
+    (
+      "<ul><li><ul><li></li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  -\n- next",
+    ),
+    (
+      "<ul><li><ul><li>inner</li></ul></li><li>next</li></ul>",
+      "-\n  - inner\n- next",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn filled_nested_list_tail_stays_in_parent_item() {
+  for (html, expected) in [
+    (
+      "<ul><li><ul><li></li><li>a</li></ul>text</li></ul>",
+      "-\n  -\n  - a\n\n  text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>text</li></ul>",
+      "-\n  - a\n\n  text",
+    ),
+    (
+      "<ul><li>lead<ul><li>a</li></ul>text</li></ul>",
+      "- lead\n  - a\n\n  text",
+    ),
+    (
+      "<ol><li><ol><li>a</li></ol>text</li></ol>",
+      "1.\n   1. a\n\n   text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><em>text</em></li></ul>",
+      "-\n  - a\n\n  *text*",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span>te</span><span>xt</span> more</li></ul>",
+      "-\n  - a\n\n  text more",
+    ),
+    (
+      "<ul><li><ul><li>a<ul><li>b</li></ul>c</li></ul>d</li></ul>",
+      "-\n  - a\n    - b\n\n    c\n\n  d",
+    ),
+    (
+      "<blockquote><ul><li><ul><li>a</li></ul>text</li></ul></blockquote>",
+      "> -\n>   - a\n>\n>   text",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>t<ul></ul>u</li></ul>",
+      "-\n  - a\n\n  t u",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul><span></span> </li><li>next</li></ul>",
+      "-\n  - a\n- next",
+    ),
+    (
+      "<ul><li><ul><li>a</li></ul>1. x</li></ul>",
+      "-\n  - a\n\n  1\\. x",
+    ),
+    (
+      "<ul><li><div><ul><li>a</li></ul></div><ul></ul>t</li></ul>",
+      "-\n  - a\n\n  t",
+    ),
+    (
+      "<ul><li><div><ul><li></li></ul></div><ul></ul><ul></ul></li><li>z</li></ul>",
+      "-\n  -\n- z",
+    ),
+    (
+      "<ul><li>x<ul><li>z<br></li></ul>y</li></ul>",
+      "- x\n  - z  \n\n  y",
+    ),
+    (
+      "<ul><li><ul><li>a<br></li></ul>text</li></ul>",
+      "-\n  - a  \n\n  text",
+    ),
+    (
+      "<ul><li><a href=\"x\"><ul><li>a</li></ul></a>t<ul></ul>u</li></ul>",
+      "- [  - a](x)t u",
+    ),
+    (
+      "<ul><li><em><ul><li>a</li></ul></em>t</li></ul>",
+      "- *  - a*t",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "html={html}");
+  }
+}
+
+#[test]
+fn empty_nested_list_review_regressions() {
+  for (id, html, expected, options) in [
+    (
+      "F8-1",
+      "<ul><li>lead<br><ul><li></li></ul>text</li></ul>",
+      "- lead  \n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F8-2",
+      "<ul><li>lead<br><ol><li></li></ol>text</li></ul>",
+      "- lead  \n\n  1.\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F8-3",
+      "<ul><li>lead<br><ul><li></li></ul></li></ul>",
+      "- lead  \n\n  -",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-1",
+      "<ul><li>lead<ul><li></li></ul>text</li></ul>",
+      "- lead\n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-2",
+      "<ul><li><p>lead</p><ul><li></li></ul>text</li></ul>",
+      "- lead\n\n  -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-3",
+      "<ul><li><blockquote><ul><li></li></ul>text</blockquote></li></ul>",
+      "- \n  >\n  > -\n  >\n  > text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F1-4",
+      "<ul><li><ul><li></li></ul>a<ul><li></li></ul>b</li></ul>",
+      "-\n  -\n\n  a\n\n  -\n\n  b",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F2-1",
+      "<ul><li><ul><li><ul><li><ul><li></li></ul></li></ul></li></ul>text</li></ul>",
+      "-\n  -\n    -\n      -\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F2-2",
+      "<ol><li><ol><li><ol><li><ol><li></li></ol></li></ol></li></ol>t</li></ol>",
+      "1.\n   1.\n      1.\n         1.\n\n   t",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F3-1",
+      "<ul><li><ul><li></li></ul><span>t</span></li></ul>",
+      "-\n  -\n\n  XtY",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "span".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("X".to_string()),
+              exit: Some("Y".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F3-2",
+      "<ul><li><ul><li></li></ul><span></span></li><li>n</li></ul>",
+      "-\n  -\n\n  XY\n- n",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "span".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("X".to_string()),
+              exit: Some("Y".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F3-3",
+      "<ul><li><ul><li></li></ul><em></em></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions {
+        plugins: Some(mdream::types::PluginConfig {
+          tag_overrides: Some(vec![(
+            "em".to_string(),
+            mdream::types::TagOverrideConfig {
+              enter: Some("".to_string()),
+              exit: Some("".to_string()),
+              ..Default::default()
+            },
+          )]),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    ),
+    (
+      "F4-1",
+      "<ul><li><hr><br>text</li></ul>",
+      "- ***\n\n    \n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F4-2",
+      "<ul><li><ul><li></li></ul><br>text</li></ul>",
+      "-\n  -\n\n    \n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F4-3",
+      "<ul><li><ul><li></li></ul><br></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-1",
+      "<ul><li><ul><li></li></ul><div></div></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-2",
+      "<ul><li><ul><li></li></ul><p></p></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-3",
+      "<ul><li><ul><li></li></ul><em></em></li><li>next</li></ul>",
+      "-\n  -\n- next",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F5-4",
+      "<ul><li><ul><li></li></ul><code></code></li><li>n</li></ul>",
+      "-\n  -\n- n",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F6-1",
+      "<ul><li><ul><li>a<br>-</li></ul>text</li></ul>",
+      "-\n  - a  \n    \\-\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F6-2",
+      "<ul><li><ul><li>a<br>1.</li></ul>text</li></ul>",
+      "-\n  - a  \n    1\\.\n\n  text",
+      HtmlToMarkdownOptions::default(),
+    ),
+    (
+      "F7-1",
+      "<ul><li><ul><li></li></ul><blockquote>q</blockquote></li></ul>",
+      "-\n  - \n  > q",
+      HtmlToMarkdownOptions::default(),
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, options.clone()),
+      expected,
+      "{id}: {html}"
+    );
+  }
+}
+
+#[test]
+fn empty_blocks_preserve_nested_list_tail() {
+  for block in ["<table></table>", "<pre></pre>"] {
+    let html = format!("<ul><li>A<ul><li>inner</li></ul>{block}parent</li></ul>");
+    let expected = "- A\n  - inner\n\n  parent";
+    assert_eq!(convert(&html), expected, "{block}");
+    for split in 0..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut actual = stream.process_chunk(&html[..split]);
+      actual.push_str(&stream.process_chunk(&html[split..]));
+      actual.push_str(&stream.finish());
+      assert_eq!(actual, expected, "{block} split={split}");
+    }
+  }
+}
+
+#[test]
+fn lone_closer_after_closed_item_and_hard_break() {
+  for (html, expected) in [
+    (
+      "<ul><li><ol><li>lead<br><em>x<br><br></em><em> </em><em>x&#10;</em><em></em><ul><li><br></li><li>z</li></ul><b></b></li></ol></li></ul>",
+      "-\n  1. lead  \n     *x  \n       \n     * *x\n*\n     -   \n     - z",
+    ),
+    (
+      "<ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-   \n    \n  *x\n*\n\n  - \n    > q",
+    ),
+    (
+      "<ul><li><br><br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li>&#10;<br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "- \n  \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><br><br>a&#10;<em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  a\n*x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><br><br>a<br><em>x&#10;</em><ul><li></li></ul></li></ul>",
+      "-   \n    \n  a  \n  *x\n*\n\n  -",
+    ),
+    (
+      "<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>",
+      "-\n  - y  \n    *x  \n      \n    *  \n\n    1.   \n    2.",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+// A hard break's indent that a line feed of the text ends is a blank line,
+// unlike the lines of spaces a run of hard breaks writes. With a hard break
+// after the `*` right below it, that line ends the paragraph above: the `*`
+// opens a list, and the nested item goes in it with no blank line. A lone
+// `\r` in a quote starts a line the quote's prefix skips, so a `*` under that
+// line opens a quote and a list of its own.
+#[test]
+fn lone_closer_under_a_blank_line_of_the_text() {
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol>",
+      "10. \n*x  \n    \n*  \n    -",
+    ),
+    // One list deeper, the nested marker sits four columns past the content
+    // of the item the `*` opens, so it reads as code in that item. A blank
+    // line above it would not avoid that.
+    (
+      "<ul><li><ol start=\"10\"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol></li></ul>",
+      "-\n  10. \n*x  \n      \n*  \n      -",
+    ),
+    (
+      "<blockquote><ol start=\"10\"><li><br>&#13;<em>x&#10;</em><br><ul><li></li></ul></li></ol></blockquote>",
+      "> 10.   \n>     \r*x\n> *  \n>     -",
+    ),
+    // A run of hard breaks wrote the line above the `*`, which keeps the blank
+    // line under it.
+    (
+      "<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>",
+      "-\n  - y  \n    *x  \n      \n    *  \n\n    1.   \n    2.",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+// A marker four columns or more past the paragraph a lone `*` continues is
+// text of that paragraph, so the nested item under the `*` needs no blank
+// line. One there would end the paragraph and open code.
+#[test]
+fn lone_closer_with_a_nested_marker_past_its_paragraph() {
+  for (html, expected) in [
+    (
+      "<strong><em><ul><li>x</li><li>-1<br><em><br><ul><li></li></ul>ab</em></li></ul></em></strong>",
+      "***- x - -1  \n  *  \n    - ab****",
+    ),
+    (
+      "<ol start=\"10\"><li>&#10;<em>x&#10;</em><ul><li></li></ul></li></ol>",
+      "10. \n*x\n*\n    -",
+    ),
+    // Past a blank line a paragraph's column is no deeper than where its
+    // first line starts, here inside the item: a marker there can still
+    // underline it, so it keeps the blank line.
+    (
+      "<ol start=\"10\"><li><ol><li>a</li></ol><em>k<br></em><ul><li><br>x</li></ul></li></ol>",
+      "10.\n    1. a\n\n    *k  \n    *\n\n    -   \n      x",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
+}
+
+// A marker that opens a blockquote reads nothing above the quote's content,
+// as in JS: a lone `*` there neither ends its blank line nor lets it go.
+#[test]
+fn lone_closer_above_a_quote_says_nothing_about_its_marker() {
+  let html = "<ol><li>&#13;<em>a&#10;</em><blockquote><br><br><br></blockquote><blockquote><ul><li></li></ul></blockquote></li></ol>";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    "1. \r*a\n*\n  \n     \n     \n\n      > -"
+  );
+}
+
+// A list marker alone on its line opens an item whose content starts one
+// column past the marker, however many spaces follow it. A paragraph whose
+// first line reaches that column sits in the item, so a lone `*` short of
+// it opens a list of its own and the nested marker needs no blank line.
+#[test]
+fn lone_closer_under_an_item_opened_by_a_bare_marker() {
+  for (html, expected) in [
+    (
+      "<ol start=\"10\"><li><br><em>x&#10;</em><br><ul><li></li></ul><p>t</p></li></ol>",
+      "10.   \n    *x\n*  \n    -\n\n    t",
+    ),
+    (
+      "<ol start=\"10\"><li><br><em>x&#10;</em><ul><li></li></ul><p>t</p></li></ol>",
+      "10.   \n    *x\n*\n    -\n\n    t",
+    ),
+    (
+      "<ol start=\"10\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n    *x\n*\n    - \n      > q",
+    ),
+    (
+      "<ol start=\"123456789\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "123456789.   \n           *x\n*\n           - \n             > q",
+    ),
+    (
+      "<blockquote><ol start=\"10\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>",
+      "> 10.   \n>     *x\n> *\n>     - \n>       > q",
+    ),
+    (
+      "<ul><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "-   \n  *x\n*\n  - \n    > q",
+    ),
+    (
+      "<ul><li><br><em>x&#10;</em><ol><li><br></li></ol></li></ul>",
+      "-   \n  *x\n*\n  1.",
+    ),
+    // A lazy line keeps the paragraph in the item, and text before the list
+    // ends at the blank line above its marker.
+    (
+      "<ol start=\"10\"><li><br><em>a&#10;b&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n    *a\nb\n*\n    - \n      > q",
+    ),
+    (
+      "a<ol start=\"10\"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "a\n\n10.   \n    *x\n*\n    - \n      > q",
+    ),
+    // A first line short of the item's content column leaves the item, and
+    // the `*` continues the paragraph it opens outside.
+    (
+      "<ul><li>&#10;<em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>",
+      "- \n*x\n*\n\n  - \n    > q",
+    ),
+    // A line of spaces under the marker leaves the item empty, and text four
+    // columns in past it is code, which the `*` cannot continue.
+    (
+      "<ol start=\"10\"><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>",
+      "10.   \n      \n    *x\n*\n    - \n      > q",
+    ),
+    (
+      "<ol start=\"10\"><li><br><br><em>x&#10;</em><br><ol><li><br></li><li></li></ol></li></ol>",
+      "10.   \n      \n    *x\n*  \n    1.   \n    2.",
+    ),
+    // Text short of a nested item that ended empty but reaching its marker's
+    // list goes on in the item holding that list, which the `*` falls out of.
+    (
+      "<ul><li><ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>",
+      "-\n  -   \n      \n    *x\n*\n    - \n      > q",
+    ),
+    (
+      "<ul><li><ul><li><br><br><em>x<br>&#10;</em><ul><li>&#13;</li></ul></li></ul></li></ul>",
+      "-\n  -   \n      \n    *x  \n    \n*\n    -",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "html={html}"
+    );
+  }
 }
 
 #[test]

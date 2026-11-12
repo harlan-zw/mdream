@@ -1,6 +1,6 @@
 import type { BlockquoteFrame, BufferScanState, MarkdownState, MarkdownStreamContext } from './markdown-processor'
 import { TAG_B, TAG_CITE, TAG_DEL, TAG_DFN, TAG_EM, TAG_I, TAG_PRE, TAG_S, TAG_STRIKE, TAG_STRONG } from './const'
-import { isAsciiWhitespace, lineOpensRawHtmlBlock, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
+import { isAsciiWhitespace, lineOpensRawHtmlBlock, noteBufferCompaction, noteListTailRewrite, stripBlockquoteListIndent, trimAsciiWhitespaceEnd } from './markdown-processor'
 import { isInsideHeading, noteBufferRewrite, trimOutputStart } from './utils'
 
 interface QuoteScan {
@@ -192,6 +192,8 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       return 0
     }
     const retained = content.slice(start)
+    noteListTailRewrite(state, 0)
+    noteBufferCompaction(state, content, start)
     state.buffer.splice(0, fragment, retained)
     noteBufferRewrite(state)
     for (const frame of state.blockquotes)
@@ -292,7 +294,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     const wrapping = !!options.wrapWidth
     if (hasYieldedContent && fragmentHeld && state.blockquotes.length > 0 && !headingHeld && !inPre && (!wrapping || leadingTrimmed === 0)) {
       observeStableOutput(content, stableLength + leadingTrimmed)
-      let retainedStart = stableLength + leadingTrimmed - 17
+      let retainedStart = stableLength + leadingTrimmed - 17 - state.listIndent.length
       if (wrapping)
         retainedStart = Math.min(retainedStart, content.lastIndexOf('\n', stableLength + leadingTrimmed - 1))
       const removed = compactQuotePrefix(heldFragment, content, Math.max(0, retainedStart))
@@ -304,7 +306,7 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       observeStableOutput(content, stableLength + leadingTrimmed)
       // A list prefix can contain three spaces, nine digits, a delimiter,
       // and three trailing spaces. Keep its preceding byte to classify it.
-      let contextStart = stableLength - 17
+      let contextStart = stableLength - 17 - state.listIndent.length
       if (wrapping) {
         const lineStart = currentContent.lastIndexOf('\n', stableLength - 1)
         if (lineStart < contextStart)
@@ -317,9 +319,11 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
         const fragmentStart = currentContent.length - lastFragment.length
         const tailStart = Math.max(0, Math.min(contextStart, fragmentStart))
         const emittedTail = currentContent.slice(tailStart, fragmentStart)
+        noteListTailRewrite(state, 0)
         const stableTailLength = Math.max(0, Math.min(stableLength, fragmentStart) - tailStart)
         const stableTail = emittedTail.slice(0, stableTailLength)
         const mutableTail = emittedTail.slice(stableTailLength)
+        noteBufferCompaction(state, currentContent, tailStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (stableTail)
@@ -334,6 +338,8 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       else if (!retainMutableFragments) {
         const tailStart = Math.max(0, contextStart)
         const emittedTail = currentContent.slice(tailStart, stableLength)
+        noteListTailRewrite(state, 0)
+        noteBufferCompaction(state, currentContent, tailStart)
         state.buffer.length = 0
         resetBufferScanCursors(bufferScan)
         if (emittedTail)

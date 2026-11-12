@@ -587,6 +587,272 @@ enum LineBeforeRow {
   Content,
 }
 
+/// How a line reads for the lone `*` rule, taken one byte at a time so a
+/// later drain can carry the reading on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum LineRead {
+  /// Only this many spaces so far.
+  Indent(usize),
+  /// The digits of an ordered marker ending at `column`, `count` of them.
+  /// `outer` is the content column of the item the marker would nest in.
+  Digits {
+    indent: usize,
+    column: usize,
+    count: usize,
+    outer: Option<usize>,
+  },
+  /// A list marker ending at `column`, then `spaces` spaces and nothing else.
+  Marker {
+    indent: usize,
+    column: usize,
+    spaces: usize,
+    outer: Option<usize>,
+  },
+  /// A list item whose content starts at `column`.
+  Item { indent: usize, column: usize },
+  /// Other text, starting after `indent` spaces.
+  Text(usize),
+}
+
+/// What a whole line holds for the lone `*` rule.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum LineKind {
+  /// Nothing: no paragraph goes on past it.
+  Blank,
+  /// A list marker alone, whose item's content starts at `column`, one past
+  /// the marker however many spaces follow it. No paragraph goes on past it,
+  /// and the one the next line opens sits in that item once it reaches
+  /// `column`. Once the item ends empty, lines indented to `code` are code.
+  Marker {
+    indent: usize,
+    column: usize,
+    code: usize,
+  },
+  /// Only spaces, this many. A run of hard breaks leaves such lines: the
+  /// lowest holds the indent of the line under it and two spaces more, and
+  /// each one above is as long as it or two spaces longer. A stream can write
+  /// them after the line below, so the rule reads past them. Any other line of
+  /// spaces ends the paragraph for a `*` that a hard break follows right below
+  /// it.
+  Spaces(usize),
+  /// A list item whose content starts at `column`.
+  Item { indent: usize, column: usize },
+  /// Other text, starting after `indent` spaces.
+  Text(usize),
+}
+
+/// The paragraph open after the lines read so far, for the lone `*` rule.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Paragraph {
+  /// None: the document starts, or a blank line ended the last one.
+  Closed,
+  /// None yet, right under a list marker alone on its line whose item's
+  /// content starts at `column`. Lines short of it indented to `code` are
+  /// code, and those four columns short of `code` reach the marker's list.
+  Bare { column: usize, code: usize },
+  /// None: the item a marker alone opened ended empty, and the lines since,
+  /// all indented to `code`, are code. `top` is the indent of the first text
+  /// line among them, where a paragraph that goes on below would start.
+  Code { code: usize, top: Option<usize> },
+  /// One inside an item at this column, or at column zero outside an item
+  /// or past a blank line, whose first line's content starts at `first`: no
+  /// column of the item it goes on in is past that.
+  Open { column: usize, first: usize },
+  /// One open at `column` from `first` with lines of spaces only after it,
+  /// the last one `spaces` long. They end it for a `*` that a hard break
+  /// follows unless a run of hard breaks wrote them all, which `chain` says
+  /// the lines above the last one allow.
+  Spaced {
+    column: usize,
+    first: usize,
+    spaces: usize,
+    chain: bool,
+  },
+}
+
+impl LineRead {
+  pub(super) const START: Self = Self::Indent(0);
+
+  /// A marker or digits starting at `column`, nested in the item whose
+  /// content starts there when `outer` says so.
+  fn marker_start(byte: u8, indent: usize, column: usize, outer: Option<usize>) -> Self {
+    match byte {
+      b'-' | b'*' | b'+' => Self::Marker {
+        indent,
+        column: column + 1,
+        spaces: 0,
+        outer,
+      },
+      b'0'..=b'9' => Self::Digits {
+        indent,
+        column: column + 1,
+        count: 1,
+        outer,
+      },
+      _ => Self::content(indent, outer),
+    }
+  }
+
+  /// What a line holds once no marker starts where one could: the content of
+  /// the item it would have nested in, or text.
+  fn content(indent: usize, outer: Option<usize>) -> Self {
+    outer.map_or(Self::Text(indent), |column| Self::Item { indent, column })
+  }
+
+  /// The same reading once `more` of the line follows.
+  pub(super) fn extend(mut self, more: &[u8]) -> Self {
+    for &byte in more {
+      self = match self {
+        Self::Item { .. } | Self::Text(_) => return self,
+        Self::Indent(indent) if byte == b' ' => Self::Indent(indent + 1),
+        Self::Indent(indent) => Self::marker_start(byte, indent, indent, None),
+        Self::Digits {
+          indent,
+          column,
+          count,
+          outer,
+        } => match byte {
+          b'0'..=b'9' if count < 9 => Self::Digits {
+            indent,
+            column: column + 1,
+            count: count + 1,
+            outer,
+          },
+          b'.' | b')' => Self::Marker {
+            indent,
+            column: column + 1,
+            spaces: 0,
+            outer,
+          },
+          _ => Self::content(indent, outer),
+        },
+        Self::Marker {
+          indent,
+          column,
+          spaces,
+          outer,
+        } => match byte {
+          b' ' => Self::Marker {
+            indent,
+            column,
+            spaces: spaces + 1,
+            outer,
+          },
+          _ if spaces == 0 => Self::content(indent, outer),
+          // Past four spaces the content is code, and the column sits one past
+          // the marker.
+          _ if spaces > 4 => Self::Item {
+            indent,
+            column: column + 1,
+          },
+          // The content can open a list of its own, as `- *` does.
+          _ => Self::marker_start(byte, indent, column + spaces, Some(column + spaces)),
+        },
+      };
+    }
+    self
+  }
+
+  /// What the line holds once it ends.
+  pub(super) fn end(self) -> LineKind {
+    match self {
+      Self::Indent(0) => LineKind::Blank,
+      Self::Marker {
+        indent,
+        column,
+        outer,
+        ..
+      } => LineKind::Marker {
+        indent,
+        column: column + 1,
+        code: outer.unwrap_or(indent) + 4,
+      },
+      Self::Indent(spaces) => LineKind::Spaces(spaces),
+      Self::Digits {
+        indent,
+        outer: Some(column),
+        ..
+      }
+      | Self::Item { indent, column } => LineKind::Item { indent, column },
+      Self::Digits { indent, .. } | Self::Text(indent) => LineKind::Text(indent),
+    }
+  }
+}
+
+impl Paragraph {
+  /// The paragraph open once `line` follows.
+  pub(super) fn then(self, line: LineKind) -> Self {
+    match (self, line) {
+      (_, LineKind::Blank) => Self::Closed,
+      // An empty item cannot interrupt a paragraph it reaches the column of.
+      (Self::Open { column, first }, LineKind::Marker { indent, .. }) if indent >= column => {
+        Self::Open { column, first }
+      }
+      (_, LineKind::Marker { column, code, .. }) => Self::Bare { column, code },
+      // A line of spaces under a marker alone leaves its item empty.
+      (Self::Bare { code, .. }, LineKind::Spaces(_)) => Self::Code { code, top: None },
+      (Self::Code { code, top }, LineKind::Spaces(_)) => Self::Code { code, top },
+      (Self::Closed, LineKind::Spaces(_)) => Self::Closed,
+      (Self::Open { column, first }, LineKind::Spaces(spaces)) => Self::Spaced {
+        column,
+        first,
+        spaces,
+        chain: true,
+      },
+      (
+        Self::Spaced {
+          column,
+          first,
+          spaces: above,
+          chain,
+        },
+        LineKind::Spaces(spaces),
+      ) => Self::Spaced {
+        column,
+        first,
+        spaces,
+        chain: chain && (above == spaces || above == spaces + 2),
+      },
+      (_, LineKind::Item { column, .. }) => Self::Open {
+        column,
+        first: column,
+      },
+      (Self::Closed, LineKind::Text(indent)) => Self::Open {
+        column: 0,
+        first: indent,
+      },
+      // Text reaching the item's content column goes on in that item. Past
+      // an empty item, text indented to the code column is code, and text
+      // reaching the column of the marker's list goes on in the item that
+      // holds that list.
+      (Self::Bare { column, .. }, LineKind::Text(indent)) if indent >= column => Self::Open {
+        column,
+        first: indent,
+      },
+      (Self::Bare { code, .. }, LineKind::Text(indent)) if indent >= code => Self::Code {
+        code,
+        top: Some(indent),
+      },
+      (Self::Code { code, top }, LineKind::Text(indent)) if indent >= code => Self::Code {
+        code,
+        top: top.or(Some(indent)),
+      },
+      // The paragraph starts at the first text line under the marker.
+      (Self::Bare { code, .. }, LineKind::Text(indent)) => Self::Open {
+        column: if indent + 4 >= code { code - 4 } else { 0 },
+        first: indent,
+      },
+      (Self::Code { code, top }, LineKind::Text(indent)) => Self::Open {
+        column: if indent + 4 >= code { code - 4 } else { 0 },
+        first: top.unwrap_or(indent),
+      },
+      (Self::Open { column, first } | Self::Spaced { column, first, .. }, LineKind::Text(_)) => {
+        Self::Open { column, first }
+      }
+    }
+  }
+}
+
 /// What the line a drain cut leads with, so the fragment left behind can still
 /// answer questions about a line whose start it no longer holds.
 #[derive(Clone, Copy, PartialEq)]
@@ -620,6 +886,10 @@ const CLEAN_REDUNDANT_LINKS: u8 = 4;
 const CLEAN_SELF_LINK_HEADINGS: u8 = 8;
 const CLEAN_EMPTY_IMAGES: u8 = 16;
 const CLEAN_EMPTY_LINK_TEXT: u8 = 32;
+
+// `list_pending` bits: separators deferred until visible content follows.
+const LIST_RULE_PENDING: u8 = 1;
+const LIST_TAIL_PENDING: u8 = 2;
 
 const SCRIPT_DATA: u8 = 0;
 const SCRIPT_DATA_ESCAPED: u8 = 1;
@@ -1150,6 +1420,21 @@ pub struct ConvertState {
   /// Per-`<li>` contribution width stack, parallel to `list_indent`. Used to
   /// truncate the correct number of bytes on close without re-walking ancestors.
   list_indent_widths: Vec<u8>,
+  /// Column each open `<li>`'s content starts at in the emitted line, parallel
+  /// to `list_indent_widths`, with the number of quote frames open around it
+  /// and whether its marker opens an item at all. `list_indent` assumes every
+  /// marker sits at its container's content column, but a marker written after
+  /// an open inline's delimiter sits further right, and its item's content
+  /// with it.
+  list_content_columns: Vec<(usize, usize, bool)>,
+  /// The latest `<li>` popped from `list_content_columns`, which holds the text
+  /// before a later sibling's marker on the same line.
+  closed_content_column: (usize, usize, bool),
+  /// Column of the marker `record_item_marker` just read, `usize::MAX` if none,
+  /// and whether the item's content starts a marker width past it. Without it
+  /// the column is the content column of the container holding the line's text.
+  item_marker_column: usize,
+  item_marker_adds_width: bool,
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
@@ -1185,14 +1470,51 @@ pub struct ConvertState {
   empty_item_hazard: bool,
   empty_item_line_start: usize,
   empty_item_len: usize,
+  /// Set with `empty_item_hazard`, `empty_list_marker_end` or `list_tail_start`
+  /// and recomputed by `settle_item_marker`, so the token loop and the hot
+  /// paths test one flag. It may stay set after all three clear, never the
+  /// other way round.
+  item_settle_pending: bool,
+  /// Last built-in marker end, excluding its trailing space.
+  last_item_marker_end: usize,
+  /// That marker follows other list markers on its line rather than its indent.
+  last_item_marker_chained: bool,
+  /// End of the latest item marker that its line holds alone, and that line's
+  /// indent, for the marker line readers once a drain has cut the line. 0 once
+  /// the drain took the marker and only whitespace after it.
+  bare_marker_end: usize,
+  bare_marker_indent: usize,
+  /// The whitespace a drain took after that marker held a line feed.
+  bare_marker_gap_newline: bool,
+  /// That marker is a lone `*` or `+` that reads as text continuing the line
+  /// above, so it is no marker line at all: the column of that paragraph.
+  bare_marker_text: Option<usize>,
+  /// Spaces the line holding `buffer[0]` lost to drains while spaces were all
+  /// it lost, so the marker line readers still count its whole indent.
+  /// `usize::MAX` once anything else left with them.
+  drained_line_spaces: usize,
+  #[cfg(test)]
+  parent_marker_scans: usize,
+  /// `LIST_RULE_PENDING`: a list item rule waiting to see whether visible
+  /// content follows it. `LIST_TAIL_PENDING`: a nested list ended and the
+  /// parent item's text, if any, needs its own paragraph.
+  list_pending: u8,
+  /// Actual built-in item marker end, distinct from marker-like source text.
+  empty_list_marker_end: usize,
+  /// `<li>` nesting level of the latest built-in item marker.
+  empty_list_marker_depth: usize,
+  /// A tentative separator retractable while following wrappers are empty.
+  list_tail_start: usize,
+  list_tail_scanned_to: usize,
+  empty_list_marker_scanned_to: usize,
+  #[cfg(test)]
+  list_settlement_bytes_read: usize,
   /// That line follows a decoded `\r`, which a single `\n` only turns into one
   /// `\r\n` line ending.
   empty_item_after_cr: bool,
   /// A drain found content on the marker's line, so nothing will be inserted
   /// there and the line may be freed; the guard itself stays armed.
   empty_item_answered: bool,
-  /// A list item rule waiting to see whether visible content follows it.
-  list_rule_pending: bool,
   /// A heading closed in a list item. Inside the item its block spacing is
   /// collapsed, so the next visible content owes it the block break the root
   /// writes, or that content joins the heading's line.
@@ -1210,6 +1532,14 @@ pub struct ConvertState {
   /// Rescanning `buffer` for a line start is wrong once a drain has happened;
   /// this is the same trick as `flushed_tail`, one step further back.
   cut_line_lead: CutLineLead,
+  /// How the drained start of the line holding `buffer[0]` reads.
+  cut_line: LineRead,
+  /// The paragraph the lines drains took whole leave open.
+  drained_paragraph: Paragraph,
+  /// Buffer offsets of released hard break runs whose copies write lines of
+  /// spaces only into the output, kept until a drain takes the line holding
+  /// the run. Such a line leaves the item a marker alone on it opens empty.
+  released_break_lines: Vec<usize>,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
   /// Test/fuzz switch: `false` routes everything through the general path.
@@ -1424,6 +1754,9 @@ impl ConvertState {
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
       cut_line_lead: CutLineLead::Uncut,
+      cut_line: LineRead::START,
+      drained_paragraph: Paragraph::Closed,
+      released_break_lines: Vec::new(),
       buffer_start_column: 0,
       #[cfg(any(test, fuzzing))]
       disable_drain: false,
@@ -1466,6 +1799,10 @@ impl ConvertState {
 
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
+      list_content_columns: Vec::with_capacity(8),
+      closed_content_column: (0, usize::MAX, false),
+      item_marker_column: usize::MAX,
+      item_marker_adds_width: false,
       ordered_starts: Vec::new(),
       list_item_counts: Vec::new(),
 
@@ -1477,9 +1814,26 @@ impl ConvertState {
       empty_item_hazard: false,
       empty_item_line_start: 0,
       empty_item_len: 0,
+      item_settle_pending: false,
+      last_item_marker_end: usize::MAX,
+      last_item_marker_chained: false,
+      bare_marker_end: usize::MAX,
+      bare_marker_indent: 0,
+      bare_marker_gap_newline: false,
+      bare_marker_text: None,
+      drained_line_spaces: 0,
+      #[cfg(test)]
+      parent_marker_scans: 0,
+      list_pending: 0,
+      empty_list_marker_end: usize::MAX,
+      empty_list_marker_depth: 0,
+      list_tail_start: usize::MAX,
+      list_tail_scanned_to: 0,
+      empty_list_marker_scanned_to: 0,
+      #[cfg(test)]
+      list_settlement_bytes_read: 0,
       empty_item_after_cr: false,
       empty_item_answered: false,
-      list_rule_pending: false,
       heading_break_pending: false,
       hard_break_end: usize::MAX,
       #[cfg(test)]
@@ -1681,7 +2035,14 @@ impl ConvertState {
     }
     // Every markup token completes the text before it, so this sees the same
     // states whatever the chunking. The parser stops before that token.
-    if self.empty_item_hazard {
+    debug_assert!(
+      self.item_settle_pending
+        || (!self.empty_item_hazard
+          && self.empty_list_marker_end == usize::MAX
+          && self.list_tail_start == usize::MAX),
+      "list item state is pending without item_settle_pending"
+    );
+    if self.item_settle_pending {
       self.settle_item_marker();
     }
     self.check_held_output();
@@ -2995,6 +3356,24 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    // Both scan cursors restart whenever their start is set, so they only
+    // matter while the settle flag is.
+    if self.item_settle_pending {
+      self.list_tail_scanned_to = self.list_tail_scanned_to.min(offset);
+      self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.min(offset);
+      if offset < self.empty_list_marker_end {
+        self.empty_list_marker_end = usize::MAX;
+      }
+      if offset < self.list_tail_start {
+        self.list_tail_start = usize::MAX;
+      }
+    }
+    if self.last_item_marker_end != usize::MAX && offset < self.last_item_marker_end {
+      self.last_item_marker_end = usize::MAX;
+    }
+    if self.bare_marker_end != usize::MAX && offset < self.bare_marker_end {
+      self.bare_marker_end = usize::MAX;
+    }
     self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
@@ -3021,6 +3400,14 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    self.list_tail_scanned_to = self.list_tail_scanned_to.saturating_sub(removed);
+    self.empty_list_marker_scanned_to = self.empty_list_marker_scanned_to.saturating_sub(removed);
+    if self.last_item_marker_end != usize::MAX {
+      self.last_item_marker_end = self
+        .last_item_marker_end
+        .checked_sub(removed)
+        .unwrap_or(usize::MAX);
+    }
     if self.blockquote_line_scanned_to != 0 {
       self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
       self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);
@@ -3246,6 +3633,12 @@ impl ConvertState {
     if self.item_marker_line_held() {
       stable_end = stable_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.empty_list_marker_end != usize::MAX {
+      stable_end = stable_end.min(self.empty_list_marker_end);
+    }
+    if self.list_tail_start != usize::MAX {
+      stable_end = stable_end.min(self.list_tail_start);
+    }
     // After the holds above: a droppable opener or link after the run can leave it trailing.
     if self.emphasis_moves_vertical_tabs() {
       let blank = self
@@ -3340,6 +3733,11 @@ impl ConvertState {
       output.push_str(&self.buffer[cursor..stable_end]);
       output
     };
+    for run in &self.streaming_break_runs {
+      if run.count > 1 && run.output_end <= stable_end {
+        self.released_break_lines.push(run.output_start);
+      }
+    }
     self
       .streaming_break_runs
       .retain(|run| run.output_end > stable_end);
@@ -3431,6 +3829,12 @@ impl ConvertState {
     if self.item_marker_line_held() {
       drain_end = drain_end.min(keep_two_before(&self.buffer, self.empty_item_line_start));
     }
+    if self.empty_list_marker_end != usize::MAX {
+      drain_end = drain_end.min(self.empty_list_marker_end);
+    }
+    if self.list_tail_start != usize::MAX {
+      drain_end = drain_end.min(self.list_tail_start);
+    }
     // Keep a lead-only line whole: `opens_block_line` reads back to its start.
     if let Some(line_start) = self.uncut_block_lead_start(drain_end, marker_tail) {
       drain_end = keep_two_before(&self.buffer, line_start);
@@ -3454,7 +3858,30 @@ impl ConvertState {
     if self.raw_html_scanned_to < drain_end && !self.raw_html_markdown && self.in_raw_html_block() {
       self.track_raw_html_markdown_context(drain_end);
     }
+    let drained_bare_marker = self.bare_marker_line_before(drain_end);
     let bytes = self.buffer.as_bytes();
+    let after_cr = self.cut_line_lead != CutLineLead::Uncut && self.flushed_tail[1] == b'\r';
+    self.drained_line_spaces =
+      Self::cut_line_spaces(&bytes[..drain_end], self.drained_line_spaces, after_cr);
+    // Fold the lines leaving whole into the paragraph they leave open, and
+    // read the start of the line being cut, for the lone `*` rule.
+    let after_cr = self.cut_line_lead != CutLineLead::Uncut && self.flushed_tail[1] == b'\r';
+    (self.cut_line, self.drained_paragraph) = Self::read_drained_lines(
+      &bytes[..drain_end],
+      after_cr,
+      self.cut_line,
+      self.drained_paragraph,
+      &self.released_break_lines,
+    );
+    // A run on the line being cut still answers for the start the drain takes.
+    let cut_line_start = bytes[..drain_end]
+      .iter()
+      .rposition(|&byte| matches!(byte, b'\n' | b'\r'))
+      .map_or(0, |at| at + 1);
+    self.released_break_lines.retain(|&at| at >= cut_line_start);
+    for at in &mut self.released_break_lines {
+      *at = at.saturating_sub(drain_end);
+    }
     self.flushed_tail = if drain_end >= 2 {
       [bytes[drain_end - 2], bytes[drain_end - 1]]
     } else if self.cut_line_lead == CutLineLead::Uncut {
@@ -3467,6 +3894,31 @@ impl ConvertState {
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
+    // A bare marker leaving with only whitespace after it stays readable at the
+    // buffer start, where the marker line readers stop.
+    if self.bare_marker_end != usize::MAX {
+      self.bare_marker_end = match self.bare_marker_end.checked_sub(drain_end) {
+        Some(end) => end,
+        None => {
+          let gap = &bytes[self.bare_marker_end..drain_end];
+          if gap.iter().all(|&byte| matches!(byte, b' ' | b'\n')) {
+            self.bare_marker_gap_newline |= gap.contains(&b'\n');
+            0
+          } else {
+            usize::MAX
+          }
+        }
+      };
+    }
+    // Any other line the readers take for a bare marker leaves the same way.
+    if self.bare_marker_end == usize::MAX
+      && let Some((indent, gap_newline, text)) = drained_bare_marker
+    {
+      self.bare_marker_end = 0;
+      self.bare_marker_indent = indent;
+      self.bare_marker_gap_newline = gap_newline;
+      self.bare_marker_text = text;
+    }
     self.note_link_release(drain_end);
     #[cfg(debug_assertions)]
     {
@@ -3518,6 +3970,12 @@ impl ConvertState {
     }
     self.empty_item_line_start = self.empty_item_line_start.saturating_sub(drain_end);
     self.empty_item_len = self.empty_item_len.saturating_sub(drain_end);
+    if self.empty_list_marker_end != usize::MAX {
+      self.empty_list_marker_end -= drain_end;
+    }
+    if self.list_tail_start != usize::MAX {
+      self.list_tail_start -= drain_end;
+    }
     // Buffer-indexed like every other stored offset: left alone, streaming reads
     // a different line start than one-shot.
     self.raw_html_scanned_to = self.raw_html_scanned_to.saturating_sub(drain_end);
@@ -3528,6 +3986,22 @@ impl ConvertState {
 }
 
 impl ConvertState {
+  /// The spaces the line ending `cut` has lost to drains, `previous` counted by
+  /// earlier cuts of it, or `usize::MAX` once it lost anything else. The space
+  /// right after a `\r` separates a marker from that line end and is no indent.
+  fn cut_line_spaces(cut: &[u8], previous: usize, after_cr: bool) -> usize {
+    match cut.iter().rposition(|&byte| matches!(byte, b'\n' | b'\r')) {
+      Some(at) if cut[at + 1..].iter().all(|&byte| byte == b' ') => {
+        let spaces = cut.len() - at - 1;
+        spaces - usize::from(cut[at] == b'\r' && spaces > 0)
+      }
+      None if previous != usize::MAX && cut.iter().all(|&byte| byte == b' ') => {
+        previous + cut.len() - usize::from(previous == 0 && after_cr)
+      }
+      _ => usize::MAX,
+    }
+  }
+
   /// Start of the line `drain_end` cuts, if no later line was yielded and only a block lead of at
   /// most `widest` bytes precedes the cut.
   fn uncut_block_lead_start(&self, drain_end: usize, widest: usize) -> Option<usize> {
@@ -3598,6 +4072,45 @@ impl ConvertState {
   /// counts from the line's real start. Read each fragment's indent on its own
   /// and a line indented past three claims a suspension it never had, dropping
   /// the escapes one-shot writes.
+  /// Fold the lines `drained` ends into the paragraph drains leave open, and
+  /// carry the reading of the line it cuts. A line begun before an earlier cut
+  /// goes on from that reading; the `\n` of a `\r\n` split across cuts, after
+  /// `after_cr`, ends nothing new. A run of hard breaks at an offset in
+  /// `break_lines` follows its line with lines of spaces the bytes lack.
+  fn read_drained_lines(
+    drained: &[u8],
+    after_cr: bool,
+    mut read: LineRead,
+    mut paragraph: Paragraph,
+    break_lines: &[usize],
+  ) -> (LineRead, Paragraph) {
+    let mut start = 0;
+    for (at, &byte) in drained.iter().enumerate() {
+      if !matches!(byte, b'\n' | b'\r') {
+        continue;
+      }
+      let crlf = byte == b'\n'
+        && if at == 0 {
+          after_cr
+        } else {
+          drained[at - 1] == b'\r'
+        };
+      if !crlf {
+        let line = read.extend(&drained[start..at]).end();
+        paragraph = paragraph.then(line);
+        // The lines of spaces a run of hard breaks writes only into the output.
+        if matches!(line, LineKind::Marker { .. })
+          && break_lines.iter().any(|run| (start..=at).contains(run))
+        {
+          paragraph = paragraph.then(LineKind::Spaces(usize::MAX));
+        }
+      }
+      read = LineRead::START;
+      start = at + 1;
+    }
+    (read.extend(&drained[start..]), paragraph)
+  }
+
   fn classify_cut_line(bytes: &[u8], drain_end: usize, previous: CutLineLead) -> CutLineLead {
     if bytes[drain_end - 1] == b'\n' {
       // The cut ends the line, so the next one starts fresh at column zero.
