@@ -3282,7 +3282,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
 
-    if (eventType === NodeEventExit && handlerOutput !== undefined && !handler?.literalExit) {
+    // The default closer of an overridden enter matches no opener.
+    if (eventType === NodeEventExit && handlerOutput !== undefined && !handler?.literalExit && !handler?.literalEnter) {
       const closedType = INLINE_MARKER_TYPE[tagId]
       if ((closedType === 1 || closedType === 2 || closedType === 4) && buff[buff.length - 1] === handlerOutput) {
         // A trim leaves emptied fragments between two closers.
@@ -3316,8 +3317,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         let closer = buff.length - 2
         while (closer >= 0 && buff[closer] === '')
           closer--
+        // An overridden exit is no closer the next opener could take back.
         const merges = (markerType === 1 || markerType === 2 || markerType === 4)
-          && (handlerOutput === '*' || handlerOutput === '**')
+          && (handlerOutput === '*' || handlerOutput === '**') && !handler?.literalExit
         const reopened = openMarkerCount ? openMarkers[openMarkerCount - 1]! : 0
         if (merges && (reopened & MARKER_TYPE_MASK) === MARKER_TYPE_MASK
           && closer < reopened >> 3 && reopenedDelimiter === handlerOutput) {

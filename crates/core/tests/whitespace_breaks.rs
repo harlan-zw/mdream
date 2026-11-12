@@ -1210,3 +1210,49 @@ fn touching_emphasis_pairs_of_one_delimiter_are_reopened() {
     assert_every_split(html, &options, expected);
   }
 }
+
+#[test]
+fn an_emphasis_pair_with_an_overridden_delimiter_is_not_reopened() {
+  let overridden = |tag: &str, config: TagOverrideConfig| HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tag_overrides: Some(vec![(tag.to_string(), config)]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let enter = |value: &str| TagOverrideConfig {
+    enter: Some(value.to_string()),
+    ..Default::default()
+  };
+  let exit = |value: &str| TagOverrideConfig {
+    exit: Some(value.to_string()),
+    ..Default::default()
+  };
+  for (html, options, expected) in [
+    // The default closer of an overridden enter has no opener to give back.
+    (
+      "<em>Aa</em><i>Bb</i>",
+      overridden("em", enter("^")),
+      "^Aa**Bb*",
+    ),
+    (
+      "<i>Aa</i><em>Bb</em><i>Cc</i>",
+      overridden("em", enter("*")),
+      "*Aa**Bb**Cc*",
+    ),
+    // An overridden exit would end the reopened pair.
+    (
+      "<em>Aa</em><i>Bb</i>",
+      overridden("i", exit("$")),
+      "*Aa**Bb$",
+    ),
+    (
+      "<em>Aa</em><i>Bb</i>",
+      overridden("em", exit("$")),
+      "*Aa$*Bb*",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected, "{html}");
+    assert_every_split(html, &options, expected);
+  }
+}

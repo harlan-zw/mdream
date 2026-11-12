@@ -510,4 +510,18 @@ describe.each(engines)('touching emphasis pairs $name', (engineConfig) => {
     }
     expect(await collect(streamHtmlToMarkdown(chunkedStream([...html]), { engine })), 'one character at a time').toBe(expected)
   })
+
+  it.each([
+    // The default closer of an overridden enter has no opener to give back.
+    ['<em>Aa</em><i>Bb</i>', { em: { enter: '^' } }, '^Aa**Bb*'],
+    ['<i>Aa</i><em>Bb</em><i>Cc</i>', { em: { enter: '*' } }, '*Aa**Bb**Cc*'],
+    // An overridden exit would end the reopened pair.
+    ['<em>Aa</em><i>Bb</i>', { i: { exit: '$' } }, '*Aa**Bb$'],
+    ['<em>Aa</em><i>Bb</i>', { em: { exit: '$' } }, '*Aa$*Bb*'],
+  ])('leaves a pair with an overridden delimiter as it is: %s %o', async (html, tagOverrides, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, plugins: { tagOverrides } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    expect(await collect(streamHtmlToMarkdown(chunkedStream([...html]), options)), 'one character at a time').toBe(expected)
+  })
 })

@@ -1150,6 +1150,7 @@ impl ConvertState {
     output: Option<&str>,
     output_start: usize,
     keeps_markers: bool,
+    reopens: bool,
   ) {
     if let Some(id) = marker_tag
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
@@ -1159,7 +1160,8 @@ impl ConvertState {
       && self.buffer.ends_with(emitted)
     {
       let mut marker_start = self.buffer.len() - emitted.len();
-      let merges = matches!(inline_marker_type, 1 | 2 | 4) && matches!(emitted, "*" | "**");
+      let merges =
+        reopens && matches!(inline_marker_type, 1 | 2 | 4) && matches!(emitted, "*" | "**");
       if merges
         && let Some(reopened) = self.open_markers.last_mut()
         && reopened.reopened as usize == emitted.len()
@@ -1619,7 +1621,7 @@ impl ConvertState {
       tag_id.and_then(Self::inline_marker_type).is_some()
     });
 
-    self.record_enter_marker(tag_id, output.as_deref(), output_start, false);
+    self.record_enter_marker(tag_id, output.as_deref(), output_start, false, true);
 
     if !is_inline && !self.open_markers.is_empty() {
       self.open_markers.clear();
@@ -2385,7 +2387,14 @@ impl ConvertState {
     let code_span_marker = self.code_span_marker_ok();
     let marker_tag = tag_id.filter(|&id| !enter_is_literal && (id != TAG_CODE || code_span_marker));
     let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
-    self.record_enter_marker(marker_tag, output.as_deref(), output_start, keeps_markers);
+    // An overridden exit is no closer the next opener could take back.
+    self.record_enter_marker(
+      marker_tag,
+      output.as_deref(),
+      output_start,
+      keeps_markers,
+      !exit_is_overridden,
+    );
 
     // A block boundary makes an enclosing inline marker permanent even when
     // the block has not emitted content yet. Release streamed output promptly.
@@ -2708,6 +2717,7 @@ impl ConvertState {
     };
 
     let is_inline = node.is_inline;
+    let enter_is_overridden = override_config.is_some_and(|ov| ov.enter.is_some());
     let raw_html_anchor = tag_id == Some(TAG_A)
       && self.in_raw_html_block()
       && override_config.is_none_or(|ov| ov.enter.is_none());
@@ -3087,7 +3097,8 @@ impl ConvertState {
     } else {
       self.write_output(false, is_inline, configured_new_lines, effective, false);
     }
-    self.note_closed_marker(marker_tag, effective);
+    // The default closer of an overridden enter matches no opener.
+    self.note_closed_marker(marker_tag.filter(|_| !enter_is_overridden), effective);
     if consumes_caption_boundary {
       if !is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR)) {
         self.caption_boundary = CaptionBoundary::None;
