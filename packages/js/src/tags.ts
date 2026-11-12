@@ -304,48 +304,84 @@ function isLeadChar(code: number): boolean {
 // renderer, so the last one is escaped back into content. A run that only the
 // line's block lead precedes is the heading's own marker instead: the heading
 // is empty, and the marker's trailing space would read as a list item's open
-// content column, joining the next block to the heading's line.
+// content column, joining the next block to the heading's line. The heading's
+// end is read across fragments, as in Rust: spacing an emptied inline element
+// left can sit in a fragment of its own, and the run can span fragments. The
+// trims take a form feed or a line end after the run too, so the run still
+// closes there.
 export function escapeTrailingHeadingHashes(state: HandlerContext['state']): void {
   const buffer = state.buffer
   let index = buffer.length - 1
-  while (index >= 0 && buffer[index] === '')
-    index--
-  if (index < 0)
+  let end = 0
+  for (; index >= 0; index--) {
+    const entry = buffer[index]!
+    end = entry.length
+    while (end > 0) {
+      const code = entry.charCodeAt(end - 1)
+      if (code !== 32 && code !== 9 && code !== 10 && code !== 12 && code !== 13)
+        break
+      end--
+    }
+    if (end > 0)
+      break
+  }
+  // Cheap reject: almost no heading ends in `#`.
+  if (index < 0 || buffer[index]!.charCodeAt(end - 1) !== 35)
     return
+  const endIndex = index
 
-  const entry = buffer[index]!
-  let end = entry.length
-  while (end > 0 && (entry[end - 1] === ' ' || entry[end - 1] === '\t'))
-    end--
-  let run = end
-  while (run > 0 && entry[run - 1] === '#')
-    run--
-  if (run === end)
-    return
+  let run = end - 1
+  let before = -1
+  for (;;) {
+    const entry = buffer[index]!
+    while (run > 0 && entry.charCodeAt(run - 1) === 35)
+      run--
+    if (run > 0) {
+      before = entry.charCodeAt(run - 1)
+      break
+    }
+    // The run reaches this fragment's start, so it may go on in the previous one.
+    let previous = index - 1
+    while (previous >= 0 && buffer[previous] === '')
+      previous--
+    if (previous < 0 || buffer[previous]!.charCodeAt(buffer[previous]!.length - 1) !== 35) {
+      if (previous >= 0)
+        before = buffer[previous]!.charCodeAt(buffer[previous]!.length - 1)
+      break
+    }
+    index = previous
+    run = buffer[index]!.length - 1
+  }
 
-  let replacement: string
   if (opensBlockLine(buffer, index, run)) {
+    const entry = buffer[endIndex]!
     let trimmed = entry.length
     while (trimmed > end && entry.charCodeAt(trimmed - 1) === 32)
       trimmed--
     if (trimmed === entry.length)
       return
-    replacement = entry.slice(0, trimmed)
-    state.outputPositions?.replace(index, index + 1, [replacement])
+    const replacement = entry.slice(0, trimmed)
+    state.outputPositions?.replace(endIndex, endIndex + 1, [replacement])
+    buffer[endIndex] = replacement
+    noteBufferRewrite(state)
+    // The processor's trailing-whitespace trim finds the last entry by reference.
+    if (state.lastContentCache === entry)
+      state.lastContentCache = replacement
+    return
   }
-  else {
-    // Only a run opening the heading content or preceded by whitespace closes it.
-    // Inside a code fence the heading is code, where a backslash would be literal text.
-    const previous = buffer[index - 1]
-    const before = run > 0 ? entry[run - 1] : previous?.charAt(previous.length - 1)
-    if ((before !== ' ' && before !== '\t') || inPreCodeFence(state))
-      return
-    replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
-    state.outputPositions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
-  }
+
+  // Only a run opening the heading content or preceded by whitespace closes it.
+  // Inside a code fence the heading is code, where a backslash would be literal text.
+  if ((before !== 32 && before !== 9) || inPreCodeFence(state))
+    return
+
+  const entry = buffer[index]!
+  const replacement = `${entry.slice(0, run)}\\${entry.slice(run)}`
+  state.outputPositions?.replace(index, index + 1, [replacement], offset => offset > run ? offset + 1 : offset)
   buffer[index] = replacement
   noteBufferRewrite(state)
-  // The processor's trailing-whitespace trim finds the last entry by reference.
+  // The trims that follow find the text's fragment by identity, so a form feed
+  // or a line end after the run still goes when the item or the block ends.
   if (state.lastContentCache === entry)
     state.lastContentCache = replacement
 }

@@ -603,6 +603,76 @@ enum CutLineLead {
   Content,
 }
 
+/// How a line reads as the block markers a list item's break checks for:
+/// spaces or tabs, then `-`, `*`, `+`, or one to nine digits and `.` or `)`,
+/// each further marker after at least one space or tab, with `>` before any
+/// of them. The line can also end in one to six `#`, a `=` run, or a run of
+/// `-` and blanks. A drain records it for the line it cuts, so the check can
+/// go on past the start of the buffer.
+#[derive(Clone, Copy, PartialEq)]
+enum MarkerRun {
+  /// At a line start, after a marker and a space or a tab, or after `>`: a
+  /// marker may begin.
+  Open,
+  /// Inside an ordered marker, after this many digits.
+  Digits(u8),
+  /// Right after a whole `*`, `+` or ordered marker.
+  Marker,
+  /// Right after a `-` that a marker or a dash run can start with.
+  Dash,
+  /// A run of `-` and blanks with two `-` in a row.
+  Dashes,
+  /// A `=` run.
+  Equals,
+  /// A run of this many `#`.
+  Hashes(u8),
+  /// Anything else on the line.
+  Broken,
+}
+
+impl MarkerRun {
+  /// The run after `bytes`, which continue a line read up to `self`. A line
+  /// end, `\n` or `\r`, starts the run over.
+  fn after(self, bytes: &[u8]) -> Self {
+    let (mut run, rest) = match bytes.iter().rposition(|&b| b == b'\n' || b == b'\r') {
+      Some(at) => (Self::Open, &bytes[at + 1..]),
+      None => (self, bytes),
+    };
+    for &byte in rest {
+      run = match (run, byte) {
+        (Self::Open | Self::Marker | Self::Dash, b' ' | b'\t') | (Self::Open, b'>') => Self::Open,
+        (Self::Open, b'-') => Self::Dash,
+        (Self::Dash | Self::Dashes, b'-') | (Self::Dashes, b' ' | b'\t') => Self::Dashes,
+        (Self::Open, b'*' | b'+') | (Self::Digits(_), b'.' | b')') => Self::Marker,
+        (Self::Open, b'0'..=b'9') => Self::Digits(1),
+        (Self::Digits(digits), b'0'..=b'9') if digits < 9 => Self::Digits(digits + 1),
+        (Self::Open | Self::Equals, b'=') => Self::Equals,
+        (Self::Open, b'#') => Self::Hashes(1),
+        (Self::Hashes(hashes), b'#') if hashes < 6 => Self::Hashes(hashes + 1),
+        _ => return Self::Broken,
+      };
+    }
+    run
+  }
+
+  /// Whether the line ends right after a marker that the escape takes at a
+  /// line start: a list marker, an ATX opening, or a setext or thematic run.
+  fn ends_in_marker(self) -> bool {
+    matches!(
+      self,
+      Self::Marker | Self::Dash | Self::Dashes | Self::Equals | Self::Hashes(_)
+    )
+  }
+
+  /// Whether `byte` can be part of a line `after` reads as markers.
+  fn reads(byte: u8) -> bool {
+    matches!(
+      byte,
+      b' ' | b'\t' | b'-' | b'*' | b'+' | b'.' | b')' | b'=' | b'#' | b'>' | b'0'..=b'9'
+    )
+  }
+}
+
 /// Deepest space indent a `<` may sit at and still suspend Markdown.
 const RAW_HTML_MAX_INDENT: u8 = 3;
 
@@ -974,6 +1044,8 @@ pub struct ConvertState {
   /// holds back.
   held_whitespace: TailRun,
   held_emphasis_blank: TailRun,
+  /// The run a quote flush stays behind while emphasis is open.
+  held_flush_whitespace: TailRun,
   held_emphasis_whitespace: TailRun,
   /// The vertical tab run `max_node_bytes` charges while emphasis is open.
   charged_vertical_tabs: VerticalTabRun,
@@ -1005,6 +1077,10 @@ pub struct ConvertState {
   // 0=none, 1=left, 2=center, 3=right
   table_column_alignments: Vec<u8>,
   last_text_node_contains_whitespace: bool,
+  last_text_node_in_pre: bool,
+  last_text_output_range: Option<(usize, usize)>,
+  /// Generated table-column separators are outside source whitespace.
+  text_cell_start: usize,
   last_text_node_depth: usize,
   last_text_node_index: usize,
   has_last_text_node: bool,
@@ -1210,6 +1286,11 @@ pub struct ConvertState {
   /// Rescanning `buffer` for a line start is wrong once a drain has happened;
   /// this is the same trick as `flushed_tail`, one step further back.
   cut_line_lead: CutLineLead,
+  /// The marker run of the line the latest drain cut, read up to the cut.
+  cut_marker_run: MarkerRun,
+  /// The same run read only up to the last drained byte a break's trim stops
+  /// at: it takes a trailing space, tab, form feed or carriage return.
+  cut_marker_run_before_blanks: MarkerRun,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
   /// Test/fuzz switch: `false` routes everything through the general path.
@@ -1386,6 +1467,7 @@ impl ConvertState {
       heading_run_dirty_from: usize::MAX,
       held_whitespace: TailRun::default(),
       held_emphasis_blank: TailRun::default(),
+      held_flush_whitespace: TailRun::default(),
       held_emphasis_whitespace: TailRun::default(),
       charged_vertical_tabs: VerticalTabRun::default(),
       held_spaces: TailRun::default(),
@@ -1406,6 +1488,9 @@ impl ConvertState {
       },
       table_column_alignments: Vec::new(),
       last_text_node_contains_whitespace: false,
+      last_text_node_in_pre: false,
+      last_text_output_range: None,
+      text_cell_start: 0,
       last_text_node_depth: 0,
       last_text_node_index: 0,
       has_last_text_node: false,
@@ -1424,6 +1509,8 @@ impl ConvertState {
       has_streamed_output: false,
       flushed_tail: [b'\n'; 2],
       cut_line_lead: CutLineLead::Uncut,
+      cut_marker_run: MarkerRun::Open,
+      cut_marker_run_before_blanks: MarkerRun::Open,
       buffer_start_column: 0,
       #[cfg(any(test, fuzzing))]
       disable_drain: false,
@@ -2995,10 +3082,18 @@ impl ConvertState {
   /// Record that buffer bytes from `offset` on were rewritten or removed.
   #[inline]
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
+    self.text_cell_start = self.text_cell_start.min(offset);
+    if self
+      .last_text_output_range
+      .is_some_and(|(_, end)| offset < end)
+    {
+      self.last_text_output_range = None;
+    }
     self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_emphasis_blank.note_rewrite(offset);
+    self.held_flush_whitespace.note_rewrite(offset);
     self.held_emphasis_whitespace.note_rewrite(offset);
     self.charged_vertical_tabs.note_rewrite(offset);
     self.held_spaces.note_rewrite(offset);
@@ -3021,6 +3116,10 @@ impl ConvertState {
 
   /// Shift the measured run after `removed` bytes left the front of the buffer.
   fn note_buffer_drain(&mut self, removed: usize) {
+    self.text_cell_start = self.text_cell_start.saturating_sub(removed);
+    self.last_text_output_range = self.last_text_output_range.and_then(|(start, end)| {
+      (end > removed).then(|| (start.saturating_sub(removed), end - removed))
+    });
     if self.blockquote_line_scanned_to != 0 {
       self.blockquote_line_scanned_to = self.blockquote_line_scanned_to.saturating_sub(removed);
       self.blockquote_line_end = self.blockquote_line_end.saturating_sub(removed);
@@ -3032,6 +3131,7 @@ impl ConvertState {
     self.heading_run_dirty_from = self.heading_run_dirty_from.saturating_sub(removed);
     self.held_whitespace.note_drain(removed);
     self.held_emphasis_blank.note_drain(removed);
+    self.held_flush_whitespace.note_drain(removed);
     self.held_emphasis_whitespace.note_drain(removed);
     self.charged_vertical_tabs.note_drain(removed);
     self.held_spaces.note_drain(removed);
@@ -3148,7 +3248,17 @@ impl ConvertState {
   /// so a document with no open quote does not pay for the limit.
   pub(crate) fn flush_settled_blockquote_lines(&mut self) {
     if self.streaming_flush_possible() {
-      let mut flush_limit = trim_ascii_whitespace_end(&self.buffer);
+      // An emphasis closer moves a trailing run that holds a vertical tab
+      // after itself, so a quote prefix inside the run cannot be committed yet.
+      let mut flush_limit = if self.emphasis_moves_vertical_tabs() {
+        self
+          .held_flush_whitespace
+          .start(self.buffer.as_bytes(), self.buffer.len(), |b| {
+            b.is_ascii_whitespace() || b == b'\x0B'
+          })
+      } else {
+        trim_ascii_whitespace_end(&self.buffer)
+      };
       if let Some(marker) = self.open_markers.first() {
         flush_limit = flush_limit.min(hold_before(&self.buffer, marker.output_start));
       }
@@ -3160,6 +3270,10 @@ impl ConvertState {
   }
 
   pub fn get_markdown_chunk(&mut self) -> String {
+    self.get_markdown_chunk_with_final(false)
+  }
+
+  fn get_markdown_chunk_with_final(&mut self, final_chunk: bool) -> String {
     if self.is_html() {
       if let Some(&last) = self.buffer.as_bytes().last() {
         self.flushed_tail[1] = last;
@@ -3190,9 +3304,13 @@ impl ConvertState {
     // a trailing tab that a later trim then removes from the buffer alone.
     // Inside <pre>, that holds for a trailing whitespace run in the current
     // text node: it stays mutable until its inline/code element closes.
-    let mut stable_end = self
-      .held_whitespace
-      .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace());
+    let mut stable_end = if final_chunk {
+      trim_ascii_whitespace_end(&self.buffer)
+    } else {
+      self
+        .held_whitespace
+        .start(self.buffer.as_bytes(), buf_len, |b| b.is_ascii_whitespace())
+    };
     if in_pre && !self.last_text_node_contains_whitespace {
       // Other trailing spaces inside <pre> are significant code. A
       // line-leading run is the exception: list continuation indentation is
@@ -3353,7 +3471,7 @@ impl ConvertState {
     if !plain_text!(self) && !self.is_html() && self.clean_flags & CLEAN_FRAGMENTS != 0 {
       self.get_markdown()
     } else {
-      self.get_markdown_chunk()
+      self.get_markdown_chunk_with_final(true)
     }
   }
 
@@ -3467,6 +3585,22 @@ impl ConvertState {
     // Remember what the line being cut leads with; a line opened before an
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
+    if !plain_text!(self) {
+      // A list item's break reads its line's markers back from the trailing
+      // run, so what it would have read in the drained bytes stays known.
+      let drained = &bytes[..drain_end];
+      let blanks = drained
+        .iter()
+        .rev()
+        .take_while(|&&b| matches!(b, b' ' | b'\t' | b'\x0C' | b'\r'))
+        .count();
+      let (up_to_blanks, blank_tail) = drained.split_at(drain_end - blanks);
+      let before_blanks = self.cut_marker_run.after(up_to_blanks);
+      if !up_to_blanks.is_empty() {
+        self.cut_marker_run_before_blanks = before_blanks;
+      }
+      self.cut_marker_run = before_blanks.after(blank_tail);
+    }
     self.note_link_release(drain_end);
     #[cfg(debug_assertions)]
     {
@@ -3904,6 +4038,13 @@ mod tests {
   fn a_growing_held_tail_is_read_once() {
     for (name, unit, prefix) in [
       ("trailing whitespace", "&#32;&#32;</b>", "<p>x"),
+      ("vertical tabs", "&#11;<i></i>", "<p>x"),
+      ("vertical tabs in emphasis", " &#11;", "<p><em>x"),
+      (
+        "vertical tabs and newlines in quoted emphasis",
+        " &#10;&#11;<span></span>",
+        "<blockquote><em>x",
+      ),
       ("leading whitespace", "&nbsp;</b>", ""),
       ("heading run", "#<span>#</span>", "<h2>x "),
       ("spaces in a code block", "&#32;&#32;</b>", "<pre><code>"),

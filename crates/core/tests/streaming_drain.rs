@@ -307,7 +307,7 @@ fn hard_break_item_indent_survives_a_drain_before_its_setext_line() {
 #[test]
 fn hard_break_item_indent_survives_a_drain_that_answers_the_marker_guard() {
   for (html, expected) in [
-    ("><li>:&#32<br></><code><li>", "\\>\n- :   \n-"),
+    ("><li>:&#32<br></><code><li>", "\\>\n- :  \n-"),
     ("<i><br><a><li>><r><br>", "*  \n- \\>  \n  *"),
   ] {
     assert_eq!(

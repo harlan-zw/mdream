@@ -2143,19 +2143,34 @@ impl ConvertState {
     }
 
     // Whitespace immediately before <br> has no visual effect in HTML. Let the
-    // explicit line boundary subsume it so the output has no trailing spaces.
+    // explicit line boundary subsume it so the output has no trailing spaces,
+    // also when a list item's indent follows the line feed.
     if tag_id == Some(TAG_BR)
       && !enter_is_literal
       && self.depth_map[TAG_PRE as usize] == 0
-      && output.as_deref().is_some_and(|value| value.ends_with('\n'))
+      && let Some(indent) = output
+        .as_deref()
+        .and_then(|value| value.rfind('\n').map(|end| value.len() - end - 1))
     {
-      // A table cell keeps its tabs: the one before a non-first cell is the
-      // column separator, as at the row boundary.
-      if plain_text!(self) && self.depth_map[TAG_TABLE as usize] == 0 {
-        self.trim_trailing_blanks();
-      } else {
-        self.trim_trailing_spaces();
+      // Preformatted source newlines stay content after </pre> closes. A list
+      // item's break keeps the text's own line feeds, as in JS.
+      if indent == 0
+        && self.last_text_node_contains_whitespace
+        && !self.last_text_node_in_pre
+        && let Some((start, end)) = self.last_text_output_range
+        && end == self.buffer.len()
+      {
+        let start = start.max(self.trim_floor());
+        if let Some(text) = self.buffer.get(start..end) {
+          let end = start + trim_ascii_whitespace_end(text);
+          self.last_content_cache_len = self
+            .last_content_cache_len
+            .saturating_sub(self.buffer.len() - end);
+          self.clamp_item_marker_end(end);
+          self.truncate_buffer(end);
+        }
       }
+      self.trim_before_break(indent);
       if output.as_deref() == Some("\n") && self.buffer.ends_with("\n\n") {
         output = None;
       }
@@ -2251,6 +2266,14 @@ impl ConvertState {
           opener[line..].to_vec()
         },
       });
+    }
+
+    if plain_text!(self)
+      && !enter_is_literal
+      && matches!(tag_id, Some(TAG_TD | TAG_TH))
+      && output.as_deref() == Some("\t")
+    {
+      self.text_cell_start = self.buffer.len();
     }
 
     if tag_id == Some(TAG_IMG)
@@ -3143,7 +3166,13 @@ impl ConvertState {
     {
       self.write_emphasis_exit(is_inline, configured_new_lines, output);
     } else {
-      self.write_output(false, is_inline, configured_new_lines, effective, false);
+      self.write_output(
+        false,
+        is_inline,
+        configured_new_lines,
+        effective,
+        has_override,
+      );
     }
     if consumes_caption_boundary {
       if !is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR)) {
@@ -3435,7 +3464,10 @@ impl ConvertState {
         }
       }
     }
+    let start = self.buffer.len().checked_sub(self.last_content_cache_len);
     self.last_text_node_contains_whitespace = contains_whitespace;
+    self.last_text_node_in_pre = self.depth_map[TAG_PRE as usize] > 0;
+    self.last_text_output_range = start.map(|start| (start, self.buffer.len()));
     self.has_last_text_node = true;
     self.break_after_last_text = false;
     self.last_text_node_depth = depth;
@@ -4045,13 +4077,13 @@ impl ConvertState {
             end - index <= 6 && Self::is_markdown_marker_whitespace(bytes.get(end).copied());
         } else if byte == b'-' || byte == b'+' {
           should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied())
-            || (byte == b'-' && Self::is_dash_line(&bytes[index..]));
+            || (byte == b'-' && Self::is_dash_line::<true>(&bytes[index..]));
         } else if byte == b'>' {
           should_escape = true;
         } else if byte == b'=' {
           // A node ending inside the run still escapes, since inline nodes can
           // split one setext underline.
-          should_escape = Self::is_equals_line(&bytes[index..]);
+          should_escape = Self::is_equals_line::<true>(&bytes[index..]);
         }
       } else if !should_escape && ordered_digits > 0 && (byte == b'.' || byte == b')') {
         should_escape = Self::is_markdown_marker_whitespace(bytes.get(index + 1).copied());
@@ -4126,9 +4158,11 @@ impl ConvertState {
   #[inline(never)]
   fn escape_trailing_heading_hashes(&mut self) {
     let bytes = self.buffer.as_bytes();
-    // Cheap reject: almost no heading ends in `#`.
+    // Cheap reject: almost no heading ends in `#`. The run ends where the trims
+    // leave the line, so skip what they take: a form feed or a line end there
+    // still makes the run the closing sequence.
     let mut end = bytes.len();
-    while end > 0 && matches!(bytes[end - 1], b' ' | b'\t') {
+    while end > 0 && matches!(bytes[end - 1], b' ' | b'\t' | b'\n' | b'\x0C' | b'\r') {
       end -= 1;
     }
     if end == 0 || bytes[end - 1] != b'#' {
@@ -4684,20 +4718,31 @@ impl ConvertState {
     }
   }
 
+  /// Only a space or a tab ends a marker in CommonMark, but the escape takes a
+  /// form feed too: a break or the block's end trims it with the rest of the
+  /// trailing whitespace, which leaves the marker ending its line.
   #[inline]
   fn is_markdown_marker_whitespace(byte: Option<u8>) -> bool {
-    matches!(byte, None | Some(b' ' | b'\t' | b'\n' | b'\r'))
+    matches!(byte, None | Some(b' ' | b'\t' | b'\n' | b'\r' | b'\x0C'))
+  }
+
+  /// Whether `byte` is a blank on a marker line. The escape passes
+  /// `FORM_FEED`, since a break or the block's end can trim a form feed; the
+  /// wrap guard counts only spaces and tabs.
+  #[inline]
+  fn is_marker_line_blank<const FORM_FEED: bool>(byte: u8) -> bool {
+    byte == b' ' || byte == b'\t' || (FORM_FEED && byte == b'\x0C')
   }
 
   /// A line of only `-` and blanks is a list marker, a thematic break, or a
   /// setext underline, so its leading `-` always needs an escape.
   #[inline]
-  fn is_dash_line(value: &[u8]) -> bool {
+  fn is_dash_line<const FORM_FEED: bool>(value: &[u8]) -> bool {
     for &byte in value {
       if byte == b'\n' || byte == b'\r' {
         break;
       }
-      if byte != b'-' && byte != b' ' && byte != b'\t' {
+      if byte != b'-' && !Self::is_marker_line_blank::<FORM_FEED>(byte) {
         return false;
       }
     }
@@ -4707,13 +4752,13 @@ impl ConvertState {
   /// A `=` run followed only by blanks is a setext underline; blanks inside
   /// the run make it plain text.
   #[inline]
-  fn is_equals_line(value: &[u8]) -> bool {
+  fn is_equals_line<const FORM_FEED: bool>(value: &[u8]) -> bool {
     let run = value.iter().take_while(|&&byte| byte == b'=').count();
     for &byte in &value[run..] {
       if byte == b'\n' || byte == b'\r' {
         break;
       }
-      if byte != b' ' && byte != b'\t' {
+      if !Self::is_marker_line_blank::<FORM_FEED>(byte) {
         return false;
       }
     }
@@ -5001,6 +5046,69 @@ impl ConvertState {
       self.clamp_item_marker_end(trimmed_len);
       self.truncate_buffer(trimmed_len);
     }
+  }
+
+  /// A hard break subsumes the trailing run of HTML's ASCII whitespace up to a
+  /// line feed, which ends block spacing or an earlier break and so stays. The
+  /// run is the same whatever the text's source whitespace; U+000B is content.
+  /// A run that opens a line keeps the `indent` the break writes after its own
+  /// line feed, an earlier break's or a block's, and in Markdown a run right
+  /// after a list item's marker stays whole, the marker's own space included,
+  /// while item text that just ends like a marker loses its run. Plain text
+  /// writes no marker, so its run always goes, as in JS.
+  fn trim_before_break(&mut self, indent: usize) {
+    let floor = self.trim_floor().max(self.text_cell_start);
+    if self.buffer.len() > floor {
+      let bytes = self.buffer.as_bytes();
+      let mut trimmed_len = bytes.len();
+      while trimmed_len > floor && matches!(bytes[trimmed_len - 1], b' ' | b'\t' | b'\x0C' | b'\r')
+      {
+        trimmed_len -= 1;
+      }
+      if trimmed_len > floor && bytes[trimmed_len - 1] == b'\n' {
+        trimmed_len = (trimmed_len + indent).min(bytes.len());
+      } else if !plain_text!(self)
+        && self.depth_map[TAG_LI as usize] > 0
+        && if trimmed_len > floor {
+          self.follows_item_marker(&bytes[..trimmed_len])
+        } else {
+          // A run that reaches back past a drain's cut ends where the cut
+          // line's own trailing blanks begin.
+          trimmed_len == 0 && self.cut_marker_run_before_blanks.ends_in_marker()
+        }
+      {
+        return;
+      }
+      if trimmed_len == bytes.len() {
+        return;
+      }
+      self.last_content_cache_len = self
+        .last_content_cache_len
+        .saturating_sub(self.buffer.len() - trimmed_len);
+      self.clamp_item_marker_end(trimmed_len);
+      self.truncate_buffer(trimmed_len);
+    }
+  }
+
+  /// Whether `text` ends in a list marker, `-`, `*`, `+`, or digits then `.`
+  /// or `)`, that only spaces or tabs and other such markers precede on its
+  /// line: the item's own, or item text that a wrap left where the trim would
+  /// make it one. Item text that just ends like a marker, as in `see item 1.`,
+  /// is not. A line that ends in a `#`, `=` or dash run the escape left bare,
+  /// as after a tab, counts too, since a form feed in the run is what keeps it
+  /// from reading as a heading, a setext underline or a thematic break.
+  fn follows_item_marker(&self, text: &[u8]) -> bool {
+    let start = text
+      .iter()
+      .rposition(|&byte| !MarkerRun::reads(byte))
+      .map_or(0, |at| at + 1);
+    if start == 0 {
+      // A streamed buffer can start mid-line once earlier output drains,
+      // even inside a marker: the cut line's run goes on into this one.
+      return self.cut_marker_run.after(text).ends_in_marker();
+    }
+    matches!(text[start - 1], b'\n' | b'\r')
+      && MarkerRun::Open.after(&text[start..]).ends_in_marker()
   }
 
   /// Plain text ends a line on a space and tab run, as in JS. Kept out of
@@ -5751,8 +5859,8 @@ impl ConvertState {
   #[cold]
   fn is_setext_marker_run(bytes: &[u8]) -> bool {
     match bytes[0] {
-      b'-' => Self::is_dash_line(bytes),
-      b'=' => Self::is_equals_line(bytes),
+      b'-' => Self::is_dash_line::<false>(bytes),
+      b'=' => Self::is_equals_line::<false>(bytes),
       _ => false,
     }
   }
@@ -6700,6 +6808,11 @@ impl ConvertState {
     closes_emphasis: bool,
   ) {
     let output_str = output.unwrap_or("");
+    // Structural output ends the source text range, even when its cached
+    // content length remains available to other spacing rules.
+    if configured_new_lines > 0 || !output_str.is_empty() {
+      self.last_text_output_range = None;
+    }
     if is_enter {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
@@ -6980,8 +7093,11 @@ impl ConvertState {
             }
           }
         }
-        self.last_text_node_contains_whitespace = false;
-        self.has_last_text_node = false;
+        // Transparent exits leave the source tail available to an enclosing delimiter.
+        if plain_text!(self) || is_enter || !is_inline || literal || !output_str.is_empty() {
+          self.last_text_node_contains_whitespace = false;
+          self.has_last_text_node = false;
+        }
       }
 
       if is_enter
@@ -7799,7 +7915,8 @@ mod tests {
     let html = format!("<p>x{}y</p>", "<br>&#9;".repeat(4096));
     assert_eq!(state.process_html(&html), html.len());
     let out = state.get_markdown_chunk();
-    assert!(out.starts_with("x  \n\t"), "{:.20}", out);
+    // Each break takes its preceding tab; the final tab belongs to the text.
+    assert_eq!(out, format!("x{}\ty", "  \n".repeat(4096)));
     assert!(
       state.break_run_scanned <= html.len(),
       "read {} bytes for {} of input",
