@@ -58,6 +58,7 @@ import {
   TAG_TH,
   TAG_TR,
   TAG_U,
+  TAG_UL,
   TAG_VAR,
   TEXT_NODE,
 } from './const'
@@ -162,12 +163,51 @@ export interface MarkdownState {
   blockquotes: BlockquoteFrame[]
   /** Public runtime view used by tag handlers without exposing frame internals. */
   bufferedBlockquoteDepth: number
+  /** How the start of the buffer's first line a stream dropped reads, once it compacted. */
+  compactedRead?: LineRead
+  /** Open paragraph column; -(column + 1) retains it across a space-only line. */
+  compactedParagraph?: number
+  /** How many spaces the last of those space-only lines holds. */
+  compactedSpaces?: number
+  /** Whether the space-only lines above the last one allow a run of hard breaks to have written them all. */
+  compactedChain?: boolean
+  /** Content column of the item a marker alone on the last dropped line opens, with no paragraph yet. */
+  compactedItem?: number
+  /** With no paragraph open after such a marker, the indent from which lines are code. */
+  compactedCode?: number
+  /** The indent of the first text line among those code lines. */
+  compactedTop?: number
+  /** Where the first line of the paragraph left open starts its content. */
+  compactedFirst?: number
+  /** The dropped bytes end in a CR, whose LF may follow in the buffer. */
+  compactedCr?: boolean
   /** Fragment for a marker line at risk of becoming a setext underline. */
   emptyItemFragment?: number
+  lastItemMarkerFragment?: number
+  lastItemMarkerOwner?: ElementNode
   /** That line follows a decoded CR, which a single LF only turns into one CRLF. */
   emptyItemAfterCr?: boolean
+  /** Spaces a hard break wrote ahead of that marker, which start its line. */
+  emptyItemBreakIndent?: number
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  /** Last built-in item marker, retained until its emptiness is settled. */
+  emptyListMarkerFragment?: number
+  /** `<li>` nesting level of the latest built-in item marker. */
+  emptyListMarkerDepth: number
+  /** A separate parent-paragraph boundary after a nested list. */
+  listTailPending?: boolean
+  /** The quote that took a pending tail at enter. */
+  listTailQuote?: ElementNode
+  listTailStart?: number
+  /** First fragment to recheck, including the last fragment a writer may append to. */
+  listTailScanFrom?: number
+  emptyListMarkerScanFrom?: number
+  /**
+   * Open elements, other than `<span>`, that collapse block spacing as
+   * `calculateNewLineConfig` does for `<li>`. The parser keeps the count.
+   */
+  collapseNonSpanDepth: number
   /**
    * A heading closed in a list item. Inside the item its block spacing is
    * collapsed, so the next visible content owes it the block break the root
@@ -200,6 +240,8 @@ export interface BlockquoteFrame {
    * can flush the pre-quote context before the exit reads it.
    */
   followsWhitespace: boolean
+  /** Took over a nested list's pending tail at enter. */
+  listTail: boolean
 }
 
 interface GfmLifecycleState {
@@ -253,6 +295,31 @@ function newlineRunBefore(buffer: string[], index: number): number {
 }
 
 /**
+ * Whether only spaces sit between the start of its line and the marker in
+ * fragment `index`, such as the indent a hard break wrote before a quote
+ * opened on that line, and no more than `maxSpaces` of them: a marker indented
+ * past this list's reach is no parent marker, as in Rust.
+ */
+function onlySpacesToLineStart(buffer: string[], index: number, maxSpaces: number): boolean {
+  let spaces = 0
+  const own = buffer[index]!
+  while (spaces < own.length && own.charCodeAt(spaces) === 32)
+    spaces++
+  for (let i = index - 1; i >= 0; i--) {
+    const fragment = buffer[i]!
+    for (let j = fragment.length - 1; j >= 0; j--) {
+      const code = fragment.charCodeAt(j)
+      if (code === 10)
+        return spaces <= maxSpaces
+      if (code !== 32)
+        return false
+      spaces++
+    }
+  }
+  return spaces <= maxSpaces
+}
+
+/**
  * Whether a line ending sits before the CR that closes the output ahead of
  * fragment `index`, which leaves a blank line.
  */
@@ -266,6 +333,21 @@ function crFollowsLineEnding(buffer: string[], index: number): boolean {
         return code === 10 || code === 13
       }
       skippedCr = true
+    }
+  }
+  return false
+}
+
+/** Whether the output ends in a line holding spaces only. */
+function endsInIndentLine(buffer: readonly string[]): boolean {
+  let spaces = 0
+  for (let fragment = buffer.length - 1; fragment >= 0; fragment--) {
+    const value = buffer[fragment]!
+    for (let index = value.length - 1; index >= 0; index--) {
+      const code = value.charCodeAt(index)
+      if (code !== 32)
+        return code === 10 && spaces > 0
+      spaces++
     }
   }
   return false
@@ -296,27 +378,611 @@ function newlineRunBeforePrefix(buffer: string[], index: number, prefix: string)
   }
 }
 
+/** The spaces before the first character of `buffer[fragment]` other than a space or a line feed, back to its line's start. */
+function lineSpacesBefore(buffer: string[], fragment: number): number {
+  const value = buffer[fragment]!
+  let at = 0
+  while (at < value.length && (value.charCodeAt(at) === 32 || value.charCodeAt(at) === 10))
+    at++
+  let spaces = 0
+  let f = fragment
+  let offset = at
+  for (;;) {
+    while (offset === 0) {
+      if (f === 0)
+        return spaces
+      offset = buffer[--f]!.length
+    }
+    if (buffer[f]!.charCodeAt(--offset) !== 32)
+      return spaces
+    spaces++
+  }
+}
+
 /**
  * Arm the empty-item guard for the `<li>` whose marker was just written. A marker
  * line continuing the paragraph above turns a lone marker into a setext
  * underline: the text becomes a heading and the item disappears. A blank line, or
  * a sibling marker, opens its own block instead.
  */
-function recordItemMarker(state: MarkdownState, index: number, lastChar: string): void {
+function recordItemMarker(state: MarkdownState, element: ElementNode, builtIn: boolean, lastChar: string): void {
+  // A descendant marker settles a bare ancestor before replacing its guard.
+  if (state.emptyItemFragment !== undefined)
+    resolveItemMarker(state, true)
+  const previousFragment = state.lastItemMarkerFragment
+  const previousOwner = state.lastItemMarkerOwner
+  state.lastItemMarkerFragment = builtIn ? state.buffer.length - 1 : undefined
+  state.lastItemMarkerOwner = builtIn ? element : undefined
+  const index = element.index
   // Only a list's first item can follow a paragraph, so every later sibling
   // skips the scan below.
   const buffer = state.buffer
   const marker = buffer.length - 1
-  const run = index === 0 ? newlineRunBefore(buffer, marker) : -1
+  let run = index === 0 ? newlineRunBefore(buffer, marker) : -1
+  // A hard break inside an open inline writes the next line's indent with its
+  // line ending, so the marker's line starts before that indent, as in Rust.
+  let breakIndent = 0
+  if (run === 0 && marker > 0) {
+    const previous = buffer[marker - 1]!
+    let cursor = previous.length
+    while (cursor > 0 && previous.charCodeAt(cursor - 1) === 32)
+      cursor--
+    if (cursor > 0 && cursor < previous.length && previous.charCodeAt(cursor - 1) === 10) {
+      breakIndent = previous.length - cursor
+      while (cursor > 0 && previous.charCodeAt(cursor - 1) === 10) {
+        cursor--
+        run++
+      }
+      if (cursor === 0)
+        run += newlineRunBefore(buffer, marker - 1)
+    }
+  }
   // CRLF is a single line ending, so it opens no blank line by itself. `run`
   // stops at the space `needsSpacing` puts between a CR and the marker.
   const afterCr = run === 0 && lastChar === '\r'
-  if (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1) {
+  // That indent can add to the marker's own, the parent item's content column.
+  // Four columns or more past it, the marker's line only continues the text
+  // above and cannot underline it, and a blank line would turn it into an
+  // indented code block.
+  let indent = breakIndent
+  if (breakIndent > 0) {
+    const value = buffer[marker]!
+    while (indent - breakIndent < value.length && value.charCodeAt(indent - breakIndent) === 32)
+      indent++
+  }
+  if (indent > state.listIndent.length + 3
+    || (afterCr ? crFollowsLineEnding(buffer, buffer[marker - 1] === ' ' ? marker - 1 : marker) : run !== 1)) {
     state.emptyItemFragment = undefined
     return
   }
-  state.emptyItemFragment = marker
   state.emptyItemAfterCr = afterCr
+  state.emptyItemBreakIndent = breakIndent
+  // A parent's bare marker is no paragraph, and a blank line under it would end
+  // that item and turn this one into its sibling. A marker outside the
+  // innermost blockquote keeps the blank line it already had, which the quote's
+  // prefix makes harmless. A CR ends a line too: alone it ends this marker's
+  // own line, which Rust reads past, and before the LF of a CRLF it ends the
+  // line above. Either way that line is read alone, as in Rust: past a blank
+  // line the CR let the drain take the marker, and the stream would disagree.
+  // Four columns or more past the column of the paragraph a lone `*` above
+  // goes on with, this marker's line goes on with that paragraph too: it can
+  // neither underline it nor open an item, and a blank line would only turn it
+  // into an indented code block.
+  const markerQuoteIndent = state.blockquotes.at(-1)?.listIndent.length ?? 0
+  const markerSpaces = lineSpacesBefore(buffer, marker)
+  const markerColumn = markerSpaces >= markerQuoteIndent ? markerSpaces - markerQuoteIndent : markerSpaces
+  let pastParagraph = false
+  let lineFeeds = 0
+  let previous = 0
+  let lineAboveOnly = false
+  let trailingSpaces = 0
+  for (let fragment = state.buffer.length - 2; fragment >= (state.blockquotes.at(-1)?.fragment ?? 0); fragment--) {
+    const value = state.buffer[fragment]!
+    for (let cursor = value.length - 1; cursor >= 0; cursor--) {
+      const code = value.charCodeAt(cursor)
+      if (code === 32 || (code === 10 && !lineAboveOnly)) {
+        if (code === 10) {
+          lineFeeds++
+          trailingSpaces = 0
+        }
+        else {
+          trailingSpaces++
+        }
+        previous = code
+        continue
+      }
+      if (code === 13 && !lineAboveOnly && (lineFeeds === 0 ? afterCr : lineFeeds === 1 && previous === 10)) {
+        lineAboveOnly = true
+        trailingSpaces = 0
+        continue
+      }
+      // A direct first-child list cannot have inserted content before its
+      // parent's built-in marker. A drain/rewrite that moves that fragment
+      // misses this shortcut and keeps the general line recognizer.
+      const recordedParent = fragment === previousFragment
+        && previousOwner === element.parent?.parent
+        && element.parent?.index === 0
+        && onlySpacesToLineStart(state.buffer, fragment, state.listIndent.length + 3)
+        && (code === 45 || code === 46)
+      // A lone `*` or `+` can be text continuing the line above, such as an
+      // emphasis closer, which the marker line would underline.
+      // A literal marker from a tag override is no emphasis closer, and Rust
+      // never records one, so the line above keeps its old reading there.
+      let readsAsMarker = !builtIn || (code !== 42 && code !== 43)
+      if (!readsAsMarker) {
+        let indent = 0
+        let before = -1
+        let at = cursor
+        for (let f = fragment; f >= 0 && before === -1; f--) {
+          const part = state.buffer[f]!
+          if (f !== fragment)
+            at = part.length
+          while (--at >= 0) {
+            const char = part.charCodeAt(at)
+            if (char !== 32) {
+              before = char
+              break
+            }
+            indent++
+          }
+        }
+        // The space after a CR separates the marker from it.
+        if (before === 13 && indent > 0)
+          indent--
+        // After a lone CR this marker sits past a space only the blank line
+        // takes away, which leaves it short of the lines indented under it.
+        const column = afterCr ? undefined : loneCloserParagraph(state, fragment, cursor, indent, trailingSpaces >= 2)
+        readsAsMarker = !afterCr && column === undefined
+        pastParagraph = column !== undefined && markerColumn >= column + 4
+      }
+      state.emptyItemFragment = (recordedParent || pastParagraph || (readsAsMarker && listMarkerLineStart(state.buffer, fragment, cursor, state.listIndent.length + 3)))
+        ? undefined
+        : state.buffer.length - 1
+      return
+    }
+  }
+  state.emptyItemFragment = state.buffer.length - 1
+}
+
+/**
+ * How a line reads for the lone `*` rule, taken one character at a time so a
+ * later compaction can carry the reading on. `kind` is 0 while only spaces
+ * came, 1 inside an ordered marker's digits, 2 after a marker and `count`
+ * spaces, 3 for an item whose content starts at `column`, 4 for other text.
+ * A run of hard breaks leaves whole lines of spaces: the lowest holds the
+ * indent of the line under it and two spaces more, and each one above is as
+ * long as it or two spaces longer. A stream can write them after the line
+ * below, so the rule reads past them.
+ */
+export interface LineRead {
+  kind: number
+  indent: number
+  column: number
+  count: number
+  /** The content column of the item a marker would nest in, or -1. */
+  outer: number
+  /** Numeric value while reading an ordered marker, including leading zeroes. */
+  ordinal?: number
+  /** Whether the outermost marker can interrupt paragraph text. */
+  interrupts?: boolean
+}
+
+const LINE_START: LineRead = { kind: 0, indent: 0, column: 0, count: 0, outer: -1 }
+
+/** The same reading once `more` of the line follows. */
+function extendLineRead(read: LineRead, more: string): LineRead {
+  let { kind, indent, column, count, outer, ordinal, interrupts } = read
+  // No marker starts where one could: the content of the item it would have
+  // nested in, or text.
+  const content = () => {
+    if (outer >= 0) {
+      kind = 3
+      column = outer
+    }
+    else {
+      kind = 4
+    }
+  }
+  // A marker or digits starting at column `at`.
+  const markerStart = (code: number, at: number) => {
+    if (code === 45 || code === 42 || code === 43) {
+      kind = 2
+      column = at + 1
+      count = 0
+      if (outer < 0)
+        interrupts = true
+    }
+    else if (code >= 48 && code <= 57) {
+      kind = 1
+      column = at + 1
+      count = 1
+      ordinal = code - 48
+    }
+    else {
+      content()
+    }
+  }
+  for (let at = 0; at < more.length && kind < 3; at++) {
+    const code = more.charCodeAt(at)
+    if (kind === 0) {
+      if (code === 32)
+        indent++
+      else
+        markerStart(code, indent)
+    }
+    else if (kind === 1) {
+      if (code >= 48 && code <= 57 && count < 9) {
+        column++
+        count++
+        ordinal = (ordinal ?? 0) * 10 + code - 48
+      }
+      else if (code === 46 || code === 41) {
+        if (outer < 0)
+          interrupts = ordinal === 1
+        kind = 2
+        column++
+        count = 0
+      }
+      else {
+        content()
+      }
+    }
+    else if (code === 32) {
+      count++
+    }
+    else if (count === 0) {
+      content()
+    }
+    else if (count > 4) {
+      // Past four spaces the content is code, and the column sits one past the marker.
+      kind = 3
+      column++
+    }
+    else {
+      // The content can open a list of its own, as `- *` does.
+      outer = column + count
+      markerStart(code, outer)
+    }
+  }
+  return { kind, indent, column, count, outer, ordinal, interrupts }
+}
+
+/** A whole line's reading: digits that open no marker are the content of the item they sit in. */
+function endLineRead(read: LineRead): LineRead {
+  return read.kind === 1 && read.outer >= 0 ? { ...read, kind: 3, column: read.outer } : read
+}
+
+/** The paragraph the lines a compaction dropped leave open, for the lone `*` rule. */
+interface ParagraphFold {
+  /** Its column; -(column + 1) retains it across a space-only line. */
+  paragraph?: number
+  /** How many spaces the last of those space-only lines holds. */
+  spaces?: number
+  /** Whether the space-only lines above the last one allow a run of hard breaks to have written them all. */
+  chain?: boolean
+  /** Right under a marker alone, the content column of the item it opens. */
+  item?: number
+  /** With no paragraph open after such a marker, the indent from which lines are code. */
+  code?: number
+  /** The indent of the first text line among those code lines. */
+  top?: number
+  /** Where the open paragraph's first line starts its content: no column of the item it goes on in is past that. */
+  first?: number
+}
+
+/**
+ * Fold a whole line reading as `read` into the paragraph open above it: none
+ * after a blank line or a marker alone, the item's content column after an
+ * item, and zero for text outside an item. Text right under a marker alone
+ * goes on in its item once it reaches the item's content column. Otherwise
+ * that item ended empty: text indented to the code column is code, and text
+ * four columns short of it goes on in the item that holds the marker's list.
+ */
+function foldLine(fold: ParagraphFold, read: LineRead): void {
+  const line = endLineRead(read)
+  const { paragraph, item, code, top, spaces } = fold
+  fold.item = undefined
+  fold.code = undefined
+  fold.top = undefined
+  // A negative column remembers spaces above a possible hard-break closer.
+  if (line.kind === 0 && line.indent > 0) {
+    if (paragraph === undefined) {
+      fold.code = code
+      fold.top = item === undefined ? top : undefined
+    }
+    else {
+      fold.chain = paragraph >= 0 || (fold.chain !== false && (spaces === line.indent || spaces === line.indent + 2))
+      if (paragraph >= 0)
+        fold.paragraph = -paragraph - 1
+      fold.spaces = line.indent
+    }
+  }
+  else if (line.kind === 0) {
+    fold.paragraph = undefined
+  }
+  else if ((line.kind === 2 || (line.kind === 3 && line.interrupts === false)) && paragraph !== undefined && paragraph >= 0 && line.indent >= paragraph) {
+    // Empty items and ordered items not starting at 1 cannot interrupt a paragraph.
+  }
+  else if (line.kind === 2) {
+    fold.paragraph = undefined
+    fold.item = line.column + 1
+    fold.code = (line.outer >= 0 ? line.outer : line.indent) + 4
+  }
+  else if (line.kind === 3) {
+    fold.paragraph = line.column
+    fold.first = line.column
+  }
+  else if (paragraph !== undefined) {
+    fold.paragraph = paragraph < 0 ? -paragraph - 1 : paragraph
+  }
+  else if (item !== undefined && line.indent >= item) {
+    fold.paragraph = item
+    fold.first = line.indent
+  }
+  else if (code !== undefined && line.indent >= code) {
+    fold.code = code
+    fold.top = item === undefined && top !== undefined ? top : line.indent
+  }
+  else {
+    // Text reaching the column of the marker's list goes on in the item that
+    // holds that list. The paragraph starts at the first text line under the
+    // marker.
+    fold.paragraph = code !== undefined && line.indent + 4 >= code ? code - 4 : 0
+    fold.first = item === undefined && top !== undefined ? top : line.indent
+  }
+}
+
+/**
+ * Note that a stream drops the buffer's front up to `cut` in `text`: fold the
+ * lines it drops whole into the paragraph they leave open, and carry the
+ * reading of the line it cuts, for the lone `*` rule. The LF of a CRLF split
+ * across cuts ends nothing new.
+ */
+export function noteBufferCompaction(state: MarkdownState, text: string, cut: number): void {
+  // Nothing leaves the buffer: the lines above stay readable, and the start of
+  // the document still reads as one, as in Rust before a drain takes a byte.
+  if (cut === 0)
+    return
+  let read = state.compactedRead ?? LINE_START
+  const fold: ParagraphFold = { paragraph: state.compactedParagraph, spaces: state.compactedSpaces, chain: state.compactedChain, item: state.compactedItem, code: state.compactedCode, top: state.compactedTop, first: state.compactedFirst }
+  let start = 0
+  for (let at = 0; at < cut; at++) {
+    const code = text.charCodeAt(at)
+    if (code !== 10 && code !== 13)
+      continue
+    const crlf = code === 10 && (at === 0 ? state.compactedCr === true : text.charCodeAt(at - 1) === 13)
+    if (!crlf)
+      foldLine(fold, extendLineRead(read, text.slice(start, at)))
+    read = LINE_START
+    start = at + 1
+  }
+  state.compactedRead = extendLineRead(read, text.slice(start, cut))
+  state.compactedParagraph = fold.paragraph
+  state.compactedSpaces = fold.spaces
+  state.compactedChain = fold.chain
+  state.compactedItem = fold.item
+  state.compactedCode = fold.code
+  state.compactedTop = fold.top
+  state.compactedFirst = fold.first
+  if (cut > 0)
+    state.compactedCr = text.charCodeAt(cut - 1) === 13
+}
+
+/**
+ * Whether a lone `*` or `+` at `fragment`/`cursor`, after `indent` spaces,
+ * reads as a list marker rather than as text continuing the paragraph above,
+ * such as an emphasis closer. Right after a CR it starts a line of its own.
+ * Past a line feed it reads as a marker when no paragraph goes on above it, or
+ * when it sits short of that paragraph's column: the column of the item
+ * content the paragraph starts with, or zero outside an item. Such a line falls
+ * out of the paragraph's container and opens a list of its own. Columns count
+ * inside the quote that holds the `*`. Returns, when it reads as text, where
+ * the first line of the paragraph it goes on with starts its content: no
+ * column of the item that paragraph goes on in is past that one. Infinity
+ * when text before it on its line leaves no column to pass, and `undefined`
+ * when it reads as a marker.
+ */
+function loneCloserParagraph(state: MarkdownState, fragment: number, cursor: number, indent: number, hardBreak: boolean): number | undefined {
+  const buffer = state.buffer
+  // The innermost quote holding the `*`.
+  let quote: BlockquoteFrame | undefined
+  for (let index = state.blockquotes.length - 1; index >= 0 && !quote; index--) {
+    if (state.blockquotes[index]!.fragment <= fragment)
+      quote = state.blockquotes[index]
+  }
+  const quoteFragment = quote?.fragment ?? 0
+  const quoteIndent = quote?.listIndent.length ?? 0
+  // A quoted line keeps the indent the quote opened under ahead of its own.
+  const relative = (column: number, lead: number) => lead >= quoteIndent ? column - quoteIndent : column
+  let at = fragment
+  let offset = cursor
+  // Read back one character, across fragments; -1 at the buffer start.
+  const back = (): number => {
+    while (offset === 0) {
+      if (at === 0)
+        return -1
+      offset = buffer[--at]!.length
+    }
+    return buffer[at]!.charCodeAt(--offset)
+  }
+  // Whether the line ending at the CR just read holds paragraph text, read
+  // within the quote. Past the buffer start it counts as text, as before.
+  const paragraphLineAbove = (): boolean => {
+    const savedAt = at
+    const savedOffset = offset
+    let text = ''
+    let char = -2
+    for (;;) {
+      if (at === quoteFragment && offset === 0)
+        break
+      char = back()
+      if (char === -1 || char === 10 || char === 13)
+        break
+      text = String.fromCharCode(char) + text
+    }
+    at = savedAt
+    offset = savedOffset
+    if (char === -1)
+      return true
+    const kind = endLineRead(extendLineRead(LINE_START, text)).kind
+    return kind === 3 || kind === 4
+  }
+  let code = back()
+  while (code === 32)
+    code = back()
+  if (code === 13 || (code === -1 && state.compactedCr === true))
+    return undefined
+  if ((quote && (code === -1 || at < quoteFragment)) || (code === -1 && !state.compactedRead))
+    return 0
+  // Text before the `*` on its line makes it no marker line, as in Rust, which
+  // never reads one: no marker under it goes past a paragraph's column.
+  if (code !== 10 && code !== -1)
+    return Number.POSITIVE_INFINITY
+  // A marker alone right under paragraph text cannot interrupt it: an empty
+  // item never does. The line goes on with the paragraph when it reaches the
+  // paragraph's column, and opens a list of its own otherwise; its indent and
+  // its answer as a marker wait for that column.
+  let pending: { indent: number, answer: number | undefined, top: number } | undefined
+  // Each answer comes with where the paragraph's first line starts its content.
+  const decide = (found: number | undefined, start: number) => {
+    const marker = pending && (found === undefined || pending.indent < found) ? pending : undefined
+    const column = marker ? marker.answer : found
+    return column === undefined || relative(indent, indent) < column ? undefined : marker ? marker.top : start
+  }
+  // Whether the line above the one just read, which `ending` ends, holds
+  // paragraph text, read within the quote. Past the buffer start the
+  // paragraph a compaction left answers.
+  const textAbove = (ending: number): boolean => {
+    if (ending === -1)
+      return state.compactedRead !== undefined && (state.compactedParagraph ?? -1) >= 0
+    const savedAt = at
+    const savedOffset = offset
+    let char = back()
+    if (ending === 10 && char === 13)
+      char = back()
+    let line = ''
+    while (char !== -1 && char !== 10 && char !== 13) {
+      line = String.fromCharCode(char) + line
+      if (quote && at === quoteFragment && offset === 0)
+        break
+      char = back()
+    }
+    at = savedAt
+    offset = savedOffset
+    const kind = endLineRead(extendLineRead(char === -1 ? state.compactedRead ?? LINE_START : LINE_START, line)).kind
+    return kind === 3 || kind === 4
+  }
+  // Walk up the paragraph above to the line it starts with.
+  let below: number | undefined
+  // The indent of the paragraph's first line read so far, that indent again
+  // unless a line of spaces came right above it, and the least indent of its
+  // lines.
+  let top = 0
+  let first: number | undefined
+  let shallow = Infinity
+  // Under a marker alone whose item's content starts at `column`: the
+  // paragraph sits in that item when its first line comes right under the
+  // marker and reaches that column. Otherwise the item ended empty: lines all
+  // indented to `code` past it are code, which no `*` continues, and a first
+  // line four columns short of `code` reaches the marker's own list, so the
+  // paragraph goes on in the item that holds that list.
+  const underMarker = (column: number, code: number, lead = top) => below === undefined
+    ? undefined
+    : first !== undefined && first >= column
+      ? column
+      : shallow >= code ? undefined : lead + 4 >= code ? code - 4 : below
+  // A line of spaces that a run of hard breaks did not write, such as the
+  // indent of a hard break that a line feed of the text ends, is blank. With a
+  // hard break after the `*`, it ends the paragraph. A run writes its lowest
+  // line as the indent of the line under it and two spaces more, and each line
+  // above it as long as the one under it or two spaces longer.
+  let under = indent
+  let underSpaces = false
+  const blank = (spaces: number | undefined, chain = true) => hardBreak && below === undefined
+    && !(chain && (spaces === under + 2 || (underSpaces && spaces === under)))
+  const compacted = (): number | undefined => {
+    const paragraph = state.compactedParagraph
+    // The paragraph starts at the first text line the compaction dropped.
+    if (paragraph === undefined && state.compactedCode !== undefined)
+      return decide(underMarker(state.compactedItem ?? Infinity, state.compactedCode, state.compactedTop ?? top), state.compactedTop ?? top)
+    if (paragraph === undefined)
+      return decide(below, top)
+    return decide(paragraph < 0
+      ? blank(state.compactedSpaces, state.compactedChain !== false) ? undefined : -paragraph - 1
+      : paragraph, state.compactedFirst ?? 0)
+  }
+  for (;;) {
+    if (quote && (code === -1 || at < quoteFragment))
+      return decide(below, top)
+    // A compaction dropped the lines above whole: the paragraph they left answers.
+    if (code === -1)
+      return compacted()
+    // CRLF is a single line ending; the LF of one split across compactions
+    // ends a line a compaction dropped.
+    let char = back()
+    if (code === 10 && char === -1 && state.compactedCr === true)
+      return compacted()
+    if (code === 10 && char === 13)
+      char = back()
+    let line = ''
+    let firstQuoted = false
+    while (char !== -1 && char !== 10 && char !== 13) {
+      line = String.fromCharCode(char) + line
+      // The quote's first line counts from where its content starts.
+      if (quote && at === quoteFragment && offset === 0) {
+        firstQuoted = true
+        break
+      }
+      char = back()
+    }
+    // A lone CR starts a line the quote's prefix skips. Unless that line goes
+    // on with a paragraph of the quote, the quote ends there and the `*` sits
+    // in one that opens below it.
+    if (quote && char === 13 && !firstQuoted && !paragraphLineAbove())
+      return decide(below, top)
+    // A compaction may have dropped the start of the buffer's first line.
+    const read = endLineRead(extendLineRead(char === -1 && !firstQuoted ? state.compactedRead ?? LINE_START : LINE_START, line))
+    if (read.kind === 0 && read.indent > 0 && !firstQuoted && !blank(read.indent)) {
+      under = read.indent
+      underSpaces = true
+      first = undefined
+      code = char
+      continue
+    }
+    if (read.kind === 2) {
+      const markerFirst = first === undefined ? undefined : relative(first, first)
+      const saved = first
+      first = markerFirst
+      const answer = underMarker(relative(read.column + 1, read.indent), relative((read.outer >= 0 ? read.outer : read.indent) + 4, read.indent))
+      first = saved
+      if (pending || firstQuoted || (quote && at < quoteFragment) || !textAbove(char))
+        return decide(answer, top)
+      pending = { indent: relative(read.indent, read.indent), answer, top }
+      below = 0
+      first = read.indent
+      top = relative(read.indent, read.indent)
+      shallow = Math.min(shallow, top)
+      code = char
+      continue
+    }
+    if (read.kind === 0)
+      return decide(below, top)
+    // A non-1 ordinal with content can still be paragraph continuation.
+    // Defer its item column until the paragraph above has been located.
+    if (read.kind === 3) {
+      const column = relative(read.column, read.indent)
+      if (read.interrupts !== false || pending || firstQuoted || !textAbove(char))
+        return decide(column, column)
+      pending = { indent: relative(read.indent, read.indent), answer: column, top: column }
+    }
+    below = 0
+    first = read.indent
+    top = relative(read.indent, read.indent)
+    shallow = Math.min(shallow, top)
+    if (firstQuoted)
+      return decide(below, top)
+    code = char
+  }
 }
 
 /**
@@ -367,6 +1033,28 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   // underline there, and a blank line would split the link across two blocks.
   if (first === -1 && afterCr && linkOpen)
     return
+  // The blank line goes before the indent a hard break wrote for the marker.
+  const breakIndent = state.emptyItemBreakIndent ?? 0
+  const previous = buffer[fragment - 1]
+  if (breakIndent > 0 && previous !== undefined && previous.length > breakIndent
+    && previous.charCodeAt(previous.length - breakIndent - 1) === 10) {
+    const head = previous.slice(0, previous.length - breakIndent)
+    // A quote that opens on the marker's line starts past that indent, so the
+    // blank line stays out of it, where Rust moves the quote's frame past it.
+    if (state.blockquotes.some(frame => frame.fragment === fragment)) {
+      const split = `${head}\n${previous.slice(head.length)}`
+      state.outputPositions?.replace(fragment - 1, fragment, [split], offset => offset >= head.length ? offset + 1 : offset)
+      buffer[fragment - 1] = split
+      noteBufferRewrite(state)
+      return
+    }
+    const moved = `\n${previous.slice(head.length)}${buffer[fragment]}`
+    state.outputPositions?.replace(fragment - 1, fragment + 1, [head, moved], offset => offset >= head.length ? offset + 1 : offset)
+    buffer[fragment - 1] = head
+    buffer[fragment] = moved
+    noteBufferRewrite(state)
+    return
+  }
   // An LF after a decoded CR only completes one CRLF line ending, so the blank
   // line takes two. They replace the space `needsSpacing` put after the CR: it
   // moves the item's content column past the indent of its next lines.
@@ -380,6 +1068,18 @@ function resolveItemMarker(state: MarkdownState, atExit: boolean, unresolvedCapt
   state.outputPositions?.replace(fragment, fragment + 1, [replacement], offset => offset + separator.length)
   buffer[fragment] = replacement
   noteBufferRewrite(state)
+}
+
+/** Invalidate tail records when their source fragments are replaced or removed. */
+export function noteListTailRewrite(state: MarkdownState, fragment: number): void {
+  if (state.emptyListMarkerFragment !== undefined && fragment <= state.emptyListMarkerFragment)
+    state.emptyListMarkerFragment = undefined
+  if (state.listTailStart !== undefined && fragment < state.listTailStart)
+    state.listTailStart = undefined
+  if (state.listTailScanFrom !== undefined && fragment < state.listTailScanFrom)
+    state.listTailScanFrom = fragment
+  if (state.emptyListMarkerScanFrom !== undefined && fragment < state.emptyListMarkerScanFrom)
+    state.emptyListMarkerScanFrom = fragment
 }
 
 /**
@@ -610,11 +1310,10 @@ export function lineOpensRawHtmlBlock(buffer: string[], scan: BufferScanState): 
 }
 
 /**
- * Return the current GFM line indent when a block marker may still start at
- * this position. A non-space byte, or more than three leading spaces, makes
- * the position ordinary inline text. A list item's content column (`column`,
- * zero outside items) opens its blocks, so a line indented to it counts from
- * there.
+ * Return block indentation after the active list continuation prefix: a list
+ * item's content column (zero outside items) opens its blocks, so a line
+ * indented to it counts from there. Four additional spaces make the position
+ * ordinary inline text.
  */
 function markdownLineIndent(buffer: string[], structuralIndent: number): number {
   let spaces = 0
@@ -627,7 +1326,7 @@ function markdownLineIndent(buffer: string[], structuralIndent: number): number 
       // A list marker is block prefix too: its content column opens a fresh
       // block context, so `- # h` escapes exactly like `# h` would.
       if (code !== 32 || spaces === structuralIndent + 3) {
-        return listMarkerLineStart(buffer, fragmentIndex, index) ? 0 : -1
+        return listMarkerLineStart(buffer, fragmentIndex, index, structuralIndent + 3) ? 0 : -1
       }
       spaces++
     }
@@ -1093,6 +1792,14 @@ function wrapperEmitsInlineMarkdown(node: ElementNode, state: MarkdownState): bo
     || tagId === TAG_SUB || tagId === TAG_SUP || tagId === TAG_INS || tagId === TAG_U || tagId === TAG_MARK
 }
 
+function hasNonWhitespaceFrom(buffer: readonly string[], from: number): boolean {
+  for (let index = from; index < buffer.length; index++) {
+    if (hasNonWhitespace(buffer[index]!))
+      return true
+  }
+  return false
+}
+
 function trimLeadingSpaces(value: string): string {
   let start = 0
   while (value.charCodeAt(start) === 32)
@@ -1261,6 +1968,7 @@ function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
       }
       return offset + added
     })
+    noteListTailRewrite(state, span.fragment + 1)
     state.buffer.length = span.fragment + 1
     state.buffer.push(content)
     noteBufferRewrite(state)
@@ -1376,8 +2084,13 @@ function finalizeBlockquote(state: MarkdownState): void {
   // An empty quote whose start followed terminated output writes nothing.
   // The context is the enter-time snapshot: streaming may have already
   // yielded and compacted the characters this decision used to read back.
-  if (!content && frame.followsWhitespace)
+  if (!content && frame.followsWhitespace) {
+    // Nothing is left to quote, so the parent's next content still needs the
+    // blank line that ends the nested list above it.
+    if (frame.listTail)
+      state.listTailPending = true
     return
+  }
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -1434,6 +2147,7 @@ function finalizeBlockquote(state: MarkdownState): void {
         replacement.push(quoted.slice(end))
       state.outputPositions.replace(frame.fragment, buffer.length, replacement, mapPosition)
     }
+    noteListTailRewrite(state, frame.fragment)
     buffer.length = frame.fragment
     if (start > 0)
       buffer.push(quoted.slice(0, start))
@@ -1447,6 +2161,7 @@ function finalizeBlockquote(state: MarkdownState): void {
   }
 
   state.outputPositions?.replace(frame.fragment, buffer.length, [quoted], mapPosition)
+  noteListTailRewrite(state, frame.fragment)
   buffer.splice(frame.fragment, buffer.length - frame.fragment, quoted)
   state.lastContentCache = quoted
   noteBufferRewrite(state)
@@ -1601,7 +2316,9 @@ function commitGfmAction(
           ? state.lastContentCache !== undefined
           && isAsciiWhitespace(state.lastContentCache.charCodeAt(state.lastContentCache.length - 1))
           : isAsciiWhitespace(before),
+        listTail: state.listTailQuote === owner,
       })
+      state.listTailQuote = undefined
       state.bufferedBlockquoteDepth = state.blockquotes.length
       break
     }
@@ -1660,8 +2377,8 @@ interface MarkdownProcessor {
  * Creates a markdown processor that consumes DOM events and generates markdown
  */
 export function createMarkdownProcessor(options?: EngineOptions): MarkdownProcessor
-export function createMarkdownProcessor<T>(options: EngineOptions, createStream: (context: MarkdownStreamContext) => T): MarkdownProcessor & T
-export function createMarkdownProcessor<T>(options: EngineOptions = {}, createStream?: (context: MarkdownStreamContext) => T) {
+export function createMarkdownProcessor<T>(options: EngineOptions, createStream: (context: MarkdownStreamContext) => T, hasPlugins?: boolean): MarkdownProcessor & T
+export function createMarkdownProcessor<T>(options: EngineOptions = {}, createStream?: (context: MarkdownStreamContext) => T, hasPlugins = false) {
   const state: MarkdownState = {
     options,
     outputFormat: 'markdown',
@@ -1675,8 +2392,28 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     bufferedBlockquoteDepth: 0,
     // Declared up front, not assigned lazily, to keep the hidden class stable.
     emptyItemFragment: undefined,
+    emptyListMarkerFragment: undefined,
+    emptyListMarkerDepth: 0,
+    listTailPending: false,
+    listTailQuote: undefined,
+    listTailStart: undefined,
+    listTailScanFrom: undefined,
+    emptyListMarkerScanFrom: undefined,
+    lastItemMarkerFragment: undefined,
+    compactedRead: undefined,
+    compactedParagraph: undefined,
+    compactedSpaces: undefined,
+    compactedChain: undefined,
+    compactedItem: undefined,
+    compactedCode: undefined,
+    compactedTop: undefined,
+    compactedFirst: undefined,
+    compactedCr: undefined,
+    lastItemMarkerOwner: undefined,
+    collapseNonSpanDepth: 0,
     headingBreakPending: false,
     emptyItemAfterCr: false,
+    emptyItemBreakIndent: 0,
     pendingLeadingBlank: false,
     pendingPairSeparator: false,
     pendingDecodedBlank: false,
@@ -1732,6 +2469,24 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let quoteTentativeSpacing: string | undefined
   let captionBoundarySpacing = 0
   let captionBreakRun = 0
+  // A marker-only item cannot release its whitespace yet. Keep repeated
+  // ordinary breaks counted until another event can observe their contents.
+  // The run's fragment always ends the buffer: only a break extends the run,
+  // every other event flushes it first, and a stream drain that compacts the
+  // buffer keeps the final fragment. Its index does not survive that drain.
+  let itemBreakRun: { unit: string, count: number } | undefined
+
+  function flushItemBreakRun(): void {
+    const run = itemBreakRun
+    if (!run)
+      return
+    itemBreakRun = undefined
+    if (run.count > 1) {
+      // Keep the final fragment separate: close handlers trim it by identity.
+      state.buffer[state.buffer.length - 1] = run.unit.repeat(run.count - 1)
+      state.buffer.push(run.unit)
+    }
+  }
   // The space run ending the buffer when a dropped caption's exit last checked
   // it: the buffer's length and last fragment then, the fragment holding the
   // run's first space, -1 when there was none, and whether the line opened a
@@ -2002,11 +2757,13 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (end !== 0) {
         state.outputPositions?.replace(index, state.buffer.length, [value.slice(0, end)])
         state.buffer[index] = value.slice(0, end)
+        noteListTailRewrite(state, index + 1)
         state.buffer.length = index + 1
         noteBufferRewrite(state)
         break
       }
       state.outputPositions?.replace(index, state.buffer.length, [])
+      noteListTailRewrite(state, index)
       state.buffer.length = index
       noteBufferRewrite(state)
     }
@@ -2068,6 +2825,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     else if (anchor !== CAPTION_NO_ANCHOR) {
       state.outputPositions?.replace(anchor, state.buffer.length, [])
+      noteListTailRewrite(state, anchor)
       state.buffer.length = anchor
       state.lastContentCache = state.buffer.at(-1)
       state.lastTextNode = undefined
@@ -2452,7 +3210,25 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
+    if ((state.emptyListMarkerFragment !== undefined || state.listTailStart !== undefined)
+      && hasNonWhitespace(textNode.value)) {
+      state.emptyListMarkerFragment = undefined
+      state.listTailStart = undefined
+    }
     state.lastTextNode = textNode
+  }
+
+  function flushListTail(preserveMarkerSpace = false): void {
+    if (!preserveMarkerSpace)
+      trimTrailingSpaces(state.buffer)
+    state.listTailStart = state.buffer.length
+    state.listTailScanFrom = state.listTailStart
+    // A hard break has already ended the line; write only the newlines the
+    // blank line still lacks.
+    state.buffer.push(`${'\n\n'.slice(newlineRunBefore(state.buffer, state.buffer.length))}${state.listIndent}`)
+    state.lastContentCache = state.buffer.at(-1)
+    state.lastTextNode = undefined
+    state.listTailPending = false
   }
 
   /**
@@ -2493,6 +3269,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
    */
   function processEvent(event: NodeEvent): void {
     const { type: eventType, node } = event
+    if (itemBreakRun && !(node.type === ELEMENT_NODE && node.tagHandler === breakHandler
+      && !(node as ElementNode).pluginOutput?.length)) {
+      flushItemBreakRun()
+    }
     if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
       && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
       pendingRawHtmlBoundary = false
@@ -2555,6 +3335,55 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
       else if (node.type === TEXT_NODE) {
         return
+      }
+    }
+
+    if (state.listTailPending) {
+      if (node.type === ELEMENT_NODE && eventType === NodeEventExit && (node as ElementNode).tagId === TAG_LI) {
+        state.listTailPending = false
+      }
+      else if (node.type === ELEMENT_NODE && eventType === NodeEventEnter) {
+        const tagId = (node as ElementNode).tagId
+        if (tagId === TAG_UL || tagId === TAG_OL) {
+          // Empty lists cannot settle the parent paragraph boundary.
+        }
+        else if (tagId === TAG_BLOCKQUOTE) {
+          if (node.tagHandler?.literalEnter && node.tagHandler.literalEnterHasOutput === false) {
+            flushListTail()
+          }
+          else {
+            // A built-in quote hands the tail back when empty. Nonempty literal
+            // overrides own their spacing and do not create a quote frame.
+            if (!node.tagHandler?.literalEnter)
+              state.listTailQuote = node as ElementNode
+            state.listTailPending = false
+            state.emptyListMarkerFragment = undefined
+          }
+        }
+        else if (tagId === TAG_LI || (tagId! >= TAG_H1 && tagId! <= TAG_H6) || tagId === TAG_HR) {
+          // A closed nested item can leave its indent alone on the last line, as
+          // after a fence. A heading or rule reads it as its own prefix and lands
+          // in that item, so the parent's prefix replaces it after a blank line.
+          if (tagId !== TAG_LI && endsInIndentLine(state.buffer)) {
+            trimTrailingSpaces(state.buffer)
+            if (newlineRunBefore(state.buffer, state.buffer.length) === 2) {
+              state.buffer.push(state.listIndent)
+              state.lastContentCache = state.listIndent
+              state.lastTextNode = undefined
+            }
+          }
+          state.listTailPending = false
+          state.emptyListMarkerFragment = undefined
+        }
+        else if (!node.tagHandler?.excludesTextNodes) {
+          flushListTail((tagId === TAG_PRE || tagId === TAG_TABLE) && state.emptyListMarkerFragment !== undefined)
+        }
+      }
+      else if (node.type === TEXT_NODE && eventType === NodeEventEnter) {
+        if (!node.parent?.tagHandler?.excludesTextNodes && hasNonWhitespace((node as TextNode).value))
+          flushListTail()
+        else
+          return
       }
     }
 
@@ -2629,6 +3458,38 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         literalOpeners.length -= 2
     }
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
+    if (eventType === NodeEventExit) {
+      if (tagId === TAG_LI) {
+        if (state.listIndentWidths.length === 1)
+          state.emptyListMarkerFragment = undefined
+        if (state.listTailStart !== undefined) {
+          const start = state.listTailStart
+          if (!hasNonWhitespaceFrom(buff, start)) {
+            state.outputPositions?.replace(start, buff.length, [])
+            buff.length = start
+            state.lastContentCache = buff.at(-1)
+            state.lastTextNode = undefined
+            lastBuffEntry = buff.at(-1)!
+            lastChar = lastBuffEntry?.at(-1) || ''
+          }
+          state.listTailStart = undefined
+        }
+      }
+      else if ((tagId === TAG_UL || tagId === TAG_OL)
+        && state.emptyListMarkerDepth > state.depthMap[TAG_LI]!
+        && state.listIndent && !isInsideTableCell(state)
+        && !handler?.literalExitHasOutput && !element.pluginOutput?.length) {
+        // Any item of this list, filled or empty, ends before the parent's text.
+        // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+        // item line is left open for that text to continue.
+        if (!state.collapseNonSpanDepth)
+          state.listTailPending = true
+        state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
+        const marker = state.emptyListMarkerFragment
+        if (marker !== undefined && (marker >= buff.length || hasNonWhitespaceFrom(buff, marker + 1)))
+          state.emptyListMarkerFragment = undefined
+      }
+    }
     if (captionBoundary >= 3 && tagId === TAG_LI) {
       restoreQuoteParentBoundary()
       captionBoundary = 0
@@ -2755,6 +3616,21 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         captionBreakRun++
       }
       else if (breakOutput) {
+        if (createStream && !hasPlugins && state.emptyListMarkerFragment !== undefined
+          && !state.outputPositions && !state.blockquotes.length && !openMarkerCount
+          && !gfmLifecycle.openCodeSpans.length && !state.codeFence && openLinkFragment === -1
+          && !inPre && !state.depthMap[TAG_CODE] && !cleanPass?.holdsOutput
+          && !hasNonWhitespace(breakOutput)) {
+          if (itemBreakRun && itemBreakRun.unit === breakOutput && buff[buff.length - 1] === breakOutput) {
+            itemBreakRun.count++
+            return
+          }
+          flushItemBreakRun()
+          itemBreakRun = { unit: breakOutput, count: 1 }
+        }
+        else {
+          flushItemBreakRun()
+        }
         // A raw `<br>` takes the separator other raw inline HTML gets, as in Rust.
         if (breakOutput.charCodeAt(0) === 60 && lastOutputChar(buff) === 124)
           buff.push(' ')
@@ -2810,6 +3686,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             buff.length--
             state.headingBreakPending = true
           }
+          noteListTailRewrite(state, openLinkHeadingBreak ? openLinkFragment - 1 : openLinkFragment)
           if (captionFrameCount !== 0) {
             captionBreakRun = openLinkCaptionBreakRun
             restoreCaptionBreakFlags(captionFrames, openLinkCaptionFlags, captionFrameCount)
@@ -3086,6 +3963,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         const restoresHeadingBreak = buff[marker >> 3]?.includes('\n')
         let idx = dropEmptyMarker(buff, marker, markerType, state.outputPositions)
         if (idx >= 0) {
+          noteListTailRewrite(state, idx)
           noteBufferRewrite(state)
           if (hoisted) {
             state.pendingInlineWhitespace = true
@@ -3514,10 +4392,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, keepsQuoteSeparator, rawHtmlQuoteBoundary)
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
-      if (eventType === NodeEventEnter)
-        recordItemMarker(state, element.index, handler?.literalEnter ? '' : lastChar)
-      else
+      if (eventType === NodeEventEnter) {
+        recordItemMarker(state, element, !handler?.literalEnter && !hasPluginOutput, handler?.literalEnter ? '' : lastChar)
+        if (!handler?.literalEnter && handlerOutput) {
+          state.emptyListMarkerFragment = state.buffer.length - 1
+          state.emptyListMarkerScanFrom = state.buffer.length
+          state.emptyListMarkerDepth = state.depthMap[TAG_LI]!
+        }
+      }
+      else {
         resolveItemMarker(state, true, -1, openLinkFragment !== -1)
+        state.lastItemMarkerFragment = undefined
+        state.lastItemMarkerOwner = undefined
+      }
     }
 
     if (eventType === NodeEventEnter
@@ -3622,6 +4509,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // Only ASCII whitespace ends the output, as in Rust: U+00A0 is content,
     // and a stream cannot take back a nbsp it already yielded.
     const result = trimAsciiWhitespaceEnd(trimOutputStart(state.buffer.join('')))
+    noteListTailRewrite(state, 0)
     state.buffer.length = 0
     return cleanPass ? cleanPass.finish(result).markdown : result
   }
@@ -3636,7 +4524,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : Math.min(
           openMarkerCount ? openMarkers[0]! >> 3 : Infinity,
           gfmLifecycle.openCodeSpans[0]?.fragment ?? Infinity,
-          state.emptyItemFragment ?? Infinity,
+          state.emptyItemFragment === undefined ? Infinity : state.emptyItemFragment - (state.emptyItemBreakIndent ? 1 : 0),
+          state.emptyListMarkerFragment ?? Infinity,
+          state.listTailStart ?? Infinity,
           state.codeFence?.fragment ?? Infinity,
           openLinkFragment === -1 ? Infinity : openLinkFragment < -1 ? -openLinkFragment - 2 : openLinkFragment - Number(openLinkHeadingBreak),
         )
@@ -3676,6 +4566,22 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         heldFragment = fragment
     }
     return heldFragment > state.buffer.length ? Infinity : heldFragment
+  }
+
+  let settledWhitespaceFragment = -1
+  let settledWhitespaceValue: string | undefined
+  function hasUnsettledListContent(from: number): boolean {
+    const buffer = state.buffer
+    // Strings are immutable. An unchanged last fragment needs no character
+    // scan; appends and replacements still go through the full content check.
+    if (from === settledWhitespaceFragment && buffer[from] === settledWhitespaceValue)
+      from++
+    const visible = hasNonWhitespaceFrom(buffer, from)
+    if (!visible && from < buffer.length) {
+      settledWhitespaceFragment = buffer.length - 1
+      settledWhitespaceValue = buffer[settledWhitespaceFragment]
+    }
+    return visible
   }
 
   const processor = {
@@ -3729,7 +4635,25 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const codeSpanFragment = gfmLifecycle.openCodeSpans[0]?.fragment
       if (codeSpanFragment !== undefined && (unresolvedCaptionFragment === -1 || codeSpanFragment < unresolvedCaptionFragment))
         unresolvedCaptionFragment = codeSpanFragment
+      if (unresolvedCaptionFragment === -1 && !state.codeFence) {
+        const marker = state.emptyListMarkerFragment
+        if (marker !== undefined) {
+          if (marker >= state.buffer.length || hasUnsettledListContent(Math.max(marker + 1, state.emptyListMarkerScanFrom ?? marker + 1)))
+            state.emptyListMarkerFragment = undefined
+          state.emptyListMarkerScanFrom = Math.max(marker + 1, state.buffer.length - 1)
+        }
+        const start = state.listTailStart
+        if (start !== undefined) {
+          if (start > state.buffer.length || hasUnsettledListContent(Math.max(start, state.listTailScanFrom ?? start)))
+            state.listTailStart = undefined
+          state.listTailScanFrom = Math.max(start, state.buffer.length - 1)
+        }
+      }
       resolveItemMarker(state, false, unresolvedCaptionFragment)
+      if (state.emptyListMarkerFragment === undefined && state.listTailStart === undefined) {
+        settledWhitespaceFragment = -1
+        settledWhitespaceValue = undefined
+      }
     },
     markYielded() { hasYieldedContent = true },
   }) }

@@ -42,6 +42,18 @@ fn get_language_from_data_attribute(value: Option<&str>) -> Option<&str> {
   Some(value)
 }
 
+/// What precedes a list marker on its line, as `ConvertState::marker_line`
+/// reads it.
+#[derive(Clone, Copy, PartialEq)]
+enum MarkerLine {
+  /// The marker is all its line holds, after this many spaces of indent.
+  Bare(usize),
+  /// The line holds more than the marker, or more indent than allowed.
+  Other,
+  /// A drain cut the line before its start: only the stream's past can tell.
+  Cut,
+}
+
 /// Buffer size at which a streaming flush starts quoting completed blockquote
 /// lines, so a long quote releases instead of growing with the document.
 const STREAMING_FLUSH_THRESHOLD: usize = 8 * 1024;
@@ -108,6 +120,28 @@ const DESTINATION_ESCAPE_BIT: u8 = 1;
 const TITLE_ESCAPE_BIT: u8 = 2;
 const IMAGE_DESCRIPTION_ESCAPE_BIT: u8 = 4;
 const DESTINATION_NEEDS_ANGLE_BIT: u8 = 8;
+
+/// Whether `after`, the bytes after a lone `*` on its line, open with a hard
+/// break: two spaces or more.
+fn hard_break_follows(after: &[u8]) -> bool {
+  after.iter().take_while(|&&byte| byte == b' ').count() >= 2
+}
+
+/// Whether the line ending at `end` holds paragraph text, reading no further
+/// back than `floor`.
+fn paragraph_line_ends_at(bytes: &[u8], floor: usize, end: usize) -> bool {
+  if end <= floor {
+    return false;
+  }
+  let start = bytes[floor..end]
+    .iter()
+    .rposition(|&byte| matches!(byte, b'\n' | b'\r'))
+    .map_or(floor, |at| floor + at + 1);
+  matches!(
+    LineRead::START.extend(&bytes[start..end]).end(),
+    LineKind::Text(_) | LineKind::Item { .. }
+  )
+}
 
 /// Whether `bytes` holds anything other than whitespace.
 #[inline]
@@ -843,6 +877,10 @@ impl ConvertState {
     let Some(frame) = self.blockquotes.pop() else {
       return;
     };
+    let took_list_tail = self.list_tail_quote_depth == self.blockquotes.len() + 1;
+    if took_list_tail {
+      self.list_tail_quote_depth = 0;
+    }
     let content_end = trim_ascii_whitespace_end(&self.buffer);
     // An empty range means "no content" only while none of it has left the
     // buffer. `has_streamed_output` is global, so reading it here drops the `>`
@@ -851,6 +889,11 @@ impl ConvertState {
     if content_end < frame.content_start
       || (content_end == frame.content_start && content_left_buffer)
     {
+      // Nothing is left to quote, so the parent's next content still needs the
+      // blank line that ends the nested list above it.
+      if took_list_tail {
+        self.list_pending |= LIST_TAIL_PENDING;
+      }
       return;
     }
     let content = &self.buffer[frame.content_start..content_end];
@@ -1024,6 +1067,7 @@ impl ConvertState {
       self
         .item_marker_line_held()
         .then_some(self.empty_item_line_start),
+      (self.list_tail_start != usize::MAX).then_some(self.list_tail_start),
     ]
     .into_iter()
     .flatten()
@@ -1515,8 +1559,8 @@ impl ConvertState {
       self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
       return;
     }
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+    if self.list_pending != 0 && !self.stack[stack_len - 1].excludes_text_nodes {
+      self.flush_list_pending(self.stack[stack_len - 1].tag_id);
     }
 
     let tag_id: Option<u8>;
@@ -1799,6 +1843,9 @@ impl ConvertState {
       );
     }
     self.settle_empty_text_pending(output_start, || false);
+    if matches!(tag_id, Some(TAG_UL | TAG_OL)) {
+      self.defer_list_tail();
+    }
   }
 
   #[inline(always)]
@@ -1831,8 +1878,8 @@ impl ConvertState {
       return;
     }
 
-    if self.list_rule_pending && !self.stack[stack_len - 1].excludes_text_nodes {
-      self.flush_list_rule();
+    if self.list_pending != 0 && !self.stack[stack_len - 1].excludes_text_nodes {
+      self.flush_list_pending(self.stack[stack_len - 1].tag_id);
     }
 
     // Arm the deferral when entering a <pre>; the fence (with this <pre>'s own
@@ -2284,6 +2331,15 @@ impl ConvertState {
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
       self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+      let bytes = self.buffer.as_bytes();
+      let mut end = bytes.len();
+      while end > 0 && bytes[end - 1] == b' ' {
+        end -= 1;
+      }
+      self.empty_list_marker_end = end;
+      self.empty_list_marker_scanned_to = bytes.len();
+      self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
+      self.item_settle_pending = true;
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -2717,7 +2773,21 @@ impl ConvertState {
 
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
-      self.list_rule_pending = false;
+      self.list_pending = 0;
+      if self.depth_map[TAG_LI as usize] == 1 {
+        self.empty_list_marker_end = usize::MAX;
+      }
+      if self.list_tail_start != usize::MAX {
+        let start = self.list_tail_start.min(self.buffer.len());
+        if self.buffer[start..]
+          .bytes()
+          .all(|byte| byte.is_ascii_whitespace())
+        {
+          self.truncate_buffer(start);
+          self.last_content_cache_len = 0;
+        }
+        self.list_tail_start = usize::MAX;
+      }
       if matches!(
         self.caption_boundary,
         CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
@@ -2948,7 +3018,15 @@ impl ConvertState {
       && !self.in_table_cell()
       && self.depth_map[TAG_LI as usize] > 0
     {
-      self.list_rule_pending = true;
+      self.list_pending |= LIST_RULE_PENDING;
+    }
+
+    // An empty exit override writes nothing, so the parent's text still needs
+    // the separator that ends the list.
+    if matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && (!has_override || output.as_deref().is_some_and(str::is_empty))
+    {
+      self.defer_list_tail();
     }
 
     let closes_quote =
@@ -3112,7 +3190,7 @@ impl ConvertState {
         // A hard break already ended the item. Its continuation indentation
         // must not become a whitespace-only line before the following block.
         if self.hard_break_end == self.buffer.len()
-          && !self.empty_item_hazard
+          && (!self.empty_item_hazard || self.break_follows_item_marker())
           && !has_override
           && self.depth_map[TAG_PRE as usize] == 0
           && !self.in_table_cell()
@@ -3166,7 +3244,7 @@ impl ConvertState {
     {
       self.caption_boundary = CaptionBoundary::QuoteParent;
       // An HR inside this quote cannot own the parent's deferred separator.
-      self.list_rule_pending = false;
+      self.list_pending &= !LIST_RULE_PENDING;
     }
     self.settle_empty_text_pending(output_start, || false);
     // Reset <pre> fence deferral once the element closes (issue #97).
@@ -3283,7 +3361,7 @@ impl ConvertState {
       && self.wrap_width == 0
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
-      && !self.list_rule_pending
+      && self.list_pending == 0
       && !self.heading_break_pending
       && !self.pending_inline_whitespace
       && !self.pending_raw_html_boundary
@@ -3434,6 +3512,16 @@ impl ConvertState {
           marker.decoded_blank = true;
         }
       }
+    }
+    if self.item_settle_pending
+      && (self.empty_list_marker_end != usize::MAX || self.list_tail_start != usize::MAX)
+      && has_visible(text.as_bytes())
+    {
+      self.empty_list_marker_end = usize::MAX;
+      self.list_tail_start = usize::MAX;
+      // Only the hazard can still need settling, so a filled item does not
+      // call `settle_item_marker` again at its next token.
+      self.item_settle_pending = self.empty_item_hazard;
     }
     self.last_text_node_contains_whitespace = contains_whitespace;
     self.has_last_text_node = true;
@@ -3621,11 +3709,11 @@ impl ConvertState {
       return;
     }
 
-    if self.list_rule_pending {
+    if self.list_pending != 0 {
       if text.as_bytes().iter().all(|&byte| is_whitespace(byte)) {
         return;
       }
-      self.flush_list_rule();
+      self.flush_list_pending(None);
     }
 
     let mut wrap_separator = false;
@@ -4274,7 +4362,19 @@ impl ConvertState {
 
   /// Whether `end` sits just past a list marker that is all its line holds: up
   /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
+  /// `bytes` is the buffer: a line a drain cut is answered from the record of
+  /// the latest bare marker, as one-shot reads it.
   fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
+    match self.marker_line(bytes, end, max_spaces) {
+      MarkerLine::Bare(_) => true,
+      MarkerLine::Other => false,
+      MarkerLine::Cut => end == self.bare_marker_end && self.bare_marker_indent <= max_spaces,
+    }
+  }
+
+  /// The line `list_marker_line_start` reads, told apart from one whose start
+  /// a drain already took.
+  fn marker_line(&self, bytes: &[u8], end: usize, max_spaces: usize) -> MarkerLine {
     let mut index = end - 1;
     match bytes[index] {
       b'.' | b')' => {
@@ -4282,14 +4382,24 @@ impl ConvertState {
         while index > 0 && bytes[index - 1].is_ascii_digit() {
           index -= 1;
         }
+        if index == 0 && self.has_flushed_tail() && self.flushed_tail[1].is_ascii_digit() {
+          return MarkerLine::Cut;
+        }
         if index == digits || digits - index > 9 {
-          return false;
+          return MarkerLine::Other;
         }
       }
       b'-' | b'*' | b'+' => {}
-      _ => return false,
+      _ => return MarkerLine::Other,
     }
     let mut spaces = 0;
+    while index >= 8
+      && max_spaces.saturating_sub(spaces) >= 8
+      && bytes[index - 8..index] == [b' '; 8]
+    {
+      index -= 8;
+      spaces += 8;
+    }
     while index > 0 && bytes[index - 1] == b' ' {
       // The space after a decoded `\r` separates the marker from the line end
       // before it; it is not indentation, so it never counts against the cap.
@@ -4303,9 +4413,376 @@ impl ConvertState {
       index -= 1;
     }
     if index == 0 {
-      return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
+      return if !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r') {
+        MarkerLine::Bare(spaces)
+      } else if self.drained_line_spaces != usize::MAX {
+        // Only indent left with the drain: count it as the whole line would.
+        let spaces = spaces + self.drained_line_spaces;
+        if spaces <= max_spaces {
+          MarkerLine::Bare(spaces)
+        } else {
+          MarkerLine::Other
+        }
+      } else {
+        MarkerLine::Cut
+      };
     }
-    matches!(bytes[index - 1], b'\n' | b'\r')
+    if matches!(bytes[index - 1], b'\n' | b'\r') {
+      MarkerLine::Bare(spaces)
+    } else {
+      MarkerLine::Other
+    }
+  }
+
+  /// The indent of the bare marker line that `end` closes once the spaces and
+  /// line feeds before it are skipped, read before a drain takes those bytes,
+  /// whether a line feed was among them, and whether the marker is a lone `*`
+  /// or `+` that reads as text.
+  pub(super) fn bare_marker_line_before(&self, end: usize) -> Option<(usize, bool, Option<usize>)> {
+    let bytes = self.buffer.as_bytes();
+    let mut start = end;
+    while start > 0 && matches!(bytes[start - 1], b' ' | b'\n') {
+      start -= 1;
+    }
+    if start == 0 {
+      return None;
+    }
+    match self.marker_line(bytes, start, usize::MAX) {
+      MarkerLine::Bare(indent) => Some((
+        indent,
+        bytes[start..end].contains(&b'\n'),
+        if matches!(bytes[start - 1], b'*' | b'+') {
+          self.lone_closer_paragraph(
+            bytes,
+            start - 1,
+            indent,
+            hard_break_follows(&bytes[start..end]),
+          )
+        } else {
+          None
+        },
+      )),
+      MarkerLine::Other | MarkerLine::Cut => None,
+    }
+  }
+
+  /// Remember whether the marker just written from `output_start` is all its
+  /// line holds. A later block or first item reads back for it, and a stream
+  /// may have drained that line's start by then.
+  fn note_bare_marker(&mut self, output_start: usize) {
+    let bytes = self.buffer.as_bytes();
+    let mut end = bytes.len();
+    while end > output_start && bytes[end - 1] == b' ' {
+      end -= 1;
+    }
+    self.bare_marker_end = usize::MAX;
+    self.bare_marker_gap_newline = false;
+    if end > output_start
+      && let MarkerLine::Bare(indent) = self.marker_line(bytes, end, usize::MAX)
+    {
+      self.bare_marker_end = end;
+      self.bare_marker_indent = indent;
+      self.bare_marker_text = None;
+    }
+  }
+
+  /// How a lone `*` or `+` at `closer`, after `indent` spaces, reads: `None`
+  /// when it reads as a list marker, or, when it reads as text continuing the
+  /// paragraph above, such as an emphasis closer, where that paragraph's first
+  /// line starts its content: no column of the item the paragraph goes on in
+  /// is past that one. Right after a `\r` it starts a line of its own. Past a
+  /// line feed it reads as a marker when no paragraph goes on above it, or
+  /// when it sits short of that paragraph's column: the column of the item
+  /// content the paragraph starts with, or zero outside an item. A paragraph
+  /// whose first line comes right under a marker alone and reaches the content
+  /// column of the item that marker opens starts in that item. Such a line falls
+  /// out of the paragraph's container and opens a list of its own. Columns
+  /// count inside the quote that holds the `*`. `hard_break` says a hard break
+  /// follows the `*` on its line.
+  fn lone_closer_paragraph(
+    &self,
+    bytes: &[u8],
+    closer: usize,
+    indent: usize,
+    hard_break: bool,
+  ) -> Option<usize> {
+    let mut start = closer;
+    while start > 0 && bytes[start - 1] == b' ' {
+      start -= 1;
+    }
+    let after_cr = if start > 0 {
+      bytes[start - 1] == b'\r'
+    } else {
+      self.has_flushed_tail() && self.flushed_tail[1] == b'\r'
+    };
+    if after_cr {
+      return None;
+    }
+    // The innermost quote holding the `*`: a stream can drain its line from
+    // inside a quote opened later.
+    let quote = self
+      .blockquotes
+      .iter()
+      .rev()
+      .find(|frame| frame.content_start <= start)
+      .map(|frame| (frame.content_start, frame.list_indent.len()));
+    let (quote_start, quote_indent) = quote.unwrap_or((0, 0));
+    if quote.is_some() && start <= quote_start || start == 0 && !self.has_flushed_tail() {
+      return Some(0);
+    }
+    // A quoted line keeps the indent the quote opened under ahead of its own.
+    let relative = |column: usize, indent: usize| {
+      if indent >= quote_indent {
+        column - quote_indent
+      } else {
+        column
+      }
+    };
+    // Walk up the paragraph above to the line it starts with.
+    let mut line_end = start;
+    let mut below = None;
+    // The indent of the paragraph's first line read so far, that indent
+    // again unless a line of spaces came right above it, and the least indent
+    // of its lines.
+    let mut top = 0;
+    let mut first = None;
+    let mut shallow = usize::MAX;
+    // Under a marker alone whose item's content starts at `column`: the
+    // paragraph sits in that item when its first line comes right under the
+    // marker and reaches that column. Otherwise the item ended empty: lines
+    // all indented to `code` past it are code, which no `*` continues, and a
+    // first line four columns short of `code` reaches the marker's own list,
+    // so the paragraph goes on in the item that holds that list.
+    let under_marker =
+      |below: Option<usize>, top: usize, first: Option<usize>, shallow, column, code| {
+        below.and_then(|text| {
+          if first.is_some_and(|first| first >= column) {
+            Some(column)
+          } else if shallow >= code {
+            None
+          } else if top + 4 >= code {
+            Some(code - 4)
+          } else {
+            Some(text)
+          }
+        })
+      };
+    // The line under the next line of spaces: its indent, and whether it is
+    // a line of spaces too. A run of hard breaks writes its lowest line as
+    // that indent and two spaces more, and each line above it as long as the
+    // one under it or two spaces longer.
+    let mut under = (indent, false);
+    let break_run =
+      |spaces: usize, under: (usize, bool)| spaces == under.0 + 2 || under.1 && spaces == under.0;
+    // A marker alone right under paragraph text cannot interrupt it: an
+    // empty item never does. The line goes on with the paragraph when it
+    // reaches the paragraph's column, and opens a list of its own otherwise;
+    // its indent and its answer as a marker wait for that column.
+    let mut pending: Option<(usize, Option<usize>, usize)> = None;
+    // Each answer comes with where the paragraph's first line starts its
+    // content.
+    let (column, first_content) = loop {
+      if quote.is_some() && line_end <= quote_start {
+        break (below, top);
+      }
+      // The `\n` of a `\r\n` split across cuts ends a line a drain took.
+      let split_crlf = line_end == 1
+        && bytes[0] == b'\n'
+        && self.has_flushed_tail()
+        && self.flushed_tail[1] == b'\r';
+      if line_end == 0 || split_crlf {
+        // Drains took the lines above whole: the paragraph they left answers.
+        break match self.drained_paragraph {
+          Paragraph::Spaced { spaces, chain, .. }
+            if hard_break && below.is_none() && !(chain && break_run(spaces, under)) =>
+          {
+            (None, top)
+          }
+          Paragraph::Open { column, first } | Paragraph::Spaced { column, first, .. } => {
+            (Some(column), first)
+          }
+          Paragraph::Bare { column, code } => {
+            (under_marker(below, top, first, shallow, column, code), top)
+          }
+          // The paragraph starts at the first text line the drain took.
+          Paragraph::Code { code, top: drained } => (
+            under_marker(
+              below,
+              drained.unwrap_or(top),
+              None,
+              shallow,
+              usize::MAX,
+              code,
+            ),
+            drained.unwrap_or(top),
+          ),
+          Paragraph::Closed => (below, top),
+        };
+      }
+      // `\r\n` is a single line ending.
+      let mut end = line_end - 1;
+      if bytes[end] == b'\n' && end > 0 && bytes[end - 1] == b'\r' {
+        end -= 1;
+      }
+      let line_start = bytes[..end]
+        .iter()
+        .rposition(|&byte| matches!(byte, b'\n' | b'\r'))
+        .map_or(0, |at| at + 1);
+      // A lone `\r` starts a line the quote's prefix skips. Unless that line
+      // goes on with a paragraph of the quote, the quote ends there and the
+      // `*` sits in one that opens below it.
+      if quote.is_some()
+        && line_start > quote_start
+        && bytes[line_start - 1] == b'\r'
+        && !paragraph_line_ends_at(bytes, quote_start, line_start - 1)
+      {
+        break (below, top);
+      }
+      // The quote's first line counts from where its content starts.
+      let first_quoted = quote.is_some() && line_start < quote_start;
+      let begin = if first_quoted {
+        quote_start
+      } else {
+        line_start
+      };
+      // A drain may have taken the start of the buffer's first line.
+      let read = if begin == 0 {
+        self.cut_line
+      } else {
+        LineRead::START
+      };
+      match read.extend(&bytes[begin..end]).end() {
+        LineKind::Blank => break (below, top),
+        // A stream keeps the lines of spaces a run of hard breaks writes out
+        // of its buffer.
+        LineKind::Marker {
+          indent,
+          column,
+          code,
+        } => {
+          let marker_first = first.filter(|_| !self.writes_break_lines(line_start, end));
+          let answer = under_marker(
+            below,
+            top,
+            marker_first.map(|first| relative(first, first)),
+            shallow,
+            relative(column, indent),
+            relative(code, indent),
+          );
+          if pending.is_some()
+            || first_quoted
+            || !self.paragraph_text_above(bytes, line_start, quote.map(|(start, _)| start))
+          {
+            break (answer, top);
+          }
+          pending = Some((relative(indent, indent), answer, top));
+          below = Some(0);
+          first = Some(indent);
+          top = relative(indent, indent);
+          shallow = shallow.min(top);
+          line_end = line_start;
+        }
+        LineKind::Spaces(_) if first_quoted => break (below, top),
+        // A line of spaces that a run of hard breaks did not write, such as
+        // the indent of a hard break that a line feed of the text ends, is
+        // blank. With a hard break after the `*`, it ends the paragraph.
+        LineKind::Spaces(spaces) if hard_break && below.is_none() && !break_run(spaces, under) => {
+          break (below, top);
+        }
+        LineKind::Spaces(spaces) => {
+          under = (spaces, true);
+          first = None;
+          line_end = line_start;
+        }
+        // A non-1 ordinal with content can still continue the paragraph
+        // above, so defer its item column just like an empty marker.
+        LineKind::Item {
+          indent,
+          column,
+          interrupts,
+        } => {
+          let column = relative(column, indent);
+          if interrupts
+            || pending.is_some()
+            || first_quoted
+            || !self.paragraph_text_above(bytes, line_start, quote.map(|(start, _)| start))
+          {
+            break (Some(column), column);
+          }
+          pending = Some((relative(indent, indent), Some(column), column));
+          below = Some(0);
+          first = Some(indent);
+          top = relative(indent, indent);
+          shallow = shallow.min(top);
+          line_end = line_start;
+        }
+        LineKind::Text(indent) => {
+          below = Some(0);
+          first = Some(indent);
+          top = relative(indent, indent);
+          shallow = shallow.min(top);
+          if first_quoted {
+            break (below, top);
+          }
+          line_end = line_start;
+        }
+      }
+    };
+    let (column, first_content) = match pending {
+      Some((marker, answer, top)) if column.is_none_or(|column| marker < column) => (answer, top),
+      _ => (column, first_content),
+    };
+    column
+      .filter(|&column| relative(indent, indent) >= column)
+      .map(|_| first_content)
+  }
+
+  /// Whether the line above the one starting at `line_start` holds paragraph
+  /// text, read no further back than the start of the quote's content. Past
+  /// the buffer start the paragraph the drained lines left answers.
+  fn paragraph_text_above(
+    &self,
+    bytes: &[u8],
+    line_start: usize,
+    quote_start: Option<usize>,
+  ) -> bool {
+    if quote_start.is_some_and(|start| line_start <= start) {
+      return false;
+    }
+    if line_start == 0 {
+      return self.has_flushed_tail() && matches!(self.drained_paragraph, Paragraph::Open { .. });
+    }
+    let mut end = line_start - 1;
+    if bytes[end] == b'\n' && end > 0 && bytes[end - 1] == b'\r' {
+      end -= 1;
+    }
+    let start = bytes[..end]
+      .iter()
+      .rposition(|&byte| matches!(byte, b'\n' | b'\r'))
+      .map_or(0, |at| at + 1)
+      .max(quote_start.unwrap_or(0));
+    let read = if start == 0 {
+      self.cut_line
+    } else {
+      LineRead::START
+    };
+    matches!(
+      read.extend(&bytes[start..end]).end(),
+      LineKind::Text(_) | LineKind::Item { .. }
+    )
+  }
+
+  /// Whether a run of hard breaks starting in `start..end` writes lines of
+  /// spaces only into the output, as a stream writes the copies of one.
+  fn writes_break_lines(&self, start: usize, end: usize) -> bool {
+    self
+      .streaming_break_runs
+      .iter()
+      .any(|run| run.count > 1 && (start..=end).contains(&run.output_start))
+      || self
+        .released_break_lines
+        .iter()
+        .any(|run| (start..=end).contains(run))
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -4313,18 +4790,45 @@ impl ConvertState {
   /// marker into a setext underline: the text becomes a heading and the item
   /// disappears. A blank line, or a sibling marker, opens its own block instead.
   fn record_item_marker(&mut self, index: usize, output_start: usize) {
+    // A descendant marker settles a bare ancestor before replacing its guard.
+    let mut output_start = output_start;
+    if self.empty_item_hazard {
+      let before = self.buffer.len();
+      self.resolve_item_marker(true);
+      output_start += self.buffer.len() - before;
+    }
+    let parent_marker_end = self.last_item_marker_end;
+    self.last_item_marker_end = usize::MAX;
+    let output_start = output_start.min(self.buffer.len());
     // Only a list's first item can follow a paragraph, so every later sibling
     // skips the line scan below.
     if index != 0 {
       self.empty_item_hazard = false;
+      self.note_bare_marker(output_start);
       return;
     }
-    let output_start = output_start.min(self.buffer.len());
     let bytes = self.buffer.as_bytes();
-    let line_start = bytes[output_start..]
+    let mut line_start = bytes[output_start..]
       .iter()
       .rposition(|&byte| byte == b'\n')
       .map_or(output_start, |i| output_start + i + 1);
+    let output_line_start = line_start;
+    // A hard break may already have written the continuation indentation.
+    // Include that indent when locating the marker line, so the guard sees
+    // the preceding newline rather than mistaking spaces for a blank line.
+    while line_start > 0 && bytes[line_start - 1] == b' ' {
+      line_start -= 1;
+    }
+    // That indent can add to the marker's own, the parent item's content
+    // column. Four columns or more past it, the marker's line only continues
+    // the text above and cannot underline it, and a blank line would turn it
+    // into an indented code block.
+    let past_content_column = line_start < output_line_start
+      && bytes[line_start..]
+        .iter()
+        .take_while(|&&byte| byte == b' ')
+        .count()
+        > self.list_indent.len() + 3;
     // Draining removes the front of the buffer, so read through it the way
     // `write_output` does: `flushed_tail` holds the two bytes before `buffer[0]`.
     let before = |offset: usize| -> u8 {
@@ -4342,11 +4846,154 @@ impl ConvertState {
       b'\r' => matches!(before(2), b'\n' | b'\r'),
       _ => true,
     };
-    self.empty_item_hazard = !starts_document && !blank_above;
+    // Cache only a built-in marker actually written on its own line. Literal
+    // overrides, raw HTML and a cap rejecting output cannot create a shortcut.
+    let mut marker_end = bytes.len();
+    while marker_end > 0 && bytes[marker_end - 1] == b' ' {
+      marker_end -= 1;
+    }
+    if (starts_document || before(1) == b'\n')
+      && self.buffer.len() > output_start
+      && bytes
+        .get(marker_end.wrapping_sub(1))
+        .is_some_and(|byte| matches!(byte, b'-' | b'.' | b')'))
+    {
+      self.last_item_marker_end = marker_end;
+    }
+    // A parent's bare marker is no paragraph, and a blank line under it would
+    // end that item and turn this one into its sibling. A marker outside the
+    // innermost blockquote keeps the blank line it already had, which the
+    // quote's prefix makes harmless.
+    let above_end = line_start.saturating_sub(1);
+    // Four columns or more past the column of the paragraph a lone `*` above
+    // goes on with, this marker's line goes on with that paragraph too: it
+    // can neither underline it nor open an item, and a blank line would only
+    // turn it into an indented code block.
+    let marker_spaces = bytes[line_start..]
+      .iter()
+      .take_while(|&&byte| byte == b' ')
+      .count();
+    let quote_indent = self
+      .blockquotes
+      .iter()
+      .rev()
+      .find(|frame| frame.content_start <= line_start)
+      .map_or(0, |frame| frame.list_indent.len());
+    let marker_column = if marker_spaces >= quote_indent {
+      marker_spaces - quote_indent
+    } else {
+      marker_spaces
+    };
+    let mut past_paragraph = false;
+    let mut text_above = |column: Option<usize>| {
+      past_paragraph = column.is_some_and(|column| marker_column >= column + 4);
+      column.is_none()
+    };
+    let follows_marker = if starts_document || blank_above {
+      false
+    } else if above_end > 0
+      && above_end == parent_marker_end
+      // A closed deeper item's marker indented past this list's reach is no
+      // parent marker: leave it to the scan below, as JS does.
+      && (self.bare_marker_end != above_end
+        || self.bare_marker_indent <= self.list_indent.len() + 3)
+    {
+      self
+        .blockquotes
+        .last()
+        .is_none_or(|frame| above_end > frame.content_start)
+    } else {
+      #[cfg(test)]
+      {
+        self.parent_marker_scans += 1;
+      }
+      // A line of spaces only is blank, as in JS: a hard break's continuation
+      // indent left one between the parent's marker and this one. A marker
+      // right after a `\r` reads only its own line, which JS stops at too.
+      // `\r\n` is one line ending, so a parent holding only that `\r` keeps a
+      // bare marker on the line above, read alone as well: past a blank line
+      // the `\r` let the drain take the marker, and the stream would disagree.
+      let mut above_end = above_end;
+      let line_above_only = line_ending == b'\n' && above_end > 0 && bytes[above_end - 1] == b'\r';
+      if line_above_only {
+        above_end -= 1;
+      }
+      let across_lines = line_ending == b'\n' && !line_above_only;
+      while above_end > 0
+        && (bytes[above_end - 1] == b' ' || across_lines && bytes[above_end - 1] == b'\n')
+      {
+        above_end -= 1;
+      }
+      let max_spaces = self.list_indent.len() + 3;
+      // Past the buffer start the drain took the marker with only whitespace
+      // after it, so its record answers as one-shot reads the line. A lone `*`
+      // or `+` can be text continuing the line above, such as an emphasis
+      // closer, which the marker line would underline.
+      let bare = if above_end > 0 {
+        let lone_closer = matches!(bytes[above_end - 1], b'*' | b'+');
+        match self.marker_line(bytes, above_end, max_spaces) {
+          // After a lone `\r` this marker sits past a space only the blank
+          // line takes away, which leaves it short of the lines indented under
+          // it.
+          MarkerLine::Bare(indent) => {
+            !lone_closer
+              || line_ending != b'\r'
+                && text_above(self.lone_closer_paragraph(
+                  bytes,
+                  above_end - 1,
+                  indent,
+                  hard_break_follows(&bytes[above_end..]),
+                ))
+          }
+          MarkerLine::Other => false,
+          MarkerLine::Cut => {
+            above_end == self.bare_marker_end
+              && self.bare_marker_indent <= max_spaces
+              && text_above(self.bare_marker_text)
+          }
+        }
+      } else {
+        self.has_flushed_tail()
+          && self.bare_marker_end == 0
+          && self.bare_marker_indent <= max_spaces
+          && (across_lines || !self.bare_marker_gap_newline)
+          && text_above(self.bare_marker_text)
+      };
+      // A line above the innermost blockquote's content says nothing here,
+      // as in JS, which reads no further back.
+      let inside = self
+        .blockquotes
+        .last()
+        .is_none_or(|frame| above_end > frame.content_start);
+      past_paragraph &= inside;
+      bare && inside
+    };
+    self.empty_item_hazard = !starts_document
+      && !blank_above
+      && !follows_marker
+      && !past_content_column
+      && !past_paragraph;
     self.empty_item_answered = false;
     self.empty_item_after_cr = line_ending == b'\r';
     self.empty_item_line_start = line_start;
     self.empty_item_len = self.buffer.len();
+    self.note_bare_marker(output_start);
+  }
+
+  /// Scan only bytes appended since the last settlement or buffer rewrite.
+  fn list_tail_has_visible(&mut self, start: usize, scanned_to: usize) -> bool {
+    if start > self.buffer.len() {
+      return true;
+    }
+    let bytes = &self.buffer.as_bytes()[start.max(scanned_to)..];
+    #[cfg(test)]
+    {
+      self.list_settlement_bytes_read += bytes
+        .iter()
+        .position(|&byte| !is_whitespace(byte))
+        .map_or(bytes.len(), |index| index + 1);
+    }
+    has_visible(bytes)
   }
 
   /// Answer the guard between tokens, where the buffer reads the same whatever
@@ -4355,8 +5002,37 @@ impl ConvertState {
   /// the same, and waiting for it pins the marker's line and everything the
   /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
   /// blank line also survives a nested list whose first `<li>` dropped it.
+  /// Kept out of line so the token loop stays small when nothing is pending.
+  #[inline(never)]
   pub(crate) fn settle_item_marker(&mut self) {
-    if self.buffer.len() > self.empty_item_len
+    let len = self.buffer.len();
+    let marker = self.empty_list_marker_end;
+    let tail = self.list_tail_start;
+    if ((marker != usize::MAX && (marker > len || self.empty_list_marker_scanned_to != len))
+      || (tail != usize::MAX && (tail > len || self.list_tail_scanned_to != len)))
+      && self.open_markers.is_empty()
+      && self.code_spans.is_empty()
+      && self.open_link_hold_floor().is_none()
+      && self.first_tentative_caption_start().is_none()
+    {
+      if self.empty_list_marker_end != usize::MAX {
+        if self.list_tail_has_visible(
+          self.empty_list_marker_end,
+          self.empty_list_marker_scanned_to,
+        ) {
+          self.empty_list_marker_end = usize::MAX;
+        }
+        self.empty_list_marker_scanned_to = self.buffer.len();
+      }
+      if self.list_tail_start != usize::MAX {
+        if self.list_tail_has_visible(self.list_tail_start, self.list_tail_scanned_to) {
+          self.list_tail_start = usize::MAX;
+        }
+        self.list_tail_scanned_to = self.buffer.len();
+      }
+    }
+    if self.empty_item_hazard
+      && self.buffer.len() > self.empty_item_len
       && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
@@ -4374,6 +5050,19 @@ impl ConvertState {
       // to preserve continuation indentation after a hard break.
       self.resolve_item_marker(self.depth_map[TAG_A as usize] == 0);
     }
+    self.item_settle_pending = self.empty_item_hazard
+      || self.empty_list_marker_end != usize::MAX
+      || self.list_tail_start != usize::MAX;
+  }
+
+  /// Whether the output ends in a line break written after the open item's
+  /// marker and then spaces only. Those spaces are the break's continuation
+  /// indent, never the marker's own space that the empty-item guard keeps.
+  #[cold]
+  fn break_follows_item_marker(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let start = bytes.len() - trailing_spaces(bytes);
+    start > self.empty_item_len && bytes[start - 1] == b'\n'
   }
 
   /// The marker's line may still get a newline inserted, so it must stay put.
@@ -4439,6 +5128,7 @@ impl ConvertState {
       return;
     }
     self.empty_item_hazard = false;
+    let list_marker_end = self.empty_list_marker_end;
     // A link's `](url)` will share the marker's line, so nothing reads as an
     // underline there, and a blank line would split the link across two blocks.
     if tail.is_empty() && self.empty_item_after_cr && self.link.open && self.link.bracket_emitted {
@@ -4461,8 +5151,14 @@ impl ConvertState {
     } else {
       "\n"
     };
+    let bare_marker_end = self.bare_marker_end;
     if !self.replace_code_span_content(at..at + replaced, separator) {
       return;
+    }
+    // The lines from `at` on keep their bytes, so a bare marker there stays
+    // bare, and a drain may still need its record. The shift below moves it.
+    if bare_marker_end != usize::MAX && bare_marker_end > at + replaced {
+      self.bare_marker_end = bare_marker_end;
     }
     // The insertion moves cached offsets at or past the line: an inline marker
     // still open across it measures emptiness from `content_start`, so left
@@ -4476,6 +5172,7 @@ impl ConvertState {
     // `link_bracket_pos` needs no shift either — a pending `[` is the tail this
     // function has already returned on.
 
+    self.empty_list_marker_end = list_marker_end;
     let inserted = separator.len() - replaced;
     for _ in 0..inserted {
       self.shift_offsets_at_or_after(at);
@@ -4627,6 +5324,25 @@ impl ConvertState {
 
   /// Move every cached offset at or past `at` one byte right, for a newline inserted at `at`.
   fn shift_offsets_at_or_after(&mut self, at: usize) {
+    if self.list_tail_scanned_to >= at {
+      self.list_tail_scanned_to += 1;
+    }
+    if self.empty_list_marker_scanned_to >= at {
+      self.empty_list_marker_scanned_to += 1;
+    }
+    if self.empty_list_marker_end != usize::MAX && self.empty_list_marker_end >= at {
+      self.empty_list_marker_end += 1;
+    }
+    if self.list_tail_start != usize::MAX && self.list_tail_start >= at {
+      self.list_tail_start += 1;
+    }
+    if self.last_item_marker_end != usize::MAX && self.last_item_marker_end >= at {
+      self.last_item_marker_end += 1;
+    }
+    // A newline written at a bare marker's end leaves the marker where it is.
+    if self.bare_marker_end != usize::MAX && self.bare_marker_end > at {
+      self.bare_marker_end += 1;
+    }
     for marker in &mut self.open_markers {
       if marker.output_start >= at {
         marker.output_start += 1;
@@ -4644,6 +5360,11 @@ impl ConvertState {
       }
       if run.output_end >= at {
         run.output_end += 1;
+      }
+    }
+    for run in &mut self.released_break_lines {
+      if *run >= at {
+        *run += 1;
       }
     }
     for frame in &mut self.caption_frames {
@@ -4760,7 +5481,7 @@ impl ConvertState {
         // A list marker is block prefix too: its content column opens a fresh
         // block context, so `- # h` escapes exactly like `# h` would.
         return self
-          .list_marker_line_start(bytes, offset + 1, 3)
+          .list_marker_line_start(bytes, offset + 1, structural_indent + 3)
           .then_some(0);
       }
       spaces += 1;
@@ -5732,6 +6453,142 @@ impl ConvertState {
     p
   }
 
+  /// Called on a `</ul>` or `</ol>` exit.
+  fn defer_list_tail(&mut self) {
+    if !plain_text!(self)
+      && self.depth_map[TAG_LI as usize] > 0
+      && !self.in_table_cell()
+      && self.empty_list_marker_depth > self.depth_map[TAG_LI as usize] as usize
+    {
+      // Any item of this list, filled or empty, ends before the parent's text.
+      // An inline wrapper such as `<a>` or `<em>` wrote its items inline, so no
+      // item line is left open for that text to continue.
+      if self.collapse_non_span_depth == 0 {
+        self.list_pending |= LIST_TAIL_PENDING;
+      }
+      self.empty_list_marker_depth = self.depth_map[TAG_LI as usize] as usize;
+      if self.empty_list_marker_end != usize::MAX {
+        let end = self.empty_list_marker_end.min(self.buffer.len());
+        if !self.buffer[end..]
+          .bytes()
+          .all(|byte| byte.is_ascii_whitespace())
+        {
+          self.empty_list_marker_end = usize::MAX;
+        }
+      }
+    }
+  }
+
+  /// Whether only indentation follows a prose hard break, read from the bytes
+  /// as JS reads its buffer: an empty block dropped after the break moves no
+  /// line, though its rewrite forgets `hard_break_end`.
+  fn ends_at_hard_break(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let end = bytes.len() - trailing_spaces(bytes);
+    let byte = |back: usize| match end.checked_sub(back) {
+      Some(at) => Some(bytes[at]),
+      None if self.has_flushed_tail() && back - end <= 2 => {
+        Some(self.flushed_tail[2 - (back - end)])
+      }
+      None => None,
+    };
+    byte(1) == Some(b'\n') && byte(2) == Some(b' ') && byte(3) == Some(b' ')
+  }
+
+  /// Whether the output ends in a line holding spaces only, read through a
+  /// drain via `flushed_tail` like `trailing_new_lines`.
+  fn ends_in_indent_line(&self) -> bool {
+    let bytes = self.buffer.as_bytes();
+    let start = bytes.len() - trailing_spaces(bytes);
+    if start == bytes.len() {
+      return false;
+    }
+    if start > 0 {
+      bytes[start - 1] == b'\n'
+    } else {
+      self.has_flushed_tail() && self.flushed_tail[1] == b'\n'
+    }
+  }
+
+  fn flush_list_tail(&mut self, preserve_marker_space: bool) {
+    let prefix = self.continuation_prefix();
+    self.flush_list_tail_with_prefix(&prefix, preserve_marker_space);
+  }
+
+  fn flush_list_tail_with_prefix(&mut self, prefix: &str, preserve_marker_space: bool) {
+    if !preserve_marker_space {
+      self.trim_trailing_spaces();
+    }
+    self.list_tail_start = self.buffer.len();
+    self.list_tail_scanned_to = self.list_tail_start;
+    self.item_settle_pending = true;
+    // A hard break has already ended the line; write only the newlines the
+    // blank line still lacks.
+    let new_lines = &"\n\n"[usize::from(self.trailing_new_lines())..];
+    let separator = format!("{new_lines}{prefix}");
+    self.last_content_cache_len = self.push_code_span_content(&separator, true);
+    self.list_pending &= !LIST_TAIL_PENDING;
+  }
+
+  /// Write the separators `list_pending` deferred, now that visible content
+  /// follows: a nested list's tail first, then an item rule's. A blockquote
+  /// opening its own block takes the tail instead, and an empty one hands it
+  /// back at its exit.
+  #[cold]
+  #[inline(never)]
+  fn flush_list_pending(&mut self, tag_id: Option<u8>) {
+    if self.list_pending & LIST_TAIL_PENDING != 0 {
+      if matches!(tag_id, Some(TAG_UL | TAG_OL)) {
+        // Empty lists cannot settle the parent paragraph boundary.
+      } else if matches!(tag_id, Some(TAG_BLOCKQUOTE)) {
+        // A literal quote pushes no frame to hand the tail back.
+        let overrides = self
+          .options
+          .plugins
+          .as_ref()
+          .and_then(|p| p.tag_overrides.as_ref());
+        let node = &self.stack[self.stack.len() - 1];
+        match Self::override_for_node(overrides, self.override_idx.as_deref(), node)
+          .and_then(|config| config.enter.as_deref())
+        {
+          Some("") => {
+            // A literal enter has no quote frame and must not add a `>` prefix.
+            let prefix = self.list_indent.clone();
+            self.flush_list_tail_with_prefix(&prefix, false);
+          }
+          enter => {
+            let built_in = enter.is_none();
+            self.list_pending &= !LIST_TAIL_PENDING;
+            self.empty_list_marker_end = usize::MAX;
+            if built_in {
+              self.list_tail_quote_depth = self.blockquotes.len() + 1;
+            }
+          }
+        }
+      } else if matches!(tag_id, Some(TAG_LI | TAG_H1..=TAG_H6 | TAG_HR)) {
+        // A closed nested item can leave its indent alone on the last line, as
+        // after a fence. A heading or rule reads it as its own prefix and lands
+        // in that item, so the parent's prefix replaces it after a blank line.
+        if matches!(tag_id, Some(TAG_H1..=TAG_H6 | TAG_HR)) && self.ends_in_indent_line() {
+          self.trim_trailing_spaces();
+          if self.trailing_new_lines() == 2 {
+            let prefix = self.continuation_prefix();
+            self.last_content_cache_len = self.push_code_span_content(&prefix, true);
+          }
+        }
+        self.list_pending &= !LIST_TAIL_PENDING;
+        self.empty_list_marker_end = usize::MAX;
+      } else {
+        self.flush_list_tail(
+          matches!(tag_id, Some(TAG_PRE | TAG_TABLE)) && self.empty_list_marker_end != usize::MAX,
+        );
+      }
+    }
+    if self.list_pending & LIST_RULE_PENDING != 0 {
+      self.flush_list_rule();
+    }
+  }
+
   fn flush_list_rule(&mut self) {
     let prefix = self.continuation_prefix();
     if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
@@ -5743,7 +6600,7 @@ impl ConvertState {
       let output = format!("\n\n{prefix}");
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
-    self.list_rule_pending = false;
+    self.list_pending &= !LIST_RULE_PENDING;
   }
 
   /// Only the word's own line counts: a decoded line ending or a trailing tab
@@ -7113,7 +7970,7 @@ impl ConvertState {
       && self.ordered_item_number(0) != 1
       && !self.in_table_cell()
       && !self.inside_open_inline_delimiter()
-      && (self.block_open_prefix("").is_some() || self.hard_break_end == self.buffer.len())
+      && (self.block_open_prefix("").is_some() || self.ends_at_hard_break())
     {
       return DEFAULT_BLOCK_SPACING;
     }
@@ -7450,10 +8307,24 @@ impl ConvertState {
 #[cfg(test)]
 mod tests {
   use super::{
-    BlockquoteFrame, ConvertState, CutLineLead, EMPHASIS_EXIT_TAG, TAG_A, TAG_CODE, TAG_H2, TAG_LI,
-    TAG_P, push_decimal,
+    BlockquoteFrame, ConvertState, CutLineLead, EMPHASIS_EXIT_TAG, LIST_TAIL_PENDING, LineKind,
+    Paragraph, TAG_A, TAG_CODE, TAG_H2, TAG_LI, TAG_P, push_decimal,
   };
   use crate::types::{HtmlToMarkdownOptions, OutputFormat};
+
+  #[test]
+  fn bare_parent_markers_skip_indent_recognition_at_depth() {
+    for depth in [50, 200] {
+      let mut state =
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      state.process_html(&"<ul><li>".repeat(depth));
+      assert!(
+        state.parent_marker_scans <= 1,
+        "depth={depth}: {} parent scans",
+        state.parent_marker_scans
+      );
+    }
+  }
 
   #[test]
   fn emphasis_exit_table_matches_inline_marker_types() {
@@ -7463,6 +8334,28 @@ mod tests {
         matches!(ConvertState::inline_marker_type(id as u8), Some(1..=4)),
         "tag id {id}"
       );
+    }
+  }
+
+  #[test]
+  fn list_marker_indent_cap_survives_word_skips() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    for indent in 0..=24 {
+      state.list_indent = " ".repeat(indent);
+      let max_spaces = indent + 3;
+      for spaces in 0..=60 {
+        for lead in ["", "\n", "x"] {
+          for marker in ["-", "3."] {
+            let line = format!("{lead}{}{marker}", " ".repeat(spaces));
+            let expected = (lead.is_empty() || lead == "\n") && spaces <= max_spaces;
+            assert_eq!(
+              state.list_marker_line_start(line.as_bytes(), line.len(), max_spaces),
+              expected,
+              "indent={indent} spaces={spaces} lead={lead:?} marker={marker}"
+            );
+          }
+        }
+      }
     }
   }
 
@@ -7584,6 +8477,79 @@ mod tests {
     assert_eq!(state.markdown_line_indent(), None);
   }
 
+  // A run of hard breaks leaves lines of spaces, each the indent of the line
+  // under it and two spaces more, that a stream can write after the lone `*`
+  // below them, so the rule reads past them. Any other line of spaces is blank:
+  // with a hard break after the `*` it ends the paragraph, in the buffer and in
+  // the paragraph a drain leaves open alike.
+  #[test]
+  fn lone_closer_after_a_hard_break_stops_at_the_spaces_above() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    // A line feed of the text ends the hard break's indent line.
+    let text = b"- y  \n  *x  \n  \n  *";
+    let closer = text.len() - 1;
+    assert!(
+      state
+        .lone_closer_paragraph(text, closer, 2, false)
+        .is_some()
+    );
+    assert!(state.lone_closer_paragraph(text, closer, 2, true).is_none());
+    // A run of hard breaks wrote the line: the `*`'s indent and two spaces.
+    let text = b"- y  \n  *x  \n    \n  *";
+    assert!(
+      state
+        .lone_closer_paragraph(text, closer + 2, 2, true)
+        .is_some()
+    );
+
+    state.has_streamed_output = true;
+    state.cut_line_lead = CutLineLead::Blank(0);
+    state.flushed_tail = *b" \n";
+    state.drained_paragraph = Paragraph::Spaced {
+      column: 2,
+      first: 2,
+      spaces: 2,
+      chain: true,
+    };
+    assert!(state.lone_closer_paragraph(b"  *", 2, 2, false).is_some());
+    assert!(state.lone_closer_paragraph(b"  *", 2, 2, true).is_none());
+    state.drained_paragraph = Paragraph::Spaced {
+      column: 2,
+      first: 2,
+      spaces: 4,
+      chain: true,
+    };
+    assert!(state.lone_closer_paragraph(b"  *", 2, 2, true).is_some());
+  }
+
+  // A marker alone right under paragraph text cannot interrupt it. Reaching
+  // the paragraph's column it goes on with the paragraph, so a `*` under it
+  // reads as text; short of that column it opens a list of its own.
+  #[test]
+  fn lone_closer_under_a_marker_line_in_a_paragraph() {
+    let state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    let text = b"y\n*\n*";
+    assert!(
+      state
+        .lone_closer_paragraph(text, text.len() - 1, 0, false)
+        .is_some()
+    );
+    let text = b"- y\n*\n*";
+    assert!(
+      state
+        .lone_closer_paragraph(text, text.len() - 1, 0, false)
+        .is_none()
+    );
+    let marker = LineKind::Marker {
+      indent: 0,
+      column: 2,
+      code: 4,
+    };
+    let open = |column| Paragraph::Open { column, first: 0 };
+    assert_eq!(open(0).then(marker), open(0));
+    assert_eq!(open(2).then(marker), Paragraph::Bare { column: 2, code: 4 });
+  }
+
   /// An open list item whose buffer a drain emptied: the item's content line
   /// was cut away, a trim removed the retained tail, and `y` is the byte the
   /// output last followed, reachable only through `flushed_tail`.
@@ -7657,6 +8623,143 @@ mod tests {
     state.emit_enter_element();
 
     assert_eq!(state.buffer, " `");
+  }
+
+  #[test]
+  fn empty_list_tail_cache_counts_only_written_capped_span_bytes() {
+    for (cap, content, expected_written) in [(1, "xx", 0), (1, "", 0), (8, "x", 4)] {
+      let mut state = drained_open_list_item();
+      state.options.max_node_bytes = cap;
+      state.stack.push(entering_node(TAG_LI, false));
+      let mut code = entering_node(TAG_CODE, true);
+      code.depth = 2;
+      state.stack.push(code);
+      state.emit_enter_element();
+      state.push_code_span_content(content, false);
+      if content == "xx" {
+        assert!(state.code_spans[0].exhausted);
+      }
+      state.list_pending |= LIST_TAIL_PENDING;
+      let before = state.buffer.len();
+
+      state.flush_list_tail(false);
+
+      let written = state.buffer.len() - before;
+      assert_eq!(written, expected_written, "cap={cap}, content={content:?}");
+      assert_eq!(
+        state.last_content_cache_len, written,
+        "cache must describe actual buffer bytes"
+      );
+      assert_eq!(
+        state.list_tail_start, before,
+        "even a rejected separator keeps its cleanup boundary"
+      );
+      assert_eq!(state.list_pending & LIST_TAIL_PENDING, 0);
+    }
+  }
+
+  #[test]
+  fn empty_list_tail_settlement_reads_incrementally() {
+    for visible in [false, true] {
+      let mut state =
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      let prefix = "<ul><li><ul><li></li></ul>";
+      state.process_html(prefix);
+      let chunk = "<div></div><p></p><em></em><span> </span>";
+      for _ in 0..256 {
+        state.process_html(chunk);
+        state.settle_item_marker();
+      }
+      let reads = state.list_settlement_bytes_read;
+      let close = if visible {
+        "text</li><li>next</li></ul>"
+      } else {
+        "</li><li>next</li></ul>"
+      };
+      state.process_html(close);
+      assert_eq!(
+        state.get_markdown(),
+        if visible {
+          "-\n  -\n\n  text\n- next"
+        } else {
+          "-\n  -\n- next"
+        }
+      );
+      assert!(reads < 256 * 100, "settlement read {reads} bytes");
+    }
+  }
+
+  #[test]
+  fn growing_list_tail_settlement_has_linear_byte_reads() {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+    state.buffer.push_str("- \n\n  ");
+    state.empty_list_marker_end = 2;
+    state.list_tail_start = 2;
+    for _ in 0..256 {
+      state.buffer.push_str("\n  ");
+      state.settle_item_marker();
+    }
+    let reads = state.list_settlement_bytes_read;
+    state.buffer.push('x');
+    state.settle_item_marker();
+    assert_eq!(state.list_tail_start, usize::MAX);
+    assert_eq!(state.empty_list_marker_end, usize::MAX);
+    assert!(
+      reads <= 2 * state.buffer.len(),
+      "settlement read {reads} bytes"
+    );
+  }
+
+  #[test]
+  fn list_tail_cursors_follow_rewrites_truncation_drains_and_insertions() {
+    for mutation in 0..4 {
+      let mut state =
+        ConvertState::new(HtmlToMarkdownOptions::default(), 64, OutputFormat::Markdown);
+      state.buffer.push_str("prefix- \n\n    ");
+      state.buffer.push_str(&" ".repeat(32));
+      state.empty_list_marker_end = 8;
+      state.list_tail_start = 8;
+      state.settle_item_marker();
+      match mutation {
+        0 => {
+          // Rewrite a previously scanned byte, including the final byte.
+          let end = state.buffer.len() - 1;
+          state.note_buffer_rewrite(end);
+          state.buffer.replace_range(end.., "x");
+        }
+        1 => {
+          state.truncate_buffer(10);
+          state.buffer.push('x');
+        }
+        2 => {
+          state.last_yielded_length = 6;
+          state.drain_streamed_prefix();
+          assert_eq!(state.list_tail_start, 2);
+          assert_eq!(state.list_tail_scanned_to, state.buffer.len());
+          state.buffer.push('x');
+        }
+        _ => {
+          state.note_buffer_rewrite(0);
+          state.buffer.insert(0, '\n');
+          state.shift_offsets_at_or_after(0);
+          // A fresh marker/tail after the earlier one was invalidated.
+          state.empty_list_marker_end = state.buffer.len();
+          state.empty_list_marker_scanned_to = state.buffer.len();
+          state.list_tail_start = state.buffer.len();
+          state.list_tail_scanned_to = state.buffer.len();
+          state.buffer.push(' ');
+          state.settle_item_marker();
+          state.buffer.push('x');
+        }
+      }
+      state.settle_item_marker();
+      assert_eq!(state.list_tail_start, usize::MAX, "mutation={mutation}");
+      assert_eq!(
+        state.empty_list_marker_end,
+        usize::MAX,
+        "mutation={mutation}"
+      );
+    }
   }
 
   #[test]

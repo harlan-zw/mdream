@@ -305,6 +305,7 @@ export function* htmlToMarkdownSplitChunksStream(
     tagHandlers,
     tagOverrideHandlers: opts.tagOverrideHandlers,
     urlBaseTarget: processor.state,
+    collapseDepthTarget: processor.state,
   }
   const leftover = parseHtmlStream(html, parseState, handleEvent)
   finalizeParse(leftover, parseState, handleEvent)

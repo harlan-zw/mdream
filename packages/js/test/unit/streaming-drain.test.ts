@@ -1,13 +1,14 @@
 import type { ParseState } from '../../src/parse'
 import type { MdreamOptions, TransformPlugin } from '../../src/types'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
-import { createMarkdownProcessor } from '../../src/markdown-processor'
+import { createMarkdownProcessor, noteListTailRewrite } from '../../src/markdown-processor'
 import { createMarkdownDrain } from '../../src/markdown-stream'
 import { finalizeParse, parseHtmlStream } from '../../src/parse'
 import { processPluginsForEvent } from '../../src/plugin-processor'
 import { createPlugin, filterPlugin } from '../../src/plugins'
 import { tagHandlers } from '../../src/tags'
+import * as markerUtils from '../../src/utils'
 
 function chunkedStream(html: string, chunkSize: number): ReadableStream<string> {
   return new ReadableStream({
@@ -41,6 +42,20 @@ const BLOCK_NEWLINE_HTML = [
 ].join('')
 
 describe('streaming drain parity', () => {
+  it.each([
+    ['<ul><li><ol><li>lead<br><em>x<br><br></em><em> </em><em>x&#10;</em><em></em><ul><li><br></li><li>z</li></ul><b></b></li></ol></li></ul>', '-\n  1. lead  \n     *x  \n       \n     * *x\n*\n     -   \n     - z'],
+    ['<ul><li><br><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-   \n    \n  *x\n*\n\n  - \n    > q'],
+    ['<ul><li><br><br><em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  *x\n*\n\n  -'],
+    ['<ul><li>&#10;<br><em>x&#10;</em><ul><li></li></ul></li></ul>', '- \n  \n  *x\n*\n\n  -'],
+    ['<ul><li><br><br>a&#10;<em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  a\n*x\n*\n\n  -'],
+    ['<ul><li><br><br>a<br><em>x&#10;</em><ul><li></li></ul></li></ul>', '-   \n    \n  a  \n  *x\n*\n\n  -'],
+    ['<ul><li><ul><li>y<br><em>x<br><br></em><br><ol><li><br></li><li></li></ol></li></ul></li></ul>', '-\n  - y  \n    *x  \n      \n    *  \n\n    1.   \n    2.'],
+  ])('streams lone closers after closed items and hard breaks: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let width = 1; width <= 16; width++)
+      expect(await streamConvert(html, width), `width=${width}`).toBe(expected)
+  })
+
   it.each([
     '<p>before</p><script>é漢🎉 &amp; if (a < b) x()</script><p>after</p>',
     '<p>before</p><script><!--<script>nested</script>--></script><p>after</p>',
@@ -96,6 +111,56 @@ describe('streaming drain parity', () => {
       for (const chunkSize of [1, 2, 3, 7, html.length])
         expect(await streamConvert(html, chunkSize, options), `chunkSize=${chunkSize}`).toBe(expected)
     }
+  })
+  it.each([
+    '<ol start="10"><li><em>abcdefghijklmnopqrstuvwxyz0123456789&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>',
+    '<ol start="10"><li><em>abcdefghij&#13;&#10;klmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>',
+    '<ol start="10"><li>abcdefghijklmnopqrstuvwxyz&#13;&#10;<em>x&#13;&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>',
+    '<ol start="10"><li>a&#10;<em>b&#10;</em><br><ul><li><blockquote>q</blockquote></li></ul></li></ol>',
+    '<ol start="123456789"><li><em>x<br><br></em><blockquote></blockquote><ul><li><em></em></li><li></li></ul></li></ol>',
+  ])('reads a lone emphasis closer across compaction as one-shot does: %s', async (html) => {
+    const expected = htmlToMarkdown(html)
+    for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it.each([
+    ['<em><br><ul><li></li></ul></em>', '*  \n\n- *'],
+    ['<em>&#10;<ul><li></li></ul>&#10;&#10;</em>', '*\n\n- \n\n*'],
+    ['<ul><li><br>&#10;y&#10;<em>x&#10;</em><ol><li></li></ol></li></ul>', '-   \n  \ny\n*x\n*\n\n  1.'],
+    ['<ol start="0"><li><br>&#10;y&#13;&#10;<em>x&#13;&#10;</em><ol><li></li></ol></li></ol>', '0.   \n   \ny\r\n*x\r\n*\n\n   1.'],
+  ])('reads a lone `*` with the paragraph or the document above it: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it.each([
+    ['<strong><em><ul><li>x</li><li>-1<br><em><br><ul><li></li></ul>ab</em></li></ul></em></strong>', '***- x - -1  \n  *  \n    - ab****'],
+    ['<ol start="10"><li>&#10;<em>x&#10;</em><ul><li></li></ul></li></ol>', '10. \n*x\n*\n    -'],
+    ['<ol start="10"><li><ol><li>a</li></ol><em>k<br></em><ul><li><br>x</li></ul></li></ol>', '10.\n    1. a\n\n    *k  \n    *\n\n    -   \n      x'],
+  ])('keeps a nested marker past the paragraph of a lone `*` as its text: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
+  })
+  it.each([
+    ['<ol start="10"><li><br><em>x&#10;</em><br><ul><li></li></ul><p>t</p></li></ol>', '10.   \n    *x\n*  \n    -\n\n    t'],
+    ['<ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *x\n*\n    - \n      > q'],
+    ['<blockquote><ol start="10"><li><br><em>x&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol></blockquote>', '> 10.   \n>     *x\n> *\n>     - \n>       > q'],
+    ['<ol start="10"><li><br><em>abcdefghijklmnopqrstuvwxyz0123456789&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *abcdefghijklmnopqrstuvwxyz0123456789\n*\n    - \n      > q'],
+    ['<ol start="10"><li><br><em>abcdefghij&#10;klmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n    *abcdefghij\nklmnopqrstuvwxyz\n*\n    - \n      > q'],
+    ['<ol start="123456789"><li><br><em>abcdefghijklmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '123456789.   \n           *abcdefghijklmnopqrstuvwxyz\n*\n           - \n             > q'],
+    ['<ol start="10"><li><br><br><em>x&#10;</em><br><ol><li><br></li><li></li></ol></li></ol>', '10.   \n      \n    *x\n*  \n    1.   \n    2.'],
+    ['<ol start="10"><li><br><br><em>abcdefghijklmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ol>', '10.   \n      \n    *abcdefghijklmnopqrstuvwxyz\n*\n    - \n      > q'],
+    ['<ul><li><ul><li><br><br><em>abcdefghijklmnopqrstuvwxyz&#10;</em><ul><li><blockquote>q</blockquote></li></ul></li></ul></li></ul>', '-\n  -   \n      \n    *abcdefghijklmnopqrstuvwxyz\n*\n    - \n      > q'],
+    ['<ol start="10"><li>&#10;<em>x<br>&#10;</em><br><ul><li></li></ul></li></ol>', '10. \n*x  \n    \n*  \n    -'],
+    ['<blockquote><ol start="10"><li><br>&#13;<em>x&#10;</em><br><ul><li></li></ul></li></ol></blockquote>', '> 10.   \n>     \r*x\n> *  \n>     -'],
+    ['<ul><li><ol start="10"><li><br><br><em>x&#10;klmnopqrstuvwxyz&#10;</em><br><ul><li></li></ul></li></ol></li></ul>', '-\n  10.   \n        \n      *x\nklmnopqrstuvwxyz\n*  \n      -'],
+    ['<ul><li>&#10;<br><br><em>x<br><br>&#10;</em><br><ul><li></li></ul></li></ul>', '- \n  \n    \n  *x  \n    \n  \n*  \n\n  -'],
+    ['<ol start="10"><li><em>x<br><br>&#10;</em><br><ul><li></li></ul></li></ol>', '10. *x  \n      \n    \n*  \n    -'],
+  ])('reads a lone closer under an item a bare marker opens across compaction: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= 16; chunkSize++)
+      expect(await streamConvert(html, chunkSize), `chunkSize=${chunkSize}`).toBe(expected)
   })
   it.each(['<li><li><br><ol><li>', '_<li><br><ol><li>', '<dl><li><blockquote><ol><li>'])('preserves malformed list spacing after drained markers: %s', async (html) => {
     const expected = htmlToMarkdown(html)
@@ -292,7 +357,7 @@ describe('streaming drain parity', () => {
     ['wrapWidth', { wrapWidth: 40 }, []],
   ])('bounds retained output with %s', (_, options, plugins) => {
     const html = '<p>A paragraph of words that runs well past forty columns before it ends.</p>'.repeat(2048)
-    const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, plugins.length > 0))
+    const processor = createMarkdownProcessor(options, context => createMarkdownDrain(context, plugins.length > 0), plugins.length > 0)
     const parseState: ParseState = {
       depthMap: processor.state.depthMap,
       depth: 0,
@@ -323,4 +388,326 @@ describe('streaming drain parity', () => {
     expect(markdown).toBe(htmlToMarkdown(html, { ...options, plugins }))
     expect(peakRetainedLength).toBeLessThan(chunkSize)
   })
+})
+
+it.each(['<img src="/x">', '<br><img src="/x">', '<hr>', '<span></span>'])('releases an empty item marker for non-text output: %s', (content) => {
+  const plugins = content === '<span></span>'
+    ? [createPlugin({ onNodeEnter: node => node.name === 'span' ? 'X'.repeat(32) : undefined })]
+    : []
+  const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, plugins.length > 0), plugins.length > 0)
+  const parseState: ParseState = { depthMap: processor.state.depthMap, depth: 0, resolvedPlugins: plugins, tagHandlers, plainText: false }
+  const handleEvent = plugins.length
+    ? (event: Parameters<typeof processor.processEvent>[0]) => processPluginsForEvent(event, plugins, processor.state, processor.processEvent)
+    : processor.processEvent
+  let remaining = parseHtmlStream('<ul><li>', parseState, handleEvent)
+  let markdown = processor.getMarkdownChunk()
+  let peakRetained = 0
+  const body = content.repeat(32)
+  for (let index = 0; index < 256; index++) {
+    remaining = parseHtmlStream(remaining + body, parseState, handleEvent)
+    markdown += processor.getMarkdownChunk()
+    peakRetained = Math.max(peakRetained, processor.state.buffer.reduce((size, fragment) => size + fragment.length, 0))
+    expect(processor.state.emptyListMarkerFragment).toBeUndefined()
+  }
+  expect(markdown.length).toBeGreaterThan(32 * 1024)
+  expect(peakRetained).toBeLessThan(4096)
+  remaining = parseHtmlStream(`${remaining}</li></ul>`, parseState, handleEvent)
+  finalizeParse(remaining, parseState, handleEvent)
+  markdown += processor.getMarkdownChunk(true)
+  expect(markdown).toBe(htmlToMarkdown(`<ul><li>${content.repeat(8192)}</li></ul>`, { plugins }))
+})
+
+it.each([
+  ['', '-\n  -\n- next'],
+  ['text', '-\n  -\n\n  text\n- next'],
+])('streams a pending empty list tail without allocating tail arrays: %s', (tail, expected) => {
+  let settling = false
+  let reads = 0
+  const processor = createMarkdownProcessor({}, (context) => {
+    const settle = context.settleItemMarker
+    context.settleItemMarker = () => {
+      settling = true
+      settle()
+      settling = false
+    }
+    return createMarkdownDrain(context, false)
+  })
+  processor.state.buffer = new Proxy(processor.state.buffer, {
+    get(target, key, receiver) {
+      if (settling && typeof key === 'string' && key.length > 0 && key.charCodeAt(0) >= 48 && key.charCodeAt(0) <= 57)
+        reads++
+      return Reflect.get(target, key, receiver)
+    },
+  })
+  const parseState: ParseState = { depthMap: processor.state.depthMap, depth: 0, resolvedPlugins: [], tagHandlers, plainText: false }
+  const buffer = processor.state.buffer
+  const originalSlice = buffer.slice
+  let tailArrayCopies = 0
+  buffer.slice = (start, end) => {
+    if (start !== undefined && start > 0 && end === undefined)
+      tailArrayCopies++
+    return originalSlice.call(buffer, start, end)
+  }
+  const prefix = '<ul><li><ul><li></li></ul>'
+  const emptyChunk = '<div></div><p></p><em></em><span> </span>'
+  let remaining = ''
+  let markdown = ''
+  for (const character of prefix) {
+    remaining = parseHtmlStream(remaining + character, parseState, processor.processEvent)
+    markdown += processor.getMarkdownChunk()
+  }
+  for (let index = 0; index < 256; index++) {
+    remaining = parseHtmlStream(remaining + emptyChunk, parseState, processor.processEvent)
+    markdown += processor.getMarkdownChunk()
+  }
+  const close = `${tail}</li><li>next</li></ul>`
+  for (const character of close) {
+    remaining = parseHtmlStream(remaining + character, parseState, processor.processEvent)
+    markdown += processor.getMarkdownChunk()
+  }
+  finalizeParse(remaining, parseState, processor.processEvent)
+  markdown += processor.getMarkdownChunk(true)
+  expect(markdown).toBe(expected)
+  expect(markdown).toBe(htmlToMarkdown(prefix + emptyChunk.repeat(256) + close))
+  expect(tailArrayCopies).toBe(0)
+  expect(reads).toBeLessThan(256 * 20)
+})
+
+it.each([false, true])('bounds settlement reads as retained whitespace grows, visible=%s', (visible) => {
+  let settle = () => {}
+  const processor = createMarkdownProcessor({}, (context) => {
+    settle = context.settleItemMarker
+    return createMarkdownDrain(context, false)
+  })
+  let reads = 0
+  processor.state.buffer = new Proxy(['- ', '\n\n  '], {
+    get(target, key, receiver) {
+      if (typeof key === 'string' && key.length > 0 && key.charCodeAt(0) >= 48 && key.charCodeAt(0) <= 57)
+        reads++
+      return Reflect.get(target, key, receiver)
+    },
+  })
+  processor.state.emptyListMarkerFragment = 0
+  processor.state.listTailStart = 1
+  for (let index = 0; index < 256; index++) {
+    processor.state.buffer.push('\n  ')
+    settle()
+  }
+  const scanned = reads
+  // A writer can append to the existing last fragment instead of pushing one.
+  if (visible)
+    processor.state.buffer[processor.state.buffer.length - 1] += 'x'
+  settle()
+  expect(processor.state.listTailStart).toBe(visible ? undefined : 1)
+  expect(processor.state.emptyListMarkerFragment).toBe(visible ? undefined : 0)
+  expect(scanned).toBeLessThan(256 * 8)
+})
+
+it.each(['rewrite', 'truncate', 'compact'])('rescans retained list tails after %s', (mutation) => {
+  let settle = () => {}
+  const processor = createMarkdownProcessor({}, (context) => {
+    settle = context.settleItemMarker
+    return createMarkdownDrain(context, false)
+  })
+  const state = processor.state
+  state.buffer.push('- ', '\n  ', ' ', ' ')
+  state.emptyListMarkerFragment = 0
+  state.listTailStart = 1
+  settle()
+  if (mutation === 'rewrite') {
+    noteListTailRewrite(state, 1)
+    state.buffer[1] = 'x'
+  }
+  else if (mutation === 'truncate') {
+    noteListTailRewrite(state, 2)
+    state.buffer.length = 2
+    state.buffer.push('x')
+  }
+  else {
+    noteListTailRewrite(state, 0)
+    state.buffer.splice(0, 1)
+    expect(state.listTailStart).toBeUndefined()
+    expect(state.emptyListMarkerFragment).toBeUndefined()
+    state.buffer.push('- ', '\n ', ' ')
+    state.emptyListMarkerFragment = state.buffer.length - 3
+    state.emptyListMarkerScanFrom = state.buffer.length - 2
+    state.listTailStart = state.buffer.length - 2
+    state.listTailScanFrom = state.listTailStart
+    settle()
+    state.buffer.push('x')
+  }
+  settle()
+  expect(state.listTailStart).toBeUndefined()
+  expect(state.emptyListMarkerFragment).toBeUndefined()
+})
+
+describe('recorded parent markers', () => {
+  it.each(['text-', 'text.'])('keeps plugin prose ending in a marker separate: %s', async (value) => {
+    const html = '<ul><li><ul><li></li></ul></li></ul>'
+    const options = { plugins: [createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'li' && !node.parent?.parent)
+          return value
+      },
+    })] }
+    const expected = `${value}\n\n  -`
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let width = 1; width <= html.length; width++)
+      expect(await streamConvert(html, width, options), `width=${width}`).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options)) actual += chunk
+      expect(actual, `split=${split}`).toBe(expected)
+    }
+    const prefix = `<p>${'lead '.repeat(2000)}</p>`
+    const longExpected = `${'lead '.repeat(2000).trim()}\n\n${expected}`
+    for (const width of [1, 7, 4096])
+      expect(await streamConvert(prefix + html, width, options)).toBe(longExpected)
+  })
+  it.each(['- ', '10. '])('recognizes a genuine marker supplied by a plugin: %s', async (value) => {
+    const html = '<ul><li><ul><li></li></ul></li></ul>'
+    const options = { plugins: [createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'li' && !node.parent?.parent)
+          return value
+      },
+    })] }
+    const expected = `${value.trimEnd()}\n  -`
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    expect(await streamConvert(html, 1, options)).toBe(expected)
+  })
+
+  it('skips repeated parent-indent recognition at depth 50 and 200', () => {
+    const spy = vi.spyOn(markerUtils, 'listMarkerLineStart')
+    try {
+      for (const depth of [50, 200]) {
+        spy.mockClear()
+        htmlToMarkdown('<ul><li>'.repeat(depth))
+        expect(spy.mock.calls.length, `depth=${depth}`).toBeLessThanOrEqual(1)
+      }
+    }
+    finally {
+      spy.mockRestore()
+    }
+  })
+  it('asserts expected nested Markdown for every chunk width and split', async () => {
+    const cases = [
+      ['<ul><li><ul><li><ul><li># h</li></ul></li></ul></li></ul>', '-\n  -\n    - \\# h'],
+      ['<ul><li><ul><li><ul><li><table><tr><td>a</td></tr></table></li></ul></li></ul></li></ul>', '-\n  -\n    - | a |\n      | --- |'],
+      ['<ul><li><ul><li><ul><li><hr></li></ul></li></ul></li></ul>', '-\n  -\n    - ***'],
+      ['<ul><li><ul><li></li></ul></li></ul>', '-\n  -'],
+      ['<ul><li><ul><li><blockquote>q</blockquote></li></ul></li></ul>', '-\n  - \n    > q'],
+    ] as const
+    for (const [html, expected] of cases) {
+      expect(htmlToMarkdown(html)).toBe(expected)
+      for (let width = 1; width <= html.length; width++)
+        expect(await streamConvert(html, width)).toBe(expected)
+      for (let split = 0; split <= html.length; split++) {
+        const stream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let output = ''
+        for await (const chunk of streamHtmlToMarkdown(stream)) output += chunk
+        expect(output, `split=${split}`).toBe(expected)
+      }
+    }
+  })
+  it('preserves deep marker bytes in ancestor contexts', async () => {
+    for (const depth of [50, 200]) {
+      for (const [open, close, marker] of [['<ul><li>', '</li></ul>', '-'], ['<ol start="10"><li>', '</li></ol>', '10.']] as const) {
+        const body = `${open.repeat(depth)}# h${close.repeat(depth)}`
+        const expected = `${Array.from({ length: depth }, (_, level) => ' '.repeat(level * (marker.length + 1)) + marker).join('\n')} \\# h`
+        for (const [prefix, suffix, rendered] of [
+          ['', '', expected],
+          ['<div>', '</div>', expected],
+          ['<blockquote>', '</blockquote>', expected.split('\n').map(line => `> ${line}`).join('\n')],
+          [`<p>${'x'.repeat(9000)}</p>`, '', `${'x'.repeat(9000)}\n\n${expected}`],
+        ]) {
+          const html = prefix + body + suffix
+          expect(htmlToMarkdown(html), `depth=${depth}`).toBe(rendered)
+          for (const width of [1, 7, 64, 4096])
+            expect(await streamConvert(html, width), `depth=${depth}, width=${width}`).toBe(rendered)
+        }
+      }
+    }
+  })
+})
+
+it.each(['<br>', '<br> ', '<br>\n'])('bounds whitespace retained behind an open empty list marker with %j', (breaks) => {
+  const processor = createMarkdownProcessor({}, context => createMarkdownDrain(context, false))
+  const parseState: ParseState = {
+    depthMap: processor.state.depthMap,
+    depth: 0,
+    resolvedPlugins: [],
+    tagHandlers,
+    plainText: false,
+  }
+  let remaining = parseHtmlStream('<ul><li>', parseState, processor.processEvent)
+  for (let index = 0; index < 1024; index++) {
+    remaining = parseHtmlStream(remaining + breaks, parseState, processor.processEvent)
+    processor.getMarkdownChunk()
+  }
+  expect(processor.state.buffer.join('').length).toBeLessThan(128)
+  remaining = parseHtmlStream(`${remaining}parent</li></ul>`, parseState, processor.processEvent)
+  finalizeParse(remaining, parseState, processor.processEvent)
+  expect(processor.getMarkdownChunk(true)).toBe(htmlToMarkdown(`<ul><li>${breaks.repeat(1024)}parent</li></ul>`))
+})
+
+it('does not rescan an unchanged whitespace fragment on every settlement', () => {
+  let settle = () => {}
+  const processor = createMarkdownProcessor({}, (context) => {
+    settle = context.settleItemMarker
+    return createMarkdownDrain(context, false)
+  })
+  const state = processor.state
+  state.buffer.push('- ', ' '.repeat(8192))
+  state.emptyListMarkerFragment = 0
+  state.listTailStart = 1
+  settle()
+  const reads = vi.spyOn(String.prototype, 'charCodeAt')
+  try {
+    for (let index = 0; index < 32; index++)
+      settle()
+    expect(reads.mock.calls.length).toBeLessThan(128)
+  }
+  finally {
+    reads.mockRestore()
+  }
+  state.buffer[1] += 'x'
+  settle()
+  expect(state.emptyListMarkerFragment).toBeUndefined()
+  expect(state.listTailStart).toBeUndefined()
+})
+
+it('preserves nested items after a noninterrupting ordinal 0', async () => {
+  const html = '<ol><li>&#10;+1<div>y</div></li><li>x&#10;<em>&#13;&#10;<ol start="7"><li></li></ol></em></li></ol>'
+  const one = htmlToMarkdown(html)
+  expect(one).toBe('1. \n+1 y\n2. x\n*\r\n\n   7. *')
+  for (const width of [1, 2, 7, 16, 64])
+    expect(await streamConvert(html, width)).toBe(one)
+})
+it('preserves nested items after a noninterrupting ordinal 1', async () => {
+  const html = '<ol><li>&#10;+1<div>y</div></li><li>x&#10;<em>&#10;<ol start="7"><li></li></ol></em></li></ol>'
+  const one = htmlToMarkdown(html)
+  expect(one).toBe('1. \n+1 y\n2. x\n*\n\n   7. *')
+  for (const width of [1, 2, 7, 16, 64])
+    expect(await streamConvert(html, width)).toBe(one)
+})
+it('preserves nested items after a noninterrupting ordinal 2', async () => {
+  const html = '<ol><li><ol start="7"><li></li><li><br><span>&#10;   <div>y</div>#x-1.>&#10;&#10;+</span><div><span>1</span><h1>t</h1>1.#</div></li></ol><p></p><div>y</div><em>   </em></li><li>==&#10;<em>&#13;&#10;<ol start="7"><li></li><li></li></ol></em></li></ol>'
+  const one = htmlToMarkdown(html)
+  expect(one).toContain('2. \\==\n*\r\n\n   7.    8. *')
+  for (const width of [1, 2, 7, 16, 64])
+    expect(await streamConvert(html, width)).toBe(one)
 })

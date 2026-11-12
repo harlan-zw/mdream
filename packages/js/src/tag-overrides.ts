@@ -28,6 +28,7 @@ export function buildTagOverrideHandlers(
       const output = override.enter
       handler.enter = () => output
       handler.literalEnter = true
+      handler.literalEnterHasOutput = output.length > 0
       let hashes = 0
       while (hashes < 7 && output.charCodeAt(hashes) === 35)
         hashes++

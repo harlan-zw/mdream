@@ -1,4 +1,4 @@
-import type { ElementNode, MdreamOptions } from '../../src/types'
+import type { ElementNode, MdreamOptions, MdreamRuntimeState } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { clean } from '../../src/clean'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
@@ -6,6 +6,33 @@ import { htmlToMarkdown, NodeEventExit, streamHtmlToMarkdown } from '../../src/i
 import { createPlugin } from '../../src/plugins'
 import { filterPlugin } from '../../src/plugins/filter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
+
+it('keeps pending list break fragments observable to plugins while streaming', async () => {
+  const html = '<ul><li><br><br><br>text</li></ul>'
+  const expectedFragments: string[] = []
+  const observe = (fragments: string[]) => createPlugin({
+    onNodeEnter(node, state) {
+      if (node.name === 'br')
+        fragments.push((state as MdreamRuntimeState).buffer.join(''))
+    },
+  })
+  const expected = htmlToMarkdown(html, { plugins: [observe(expectedFragments)] })
+  for (const width of [1, html.length]) {
+    const fragments: string[] = []
+    const input = new ReadableStream<string>({
+      start(controller) {
+        for (let offset = 0; offset < html.length; offset += width)
+          controller.enqueue(html.slice(offset, offset + width))
+        controller.close()
+      },
+    })
+    let actual = ''
+    for await (const chunk of streamHtmlToMarkdown(input, { plugins: [observe(fragments)] }))
+      actual += chunk
+    expect(actual).toBe(expected)
+    expect(fragments, `plugin observations at width ${width}`).toEqual(expectedFragments)
+  }
+})
 
 type ParityFormat = 'markdown' | 'html' | 'text'
 type ParityOptions = Partial<MdreamOptions> & { format?: ParityFormat }
@@ -1000,6 +1027,41 @@ describe('flattened declaration carry', () => {
       }
     }
   })
+})
+
+it('preserves a nested list tail across an overridden empty quote', async () => {
+  const html = '<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>'
+  const options = { tagOverrides: { blockquote: { enter: '', exit: '', spacing: [0, 0] as [number, number], isInline: false } } }
+  expect(convertOnce(html, options)).toBe('- A\n  - inner\n\n  parent')
+  await expectEverySplitParity(html, options)
+})
+
+it('preserves literal spacing for nonempty quote enter output', async () => {
+  const html = '<ul><li>A<ul><li>inner</li></ul><blockquote></blockquote>parent</li></ul>'
+  const options = { tagOverrides: { blockquote: { enter: 'CUSTOM ', exit: '', spacing: [0, 0] as [number, number], isInline: false } } }
+  expect(convertOnce(html, options)).toBe('- A\n  - innerCUSTOM parent')
+  await expectEverySplitParity(html, options)
+})
+
+it.each(['parent</li></ul>', '</li></ul><p>after</p>', '<ul><li>nested</li></ul>parent</li></ul>', '<em>text</em></li></ul>', '<pre>x</pre></li></ul>', '</li></ul>', ''])('preserves counted list breaks before %s', async (suffix) => {
+  const html = `<p>before</p><ul><li>${'<br>'.repeat(8)}${suffix}`
+  await expectEverySplitParity(html)
+})
+
+// A drain can compact the buffer while a counted break run is still open.
+it.each([
+  '<ul><li><em><ul><li></li></ul></em><br><br></li></ul>',
+  '<ul><li><em><ol><li><br></li></ol></em><br><br></li></ul>',
+  '<ul><li><em><ul><li></li></ul></em><br><br><br><br>x</li></ul>',
+  '<p>lead</p><ul><li><br><br><em>&#13;<br><br></em></li></ul>',
+])('keeps counted list breaks across a drain at every width in %s', async (html) => {
+  await expectStreamingParity(html)
+})
+
+it.each(['<table></table>', '<pre></pre>'])('keeps the nested list tail across %s', async (block) => {
+  const html = `<ul><li>A<ul><li>inner</li></ul>${block}parent</li></ul>`
+  expect(convertOnce(html)).toBe('- A\n  - inner\n\n  parent')
+  await expectEverySplitParity(html)
 })
 
 describe('raw-text end tags cut between chunks', () => {
