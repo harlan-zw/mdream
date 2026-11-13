@@ -1620,10 +1620,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   // The first text of a block drops its leading whitespace. With no block
   // ancestor the text is inline at the root: like root text it drops the
   // space only where the output is at a line start, which the output decides.
-  // A link's nested content counts once for the block around the link, which
-  // a blank right in that link still starts, as before the content counted.
-  const firstInBlock = containsWhitespace && (!firstBlockParent.childTextNodeIndex
-    || (isLeadingBlank && firstBlockParent.childTextNodeIndex === 1 && linkHasOnlyNestedContent(state.currentNode)))
+  const firstInBlock = containsWhitespace && !firstBlockParent.childTextNodeIndex
   const inlineAtRoot = firstInBlock && !firstBlockParent.parent
     && (firstBlockParent.tagHandler?.isInline ?? firstBlockParent.tagId === -1)
   if (firstInBlock && !inlineAtRoot) {
