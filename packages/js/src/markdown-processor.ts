@@ -1191,7 +1191,9 @@ function resetRetractedCaptionFrames(frames: number[] | undefined, count: number
  */
 function dropBlankLinkText(state: MarkdownState, openFragment: number, label: string, trailingBlank: boolean, captionOwnsSpace: boolean): boolean {
   const buffer = state.buffer
-  if (openFragment < 0 || buffer[openFragment] !== '[' || !hasNonWhitespace(label))
+  // A caption that the link starts writes its opener into the `[` fragment.
+  const bracket = openFragment < 0 ? undefined : buffer[openFragment]
+  if (!bracket || bracket.charCodeAt(bracket.length - 1) !== 91 || !hasNonWhitespace(label))
     return false
   let text = ''
   for (let index = openFragment + 1; index < buffer.length; index++) {

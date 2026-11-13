@@ -825,6 +825,32 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('- Go [  \n  L](/x) now')
   })
 
+  // A caption writes its opener in front of a link that starts it, and the
+  // link's blank text still gives way to the label there.
+  it.each([
+    ['<figure><figcaption><a href="/x" title="T">&nbsp;</a></figcaption></figure>', '*[T](/x)*', undefined],
+    ['<figure><figcaption><a href="/x" title="T">&#x3000;</a></figcaption></figure>', '*[T](/x)*', undefined],
+    ['<figure><figcaption><a href="/x" aria-label="L">&#x202F;</a></figcaption></figure>', '*[L](/x)*', undefined],
+    ['<figure><figcaption><a href="/x" aria-label="L"><svg></svg>&nbsp;</a></figcaption></figure>', '*[L](/x)*', undefined],
+    ['<figure><figcaption><a href="/x" title="T">&nbsp;</a></figcaption></figure>', '*[T](/x)*', { filter: { exclude: ['[hidden]'] } }],
+  ])('drops blank link text before the label at the start of a caption in %s', async (html, expected, plugins) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine, plugins }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
   // The list indent a hard break writes after it stays with the break.
   it.each([
     ['<ul><li><a href="/x" title="T"><br></a></li></ul>', '- [  \n  T](/x)'],
