@@ -2283,6 +2283,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         if (start !== 0)
           textNode.value = value.slice(start)
+        // The output now ends with the boundary, not with what `lastChar` saw.
+        lastChar = '\n'
       }
     }
     if (textNode.trimsAtLineStart)
