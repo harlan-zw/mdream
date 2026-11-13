@@ -4550,6 +4550,17 @@ fn any_white_space_is_blank_link_text() {
   );
 }
 
+/// A blank label replaces nothing, so a link holding only blank text keeps it.
+#[test]
+fn blank_label_leaves_blank_link_text() {
+  for (html, expected) in [
+    (r#"<p>G<a title="  ">&#10;</a></p><p>G</p>"#, "G\n\nG"),
+    (r#"<p>G<a title="  ">&#10;</a>H</p>"#, "G\nH"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 /// A blank the parser drops between two children of a link, as between two
 /// icons, is part of the content the label replaces: only a blank after the
 /// link's last child moves past the link.

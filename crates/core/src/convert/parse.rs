@@ -1840,7 +1840,8 @@ impl ConvertState {
         .or_else(|| self.stack.retired().attributes.get_bit(ATTR_ARIA_LABEL))
         .map(ToString::to_string)
         .unwrap_or_default();
-      if !prefix.is_empty() {
+      // A blank label replaces nothing, so blank link text stays.
+      if !prefix.is_empty() && (node_child_text_index == 0 || !is_blank_link_text(&prefix)) {
         let mut modified_node = self.stack.take_retired();
         modified_node.child_text_node_index = 1;
         let trailing_blank = modified_node

@@ -774,6 +774,28 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, plugins })).toBe('[T](/x)')
   })
 
+  // A blank label replaces nothing, so a link holding only blank text keeps it.
+  it.each([
+    ['<p>G<a title="  ">&#10;</a></p><p>G</p>', 'G\n\nG'],
+    ['<p>G<a title="  ">&#10;</a>H</p>', 'G\nH'],
+  ])('keeps the blank text of a link with a blank label in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
   it('keeps a hard break in the link before its label', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<p>Go <a href="/x" aria-label="L"><svg></svg><br></a>Next</p>', { engine }))

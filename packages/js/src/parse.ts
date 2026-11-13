@@ -1945,7 +1945,8 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
   const emitLabel = node.tagId === TAG_A ? linkLabelTarget(node, state, handleEvent) : undefined
   if (emitLabel) {
     const prefix = node.attributes?.title || node.attributes?.['aria-label'] || ''
-    if (prefix) {
+    // A blank label replaces nothing, so blank link text stays.
+    if (prefix && (!node.childTextNodeIndex || !isBlankLinkText(prefix))) {
       node.childTextNodeIndex = 1
       const textNode = {
         type: TEXT_NODE,
