@@ -6833,6 +6833,45 @@ fn text_after_a_blank_line_inserted_in_a_raw_html_block_is_escaped() {
   );
 }
 
+// A heading or rule in a list item brings its own blank line and indent. The
+// boundary after a raw HTML block wrote both again, leaving a line that held
+// only the indent.
+#[test]
+fn raw_html_boundary_counts_the_line_breaks_of_the_next_output() {
+  for (html, expected) in [
+    (
+      "<ul><li><dd>A</dd><h3>t</h3></li></ul>",
+      "- <dd>A</dd>\n\n  ### t",
+    ),
+    (
+      "<ol><li>Aa</li><li><dd>Lima</dd><hr></li></ol>",
+      "1. Aa\n2. <dd>Lima</dd>\n\n   ---",
+    ),
+    (
+      "<ul><li>x<ul><li><address>A</address><h3>t</h3></li></ul></li></ul>",
+      "- x\n  - <address>A</address>\n\n    ### t",
+    ),
+    (
+      "<blockquote><ul><li><dl><dt>A</dt></dl><hr></li></ul></blockquote>",
+      "> - <dl><dt>A</dt></dl>\n>\n>   ---",
+    ),
+    // A paragraph has no line break of its own in an item: the boundary writes it.
+    (
+      "<ul><li><dd>A</dd><p>t</p></li></ul>",
+      "- <dd>A</dd>\n\n  t",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in [1, 2, 3, 7] {
+      assert_eq!(
+        convert_stream(html, &HtmlToMarkdownOptions::default(), width),
+        expected,
+        "{html} at width {width}"
+      );
+    }
+  }
+}
+
 #[test]
 fn a_row_closes_through_content_left_open_in_a_cell() {
   // `<tr>` must close an unclosed `<p>` inside the previous cell; otherwise the

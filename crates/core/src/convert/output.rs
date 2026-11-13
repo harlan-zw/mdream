@@ -2313,7 +2313,7 @@ impl ConvertState {
         }
       }
       if self.pending_raw_html_boundary {
-        self.finish_raw_html_block(">", false);
+        self.finish_raw_html_block(">", false, 0);
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
@@ -3543,7 +3543,7 @@ impl ConvertState {
     }
     let pending_raw_boundary = self.pending_raw_html_boundary;
     if pending_raw_boundary {
-      self.finish_raw_html_block(text, true);
+      self.finish_raw_html_block(text, true, 0);
     }
     let text = if pending_raw_boundary && !self.pending_raw_html_boundary {
       text.trim_start_matches([' ', '\t', '\r', '\n'])
@@ -6585,14 +6585,14 @@ impl ConvertState {
 
   /// Separate content following a raw HTML region. A capped code span must
   /// accept the complete separator before this consumes the pending boundary.
-  fn finish_raw_html_block(&mut self, value: &str, indent: bool) {
+  fn finish_raw_html_block(&mut self, value: &str, indent: bool, leading_newlines: usize) {
     if !self.pending_raw_html_boundary
       || self.in_raw_html_block()
       || !value.bytes().any(|byte| !is_whitespace(byte))
     {
       return;
     }
-    let mut newlines = 0;
+    let mut newlines = leading_newlines;
     let mut tail_start = 0;
     for (at, &byte) in self.buffer.as_bytes().iter().enumerate().rev() {
       if byte == b'\n' {
@@ -6614,29 +6614,37 @@ impl ConvertState {
       .take_while(|run| run.output_start >= tail_start)
       .map(|run| (run.count - 1) * run.unit.matches('\n').count())
       .sum::<usize>();
-    if newlines >= 2 {
+    if newlines >= 2 && leading_newlines == 0 {
       self.pending_raw_html_boundary = false;
       return;
     }
-    let indent_len = if indent { self.list_indent.len() } else { 0 };
+    let missing = 2usize.saturating_sub(newlines);
+    // An output that starts its own line brings the indent with it.
+    let indent_len = if indent && leading_newlines == 0 {
+      self.list_indent.len()
+    } else {
+      0
+    };
     // Charge the complete separator to an open code span. A rejected write
     // leaves the boundary pending until content can be emitted again.
-    if self.options.max_node_bytes != 0 && !self.code_spans.is_empty() {
-      let mut separator = String::with_capacity(2 - newlines + indent_len);
-      separator.push_str(&"\n\n"[..2 - newlines]);
+    if missing + indent_len == 0 {
+      // The output's own line breaks are the whole boundary.
+    } else if self.options.max_node_bytes != 0 && !self.code_spans.is_empty() {
+      let mut separator = String::with_capacity(missing + indent_len);
+      separator.push_str(&"\n\n"[..missing]);
       separator.push_str(&self.list_indent[..indent_len]);
       if self.push_code_span_content(&separator, true) == 0 {
         return;
       }
     } else {
       // The separator belongs after the HTML close, even when it had no spacing.
-      for _ in newlines..2 {
+      for _ in 0..missing {
         self.buffer.push('\n');
       }
       self.buffer.push_str(&self.list_indent[..indent_len]);
     }
     self.pending_raw_html_boundary = false;
-    self.last_content_cache_len = 2 - newlines + indent_len;
+    self.last_content_cache_len = missing + indent_len;
     self.has_last_text_node = false;
     self.last_text_node_contains_whitespace = false;
   }
@@ -6704,7 +6712,16 @@ impl ConvertState {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
       } else if self.pending_raw_html_boundary {
-        self.finish_raw_html_block(output_str, true);
+        // Line breaks the output opens with count towards the boundary.
+        let mut leading_newlines = 0;
+        for &byte in output_str.as_bytes() {
+          if byte == b'\n' {
+            leading_newlines += 1;
+          } else if !matches!(byte, b' ' | b'\t' | b'\r') {
+            break;
+          }
+        }
+        self.finish_raw_html_block(output_str, true, leading_newlines);
       }
     }
     let is_line_boundary =

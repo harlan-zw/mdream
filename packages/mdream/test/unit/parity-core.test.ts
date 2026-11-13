@@ -187,6 +187,13 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<strong>h<span> </span>&#32;</strong>x',
     'Aa<span> </span>&#32;<form><span>Bb</span></form>',
   ], ['markdown', 'text']],
+  'block that opens its own line after a raw HTML block in a list item': [[
+    '<ul><li><dd>A</dd><h3>t</h3></li></ul>',
+    '<ol><li>Aa</li><li><dd>Lima</dd><hr></li></ol>',
+    '<ul><li>x<ul><li><address>A</address><h3>t</h3></li></ul></li></ul>',
+    '<blockquote><ul><li><dl><dt>A</dt></dl><hr></li></ul></blockquote>',
+    '<ul><li><dd>A</dd><p>t</p></li></ul>',
+  ], ['markdown']],
   'decoded blank after a blank that opened an inline element': [[
     'Aa<span> </span>&#32; <form><span>Bb</span></form>',
     'Aa<span> </span>&#9;<form><span>Bb</span></form>',
