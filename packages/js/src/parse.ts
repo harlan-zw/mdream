@@ -1956,6 +1956,10 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
         depth: node.depth + 1,
         isLinkLabel: true,
       } as TextNode
+      // Rust spaces the label as any text right after an end tag that closed
+      // nothing, which joins what came before it.
+      if (state.endTagClosedNothing)
+        textNode.joinsPrevious = true
 
       emitLabel({ type: NodeEventEnter, node: textNode })
       const parents = traverseUpToFirstBlockNode(node)

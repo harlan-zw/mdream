@@ -808,6 +808,35 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe(htmlOutput)
   })
 
+  // An end tag that closes nothing, like the `</p>` left after a block closed
+  // its paragraph, joins the text on either side. The label written right
+  // after it joins what the link wrote before it too.
+  it.each([
+    ['<a href="/x" title="T"><p><hr></p></a>', '[---T](/x)'],
+    ['<a href="/x" title="T"><p><hr>&nbsp;</p></a>', '[---  T](/x)'],
+    ['<a href="/x" title="T"><p><ul><li></li></ul>&#12288;</p></a>', '[- 　T](/x)'],
+    ['<a href="/x" title="T"><p><blockquote></blockquote>&#11;</p></a>', '[>\vT](/x)'],
+    ['<a href="/x" title="T"><hr>&#13;</span></a>', '[--- \rT](/x)'],
+    ['<a href="/x" title="T"><p><hr>&nbsp;</a>', '[---   T](/x "T")'],
+  ])('joins the label after an end tag that closes nothing in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
   // A link nested in content that never shows writes no label, so the link
   // around it still takes its own.
   it.each([
