@@ -745,6 +745,7 @@ describe.each(engines)('links $name', (engineConfig) => {
       [`<p>Go <a href="/x" aria-label="L"><svg></svg>${blank}</a>Next</p>`, 'Go [L](/x) Next'],
       [`<a href="/c" title="Contact us"><div>${blank}</div></a>`, '[Contact us](/c)'],
       [`<p><a href="/c" title="T">${blank}</a>Next</p>`, '[T](/c) Next'],
+      [`<p><a href="/c" title="" aria-label="L">${blank}</a>Next</p>`, '[L](/c) Next'],
     ])('is blank link text in %s', async (html, expected) => {
       const engine = await resolveEngine(engineConfig.engine)
       expect(htmlToMarkdown(html, { engine })).toBe(expected)
@@ -789,6 +790,22 @@ describe.each(engines)('links $name', (engineConfig) => {
       expect(htmlToMarkdown(`<p>Go <a href="/x" aria-label="L"><span hidden>x</span>${blank}</a>Next</p>`, { engine, plugins: { filter: {} } }))
         .toBe('Go [L](/x) Next')
     })
+  })
+
+  // An empty title is no label, so the link takes its aria-label. A blank
+  // title is still a label.
+  it.each([
+    ['<p><a href="/x" title="" aria-label="L"></a>Next</p>', '[L](/x)Next', 'LNext', '<p><a href="/x" title="">L</a>Next</p>'],
+    ['<p><a href="/x" title aria-label="L"> </a>Next</p>', '[L](/x)Next', 'LNext', '<p><a href="/x" title="">L</a>Next</p>'],
+    ['<p>Share <a href="/s" title="" aria-label="Share on X"><svg aria-hidden="true"></svg>&nbsp;</a> now</p>', 'Share [Share on X](/s) now', undefined, '<p>Share <a href="/s" title="">\u00A0Share on X</a> now</p>'],
+    ['<p><a href="/x" title=" " aria-label="L">&nbsp;</a>Next</p>', '[\u00A0](/x " ")Next', 'Next', '<p><a href="/x" title=" ">\u00A0</a>Next</p>'],
+  ])('takes the aria-label of a link with an empty title in %s', async (html, markdown, text, htmlOutput) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(markdown)
+    expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(markdown)
+    if (text !== undefined)
+      expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe(text)
+    expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe(htmlOutput)
   })
 
   // A link nested in content that never shows writes no label, so the link

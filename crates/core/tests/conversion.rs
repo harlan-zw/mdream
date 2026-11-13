@@ -4605,6 +4605,50 @@ fn any_white_space_is_blank_link_text() {
   }
 }
 
+/// An empty title is no label, so the link takes its aria-label, as JS reads
+/// `title || aria-label`. A blank title is still a label.
+#[test]
+fn empty_title_gives_way_to_the_aria_label() {
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      r#"<p><a href="/x" title="" aria-label="L"></a>Next</p>"#,
+      "[L](/x)Next",
+    ),
+    (
+      r#"<p><a href="/x" title aria-label="L"> </a>Next</p>"#,
+      "[L](/x)Next",
+    ),
+    (
+      r#"<p><a href="/x" title="" aria-label="L">&nbsp;</a>Next</p>"#,
+      "[L](/x) Next",
+    ),
+    (
+      r#"<p>Share <a href="/s" title="" aria-label="Share on X"><svg aria-hidden="true"></svg>&nbsp;</a> now</p>"#,
+      "Share [Share on X](/s) now",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+    assert_eq!(html_to_markdown(html, clean.clone()), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "{html} width={width}");
+    }
+  }
+  assert_eq!(
+    convert(r#"<p><a href="/x" title=" " aria-label="L">&nbsp;</a>Next</p>"#),
+    "[\u{a0}](/x \" \")Next"
+  );
+}
+
 /// An inline element of a link writes its delimiters around any text but HTML
 /// white space, so a no-break space in it is text the label cannot replace.
 #[test]

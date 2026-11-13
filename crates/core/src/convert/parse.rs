@@ -301,14 +301,20 @@ fn is_hidden(node: &ElementNode) -> bool {
   matches!(node.attributes.get("hidden"), Some(v) if !v.eq_ignore_ascii_case("until-found"))
 }
 
-/// Whether a link has text to take when empty: its title, else its aria-label,
-/// read as the label branch of the close reads them.
-fn has_link_label(node: &ElementNode) -> bool {
+/// The text a link takes when empty: its title, else its aria-label. An empty
+/// title is no label, as `title || aria-label` reads it in JS.
+fn link_label(node: &ElementNode) -> Option<&str> {
   node
     .attributes
     .get_bit(ATTR_TITLE)
+    .filter(|title| !title.is_empty())
     .or_else(|| node.attributes.get_bit(ATTR_ARIA_LABEL))
-    .is_some_and(|label| !label.is_empty())
+}
+
+/// Whether a link has text to take when empty, read as the label branch of the
+/// close reads it.
+fn has_link_label(node: &ElementNode) -> bool {
+  link_label(node).is_some_and(|label| !label.is_empty())
 }
 
 impl ConvertState {
@@ -1851,12 +1857,7 @@ impl ConvertState {
           .as_ref()
           .is_some_and(|extras| extras.hidden_text_nodes == node_child_text_index))
     {
-      let prefix = self
-        .stack
-        .retired()
-        .attributes
-        .get_bit(ATTR_TITLE)
-        .or_else(|| self.stack.retired().attributes.get_bit(ATTR_ARIA_LABEL))
+      let prefix = link_label(self.stack.retired())
         .map(ToString::to_string)
         .unwrap_or_default();
       // A blank label replaces nothing, so blank link text stays.
