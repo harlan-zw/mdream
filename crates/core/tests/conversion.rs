@@ -4543,10 +4543,17 @@ fn any_white_space_is_blank_link_text() {
       }
     }
   }
-  // A hard break is content of the link, not a blank before its label.
+  // A hard break is content of the link: only the blanks after it go.
   assert_eq!(
     convert(r#"<p>Go <a href="/x" aria-label="L"><svg></svg><br></a>Next</p>"#),
     "Go [  \nL](/x)Next"
+  );
+  assert_eq!(
+    html_to_markdown(
+      r#"<p>Go<a href="/x" aria-label="L"><br>&#12288;<span hidden>h</span></a>now</p>"#,
+      filter.clone()
+    ),
+    "Go [  \nL](/x) now"
   );
   // A stream holds blank link text longer than the href until the label.
   let html = r#"<a href="/x" title="C">&#12288;<svg></svg>&#12288;<div>&nbsp;</div></a>"#;

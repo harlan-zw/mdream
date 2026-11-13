@@ -819,6 +819,8 @@ describe.each(engines)('links $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<p>Go <a href="/x" aria-label="L"><svg></svg><br></a>Next</p>', { engine }))
       .toBe('Go [  \nL](/x)Next')
+    expect(htmlToMarkdown('<p>Go<a href="/x" aria-label="L"><br>&#12288;<span hidden>h</span></a>now</p>', { engine, plugins: { filter: {} } }))
+      .toBe('Go [  \nL](/x) now')
   })
 
   // A blank between two children of a link is part of the content the label

@@ -1200,11 +1200,17 @@ function dropBlankLinkText(state: MarkdownState, openFragment: number, label: st
       return false
     text += fragment
   }
-  // A hard break, as from `<br>`, is content of the link, not a blank.
-  if (text.includes('  \n') || (!text && !(state.pendingInlineWhitespace && !captionOwnsSpace) && !trailingBlank))
+  // A hard break, as from `<br>`, is content of the link: only the blanks
+  // after the last one go.
+  const hardBreak = text.lastIndexOf('  \n')
+  const kept = hardBreak < 0 ? '' : text.slice(0, hardBreak + 3)
+  if (kept.length === text.length && (hardBreak >= 0 || (!(state.pendingInlineWhitespace && !captionOwnsSpace) && !trailingBlank)))
     return false
-  state.outputPositions?.replace(openFragment + 1, buffer.length, [])
+  const replacement = kept ? [kept] : []
+  state.outputPositions?.replace(openFragment + 1, buffer.length, replacement)
   buffer.length = openFragment + 1
+  if (kept)
+    buffer.push(kept)
   noteBufferRewrite(state)
   if (!captionOwnsSpace)
     state.pendingInlineWhitespace = false
