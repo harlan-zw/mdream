@@ -207,6 +207,16 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
   'link title after a pair dropped in an earlier block': [[
     '<blockquote><br><em>h</em><i></i></blockquote><a href="/x" title="x">x</a>',
   ], ['markdown']],
+  'heading hashes followed by a blank of its own': [[
+    '<label>x <h1>&#9;</h1>x</label>',
+    '<label>x <h1>&#9;</h1></label>',
+    '<h2><u>x <h1>&#9;</h1></u></h2>',
+    '<figcaption>x <h1>&#9;</h1>x</figcaption>',
+    '<kbd>x <h1>&#9;</h1></kbd>',
+    '<ul><li><kbd>x <h1>&#9;</h1>x</kbd></li></ul>',
+    '<label>x <h1>a #&#9;</h1>x</label>',
+    '<label><h1>&#9;</h1>x</label>',
+  ], ['markdown']],
   'inline code in a list item after an element that writes nothing': [[
     '<ul><li><code>Aa</code> <table></table><code>Bb</code></li></ul>',
     '<ul><li>Aa<span> </span> <p><code>Bb</code></p></li></ul>',

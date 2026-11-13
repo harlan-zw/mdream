@@ -300,6 +300,16 @@ function isLeadChar(code: number): boolean {
     || code === 46 || code === 41
 }
 
+/** Whether an entry holds only spaces and tabs, or nothing. */
+function isBlankEntry(entry: string): boolean {
+  for (let i = 0; i < entry.length; i++) {
+    const code = entry.charCodeAt(i)
+    if (code !== 32 && code !== 9)
+      return false
+  }
+  return true
+}
+
 // A `#` run closing a heading is an ATX closing sequence and is dropped by the
 // renderer, so the last one is escaped back into content. A run that only the
 // line's block lead precedes is the heading's own marker instead: the heading
@@ -313,6 +323,12 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
   if (index < 0)
     return
 
+  // Blanks after the run can sit in entries of their own, as a decoded tab
+  // does. Rust reads its whole buffer, so they are skipped here too.
+  const last = index
+  while (index > 0 && isBlankEntry(buffer[index]!))
+    index--
+
   const entry = buffer[index]!
   let end = entry.length
   while (end > 0 && (entry[end - 1] === ' ' || entry[end - 1] === '\t'))
@@ -325,6 +341,8 @@ export function escapeTrailingHeadingHashes(state: HandlerContext['state']): voi
 
   let replacement: string
   if (opensBlockLine(buffer, index, run)) {
+    if (index !== last)
+      return
     let trimmed = entry.length
     while (trimmed > end && entry.charCodeAt(trimmed - 1) === 32)
       trimmed--
