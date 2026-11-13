@@ -966,6 +966,37 @@ fn blank_between_blocks_of_a_link_keeps_its_space() {
   );
 }
 
+/// In a link that starts its block, the blank between the link's blocks is
+/// still the block's first text, as on main.
+#[test]
+fn blank_between_blocks_of_a_link_that_starts_its_block_is_dropped() {
+  for (html, markdown, text) in [
+    (
+      r#"<ul><li><a href="/x"><div>A</div> <div><span>B</span></div></a></li></ul>"#,
+      "- [AB](/x)",
+      "AB",
+    ),
+    (
+      r#"<h3><a href="/x"><div>A</div> <div><span>B</span></div></a></h3>"#,
+      "### [AB](/x)",
+      "AB",
+    ),
+    (
+      r#"<ul><li><a href="/x"><div><img src="/i" alt="A"></div> <div><span>B</span></div></a></li></ul>"#,
+      "- [![A](/i)B](/x)",
+      "AB",
+    ),
+    (
+      r#"<ul><li>Go <a href="/x"><div>A</div> <div><span>B</span></div></a></li></ul>"#,
+      "- Go [A B](/x)",
+      "Go A B",
+    ),
+  ] {
+    assert_eq!(convert(html), markdown, "{html}");
+    assert_eq!(convert_text(html), text, "{html}");
+  }
+}
+
 /// Whitespace in a `<pre>` nested in a link is kept but shows nothing, so it
 /// is no link text: the link still takes its label.
 #[test]

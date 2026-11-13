@@ -506,6 +506,34 @@ describe.each(engines)('links $name', (engineConfig) => {
     }
   })
 
+  // In a link that starts its block, the blank between the link's blocks is
+  // still the block's first text, as on main.
+  it.each([
+    ['<ul><li><a href="/x"><div>A</div> <div><span>B</span></div></a></li></ul>', '- [AB](/x)', 'AB'],
+    ['<h3><a href="/x"><div>A</div> <div><span>B</span></div></a></h3>', '### [AB](/x)', 'AB'],
+    ['<table><tr><td><a href="/x"><div>A</div> <div><span>B</span></div></a></td></tr></table>', '| [AB](/x) |\n| --- |', 'AB'],
+    ['<ul><li><b><a href="/x"><div>A</div> <div><span>B</span></div></a></b></li></ul>', '- **[AB](/x)**', 'AB'],
+    ['<ul><li><a href="/x"><div><img src="/i" alt="A"></div> <div><span>B</span></div></a></li></ul>', '- [![A](/i)B](/x)', 'AB'],
+    ['<ul><li>Go <a href="/x"><div>A</div> <div><span>B</span></div></a></li></ul>', '- Go [A B](/x)', 'Go A B'],
+  ])('drops the blank between blocks of a link that starts its block in %s', async (html, markdown, text) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(markdown)
+    expect(htmlToMarkdown(html, { engine, format: 'text' })).toBe(text)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        output += chunk
+      expect(output, `width=${width}`).toBe(markdown)
+    }
+  })
+
   it('keeps the blank between blocks of a link in text and html output', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<ul><li><a><p>Alpha</p> <p><span>Beta</span></p></a></li></ul>', { engine, format: 'text' }))

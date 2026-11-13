@@ -517,6 +517,15 @@ impl ConvertState {
       })
   }
 
+  /// Whether text is the first of its block. A link's nested content counts
+  /// once for the block around the link, which a blank right in that link
+  /// still starts, as before the content counted.
+  #[inline(always)]
+  fn starts_block(&self, block_text_count: u32, is_leading_blank: bool) -> bool {
+    block_text_count == 0
+      || (block_text_count == 1 && is_leading_blank && self.link_has_only_nested_content())
+  }
+
   /// A whitespace-only blank at an inline fragment root is a word separator the
   /// output places. Mirrors the JS engine's `inlineAtRoot`.
   #[inline(always)]
@@ -691,7 +700,7 @@ impl ConvertState {
       first_block_parent_index.map_or(0, |idx| self.stack[idx].child_text_node_index);
 
     let mut text = std::mem::take(text_buffer);
-    let is_first_text_in_block = first_block_child_text_count == 0
+    let is_first_text_in_block = self.starts_block(first_block_child_text_count, is_leading_blank)
       && (first_block_parent_index.is_some()
         || self
           .buffer
@@ -823,7 +832,7 @@ impl ConvertState {
     let mut tailwind_suffix = None;
     // An `html` stream hands out its whole buffer each chunk, so an empty buffer
     // there only means a document start when nothing was yielded before it.
-    let is_first_text_in_block = first_block_child_text_count == 0
+    let is_first_text_in_block = self.starts_block(first_block_child_text_count, is_leading_blank)
       && (first_block_parent_index.is_some()
         || match self.buffer.as_bytes().last() {
           Some(&last) => last == b'\n',
