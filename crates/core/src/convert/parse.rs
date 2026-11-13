@@ -301,6 +301,16 @@ fn is_hidden(node: &ElementNode) -> bool {
   matches!(node.attributes.get("hidden"), Some(v) if !v.eq_ignore_ascii_case("until-found"))
 }
 
+/// Whether a link has text to take when empty: its title, else its aria-label,
+/// read as the label branch of the close reads them.
+fn has_link_label(node: &ElementNode) -> bool {
+  node
+    .attributes
+    .get_bit(ATTR_TITLE)
+    .or_else(|| node.attributes.get_bit(ATTR_ARIA_LABEL))
+    .is_some_and(|label| !label.is_empty())
+}
+
 impl ConvertState {
   /// The tag id a `tagOverrides` alias gives a start or end tag name. Callers
   /// test `has_tag_overrides` first, so none of this is inlined into the
@@ -576,11 +586,16 @@ impl ConvertState {
   /// (or none, as a decoded `&#32;` after an `<svg>`) only spaces it out, so
   /// neither is link text: a link holding only these still takes its label.
   /// Blank text after visible text is not counted.
-  /// Excluded and skipped links never take the label, so they get no count.
+  /// Excluded and skipped links never take the label, and a link without one
+  /// has none to take, so they get no count.
   #[inline(never)]
   fn count_hidden_link_text(&mut self, up_to: usize, excluded: bool) {
     for node in &mut self.stack[up_to..] {
-      if node.tag_id != Some(TAG_A) || node.excluded_from_markdown || node.enter_skipped {
+      if node.tag_id != Some(TAG_A)
+        || node.excluded_from_markdown
+        || node.enter_skipped
+        || (node.extras.is_none() && !has_link_label(node))
+      {
         continue;
       }
       let hidden = node
@@ -598,7 +613,8 @@ impl ConvertState {
   /// in `<a><svg></svg> </a>Next`, still spaces that content from what follows:
   /// a label written in its place moves the blank past the link. A blank with
   /// more children after it, as in `<a><svg></svg> <svg></svg></a>`, does not.
-  /// Excluded and skipped links never take the label, so they record nothing.
+  /// Excluded and skipped links never take the label, and a link without one
+  /// has none to take, so they record nothing.
   #[inline(never)]
   fn note_trailing_link_blank(&mut self) {
     if let Some(node) = self.stack.last_mut()
@@ -606,6 +622,7 @@ impl ConvertState {
       && node.current_walk_index > 0
       && !node.excluded_from_markdown
       && !node.enter_skipped
+      && (node.extras.is_some() || has_link_label(node))
     {
       let children = node.current_walk_index;
       node.extras.get_or_insert_default().trailing_blank_at = Some(children);

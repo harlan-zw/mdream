@@ -126,6 +126,47 @@ fn excluded_links_do_not_allocate_per_link() {
   }
 }
 
+fn allocations(html: &str, options: HtmlToMarkdownOptions) -> usize {
+  let before = ALLOCATIONS.get();
+  drop(html_to_markdown(html, options));
+  ALLOCATIONS.get() - before
+}
+
+#[test]
+fn links_without_a_label_record_no_hidden_text() {
+  const COUNT: usize = 1024;
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  // Without a title or aria-label a link never takes a label, so its trailing
+  // blank or hidden text needs no record.
+  for (link, without) in [
+    (
+      "<a href='/x'><svg></svg> </a>",
+      "<a href='/x'><svg></svg></a>",
+    ),
+    (
+      "<a href='/x'><svg></svg>&#32;</a>",
+      "<a href='/x'><svg></svg></a>",
+    ),
+    (
+      "<a href='/x'><span hidden>x</span></a>",
+      "<a href='/x'><span hidden></span></a>",
+    ),
+  ] {
+    let used = allocations(&link.repeat(COUNT), filter.clone());
+    let base = allocations(&without.repeat(COUNT), filter.clone());
+    assert!(
+      used <= base + 64,
+      "{link}: {used} allocation calls, {base} for {without}"
+    );
+  }
+}
+
 #[test]
 fn tailwind_only_keeps_class_and_handler_attributes() {
   const COUNT: usize = 1024;
