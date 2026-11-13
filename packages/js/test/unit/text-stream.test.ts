@@ -136,3 +136,29 @@ describe('text quotation without a paired exit', () => {
     }
   })
 })
+
+describe('heading inside a wrapper that writes no markers', () => {
+  it.each([
+    ['<dl><dt>A<h1>y</h1>B</dt></dl>', 'A y\n\nB'],
+    ['<address>A<h1>y z</h1>B</address>', 'A y z\n\nB'],
+    ['<label><h2>y</h2><b>B</b></label>', 'y\n\nB'],
+    ['<small><h3>y</h3> B</small>', 'y\n\nB'],
+    ['<a><h1>y</h1>B</a>', 'y\n\nB'],
+    ['<label><span><h1>y</h1></span>B</label>', 'y\n\nB'],
+    // A wrapper that writes markers in Markdown keeps the heading on its line.
+    ['<b><h1>y</h1>B</b>', 'y B'],
+    ['<a href="/x"><h1>y</h1>B</a>', 'y B'],
+    // So do two wrappers, a table cell and a list item.
+    ['<label><small><h1>y</h1>B</small></label>', 'y B'],
+    ['<table><tr><td><label><h1>y</h1>B</label></td></tr></table>', 'y B'],
+    ['<ul><li><label><h1>y</h1>B</label></li></ul>', 'y B'],
+  ])('closes the block as Rust does: %s', async (html, expected) => {
+    expect(htmlToText(html)).toBe(expected)
+    for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {
+      let output = ''
+      for await (const chunk of streamHtmlToText(chunkedStream(html, chunkSize)))
+        output += chunk
+      expect(output, `chunk size ${chunkSize}`).toBe(expected)
+    }
+  })
+})
