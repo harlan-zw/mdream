@@ -821,6 +821,34 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('Go [  \nL](/x)Next')
     expect(htmlToMarkdown('<p>Go<a href="/x" aria-label="L"><br>&#12288;<span hidden>h</span></a>now</p>', { engine, plugins: { filter: {} } }))
       .toBe('Go [  \nL](/x) now')
+    expect(htmlToMarkdown('<ul><li>Go<a href="/x" aria-label="L"><br>&#12288;<span hidden>h</span></a>now</li></ul>', { engine, plugins: { filter: {} } }))
+      .toBe('- Go [  \n  L](/x) now')
+  })
+
+  // The list indent a hard break writes after it stays with the break.
+  it.each([
+    ['<ul><li><a href="/x" title="T"><br></a></li></ul>', '- [  \n  T](/x)'],
+    ['<ol><li><a href="/x" title="T"><br></a></li></ol>', '1. [  \n   T](/x)'],
+    ['<ul><li>a<ul><li><a href="/x" title="T"><br></a></li></ul></li></ul>', '- a\n  - [  \n    T](/x)'],
+    ['<blockquote><ul><li><a href="/x" title="T"><br></a></li></ul></blockquote>', '> - [  \n>   T](/x)'],
+    ['<ul><li><a href="/x" title="T"><br><br></a></li></ul>', '- [  \n    \n  T](/x)'],
+    ['<ul><li><a href="/x" title="T"><br>&nbsp;</a></li></ul>', '- [  \n  T](/x)'],
+  ])('keeps the list indent after a hard break before the label in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
   })
 
   // A blank between two children of a link is part of the content the label

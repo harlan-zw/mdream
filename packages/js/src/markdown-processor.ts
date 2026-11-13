@@ -1200,10 +1200,14 @@ function dropBlankLinkText(state: MarkdownState, openFragment: number, label: st
       return false
     text += fragment
   }
-  // A hard break, as from `<br>`, is content of the link: only the blanks
-  // after the last one go.
+  // A hard break, as from `<br>`, is content of the link, and so is the list
+  // indent it writes after it: only the blanks after the last one go.
   const hardBreak = text.lastIndexOf('  \n')
-  const kept = hardBreak < 0 ? '' : text.slice(0, hardBreak + 3)
+  let keep = hardBreak < 0 ? 0 : hardBreak + 3
+  const indent = state.listIndent
+  if (hardBreak >= 0 && indent && text.startsWith(indent, keep))
+    keep += indent.length
+  const kept = text.slice(0, keep)
   if (kept.length === text.length && (hardBreak >= 0 || (!(state.pendingInlineWhitespace && !captionOwnsSpace) && !trailingBlank)))
     return false
   const replacement = kept ? [kept] : []

@@ -2572,10 +2572,18 @@ impl ConvertState {
     if !is_blank_link_text(text) {
       return false;
     }
-    // A hard break, as from `<br>`, is content of the link: only the blanks
-    // after the last one go.
+    // A hard break, as from `<br>`, is content of the link, and so is the list
+    // indent it writes after it: only the blanks after the last one go.
     let hard_break = text.rfind("  \n");
-    let blank_start = text_start + hard_break.map_or(0, |at| at + 3);
+    let blank_start = text_start
+      + hard_break.map_or(0, |at| {
+        let indent = self.continuation_prefix();
+        if text[at + 3..].starts_with(&indent) {
+          at + 3 + indent.len()
+        } else {
+          at + 3
+        }
+      });
     let removes = blank_start < self.buffer.len();
     if !removes && (hard_break.is_some() || (!self.pending_inline_whitespace && !trailing_blank)) {
       return false;

@@ -4555,6 +4555,42 @@ fn any_white_space_is_blank_link_text() {
     ),
     "Go [  \nL](/x) now"
   );
+  // The list indent a hard break writes after it stays with the break.
+  for (html, expected) in [
+    (
+      r#"<ul><li><a href="/x" title="T"><br></a></li></ul>"#,
+      "- [  \n  T](/x)",
+    ),
+    (
+      r#"<ol><li><a href="/x" title="T"><br></a></li></ol>"#,
+      "1. [  \n   T](/x)",
+    ),
+    (
+      r#"<ul><li>a<ul><li><a href="/x" title="T"><br></a></li></ul></li></ul>"#,
+      "- a\n  - [  \n    T](/x)",
+    ),
+    (
+      r#"<blockquote><ul><li><a href="/x" title="T"><br></a></li></ul></blockquote>"#,
+      "> - [  \n>   T](/x)",
+    ),
+    (
+      r#"<ul><li><a href="/x" title="T"><br><br></a></li></ul>"#,
+      "- [  \n    \n  T](/x)",
+    ),
+    (
+      r#"<ul><li><a href="/x" title="T"><br>&nbsp;</a></li></ul>"#,
+      "- [  \n  T](/x)",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+  assert_eq!(
+    html_to_markdown(
+      r#"<ul><li>Go<a href="/x" aria-label="L"><br>&#12288;<span hidden>h</span></a>now</li></ul>"#,
+      filter.clone()
+    ),
+    "- Go [  \n  L](/x) now"
+  );
   // A stream holds blank link text longer than the href until the label.
   let html = r#"<a href="/x" title="C">&#12288;<svg></svg>&#12288;<div>&nbsp;</div></a>"#;
   assert_eq!(convert(html), "[C](/x)");
