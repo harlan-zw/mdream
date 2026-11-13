@@ -232,6 +232,10 @@ describe('raw HTML block before a closer', () => {
     // Content after the block still starts on a line of its own.
     ['<figcaption>k<h2>t</h2><address>A</address>z</figcaption>', '*k ## t\n\n<address>A</address>\n\nz*'],
     ['<b>k<br><dl><dt>A</dt></dl><i>z</i></b>', '**k  \n<dl><dt>A</dt></dl>\n\n*z***'],
+    // The boundary goes in front of the next opener, with no space before it.
+    ['<a href="/x">k<br><details></details></a><a href="/y">z</a>', '[k  \n<details></details>\n\n](/x)\n\n[z](/y)'],
+    ['<a href="/x">k<br><details></details><a href="/y">z</a></a>', '[k  \n<details></details>\n\n](/x)\n\n[z](/y)'],
+    ['<a href="/x">k<br><details></details></a><del>z</del>', '[k  \n<details></details>\n\n](/x)\n\n~~z~~'],
   ])('keeps the closer on the line of the block: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
     for (const size of [1, 2, 3, 7]) {

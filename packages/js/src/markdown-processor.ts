@@ -3407,8 +3407,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       handlerOutput = output[0]
     }
 
-    // Add spacing between inline elements if needed
-    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
+    // Add spacing between inline elements if needed. A pending raw HTML
+    // boundary is written first, as in Rust, so the output starts its line.
+    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])
+      && !(pendingRawHtmlBoundary && newLines < 2 && !isInsideRawHtmlBlock(state.depthMap))) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
