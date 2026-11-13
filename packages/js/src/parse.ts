@@ -1962,8 +1962,9 @@ function closeNode(node: ElementNode | null, state: ParseState, handleEvent: (ev
         parent.childTextNodeIndex = (parent.childTextNodeIndex || 0) + 1
       }
       // The label is content of a link around this link's block too, as Rust
-      // counts it for every open node.
-      if (state.depthMap[TAG_A]! > 1)
+      // counts it for every open node. Rust writes no label for an excluded or
+      // skipped link, so that one is no content of the link around it.
+      if (state.depthMap[TAG_A]! > 1 && !node.excludedFromMarkdown && !node.enterSkipped)
         countContentInEnclosingLink(parents.at(-1))
     }
   }

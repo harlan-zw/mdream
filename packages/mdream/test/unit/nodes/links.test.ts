@@ -763,6 +763,17 @@ describe.each(engines)('links $name', (engineConfig) => {
     })
   })
 
+  // A link nested in content that never shows writes no label, so the link
+  // around it still takes its own.
+  it.each([
+    ['<a href="/x" title="T"><template><a href="/y" title="U"></template></a>', undefined],
+    ['<a href="/x" title="T"><div hidden><a href="/y" title="U"></a></div></a>', { filter: {} }],
+    ['<a href="/x" title="T"><div class="hidden"><a href="/y" title="U"></a></div></a>', { tailwind: true }],
+  ])('takes the label of a link holding a hidden link in %s', async (html, plugins) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe('[T](/x)')
+  })
+
   it('keeps a hard break in the link before its label', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<p>Go <a href="/x" aria-label="L"><svg></svg><br></a>Next</p>', { engine }))
