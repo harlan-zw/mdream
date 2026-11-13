@@ -512,6 +512,11 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('Alpha\n\nBeta')
     expect(htmlToMarkdown('<a href="/x"><div>A</div> </a> <a href="/y"><div><span>B</span></div></a>', { engine, format: 'text' }))
       .toBe('A B')
+    // A div that writes nothing keeps the blank before it on the line.
+    expect(htmlToMarkdown('<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>', { engine, format: 'text' }))
+      .toBe('Alpha Beta')
+    expect(htmlToMarkdown('<a href="/x"><div><img src="/i" alt="A"></div> <div><span>B</span></div></a>', { engine, format: 'text' }))
+      .toBe('A B')
     expect(htmlToMarkdown('<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>', { engine, format: 'html' }))
       .toBe('<a href="/x"><div>Alpha</div><div><span>Beta</span></div></a>')
   })

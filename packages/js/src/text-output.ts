@@ -310,7 +310,8 @@ function appendOutput(state: TextState, element: ElementNode, eventType: number,
     const firstOutput = output?.[0] || ''
     const owed = !!state.pendingDecodedBlank && !(eventType === NodeEventEnter && element.tagId === TAG_BLOCKQUOTE)
     if (eventType === NodeEventEnter) {
-      if ((!isInline && !owed) || element.tagId === TAG_BR || missingNewlines > 0 || firstOutput === '\n' || firstOutput === '\r') {
+      // A div that writes nothing only groups content on the same line.
+      if ((!isInline && (element.tagId !== TAG_DIV || firstOutput) && !owed) || element.tagId === TAG_BR || missingNewlines > 0 || firstOutput === '\n' || firstOutput === '\r') {
         state.pendingInlineWhitespace = false
       }
       else if (firstOutput) {
