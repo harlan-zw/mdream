@@ -1206,6 +1206,38 @@ fn heading_inside_a_markerless_wrapper_keeps_its_trailing_blank_line() {
 }
 
 #[test]
+fn heading_closes_its_block_under_any_markerless_wrappers() {
+  // A second marker-less wrapper, or a raw `<dt>` or `<address>`, changes
+  // nothing: only a wrapper that writes inline Markdown keeps the line open.
+  for (html, expected) in [
+    ("<label><small><h4>t</h4></small>x</label>", "#### t\n\nx"),
+    (
+      "<dl><dt>A<h1>y</h1>B</dt></dl>",
+      "<dl><dt>A # y\n\nB</dt>\n</dl>",
+    ),
+    (
+      "<dl><dt>A<label><h1>y</h1></label>B</dt></dl>",
+      "<dl><dt>A # y\n\nB</dt>\n</dl>",
+    ),
+    (
+      "<dl><dt>A<h2>y z</h2></dt><dd>d</dd></dl>",
+      "<dl><dt>A ## y z\n\n</dt><dd>d</dd>\n</dl>",
+    ),
+    (
+      "<dl><dt>A<em><h1>y</h1></em>B</dt></dl>",
+      "<dl><dt>A*# y*B</dt>\n</dl>",
+    ),
+    (
+      "<address>A<h3>y</h3>B</address>",
+      "<address>A ### y\n\nB</address>",
+    ),
+    ("<h2>A<span><h1>y</h1></span>B</h2>", "## A # y\n\nB"),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
+#[test]
 fn heading_inside_an_hrefless_anchor_keeps_its_trailing_blank_line() {
   // An anchor without href emits no markup at all, so it counts as a
   // marker-less wrapper: the heading must close its block instead of gluing
