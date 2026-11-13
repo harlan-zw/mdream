@@ -487,6 +487,8 @@ describe.each(engines)('links $name', (engineConfig) => {
     ['<a href="/x" title="T"><div>Alpha</div> <div><span>Beta</span></div></a>', '[Alpha Beta](/x "T")'],
     ['<a href="/a" title="A"><div><a href="/b" title="B"></a></div> <div><span>x</span></div></a>', '[[B](/b) x](/a "A")'],
     ['<a href="/x" class="font-bold"><div>Alpha</div> </a>', '[Alpha](/x)'],
+    ['<ul><li><a href="/x"><div>A</div> <div><span>B</span></div></a></li></ul>', '- [A B](/x)'],
+    ['<h3><a href="/x"><div>A</div> <div><span>B</span></div></a></h3>', '### [A B](/x)'],
   ])('keeps the blank between blocks of a link in %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)
     const plugins = html.includes('font-bold') ? { tailwind: true } : undefined
@@ -516,6 +518,8 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(htmlToMarkdown('<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>', { engine, format: 'text' }))
       .toBe('Alpha Beta')
     expect(htmlToMarkdown('<a href="/x"><div><img src="/i" alt="A"></div> <div><span>B</span></div></a>', { engine, format: 'text' }))
+      .toBe('A B')
+    expect(htmlToMarkdown('<ul><li><a href="/x"><div>A</div> <div><span>B</span></div></a></li></ul>', { engine, format: 'text' }))
       .toBe('A B')
     expect(htmlToMarkdown('<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>', { engine, format: 'html' }))
       .toBe('<a href="/x"><div>Alpha</div><div><span>Beta</span></div></a>')
