@@ -475,6 +475,47 @@ describe.each(engines)('links $name', (engineConfig) => {
     }
   })
 
+  // Text in a block nested in a link counts for the link's label only: a blank
+  // right in the link after such a block still separates it from the next one.
+  it.each([
+    ['<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>', '[Alpha Beta](/x)'],
+    ['<ul><li><a><p>Alpha</p> <p><span>Beta</span></p></a></li></ul>', '- Alpha\n\n  Beta'],
+    ['<a href="/x"><div>Alpha</div> <div><b>Beta</b></div></a>', '[Alpha **Beta**](/x)'],
+    ['<a href="/x"><div>Alpha</div> <div><img src="/i" alt="B"></div></a>', '[Alpha ![B](/i)](/x)'],
+    ['<a href="/x"><div>A</div> <div><span>B</span></div> <div><span>C</span></div></a>', '[A B C](/x)'],
+    ['<a href="/x"><div>Alpha</div>\n<div><span>Beta</span></div></a>', '[Alpha Beta](/x)'],
+    ['<a href="/x" title="T"><div>Alpha</div> <div><span>Beta</span></div></a>', '[Alpha Beta](/x "T")'],
+    ['<a href="/a" title="A"><div><a href="/b" title="B"></a></div> <div><span>x</span></div></a>', '[[B](/b) x](/a "A")'],
+    ['<a href="/x" class="font-bold"><div>Alpha</div> </a>', '[Alpha](/x)'],
+  ])('keeps the blank between blocks of a link in %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const plugins = html.includes('font-bold') ? { tailwind: true } : undefined
+    expect(htmlToMarkdown(html, { engine, plugins })).toBe(expected)
+    for (let width = 1; width <= html.length; width++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let offset = 0; offset < html.length; offset += width)
+            controller.enqueue(html.slice(offset, offset + width))
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine, plugins }))
+        markdown += chunk
+      expect(markdown, `width=${width}`).toBe(expected)
+    }
+  })
+
+  it('keeps the blank between blocks of a link in text and html output', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<ul><li><a><p>Alpha</p> <p><span>Beta</span></p></a></li></ul>', { engine, format: 'text' }))
+      .toBe('Alpha\n\nBeta')
+    expect(htmlToMarkdown('<a href="/x"><div>A</div> </a> <a href="/y"><div><span>B</span></div></a>', { engine, format: 'text' }))
+      .toBe('A B')
+    expect(htmlToMarkdown('<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>', { engine, format: 'html' }))
+      .toBe('<a href="/x"><div>Alpha</div><div><span>Beta</span></div></a>')
+  })
+
   // Whitespace in a `<pre>` nested in a link shows nothing, so the link keeps its label.
   it.each([
     ['<a href="/p" aria-label="L"><pre> </pre></a>', '[L](/p)'],

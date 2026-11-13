@@ -496,6 +496,17 @@ impl ConvertState {
     self.stack.last().is_some_and(|node| node.is_inline)
   }
 
+  /// The parent is a link whose one count is content of blocks nested in it.
+  /// That count only decides the link's label: a blank right in the link still
+  /// leads, as in `<a><div>A</div> <div><span>B</span></div></a>`.
+  #[inline(always)]
+  fn link_has_only_nested_content(&self) -> bool {
+    self.depth_map[TAG_A as usize] > 0
+      && self.stack.last().is_some_and(|node| {
+        node.tag_id == Some(TAG_A) && node.link_content_counted && node.child_text_node_index == 1
+      })
+  }
+
   /// A whitespace-only blank at an inline fragment root is a word separator the
   /// output places. Mirrors the JS engine's `inlineAtRoot`.
   #[inline(always)]
@@ -626,8 +637,9 @@ impl ConvertState {
       excludes_text_nodes = true;
     }
 
-    let is_leading_blank =
-      !contains_non_whitespace && child_text_node_index == 0 && !self.stack.is_empty();
+    let is_leading_blank = !contains_non_whitespace
+      && (child_text_node_index == 0 || self.link_has_only_nested_content())
+      && !self.stack.is_empty();
     if is_leading_blank && self.depth_map[TAG_A as usize] > 0 {
       self.note_trailing_link_blank();
     }
@@ -754,7 +766,7 @@ impl ConvertState {
     // leading/trailing and block boundaries.
     let is_leading_blank = !in_pre_tag
       && !contains_non_whitespace
-      && child_text_node_index == 0
+      && (child_text_node_index == 0 || self.link_has_only_nested_content())
       && !self.stack.is_empty();
     if is_leading_blank && self.depth_map[TAG_A as usize] > 0 {
       self.note_trailing_link_blank();
@@ -1826,7 +1838,16 @@ impl ConvertState {
         if moves_blank {
           self.pending_inline_whitespace = true;
         }
-        for prev in self.stack.iter_mut() {
+        // A link around this link's block counts the label once, as content
+        // nested in it, the way `count_content_in_enclosing_link` marks it.
+        let top = self.stack.len() - 1;
+        for (index, prev) in self.stack.iter_mut().enumerate() {
+          if index < top && prev.tag_id == Some(TAG_A) {
+            if prev.link_content_counted {
+              continue;
+            }
+            prev.link_content_counted = true;
+          }
           prev.child_text_node_index += 1;
         }
         let Some(modified_node2) = self.stack.pop() else {

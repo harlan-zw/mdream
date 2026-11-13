@@ -881,6 +881,91 @@ fn nested_block_text_counts_for_its_own_link() {
   }
 }
 
+/// Text in a block nested in a link counts for the link's label only: a blank
+/// right in the link after such a block still separates it from the next one,
+/// also when that block starts with an element.
+#[test]
+fn blank_between_blocks_of_a_link_keeps_its_space() {
+  let tailwind = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      tailwind: Some(TailwindConfig),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let cases = [
+    (
+      r#"<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>"#,
+      "[Alpha Beta](/x)",
+    ),
+    (
+      "<ul><li><a><p>Alpha</p> <p><span>Beta</span></p></a></li></ul>",
+      "- Alpha\n\n  Beta",
+    ),
+    (
+      r#"<a href="/x"><div>Alpha</div> <div><b>Beta</b></div></a>"#,
+      "[Alpha **Beta**](/x)",
+    ),
+    (
+      r#"<a href="/x"><div>Alpha</div> <div><img src="/i" alt="B"></div></a>"#,
+      "[Alpha ![B](/i)](/x)",
+    ),
+    (
+      r#"<a href="/x"><div>A</div> <div><span>B</span></div> <div><span>C</span></div></a>"#,
+      "[A B C](/x)",
+    ),
+    (
+      "<a href=\"/x\"><div>Alpha</div>\n<div><span>Beta</span></div></a>",
+      "[Alpha Beta](/x)",
+    ),
+    (
+      r#"<a href="/x" title="T"><div>Alpha</div> <div><span>Beta</span></div></a>"#,
+      r#"[Alpha Beta](/x "T")"#,
+    ),
+    // The label of a link nested in a block counts once for the link around it.
+    (
+      r#"<a href="/a" title="A"><div><a href="/b" title="B"></a></div> <div><span>x</span></div></a>"#,
+      r#"[[B](/b) x](/a "A")"#,
+    ),
+  ];
+  for (html, expected) in cases {
+    assert_eq!(convert(html), expected, "{html}");
+    for width in 1..=html.len() {
+      let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      let mut output = String::new();
+      for piece in html.as_bytes().chunks(width) {
+        output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+      }
+      output.push_str(&stream.finish());
+      assert_eq!(output, expected, "{html} width={width}");
+    }
+  }
+  // A trailing blank stays out of the tailwind emphasis, as before nested
+  // block text counted for the link.
+  assert_eq!(
+    html_to_markdown(
+      r#"<a href="/x" class="font-bold"><div>Alpha</div> </a>"#,
+      tailwind,
+    ),
+    "[Alpha](/x)"
+  );
+  assert_eq!(
+    convert_text("<ul><li><a><p>Alpha</p> <p><span>Beta</span></p></a></li></ul>"),
+    "Alpha\n\nBeta"
+  );
+  assert_eq!(
+    convert_text(r#"<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>"#),
+    "Alpha Beta"
+  );
+  assert_eq!(
+    html_to_html(
+      r#"<a href="/x"><div>Alpha</div> <div><span>Beta</span></div></a>"#,
+      HtmlToMarkdownOptions::default()
+    ),
+    r#"<a href="/x"><div>Alpha</div><div><span>Beta</span></div></a>"#
+  );
+}
+
 /// Whitespace in a `<pre>` nested in a link is kept but shows nothing, so it
 /// is no link text: the link still takes its label.
 #[test]

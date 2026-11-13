@@ -1587,7 +1587,8 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
 
   // Whitespace-only text before an element's first child is indentation, but
   // in inline content after earlier text it is the only word separator.
-  const isLeadingBlank = !inPreTag && !containsNonWhitespace && !state.currentNode.childTextNodeIndex
+  const isLeadingBlank = !inPreTag && !containsNonWhitespace
+    && (!state.currentNode.childTextNodeIndex || linkHasOnlyNestedContent(state.currentNode))
   // A blank that leads no text of a link after other content of the link, as
   // in `<a><svg></svg> </a>Next`, still spaces that content from what follows:
   // a label written in its place moves the blank past the link. A blank with
@@ -1709,6 +1710,15 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
       countContentInEnclosingLink(firstBlockParent)
   }
   state.lastTextNode = textNode
+}
+
+/**
+ * A link whose one count is content of blocks nested in it. That count only
+ * decides the link's label: a blank right in the link still leads, as in
+ * `<a><div>A</div> <div><span>B</span></div></a>`.
+ */
+function linkHasOnlyNestedContent(node: ElementNode): boolean {
+  return node.tagId === TAG_A && node.childTextNodeIndex === 1 && node.linkContentCounted === true
 }
 
 function hasAnchorParent(parents: ElementNode[]): boolean {
