@@ -168,6 +168,30 @@ fn links_without_a_label_record_no_hidden_text() {
 }
 
 #[test]
+fn links_with_nested_content_record_no_hidden_text() {
+  const COUNT: usize = 1024;
+  // Content in a block nested in a link keeps it from taking its label, so a
+  // blank after that block needs no record, even with a title.
+  for (link, without) in [
+    (
+      "<a href='/x' title='T'><div>A</div> </a>",
+      "<a href='/x' title='T'><div>A</div></a>",
+    ),
+    (
+      "<a href='/x' title='T'><div>A</div> <div>B</div></a>",
+      "<a href='/x'><div>A</div> <div>B</div></a>",
+    ),
+  ] {
+    let used = allocations(&link.repeat(COUNT), HtmlToMarkdownOptions::default());
+    let base = allocations(&without.repeat(COUNT), HtmlToMarkdownOptions::default());
+    assert!(
+      used <= base + 64,
+      "{link}: {used} allocation calls, {base} for {without}"
+    );
+  }
+}
+
+#[test]
 fn tailwind_only_keeps_class_and_handler_attributes() {
   const COUNT: usize = 1024;
   assert_budget(

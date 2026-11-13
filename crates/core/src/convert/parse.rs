@@ -586,14 +586,16 @@ impl ConvertState {
   /// (or none, as a decoded `&#32;` after an `<svg>`) only spaces it out, so
   /// neither is link text: a link holding only these still takes its label.
   /// Blank text after visible text is not counted.
-  /// Excluded and skipped links never take the label, and a link without one
-  /// has none to take, so they get no count.
+  /// Excluded and skipped links never take the label, nor does a link with
+  /// content in a block nested in it, and a link without one has none to take,
+  /// so they get no count.
   #[inline(never)]
   fn count_hidden_link_text(&mut self, up_to: usize, excluded: bool) {
     for node in &mut self.stack[up_to..] {
       if node.tag_id != Some(TAG_A)
         || node.excluded_from_markdown
         || node.enter_skipped
+        || node.link_content_counted
         || (node.extras.is_none() && !has_link_label(node))
       {
         continue;
@@ -613,8 +615,9 @@ impl ConvertState {
   /// in `<a><svg></svg> </a>Next`, still spaces that content from what follows:
   /// a label written in its place moves the blank past the link. A blank with
   /// more children after it, as in `<a><svg></svg> <svg></svg></a>`, does not.
-  /// Excluded and skipped links never take the label, and a link without one
-  /// has none to take, so they record nothing.
+  /// Excluded and skipped links never take the label, nor does a link with
+  /// content in a block nested in it, and a link without one has none to take,
+  /// so they record nothing.
   #[inline(never)]
   fn note_trailing_link_blank(&mut self) {
     if let Some(node) = self.stack.last_mut()
@@ -622,6 +625,7 @@ impl ConvertState {
       && node.current_walk_index > 0
       && !node.excluded_from_markdown
       && !node.enter_skipped
+      && !node.link_content_counted
       && (node.extras.is_some() || has_link_label(node))
     {
       let children = node.current_walk_index;
