@@ -4548,6 +4548,18 @@ fn any_white_space_is_blank_link_text() {
     convert(r#"<p>Go <a href="/x" aria-label="L"><svg></svg><br></a>Next</p>"#),
     "Go [  \nL](/x)Next"
   );
+  // A stream holds blank link text longer than the href until the label.
+  let html = r#"<a href="/x" title="C">&#12288;<svg></svg>&#12288;<div>&nbsp;</div></a>"#;
+  assert_eq!(convert(html), "[C](/x)");
+  for width in 1..=html.len() {
+    let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut output = String::new();
+    for piece in html.as_bytes().chunks(width) {
+      output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+    }
+    output.push_str(&stream.finish());
+    assert_eq!(output, "[C](/x)", "width={width}");
+  }
 }
 
 /// A blank label replaces nothing, so a link holding only blank text keeps it.

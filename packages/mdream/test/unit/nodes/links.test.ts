@@ -756,6 +756,25 @@ describe.each(engines)('links $name', (engineConfig) => {
       }
     })
 
+    it('is blank link text longer than the href in a stream', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
+      const html = `<a href="/x" title="C">${blank}<svg></svg>${blank}<div>${blank}</div></a>`
+      expect(htmlToMarkdown(html, { engine })).toBe('[C](/x)')
+      for (let width = 1; width <= html.length; width++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        let markdown = ''
+        for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+          markdown += chunk
+        expect(markdown, `width=${width}`).toBe('[C](/x)')
+      }
+    })
+
     it('is blank link text after hidden content', async () => {
       const engine = await resolveEngine(engineConfig.engine)
       expect(htmlToMarkdown(`<p>Go <a href="/x" aria-label="L"><span hidden>x</span>${blank}</a>Next</p>`, { engine, plugins: { filter: {} } }))

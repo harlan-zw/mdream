@@ -3,8 +3,8 @@ use crate::entities::decode_html_entities_into;
 use crate::scan::{
   AttrBudget, DiscardedCloseTag, DiscardedCommentState, PendingTagScan, TagCarry,
   discarded_cdata_end, discarded_close_tag_end, discarded_comment_end, discarded_gt,
-  is_blank_link_text, is_whitespace, process_comment_or_doctype, process_tag_attributes,
-  resume_tag_attributes, tag_is_complete,
+  is_blank_link_char, is_blank_link_text, is_whitespace, process_comment_or_doctype,
+  process_tag_attributes, resume_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;
@@ -2944,7 +2944,8 @@ impl ConvertState {
       return true;
     }
     let text_start = link.bracket_pos + 1;
-    let text_end = trim_ascii_whitespace_end(&self.buffer);
+    // Blank link text may still give way to the label, so it is no text yet.
+    let text_end = self.buffer.trim_end_matches(is_blank_link_char).len();
     text_end.saturating_sub(text_start) <= link.url_max_len
   }
 
