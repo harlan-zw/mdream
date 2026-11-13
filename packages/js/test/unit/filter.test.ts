@@ -208,6 +208,9 @@ describe('filter plugin', () => {
     }
     expect(htmlToMarkdown('<p><a href="/x" aria-label="L"><span hidden>x</span> </a></p>', { plugins: [filterPlugin(), same] })).toBe('[L](/x)')
     expect(htmlToMarkdown('<p><a href="/x" aria-label="L">Go</a></p>', { plugins: [rewrite('Stop')] })).toBe('[Stop](/x)')
+    // In an inline element of the link a no-break space is text, as in the source.
+    expect(htmlToMarkdown('<p><a href="/x" aria-label="L">Go</a>Next</p>', { plugins: [rewrite(' ')] })).toBe('[L](/x) Next')
+    expect(htmlToMarkdown('<p><a href="/x" aria-label="L"><i>Go</i></a>Next</p>', { plugins: [rewrite(' ')] })).toBe('[* *](/x)Next')
   })
 
   it('counts visible hook output in a link as its text', async () => {

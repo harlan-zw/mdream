@@ -260,10 +260,6 @@ export function getLanguageFromAttributes(attributes: ElementNode['attributes'] 
 }
 
 /**
- * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
- * Used to decide if a <pre>'s content warrants opening a fenced code block.
- */
-/**
  * Link text that shows nothing: only Unicode `White_Space`, the set Rust's
  * `str::trim` drops, so a link clean mode would drop as empty takes its label
  * first. `is_blank_link_text` in Rust has the same list.
@@ -277,6 +273,28 @@ export function isBlankLinkText(value: string): boolean {
   return true
 }
 
+/**
+ * Link text in `parent` that shows nothing. An inline element of the link, as
+ * `<i>` or `<code>`, writes its delimiters around any text but HTML white
+ * space, so only that is blank in it: the label could not replace `*&nbsp;*`.
+ * Rust's `is_blank_link_run` reads the same.
+ */
+export function isBlankLinkTextIn(value: string, parent: ElementNode | null | undefined): boolean {
+  if (!hasNonWhitespace(value))
+    return true
+  if (!isBlankLinkText(value))
+    return false
+  for (let node = parent; node && node.tagId !== TAG_A; node = node.parent) {
+    if (isInlineNode(node))
+      return false
+  }
+  return true
+}
+
+/**
+ * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
+ * Used to decide if a <pre>'s content warrants opening a fenced code block.
+ */
 export function hasNonWhitespace(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
     const c = value.charCodeAt(i)

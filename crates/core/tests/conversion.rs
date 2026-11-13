@@ -4605,6 +4605,36 @@ fn any_white_space_is_blank_link_text() {
   }
 }
 
+/// An inline element of a link writes its delimiters around any text but HTML
+/// white space, so a no-break space in it is text the label cannot replace.
+#[test]
+fn white_space_in_an_inline_element_of_a_link_is_text() {
+  for (html, expected) in [
+    (
+      r#"<p><a href="/s" aria-label="Search"><i class="icon-search">&nbsp;</i></a>Next</p>"#,
+      "[*\u{a0}*](/s)Next",
+    ),
+    (
+      r#"<p><a href="/c" title="T"><code>&#x3000;</code></a>Next</p>"#,
+      "[`\u{3000}`](/c \"T\")Next",
+    ),
+    (
+      r#"<p><a href="/x" title="T"><span>&nbsp;</span></a>Next</p>"#,
+      "[\u{a0}](/x \"T\")Next",
+    ),
+    (
+      r#"<ul><li><a href="/x" aria-label="L"><kbd>&nbsp;</kbd><template><a href="/y" title="U"></a></template></a></li></ul>"#,
+      "- [`\u{a0}`](/x)",
+    ),
+    (
+      r#"<p><a href="/s" aria-label="Search"><i>&#9;</i></a>Next</p>"#,
+      "[Search](/s)Next",
+    ),
+  ] {
+    assert_eq!(convert(html), expected, "{html}");
+  }
+}
+
 /// A blank label replaces nothing, so a link holding only blank text keeps it.
 #[test]
 fn blank_label_leaves_blank_link_text() {

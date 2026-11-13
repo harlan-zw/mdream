@@ -562,11 +562,26 @@ impl ConvertState {
     }
   }
 
+  /// Link text that shows nothing. An inline element of the link, as `<i>` or
+  /// `<code>`, writes its delimiters around any text but HTML white space, so
+  /// only that is blank in it: the label could not replace `*&nbsp;*`.
+  #[inline(never)]
+  fn is_blank_link_run(&self, text: &str) -> bool {
+    text.bytes().all(is_whitespace)
+      || (is_blank_link_text(text)
+        && !self
+          .stack
+          .iter()
+          .rev()
+          .take_while(|node| node.tag_id != Some(TAG_A))
+          .any(|node| node.is_inline))
+  }
+
   /// Text inside a link: hidden text is counted as such, and text in a block
   /// nested in the link counts for the link.
   #[inline(never)]
   fn count_link_text(&mut self, up_to: usize, excluded: bool, text: &str) {
-    if !excluded && (self.text_run_has_text || !is_blank_link_text(text)) {
+    if !excluded && (self.text_run_has_text || !self.is_blank_link_run(text)) {
       if self.depth_map[TAG_A as usize] > 1
         || !self.stack[up_to..]
           .iter()
@@ -920,7 +935,7 @@ impl ConvertState {
       self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, &text);
     } else if self.depth_map[TAG_A as usize] > 0 && !self.text_run_has_text {
       // A later piece may be blank only because the cut left it whitespace.
-      self.text_run_has_text = !is_blank_link_text(&text);
+      self.text_run_has_text = !self.is_blank_link_run(&text);
     }
 
     // Recover String allocation

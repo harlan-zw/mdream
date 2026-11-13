@@ -825,6 +825,30 @@ describe.each(engines)('links $name', (engineConfig) => {
       .toBe('- Go [  \n  L](/x) now')
   })
 
+  // An inline element of the link writes its delimiters around any text but
+  // HTML white space, so a no-break space in it is text the label cannot
+  // replace, as an icon font's `<i class="fa">&nbsp;</i>`.
+  it.each([
+    ['<p><a href="/s" aria-label="Search"><i class="icon-search">&nbsp;</i></a>Next</p>', '[*\u00A0*](/s)Next', {}],
+    ['<p><a href="/s" aria-label="Search"><i class="icon-search">&nbsp;</i></a>Next</p>', 'Next', { format: 'text' as const }],
+    ['<p><a href="/s" aria-label="Search"><i class="icon-search">&nbsp;</i></a>Next</p>', '[*\u00A0*](/s)Next', { clean: true }],
+    ['<a href="https://twitter.com/x" title="Twitter"><i class="fa fa-twitter">&nbsp;</i></a>', '[*\u00A0*](https://twitter.com/x "Twitter")', {}],
+    ['<p><a href="/c" title="T"><b>&nbsp;</b></a>Next</p>', '[**\u00A0**](/c "T")Next', {}],
+    ['<p><a href="/c" title="T"><code>&nbsp;</code></a>Next</p>', '[`\u00A0`](/c "T")Next', {}],
+    ['<p><a href="/c" title="T"><code>&#x3000;</code></a>Next</p>', '[`　`](/c "T")Next', {}],
+    ['<p><a href="/c" title="T"><del>&nbsp;</del></a>Next</p>', '[~~\u00A0~~](/c "T")Next', {}],
+    ['<p><a href="/x" title="T"><span>&nbsp;</span></a>Next</p>', '[ ](/x "T")Next', {}],
+    ['<p><a href="/x" title="T"><span class="font-bold">&nbsp;</span></a>Next</p>', '[**\u00A0**](/x "T")Next', { plugins: { tailwind: true } }],
+    ['<p><a href="/s" aria-label="Search"><span hidden>h</span><i>&nbsp;</i></a>Next</p>', '[*\u00A0*](/s)Next', { plugins: { filter: {} } }],
+    ['<ul><li><a href="/x" aria-label="L"><kbd>&nbsp;</kbd><template><a href="/y" title="U"></a></template></a></li></ul>', '- [`\u00A0`](/x)', {}],
+    ['<h3>Title <a href="/x" title="T" aria-label="L"><em><em>&nbsp;</em></em> <p><pre> </pre></p></a></h3><p>b</p>', '### Title [**\u00A0**](/x "T")\n\nb', {}],
+    ['<figure><figcaption><a href="/x" aria-label="L"><i>&#11;</i></a></figcaption></figure>', '*[\u000B](/x)*', {}],
+    ['<p><a href="/s" aria-label="Search"><i>&#9;</i></a>Next</p>', '[Search](/s)Next', {}],
+  ])('keeps white space in an inline element of a link as text in %s', async (html, expected, options) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine, ...options })).toBe(expected)
+  })
+
   // A caption writes its opener in front of a link that starts it, and the
   // link's blank text still gives way to the label there.
   it.each([

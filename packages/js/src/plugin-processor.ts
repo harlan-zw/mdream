@@ -1,6 +1,6 @@
 import type { ElementNode, MdreamRuntimeState, NodeEvent, PluginState, TextNode, TransformPlugin } from './types'
 import { ELEMENT_NODE, NodeEventEnter, TAG_A, TAG_PRE, TEXT_NODE } from './const'
-import { countContentInEnclosingLink, isBlankLinkText } from './utils'
+import { countContentInEnclosingLink, isBlankLinkText, isBlankLinkTextIn } from './utils'
 
 /** Whether text shows nothing: empty, or only white space outside `<pre>`. */
 function isBlankText(value: string, inPreTag: boolean): boolean {
@@ -121,7 +121,7 @@ export function processPluginsForEvent(
       // The output rewrites the value before the parser counts link text, so
       // record here whether link text a hook changed is now blank.
       if (state.depthMap?.[TAG_A] && textNode.value !== text)
-        textNode.rewrittenBlank = isBlankText(textNode.value, (state.depthMap[TAG_PRE] || 0) > 0)
+        textNode.rewrittenBlank = !textNode.value || (!state.depthMap[TAG_PRE] && isBlankLinkTextIn(textNode.value, textNode.parent))
     }
   }
 

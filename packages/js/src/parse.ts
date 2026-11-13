@@ -68,7 +68,7 @@ import {
 } from './const'
 import { parserTagHandlers } from './parser-tags'
 import { resolveUrl } from './url'
-import { countContentInEnclosingLink, decodeHTMLEntities, hasNonWhitespace, isBlankLinkText, traverseUpToFirstBlockNode } from './utils'
+import { countContentInEnclosingLink, decodeHTMLEntities, hasNonWhitespace, isBlankLinkText, isBlankLinkTextIn, traverseUpToFirstBlockNode } from './utils'
 
 // The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
 const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
@@ -1687,7 +1687,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
   let hasText = false
   let wasBlank = false
   if (state.depthMap[TAG_A]) {
-    hasText = !isBlankLinkText(textNode.value)
+    hasText = !isBlankLinkTextIn(textNode.value, state.currentNode)
     wasBlank = !hasText && !inPreTag
   }
 
