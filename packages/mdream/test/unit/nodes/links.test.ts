@@ -728,6 +728,47 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { engine, format: 'html' })).toBe('<p>Go<a href="/cart"> Cart</a>now</p>')
   })
 
+  // Any white space is blank link text, not only U+0020: a decoded tab, line
+  // break, vertical tab, no-break or ideographic space after hidden content, or
+  // alone in a block of the link, leaves the link to its label like a space.
+  describe.each(['&#9;', '&#10;', '&#11;', '&#12;', '&#13;', '&nbsp;', '&#8201;', '&#12288;'])('blank %s', (blank) => {
+    it.each([
+      [`<p>Go <a href="/x" aria-label="L"><svg></svg>${blank}</a>Next</p>`, 'Go [L](/x) Next'],
+      [`<a href="/c" title="Contact us"><div>${blank}</div></a>`, '[Contact us](/c)'],
+      [`<p><a href="/c" title="T">${blank}</a>Next</p>`, '[T](/c) Next'],
+    ])('is blank link text in %s', async (html, expected) => {
+      const engine = await resolveEngine(engineConfig.engine)
+      expect(htmlToMarkdown(html, { engine })).toBe(expected)
+      expect(htmlToMarkdown(html, { engine, plugins: { filter: {} } })).toBe(expected)
+      expect(htmlToMarkdown(html, { engine, clean: true })).toBe(expected)
+      for (let width = 1; width <= html.length; width++) {
+        const input = new ReadableStream<string>({
+          start(controller) {
+            for (let offset = 0; offset < html.length; offset += width)
+              controller.enqueue(html.slice(offset, offset + width))
+            controller.close()
+          },
+        })
+        let markdown = ''
+        for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+          markdown += chunk
+        expect(markdown, `width=${width}`).toBe(expected)
+      }
+    })
+
+    it('is blank link text after hidden content', async () => {
+      const engine = await resolveEngine(engineConfig.engine)
+      expect(htmlToMarkdown(`<p>Go <a href="/x" aria-label="L"><span hidden>x</span>${blank}</a>Next</p>`, { engine, plugins: { filter: {} } }))
+        .toBe('Go [L](/x) Next')
+    })
+  })
+
+  it('keeps a hard break in the link before its label', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<p>Go <a href="/x" aria-label="L"><svg></svg><br></a>Next</p>', { engine }))
+      .toBe('Go [  \nL](/x)Next')
+  })
+
   // A blank between two children of a link is part of the content the label
   // replaces; only a blank after the last child moves past the link.
   it.each([

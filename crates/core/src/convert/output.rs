@@ -2552,7 +2552,7 @@ impl ConvertState {
     false
   }
 
-  /// Before a visible link label: drop the spaces, written or pending, that are
+  /// Before a visible link label: drop the blanks, written or pending, that are
   /// all the link text so far. They only spaced out hidden text, so the caller
   /// moves them past the link, as it does a `trailing_blank` the parser dropped.
   pub(crate) fn take_blank_link_text(&mut self, label: &str, trailing_blank: bool) -> bool {
@@ -2566,10 +2566,12 @@ impl ConvertState {
       return false;
     }
     let text_start = self.link.bracket_pos + 1;
-    let Some(text) = self.buffer.as_bytes().get(text_start..) else {
+    let Some(text) = self.buffer.get(text_start..) else {
       return false;
     };
-    if !text.iter().all(|&byte| byte == b' ')
+    // A hard break, as from `<br>`, is content of the link, not a blank.
+    if !is_blank_link_text(text)
+      || text.contains("  \n")
       || (text.is_empty() && !self.pending_inline_whitespace && !trailing_blank)
     {
       return false;

@@ -62,7 +62,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isBlankLinkText, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -1183,7 +1183,7 @@ function resetRetractedCaptionFrames(frames: number[] | undefined, count: number
 }
 
 /**
- * Before a visible link label: drop the spaces, written or pending, that are
+ * Before a visible link label: drop the blanks, written or pending, that are
  * all the link text so far. They only spaced out hidden text, so the caller
  * moves them past the link, as it does a `trailingBlank` the parser dropped.
  * A pending space a caption still owns goes before the caption's opener, which
@@ -1193,16 +1193,15 @@ function dropBlankLinkText(state: MarkdownState, openFragment: number, label: st
   const buffer = state.buffer
   if (openFragment < 0 || buffer[openFragment] !== '[' || !hasNonWhitespace(label))
     return false
-  let hasSpace = false
+  let text = ''
   for (let index = openFragment + 1; index < buffer.length; index++) {
     const fragment = buffer[index]!
-    for (let offset = 0; offset < fragment.length; offset++) {
-      if (fragment.charCodeAt(offset) !== 32)
-        return false
-      hasSpace = true
-    }
+    if (!isBlankLinkText(fragment))
+      return false
+    text += fragment
   }
-  if (!hasSpace && !(state.pendingInlineWhitespace && !captionOwnsSpace) && !trailingBlank)
+  // A hard break, as from `<br>`, is content of the link, not a blank.
+  if (text.includes('  \n') || (!text && !(state.pendingInlineWhitespace && !captionOwnsSpace) && !trailingBlank))
     return false
   state.outputPositions?.replace(openFragment + 1, buffer.length, [])
   buffer.length = openFragment + 1

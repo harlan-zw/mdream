@@ -15,6 +15,28 @@ pub(crate) const fn is_whitespace(c: u8) -> bool {
   (MASK >> c) & 1 == 1
 }
 
+/// Link text that shows nothing: only Unicode `White_Space`, the set
+/// `str::trim` drops, so a link clean mode would drop as empty takes its label
+/// first. `isBlankLinkText` in the JS engine has the same list.
+pub(crate) fn is_blank_link_text(text: &str) -> bool {
+  text.chars().all(|c| {
+    matches!(
+      c,
+      '\t'..='\r'
+        | ' '
+        | '\u{85}'
+        | '\u{a0}'
+        | '\u{1680}'
+        | '\u{2000}'..='\u{200a}'
+        | '\u{2028}'
+        | '\u{2029}'
+        | '\u{202f}'
+        | '\u{205f}'
+        | '\u{3000}'
+    )
+  })
+}
+
 const fn whitespace_and(extra: &[u8]) -> [bool; 256] {
   let mut table = [false; 256];
   let mut byte = 0u8;

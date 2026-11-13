@@ -263,6 +263,20 @@ export function getLanguageFromAttributes(attributes: ElementNode['attributes'] 
  * Whether a string contains any non-whitespace character (space, tab, LF, FF, CR).
  * Used to decide if a <pre>'s content warrants opening a fenced code block.
  */
+/**
+ * Link text that shows nothing: only Unicode `White_Space`, the set Rust's
+ * `str::trim` drops, so a link clean mode would drop as empty takes its label
+ * first. `is_blank_link_text` in Rust has the same list.
+ */
+export function isBlankLinkText(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    const c = value.charCodeAt(i)
+    if (c <= 32 ? c !== 32 && (c < 9 || c > 13) : c !== 0x85 && c !== 0xA0 && c !== 0x1680 && (c < 0x2000 || c > 0x200A) && c !== 0x2028 && c !== 0x2029 && c !== 0x202F && c !== 0x205F && c !== 0x3000)
+      return false
+  }
+  return true
+}
+
 export function hasNonWhitespace(value: string): boolean {
   for (let i = 0; i < value.length; i++) {
     const c = value.charCodeAt(i)

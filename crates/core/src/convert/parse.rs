@@ -556,7 +556,7 @@ impl ConvertState {
   /// nested in the link counts for the link.
   #[inline(never)]
   fn count_link_text(&mut self, up_to: usize, excluded: bool, text: &str) {
-    if !excluded && (self.text_run_has_text || !text.bytes().all(is_whitespace)) {
+    if !excluded && (self.text_run_has_text || !is_blank_link_text(text)) {
       if self.depth_map[TAG_A as usize] > 1
         || !self.stack[up_to..]
           .iter()
@@ -899,7 +899,7 @@ impl ConvertState {
       self.advance_text_node_counters(first_block_parent_index, excludes_text_nodes, &text);
     } else if self.depth_map[TAG_A as usize] > 0 && !self.text_run_has_text {
       // A later piece may be blank only because the cut left it whitespace.
-      self.text_run_has_text = !text.bytes().all(is_whitespace);
+      self.text_run_has_text = !is_blank_link_text(&text);
     }
 
     // Recover String allocation

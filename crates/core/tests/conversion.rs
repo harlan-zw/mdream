@@ -4484,6 +4484,72 @@ fn blank_after_excluded_link_content_moves_past_the_label() {
   );
 }
 
+/// Any white space is blank link text, not only U+0020: a decoded tab, line
+/// break, vertical tab, no-break or ideographic space after hidden content, or
+/// alone in a block of the link, leaves the link to its label like a space.
+#[test]
+fn any_white_space_is_blank_link_text() {
+  let filter = HtmlToMarkdownOptions {
+    plugins: Some(PluginConfig {
+      filter: Some(FilterConfig::default()),
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  let clean = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  for blank in [
+    "&#9;", "&#10;", "&#11;", "&#12;", "&#13;", "&nbsp;", "&#8201;", "&#12288;",
+  ] {
+    let cases = [
+      (
+        format!(r#"<p>Go <a href="/x" aria-label="L"><svg></svg>{blank}</a>Next</p>"#),
+        "Go [L](/x) Next",
+        true,
+      ),
+      (
+        format!(r#"<p>Go <a href="/x" aria-label="L"><span hidden>x</span>{blank}</a>Next</p>"#),
+        "Go [L](/x) Next",
+        false,
+      ),
+      (
+        format!(r#"<a href="/c" title="Contact us"><div>{blank}</div></a>"#),
+        "[Contact us](/c)",
+        true,
+      ),
+      (
+        format!(r#"<p><a href="/c" title="T">{blank}</a>Next</p>"#),
+        "[T](/c) Next",
+        true,
+      ),
+    ];
+    for (html, expected, without_filter) in cases {
+      assert_eq!(html_to_markdown(&html, filter.clone()), expected, "{html}");
+      if !without_filter {
+        continue;
+      }
+      assert_eq!(convert(&html), expected, "{html}");
+      assert_eq!(html_to_markdown(&html, clean.clone()), expected, "{html}");
+      for width in 1..=html.len() {
+        let mut stream = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = String::new();
+        for piece in html.as_bytes().chunks(width) {
+          output.push_str(&stream.process_chunk(std::str::from_utf8(piece).unwrap()));
+        }
+        output.push_str(&stream.finish());
+        assert_eq!(output, expected, "{html} width={width}");
+      }
+    }
+  }
+  // A hard break is content of the link, not a blank before its label.
+  assert_eq!(
+    convert(r#"<p>Go <a href="/x" aria-label="L"><svg></svg><br></a>Next</p>"#),
+    "Go [  \nL](/x)Next"
+  );
+}
+
 /// A blank the parser drops between two children of a link, as between two
 /// icons, is part of the content the label replaces: only a blank after the
 /// link's last child moves past the link.

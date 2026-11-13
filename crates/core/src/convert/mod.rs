@@ -2,8 +2,9 @@ use crate::consts::*;
 use crate::entities::decode_html_entities_into;
 use crate::scan::{
   AttrBudget, DiscardedCloseTag, DiscardedCommentState, PendingTagScan, TagCarry,
-  discarded_cdata_end, discarded_close_tag_end, discarded_comment_end, discarded_gt, is_whitespace,
-  process_comment_or_doctype, process_tag_attributes, resume_tag_attributes, tag_is_complete,
+  discarded_cdata_end, discarded_close_tag_end, discarded_comment_end, discarded_gt,
+  is_blank_link_text, is_whitespace, process_comment_or_doctype, process_tag_attributes,
+  resume_tag_attributes, tag_is_complete,
 };
 use crate::selector::{ParsedSelectorList, matches_selector_list, parse_css_selector_list};
 use crate::tags::get_tag_handler;

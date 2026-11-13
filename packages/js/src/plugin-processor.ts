@@ -1,19 +1,12 @@
 import type { ElementNode, MdreamRuntimeState, NodeEvent, PluginState, TextNode, TransformPlugin } from './types'
 import { ELEMENT_NODE, NodeEventEnter, TAG_A, TAG_PRE, TEXT_NODE } from './const'
-import { countContentInEnclosingLink } from './utils'
+import { countContentInEnclosingLink, isBlankLinkText } from './utils'
 
-/** Whether text shows nothing: empty, or only the parser's whitespace outside `<pre>`. */
+/** Whether text shows nothing: empty, or only white space outside `<pre>`. */
 function isBlankText(value: string, inPreTag: boolean): boolean {
   if (!value)
     return true
-  if (inPreTag)
-    return false
-  for (let i = 0; i < value.length; i++) {
-    const code = value.charCodeAt(i)
-    if (code !== 32 && code !== 9 && code !== 10 && code !== 12 && code !== 13)
-      return false
-  }
-  return true
+  return !inPreTag && isBlankLinkText(value)
 }
 
 /**
