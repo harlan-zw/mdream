@@ -216,6 +216,8 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<a href="/x">k<br><details></details></a><q>z</q>',
     '<ul><li><a href="/x">k<br><details></details></a><div>d</div></li></ul>',
     '<p><mark>h</mark><small><dd></dd><a> &#32;</a></small> Cc</p>',
+    '<h2>k<details><summary>s</summary></details><br><b>z</b></h2>',
+    '<h2><b>k<details><summary>s</summary></details></b><br>z</h2>',
   ], ['markdown']],
   'paragraph after a trimmed element in a list item': [[
     '<ul><li><span><span>Aa</span> </span><p>Bb</p></li></ul>',

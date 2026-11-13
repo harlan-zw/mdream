@@ -2690,6 +2690,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
 
+      // A raw `<br>` is content after a raw HTML block, so the pending
+      // boundary goes in front of it, as in Rust. A hard break is whitespace.
+      if (pendingRawHtmlBoundary && breakOutput)
+        finishRawHtmlBlock(breakOutput, true)
+
       const captionHasAnchor = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
         && captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 3] !== CAPTION_NO_ANCHOR

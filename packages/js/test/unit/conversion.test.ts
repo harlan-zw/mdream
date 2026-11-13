@@ -238,6 +238,9 @@ describe('raw HTML block before a closer', () => {
     ['<a href="/x">k<br><details></details></a><del>z</del>', '[k  \n<details></details>\n\n](/x)\n\n~~z~~'],
     // Text after the boundary starts its line too.
     ['<ul><li><a href="/x">k<br><details></details></a><div>d</div></li></ul>', '- [k  \n  <details></details>\n\n](/x)\n\n  d'],
+    // A raw `<br>` is content too, so the boundary goes in front of it.
+    ['<h2>k<details><summary>s</summary></details><br><b>z</b></h2>', '## k<details><summary>s</summary>\n\n</details>\n\n<br>**z**'],
+    ['<h2><b>k<details><summary>s</summary></details></b><br>z</h2>', '## **k<details><summary>s</summary>\n\n</details>\n\n**\n\n<br>z'],
   ])('keeps the closer on the line of the block: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
     for (const size of [1, 2, 3, 7]) {
