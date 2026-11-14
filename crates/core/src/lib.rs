@@ -841,6 +841,9 @@ mod fast_path_parity {
       "<p>one <span>two &amp; three</span> four <b>five</b> <span> </span>six</p>",
       "<p>a<span> </span>  b</p><div>  <span>   </span> </div>",
       "<main><p>x</p></main><main><span>y &amp;</span> z</main>",
+      // Excluded leading blanks.
+      "<h2><span hidden><img> </span> t</h2>",
+      "<li><a><img> <h2></a> t",
     ];
     for (name, options) in option_sets {
       for format in [OutputFormat::Markdown, OutputFormat::Text] {

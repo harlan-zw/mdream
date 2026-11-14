@@ -621,10 +621,13 @@ impl ConvertState {
 
     // Excluded text emits nothing, so the copy, the whitespace trim and the
     // entity decode would only build a string nothing reads. The counters
-    // still advance, as they do for emitted text.
+    // still advance, as they do for emitted text; a leading blank counts as
+    // dropped.
     if excludes_text_nodes {
       self.has_encoded_html_entity = false;
-      self.advance_text_node_counters(first_block_parent_index);
+      if !is_leading_blank {
+        self.advance_text_node_counters(first_block_parent_index);
+      }
       return;
     }
 
