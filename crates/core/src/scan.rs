@@ -655,6 +655,14 @@ fn walk_plain_attributes(bytes: &[u8], from: usize) -> PlainWalk {
   PlainWalk::Resume(boundary)
 }
 
+/// [`find_byte`] out of line on native. Inlined into
+/// [`walk_extracted_attributes`], it ran short of registers and rebuilt its
+/// constants every word: +4% on a long `src` value.
+#[cfg_attr(not(target_arch = "wasm32"), inline(never))]
+fn find_quote(hay: &[u8], quote: u8) -> Option<usize> {
+  find_byte(hay, quote)
+}
+
 /// [`walk_plain_attributes`] for the extracting scan: each well-formed
 /// `name="value"` or bare `name` goes straight to [`push_attr`]. A `Resume`
 /// position is always one where the tokenizer is in `State::Gap` with every
@@ -707,7 +715,7 @@ fn walk_extracted_attributes(
           return PlainWalk::Resume(name_start);
         };
         let value_start = i + 2;
-        let Some(offset) = find_byte(&bytes[value_start..], quote) else {
+        let Some(offset) = find_quote(&bytes[value_start..], quote) else {
           return PlainWalk::Resume(name_start);
         };
         let value_end = value_start + offset;
