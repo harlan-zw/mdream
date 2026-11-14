@@ -675,34 +675,32 @@ impl ConvertState {
     true
   }
 
+  // A parser also ends a line at CR, so a run after one can close the fence.
+  // A `split` searcher costs a call per line, which dominates on short lines.
   fn max_line_leading_run(value: &str, marker: u8, indent: &str) -> usize {
-    // A parser also ends a line at CR, so a run after one can close the fence.
-    // A char-set split matches byte by byte and costs more than the memchr-backed
-    // `\n` split on every fence body, so it runs only when a CR is present.
-    if value.contains('\r') {
-      Self::max_run_of_lines(value.split(['\n', '\r']), marker, indent)
-    } else {
-      Self::max_run_of_lines(value.split('\n'), marker, indent)
+    let bytes = value.as_bytes();
+    let indent = indent.as_bytes();
+    let mut max = 0;
+    let mut line_start = 0;
+    loop {
+      let mut i = line_start;
+      if bytes[i..].starts_with(indent) {
+        i += indent.len();
+      }
+      let spaces_end = bytes.len().min(i + 3);
+      while i < spaces_end && bytes[i] == b' ' {
+        i += 1;
+      }
+      let run_start = i;
+      while i < bytes.len() && bytes[i] == marker {
+        i += 1;
+      }
+      max = max.max(i - run_start);
+      match crate::scan::find_line_end(&bytes[i..]) {
+        Some(offset) => line_start = i + offset + 1,
+        None => return max,
+      }
     }
-  }
-
-  #[inline(always)]
-  fn max_run_of_lines<'a>(lines: impl Iterator<Item = &'a str>, marker: u8, indent: &str) -> usize {
-    lines
-      .map(|line| {
-        let line = line.strip_prefix(indent).unwrap_or(line);
-        let bytes = line.as_bytes();
-        let mut index = 0usize;
-        while index < bytes.len() && index < 3 && bytes[index] == b' ' {
-          index += 1;
-        }
-        bytes[index..]
-          .iter()
-          .take_while(|&&byte| byte == marker)
-          .count()
-      })
-      .max()
-      .unwrap_or(0)
   }
 
   #[cold]
@@ -8168,6 +8166,47 @@ mod tests {
           processor.state.code_span_closed_bytes,
           html.len()
         );
+      }
+    }
+  }
+
+  /// The `split(['\n', '\r'])` scan that `max_line_leading_run` replaced.
+  fn reference_max_line_leading_run(value: &str, marker: u8, indent: &str) -> usize {
+    value
+      .split(['\n', '\r'])
+      .map(|line| {
+        let bytes = line.strip_prefix(indent).unwrap_or(line).as_bytes();
+        let spaces = bytes.iter().take(3).take_while(|&&b| b == b' ').count();
+        bytes[spaces..].iter().take_while(|&&b| b == marker).count()
+      })
+      .max()
+      .unwrap_or(0)
+  }
+
+  // Every body up to seven bytes, alone and followed by a 9-byte line so that
+  // line ends also fall inside 8-byte words.
+  #[test]
+  fn fence_run_scan_matches_line_split() {
+    const ALPHABET: [u8; 6] = *b"`~ \n\ra";
+    let mut buf = Vec::new();
+    for len in 0..=7 {
+      for mut code in 0..ALPHABET.len().pow(len as u32) {
+        buf.clear();
+        for _ in 0..len {
+          buf.push(ALPHABET[code % ALPHABET.len()]);
+          code /= ALPHABET.len();
+        }
+        buf.extend_from_slice(b"abcdefgh\n");
+        for value in [&buf[..len], &buf[..]] {
+          let value = std::str::from_utf8(value).unwrap();
+          for indent in ["", " ", "  "] {
+            assert_eq!(
+              ConvertState::max_line_leading_run(value, b'`', indent),
+              reference_max_line_leading_run(value, b'`', indent),
+              "{value:?} indent={indent:?}"
+            );
+          }
+        }
       }
     }
   }

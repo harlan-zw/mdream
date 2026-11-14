@@ -126,6 +126,31 @@ pub(crate) fn find_byte(hay: &[u8], needle: u8) -> Option<usize> {
   rest.iter().position(|&b| b == needle).map(|p| offset + p)
 }
 
+/// First LF or CR, a word at a time like [`find_byte`]. The lowest hit of
+/// either test is exact, so the lowest of both is the first line end.
+#[inline(always)]
+pub(crate) fn find_line_end(hay: &[u8]) -> Option<usize> {
+  const LF: u64 = BYTE_ONES * b'\n' as u64;
+  const CR: u64 = BYTE_ONES * b'\r' as u64;
+  let (words, rest) = hay.as_chunks::<SWAR_WIDTH>();
+  let mut offset = 0usize;
+  for word in words {
+    let word = u64::from_le_bytes(*word);
+    let lf = word ^ LF;
+    let cr = word ^ CR;
+    let hits =
+      ((lf.wrapping_sub(BYTE_ONES) & !lf) | (cr.wrapping_sub(BYTE_ONES) & !cr)) & HIGH_BITS;
+    if hits != 0 {
+      return Some(offset + (hits.trailing_zeros() / u8::BITS) as usize);
+    }
+    offset += SWAR_WIDTH;
+  }
+  rest
+    .iter()
+    .position(|&b| b == b'\n' || b == b'\r')
+    .map(|p| offset + p)
+}
+
 /// [`find_byte`] for long runs such as script bodies: four words per step
 /// with one test, then `find_byte` places the match. Out of line and not for
 /// attribute values or short comments, where the wider step costs more than
