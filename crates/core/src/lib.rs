@@ -250,12 +250,15 @@ pub mod fuzz_bridge {
 mod stream_slack {
   //! An idle stream holds about what it still owes, not its high-water mark.
   use super::MarkdownStreamProcessor;
-  use crate::convert::{SLACK_FLOOR, STREAM_START_CAPACITY};
+  use crate::convert::{SLACK_FLOOR, SLACK_TRIGGER};
+
+  /// Most capacity a drained buffer with under `SLACK_FLOOR` live bytes keeps.
+  const IDLE_CAPACITY: usize = SLACK_TRIGGER * SLACK_FLOOR;
 
   #[test]
   fn output_buffer_shrinks_after_held_block_drains() {
     let mut processor = MarkdownStreamProcessor::new(Default::default());
-    let mut out = processor.process_chunk(&format!("<p><strong>{}", "x ".repeat(160_000)));
+    let mut out = processor.process_chunk(&format!("<p><strong>{}", "x ".repeat(320_000)));
     assert!(
       processor.state.buffer.capacity() > SLACK_FLOOR,
       "{}",
@@ -263,8 +266,7 @@ mod stream_slack {
     );
     out.push_str(&processor.process_chunk("</strong></p><p>after</p>"));
     assert!(
-      processor.state.buffer.capacity()
-        <= STREAM_START_CAPACITY.max(2 * processor.state.buffer.len()),
+      processor.state.buffer.capacity() <= IDLE_CAPACITY,
       "capacity {} for {} live bytes",
       processor.state.buffer.capacity(),
       processor.state.buffer.len()
@@ -281,7 +283,7 @@ mod stream_slack {
     processor.process_chunk(&format!("v>{}</div><sp", "y".repeat(256 * 1024)));
     assert_eq!(processor.buffer, "<sp");
     assert!(
-      processor.buffer.capacity() <= STREAM_START_CAPACITY.max(2 * processor.buffer.len()),
+      processor.buffer.capacity() <= IDLE_CAPACITY,
       "{}",
       processor.buffer.capacity()
     );
@@ -312,6 +314,18 @@ mod stream_slack {
       "{}",
       &out[out.len() - 30..]
     );
+  }
+
+  /// A drain after a block just above the floor keeps the capacity the next
+  /// block regrows to.
+  #[test]
+  fn block_above_floor_keeps_capacity_after_drain() {
+    let block = format!("<p>{}</p>", "word ".repeat(14_000));
+    let mut processor = MarkdownStreamProcessor::new(Default::default());
+    processor.process_chunk(&block);
+    processor.process_chunk(&block);
+    let capacity = processor.state.buffer.capacity();
+    assert!(capacity > SLACK_FLOOR, "{capacity}");
   }
 }
 

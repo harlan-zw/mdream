@@ -98,10 +98,10 @@ const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
 pub(crate) const STREAM_START_CAPACITY: usize = 4096;
 
 /// A drained stream buffer is shrunk once its capacity passes `SLACK_TRIGGER`
-/// times the live bytes, down to `SLACK_KEEP` times. Buffers under
-/// `SLACK_FLOOR` are left alone: a drain usually empties the buffer, and the
-/// next chunks would grow it back.
-const SLACK_TRIGGER: usize = 4;
+/// times the live bytes, down to `SLACK_KEEP` times. `SLACK_FLOOR` stands in
+/// for fewer live bytes: a drain usually empties the buffer, and shrinking
+/// near the size the next chunks grow it back to only reallocates.
+pub(crate) const SLACK_TRIGGER: usize = 4;
 const SLACK_KEEP: usize = 2;
 pub(crate) const SLACK_FLOOR: usize = 64 * 1024;
 
@@ -125,8 +125,8 @@ fn cdata_end(after_open: &str) -> Option<usize> {
 pub(crate) fn release_stream_slack(buffer: &mut String) {
   let len = buffer.len();
   let capacity = buffer.capacity();
-  if capacity > SLACK_FLOOR && capacity / SLACK_TRIGGER > len {
-    buffer.shrink_to(STREAM_START_CAPACITY.max(SLACK_KEEP * len));
+  if capacity / SLACK_TRIGGER > len.max(SLACK_FLOOR) {
+    buffer.shrink_to(SLACK_FLOOR.max(SLACK_KEEP * len));
   }
 }
 
