@@ -3,6 +3,7 @@ import type { ElementNode, EngineOptions, MdreamRuntimeState, NodeEvent, TextNod
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
+  isInsideRawHtmlBlock,
   MAX_TAG_ID,
   NO_SPACING,
   NodeEventEnter,
@@ -214,14 +215,16 @@ const WRITES_INLINE_MARKERS = new Uint8Array(MAX_TAG_ID + 1)
 for (const tagId of [TAG_STRONG, TAG_B, TAG_EM, TAG_I, TAG_DEL, TAG_S, TAG_STRIKE, TAG_INS, TAG_SUB, TAG_SUP, TAG_CODE, TAG_KBD, TAG_SAMP, TAG_VAR, TAG_MARK, TAG_U, TAG_CITE, TAG_DFN, TAG_Q])
   WRITES_INLINE_MARKERS[tagId] = 1
 
-// Parity with the Rust engine's `wrapper_emits_inline_markdown`.
-function wrapperWritesInlineMarkers(node: ElementNode, options: EngineOptions): boolean {
+// Parity with the Rust engine's `wrapper_emits_inline_markdown`. An anchor
+// writes `[` for an href, and inside a raw HTML block it keeps the raw tag, so
+// it counts as a marker writer there too.
+function wrapperWritesInlineMarkers(node: ElementNode, options: EngineOptions, depthMap: Uint16Array): boolean {
   const override = options.tagOverrides?.[node.name]
   if (override && typeof override !== 'string' && (override.enter || override.exit))
     return true
   const tagId = node.tagId
   if (tagId === TAG_A)
-    return node.attributes?.href !== undefined
+    return node.attributes?.href !== undefined || isInsideRawHtmlBlock(depthMap)
   return tagId !== undefined && tagId >= 0 && WRITES_INLINE_MARKERS[tagId] === 1
 }
 
@@ -250,7 +253,7 @@ function newlineConfig(node: ElementNode, depthMap: Uint16Array, options: Engine
       // Under one wrapper that writes no markers a heading still closes its
       // block, as in Rust. In a table cell the newline would end the row.
       if (heading && !closesBlock && !depthMap[TAG_TD] && !depthMap[TAG_TH]
-        && !wrapperWritesInlineMarkers(parent, options)) {
+        && !wrapperWritesInlineMarkers(parent, options, depthMap)) {
         closesBlock = true
         parent = parent.parent
         continue

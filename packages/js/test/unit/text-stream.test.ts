@@ -152,6 +152,17 @@ describe('heading inside a wrapper that writes no markers', () => {
     ['<label><small><h1>y</h1>B</small></label>', 'y B'],
     ['<table><tr><td><label><h1>y</h1>B</label></td></tr></table>', 'y B'],
     ['<ul><li><label><h1>y</h1>B</label></li></ul>', 'y B'],
+    // An anchor inside a raw HTML block keeps its raw tag, so it writes markers
+    // there and the heading stays on its line, as in Rust.
+    ['<details><a><h1>y</h1>B</a></details>', 'y B'],
+    ['<details><div><a><h1>y</h1>B</a></div></details>', 'y B'],
+    ['<summary><a><h1>y</h1>B</a></summary>', 'y B'],
+    ['<address><a><h1>y</h1>B</a></address>', 'y B'],
+    ['<dl><dd><a><h1>y</h1>B</a></dd></dl>', 'y B'],
+    ['<details><a name="n"><h2>y</h2> B</a></details>', 'y B'],
+    // Outside a raw block that anchor writes nothing, so the heading closes its
+    // block, as a marker-less wrapper next to it still does.
+    ['<details><label><h1>y</h1>B</label></details>', 'y\n\nB'],
   ])('closes the block as Rust does: %s', async (html, expected) => {
     expect(htmlToText(html)).toBe(expected)
     for (let chunkSize = 1; chunkSize <= html.length; chunkSize++) {

@@ -82,6 +82,14 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<label><small><h1>y</h1>B</small></label>',
     '<table><tr><td><label><h1>y</h1>B</label></td></tr></table>',
     '<ul><li><label><h1>y</h1>B</label></li></ul>',
+    // An anchor inside a raw HTML block keeps its raw tag, so it writes markers
+    // there and the heading stays on its line.
+    '<details><a><h1>y</h1>B</a></details>',
+    '<details><div><a><h1>y</h1>B</a></div></details>',
+    '<summary><a><h1>y</h1>B</a></summary>',
+    '<address><a><h1>y</h1>B</a></address>',
+    '<dl><dd><a><h1>y</h1>B</a></dd></dl>',
+    '<details><label><h1>y</h1>B</label></details>',
   ], ['text']],
   'block boundary trims the whole trailing space run': [
     '<ul><li><br></li><li>b</li></ul>',
