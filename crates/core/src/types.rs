@@ -173,7 +173,15 @@ impl Attributes {
 fn write_attribute_value(buffer: &mut String, value: Option<&str>) {
   match value {
     Some(value) => {
-      reset_buffer(buffer, value.len());
+      // A slot is reused across elements; rounding a value it keeps up keeps a
+      // slightly longer one from replacing it again.
+      let len = value.len();
+      if buffer.capacity() < len {
+        let keep = len <= RETAINED_VALUE_CAPACITY;
+        replace_buffer(buffer, if keep { len.next_power_of_two() } else { len });
+      } else {
+        buffer.clear();
+      }
       decode_html_attribute_entities_into(value, buffer);
     }
     None => buffer.clear(),
