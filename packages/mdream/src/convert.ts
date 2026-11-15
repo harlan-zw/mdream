@@ -47,6 +47,8 @@ const utf8 = new TextEncoder()
  * at a time cost within measurement noise; smaller chunks were slower.
  */
 const WASM_CHUNK_BYTES = 16 * 1024
+const WASM_CHUNK_CODE_UNITS = 16 * 1024
+const MAX_SINGLE_CHUNK_CODE_UNITS = Math.floor(WASM_CHUNK_BYTES / 3)
 
 export interface WasmStream {
   processChunk: (chunk: string) => string
@@ -76,9 +78,29 @@ export function convertWasm(
       markdown += stream.processChunk(String.fromCharCode(0xFEFF))
       html = html.slice(1)
     }
-    const bytes = utf8.encode(html)
-    for (let start = 0; start < bytes.length; start += WASM_CHUNK_BYTES)
-      markdown += stream.processChunkBytes(bytes.subarray(start, start + WASM_CHUNK_BYTES))
+    if (html.length <= MAX_SINGLE_CHUNK_CODE_UNITS) {
+      const bytes = utf8.encode(html)
+      if (bytes.length)
+        markdown += stream.processChunkBytes(bytes)
+    }
+    else {
+      const bytes = new Uint8Array(WASM_CHUNK_BYTES)
+      let start = 0
+
+      while (start < html.length) {
+        let end = Math.min(start + WASM_CHUNK_CODE_UNITS, html.length)
+        if (end < html.length) {
+          const lastCodeUnit = html.charCodeAt(end - 1)
+          const nextCodeUnit = html.charCodeAt(end)
+          if (lastCodeUnit >= 0xD800 && lastCodeUnit <= 0xDBFF && nextCodeUnit >= 0xDC00 && nextCodeUnit <= 0xDFFF)
+            end--
+        }
+
+        const { read, written } = utf8.encodeInto(html.slice(start, end), bytes)
+        markdown += stream.processChunkBytes(bytes.subarray(0, written))
+        start += read
+      }
+    }
     markdown += stream.finish()
     return { ...stream.takeData(), markdown }
   }

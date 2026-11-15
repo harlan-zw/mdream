@@ -65,6 +65,7 @@ async function collect(stream: AsyncIterable<string>): Promise<string> {
 }
 
 const PAGE = '<html><head><title>Page</title><meta name="description" content="About"></head><body><nav>Menu</nav><main><h1>Hello</h1><form>Sign up</form><p class="font-bold">Bold</p><a href="/a">A</a><x-note>Note</x-note></main><footer>Footer</footer></body></html>'
+const WASM_CHUNK_CODE_UNITS = 16 * 1024
 
 const optionCases: [string, Partial<MdreamOptions>][] = [
   ['minimal', { minimal: true }],
@@ -99,6 +100,11 @@ describe.each(entries)('$name entry', ({ name, convert, stream }) => {
     ['a lone surrogate', '<p>a\uD83Cb</p><p>c\uDF89</p>'],
     ['a leading BOM', `${String.fromCharCode(0xFEFF)}<p>x</p>`],
   ])('converts %s like the Node entry', async (_, html) => {
+    expect(await convert(html, {}), name).toBe(node.htmlToMarkdown(html, {}))
+  })
+
+  it('keeps a surrogate pair intact across an input chunk boundary', async () => {
+    const html = `<p>${'a'.repeat(WASM_CHUNK_CODE_UNITS - 4)}🎉tail</p>`
     expect(await convert(html, {}), name).toBe(node.htmlToMarkdown(html, {}))
   })
 
