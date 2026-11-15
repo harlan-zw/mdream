@@ -5709,27 +5709,27 @@ impl ConvertState {
   /// `<li>`, outermost first. Quote markers are never part of it. A rendered
   /// blockquote buffers its content and prefixes every line when it closes,
   /// and one the filter or a literal override dropped writes no `>` at all.
-  fn continuation_prefix(&self) -> String {
-    // Only `<li>` contributes, so with none open there is nothing to walk and
-    // nothing to allocate.
+  fn continuation_prefix(&self) -> Cow<'static, str> {
+    // Only `<li>` contributes, so with none open there is nothing to walk.
     if plain_text!(self) || self.depth_map[TAG_LI as usize] == 0 {
-      return String::new();
+      return Cow::Borrowed("");
     }
 
-    let mut p = String::new();
+    let mut width = 0usize;
     let mut li_idx = 0usize;
     for node in &self.stack {
       if node.tag_id == Some(TAG_LI) {
         // Each open <li> contributes its marker-width of spaces, in
         // the same order they were pushed onto list_indent_widths.
-        let w = self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
-        for _ in 0..w {
-          p.push(' ');
-        }
+        width += self.list_indent_widths.get(li_idx).copied().unwrap_or(2) as usize;
         li_idx += 1;
       }
     }
-    p
+    if width <= MAX_BORROWED_INDENT {
+      Cow::Borrowed(&INDENTED_BULLET[..width])
+    } else {
+      Cow::Owned(" ".repeat(width))
+    }
   }
 
   fn flush_list_rule(&mut self) {
