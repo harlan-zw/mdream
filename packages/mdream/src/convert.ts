@@ -47,8 +47,11 @@ const utf8 = new TextEncoder()
  * at a time cost within measurement noise; smaller chunks were slower.
  */
 const WASM_CHUNK_BYTES = 16 * 1024
-const WASM_CHUNK_CODE_UNITS = 16 * 1024
-const MAX_SINGLE_CHUNK_CODE_UNITS = Math.floor(WASM_CHUNK_BYTES / 3)
+/**
+ * Inputs up to this size convert in one call: below it, setting up a stream
+ * costs more than it saves, and the copy stays under 1 KiB.
+ */
+const WASM_ONE_SHOT_MAX = 256
 
 export interface WasmStream {
   processChunk: (chunk: string) => string
@@ -58,6 +61,14 @@ export interface WasmStream {
   free: () => void
 }
 
+/** The bindings of one WASM instance a conversion may use. */
+export interface WasmEngine {
+  oneShot: (html: string, napiOpts: HtmlToMarkdownOptions) => MdreamNapiResult
+  /** Only the entries that take bytes pass it; without it, bytes stream. */
+  bytes?: (html: Uint8Array, napiOpts: HtmlToMarkdownOptions) => string
+  Stream: new (napiOpts: HtmlToMarkdownOptions) => WasmStream
+}
+
 /**
  * One-shot conversion on a WASM engine, through a stream. WASM memory never
  * shrinks, so it holds one chunk of UTF-8 input and the undrained output,
@@ -65,44 +76,47 @@ export interface WasmStream {
  * at three bytes per UTF-16 unit once it holds non-ASCII text. A stream joins
  * to the same output as one-shot conversion.
  */
-export function convertWasm(
-  html: string,
-  napiOpts: HtmlToMarkdownOptions,
-  Stream: new (napiOpts: HtmlToMarkdownOptions) => WasmStream,
-): MdreamNapiResult {
-  const stream = new Stream(napiOpts)
-  try {
+export function convertWasm(html: string, napiOpts: HtmlToMarkdownOptions, engine: WasmEngine): MdreamNapiResult {
+  if (html.length <= WASM_ONE_SHOT_MAX)
+    return engine.oneShot(html, napiOpts)
+  return withWasmStream(engine, napiOpts, (stream) => {
     let markdown = ''
     // Byte chunks drop a leading BOM as `TextDecoder` does; string input keeps it.
     if (html.charCodeAt(0) === 0xFEFF) {
       markdown += stream.processChunk(String.fromCharCode(0xFEFF))
       html = html.slice(1)
     }
-    if (html.length <= MAX_SINGLE_CHUNK_CODE_UNITS) {
-      const bytes = utf8.encode(html)
-      if (bytes.length)
-        markdown += stream.processChunkBytes(bytes)
+    const bytes = new Uint8Array(WASM_CHUNK_BYTES)
+    for (let start = 0; start < html.length;) {
+      // Every UTF-16 unit takes at least one byte, so the units before a slice's
+      // last leave at most one byte free. `encodeInto` stops at a code point that
+      // does not fit, so the high half of a surrogate pair a slice cuts is
+      // encoded with its low half in the next slice rather than alone.
+      const { read, written } = utf8.encodeInto(html.slice(start, start + WASM_CHUNK_BYTES), bytes)
+      markdown += stream.processChunkBytes(bytes.subarray(0, written))
+      start += read
     }
-    else {
-      const bytes = new Uint8Array(WASM_CHUNK_BYTES)
-      let start = 0
+    return { markdown: markdown + stream.finish(), ...stream.takeData() }
+  })
+}
 
-      while (start < html.length) {
-        let end = Math.min(start + WASM_CHUNK_CODE_UNITS, html.length)
-        if (end < html.length) {
-          const lastCodeUnit = html.charCodeAt(end - 1)
-          const nextCodeUnit = html.charCodeAt(end)
-          if (lastCodeUnit >= 0xD800 && lastCodeUnit <= 0xDBFF && nextCodeUnit >= 0xDC00 && nextCodeUnit <= 0xDFFF)
-            end--
-        }
+/** Byte conversion on a WASM engine; a large input streams as `convertWasm` does. */
+export function convertWasmBytes(html: Uint8Array, napiOpts: HtmlToMarkdownOptions, engine: WasmEngine): string {
+  if (html.length <= WASM_ONE_SHOT_MAX && engine.bytes)
+    return engine.bytes(html, napiOpts)
+  return withWasmStream(engine, napiOpts, (stream) => {
+    let markdown = ''
+    // The stream carries a code point split across chunks to the next one.
+    for (let start = 0; start < html.length; start += WASM_CHUNK_BYTES)
+      markdown += stream.processChunkBytes(html.subarray(start, start + WASM_CHUNK_BYTES))
+    return markdown + stream.finish()
+  })
+}
 
-        const { read, written } = utf8.encodeInto(html.slice(start, end), bytes)
-        markdown += stream.processChunkBytes(bytes.subarray(0, written))
-        start += read
-      }
-    }
-    markdown += stream.finish()
-    return { ...stream.takeData(), markdown }
+function withWasmStream<T>(engine: WasmEngine, napiOpts: HtmlToMarkdownOptions, use: (stream: WasmStream) => T): T {
+  const stream = new engine.Stream(napiOpts)
+  try {
+    return use(stream)
   }
   finally {
     // After a panic the instance has aborted; the panic is the error to report.

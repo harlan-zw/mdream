@@ -2,6 +2,7 @@ import type { MdreamOptions } from '../../src'
 import { describe, expect, it, vi } from 'vitest'
 import * as browserStub from '../../src/browser-stub.js'
 import * as browser from '../../src/browser.js'
+import { convertWasm } from '../../src/convert.js'
 import * as edge from '../../src/edge.js'
 import * as node from '../../src/index.js'
 import * as wasm from '../../src/wasm.js'
@@ -65,7 +66,9 @@ async function collect(stream: AsyncIterable<string>): Promise<string> {
 }
 
 const PAGE = '<html><head><title>Page</title><meta name="description" content="About"></head><body><nav>Menu</nav><main><h1>Hello</h1><form>Sign up</form><p class="font-bold">Bold</p><a href="/a">A</a><x-note>Note</x-note></main><footer>Footer</footer></body></html>'
-const WASM_CHUNK_CODE_UNITS = 16 * 1024
+const WASM_CHUNK = 16 * 1024
+const MANY_CHUNKS = '<p>pad</p>'.repeat(4000)
+const PADDINGS: [string, string][] = [['in one call', ''], ['in many chunks', MANY_CHUNKS]]
 
 const optionCases: [string, Partial<MdreamOptions>][] = [
   ['minimal', { minimal: true }],
@@ -93,22 +96,25 @@ describe.each(entries)('$name entry', ({ name, convert, stream }) => {
     expect(await convert(PAGE, options), name).toBe(node.htmlToMarkdown(PAGE, options))
   })
 
-  // The WASM entries stream UTF-8 bytes; a lone surrogate and a BOM must
-  // convert as they do from a string.
   it.each([
     ['non-ASCII text', '<p>Ünïcödé — 日本語 🎉</p>'],
     ['a lone surrogate', '<p>a\uD83Cb</p><p>c\uDF89</p>'],
     ['a leading BOM', `${String.fromCharCode(0xFEFF)}<p>x</p>`],
-  ])('converts %s like the Node entry', async (_, html) => {
+  ])('converts %s in many chunks like the Node entry', async (_, text) => {
+    const html = text + MANY_CHUNKS
     expect(await convert(html, {}), name).toBe(node.htmlToMarkdown(html, {}))
+  })
+
+  it.each(PADDINGS)('drops an NBSP-only link %s like the Node entry', async (_, padding) => {
+    const html = `${padding}<ul><li><ul><li><a href="">&nbsp;</a></li></ul></li></ul>`
+    expect(await convert(html, { clean: true }), name).toBe(node.htmlToMarkdown(html, { clean: true }))
   })
 
   it('keeps a surrogate pair intact across an input chunk boundary', async () => {
-    const html = `<p>${'a'.repeat(WASM_CHUNK_CODE_UNITS - 4)}🎉tail</p>`
+    const html = `<p>${'a'.repeat(WASM_CHUNK - 4)}🎉tail</p>`
     expect(await convert(html, {}), name).toBe(node.htmlToMarkdown(html, {}))
   })
 
-  // The WASM entries pass a page in many chunks.
   it.each(optionCases)('converts a page of many chunks with %s like the Node entry', async (_, options) => {
     const big = PAGE.replace('<p class="font-bold">Bold</p>', '<p>Ünïcödé — 日本語 🎉 <a href="/b">b</a></p>'.repeat(3000))
     expect(new TextEncoder().encode(big).length).toBeGreaterThan(128 * 1024)
@@ -136,6 +142,39 @@ describe.each(entries)('$name entry', ({ name, convert, stream }) => {
     expect(markdown).toBe(node.htmlToMarkdown(PAGE, { minimal: true }))
     expect(frontmatter).toHaveBeenCalledWith({ title: 'Page', description: 'About' })
     expect(link).toHaveBeenCalledOnce()
+  })
+})
+
+describe('wasm entry', () => {
+  it('converts a small input without a stream', () => {
+    const engine = {
+      oneShot: () => ({ markdown: '# one-shot' }),
+      Stream: class {
+        constructor() {
+          throw new Error('built a stream')
+        }
+      } as never,
+    }
+    expect(convertWasm('<h1>Hi</h1>', {} as never, engine).markdown).toBe('# one-shot')
+  })
+
+  it('returns the Markdown first in the result, as the one-shot binding does', () => {
+    const big = `${PAGE}${'<p>pad</p>'.repeat(100)}`
+    expect(Object.keys(wasm.htmlToMarkdownResult(big, { frontmatter: true }))).toEqual(['markdown', 'frontmatter'])
+  })
+
+  it.each([
+    ['a code point', [0xF0, 0x9F, 0x8E, 0x89]],
+    ['an invalid sequence', [0xE6, 0x97, 0xFF, 0xC3]],
+  ])('converts bytes with %s across a chunk boundary like the Node entry', (_, cut) => {
+    const encoder = new TextEncoder()
+    const head = encoder.encode(`\uFEFF<p>${'a'.repeat(WASM_CHUNK - 9)}`)
+    const tail = encoder.encode(`tail</p>${'<p>pad</p>'.repeat(4000)}`)
+    const bytes = new Uint8Array([...head, ...cut, ...tail])
+    for (const offset of [0, 1, 2, 3]) {
+      const shifted = bytes.subarray(offset)
+      expect(wasm.htmlToMarkdownBytes(shifted)).toBe(node.htmlToMarkdown(new TextDecoder().decode(shifted)))
+    }
   })
 })
 

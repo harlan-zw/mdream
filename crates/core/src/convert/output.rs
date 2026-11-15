@@ -1607,6 +1607,8 @@ impl ConvertState {
         self.link.starts_at_hard_break =
           self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
       }
+      self.link.empty_text_pending =
+        emitted_bracket && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
@@ -1615,8 +1617,6 @@ impl ConvertState {
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
           });
-        self.link.empty_text_pending =
-          emitted_bracket && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         self.link.hold_forever = self.link.pins_output;
         self.link.hold_released = !emitted_bracket;
         self.link.url_max_len = href.map_or(0, |href| {
@@ -2393,10 +2393,14 @@ impl ConvertState {
         self.link.starts_at_hard_break =
           self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
       }
+      let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
+      // One-shot conversion sets this too: until visible text arrives, the close
+      // may drop the link, so the item marker guard must not count its `[`.
+      self.link.empty_text_pending =
+        has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
       // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
       // `max_node_bytes` has to charge what the link holds back.
       if self.streaming || self.options.max_node_bytes != 0 {
-        let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = has_rewrite_anchor
           && href.is_some_and(|href| {
@@ -2404,8 +2408,6 @@ impl ConvertState {
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
           });
-        self.link.empty_text_pending =
-          has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
         if self.streaming {
           self.link.hold_forever = self.link.pins_output;
           self.link.hold_released = !has_rewrite_anchor;

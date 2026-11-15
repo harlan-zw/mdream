@@ -1,6 +1,6 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import type { MdreamOptions } from './index.js'
-import { __mdreamTakePanicMessage, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
+import { __mdreamTakePanicMessage, htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
 import { convertResult, convertWasm } from './convert.js'
 import { wasmPanicError } from './wasm-panic.js'
 
@@ -18,9 +18,11 @@ declare global {
   }
 }
 
+const engine = { oneShot: _htmlToMarkdownResult, Stream: _MarkdownStream }
+
 function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResult {
   try {
-    return convertWasm(html, napiOpts, _MarkdownStream)
+    return convertWasm(html, napiOpts, engine)
   }
   catch (error) {
     throw wasmPanicError(error, __mdreamTakePanicMessage)
