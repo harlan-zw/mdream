@@ -6282,9 +6282,7 @@ impl ConvertState {
       TAG_SUB => Some(Cow::Borrowed("</sub>")),
       TAG_SUP => Some(Cow::Borrowed("</sup>")),
       TAG_INS => Some(Cow::Borrowed("</ins>")),
-      TAG_A if self.in_raw_html_block() => {
-        self.html_element_output(node, false, true).map(Cow::Owned)
-      }
+      TAG_A if self.in_raw_html_block() => self.html_anchor_close(node).map(Cow::Borrowed),
       TAG_CODE => {
         if self.depth_map[TAG_PRE as usize] > 0 {
           // Raw <code> close inside a table cell (issue #147).

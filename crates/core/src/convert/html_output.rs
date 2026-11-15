@@ -149,6 +149,13 @@ impl ConvertState {
     push_escaped(self.html_output_mut(), value, false);
   }
 
+  /// The closing `</a>` of [`Self::html_element_output`], borrowed: it is kept
+  /// under the same href check as the opening tag.
+  pub(super) fn html_anchor_close(&self, node: &ElementNode) -> Option<&'static str> {
+    let href = node.attributes.get_bit(ATTR_HREF)?;
+    self.resolve_html_url(href, false).map(|_| "</a>")
+  }
+
   pub(super) fn html_element_output(
     &self,
     node: &ElementNode,
