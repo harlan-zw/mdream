@@ -114,6 +114,17 @@ describe.each(engines)('$name MarkdownStream wrapper', ({ make, panicMessage, st
     expect(out).toBe('chunk:<p>x</p>')
     expect(control.freed).toBe(1)
   })
+
+  it('frees the binding stream when the source is already locked', async () => {
+    control.freed = 0
+    const html = new ReadableStream<string>({ start() {} })
+    html.getReader()
+    await expect(async () => {
+      for await (const chunk of streamHtml(html))
+        void chunk
+    }).rejects.toThrow(TypeError)
+    expect(control.freed).toBe(1)
+  })
 })
 
 // build-wasm-edge.mjs moves the glue's `Symbol.dispose` hook into the class

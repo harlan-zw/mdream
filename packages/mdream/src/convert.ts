@@ -146,6 +146,14 @@ export interface PumpOptions {
   mapError?: (error: unknown) => unknown
 }
 
+/** Frees the engine stream; a binding whose instance is gone must not mask the pump's error. */
+function freeStream(stream: EngineStream): void {
+  try {
+    stream.free?.()
+  }
+  catch {}
+}
+
 /**
  * Feeds `htmlStream` through an engine stream, yields the Markdown, then runs
  * the callbacks once the whole document is read.
@@ -156,9 +164,10 @@ export async function* pumpStream(
   callbacks: Callbacks,
   { mapError = error => error }: PumpOptions = {},
 ): AsyncIterable<string> {
-  const reader = htmlStream.getReader()
   const decoder = stream.processChunkBytes ? undefined : new TextDecoder()
+  let reader: ReadableStreamDefaultReader<Uint8Array | string> | undefined
   try {
+    reader = htmlStream.getReader()
     while (true) {
       const { done, value } = await reader.read()
       if (done)
@@ -187,10 +196,7 @@ export async function* pumpStream(
     throw mapError(error)
   }
   finally {
-    reader.releaseLock()
-    try {
-      stream.free?.()
-    }
-    catch {}
+    freeStream(stream)
+    reader?.releaseLock()
   }
 }
