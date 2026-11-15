@@ -23,6 +23,8 @@ export interface EngineStream {
   processChunkBytes?: (chunk: Uint8Array) => string
   finish: () => string
   takeData: () => PluginData
+  /** Frees the engine stream; WASM streams otherwise wait for GC. */
+  free?: () => void
 }
 
 /** Calls the frontmatter callback and extraction handlers with what a conversion collected. */
@@ -186,5 +188,9 @@ export async function* pumpStream(
   }
   finally {
     reader.releaseLock()
+    try {
+      stream.free?.()
+    }
+    catch {}
   }
 }

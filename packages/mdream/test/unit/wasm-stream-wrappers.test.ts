@@ -4,7 +4,7 @@ import { MarkdownStream as BrowserMarkdownStream, streamHtmlToMarkdown as browse
 import { MarkdownStream as EdgeMarkdownStream, streamHtmlToMarkdown as edgeStream } from '../../src/edge.js'
 
 const { control, BindingMarkdownStream } = vi.hoisted(() => {
-  const control = { failProcessChunkBytes: false }
+  const control = { failProcessChunkBytes: false, freed: 0 }
 
   class BindingMarkdownStream {
     // wasm-bindgen encodes a string argument to UTF-8, so a lone surrogate
@@ -21,6 +21,10 @@ const { control, BindingMarkdownStream } = vi.hoisted(() => {
 
     finish(): string {
       return ''
+    }
+
+    free(): void {
+      control.freed++
     }
   }
 
@@ -94,6 +98,21 @@ describe.each(engines)('$name MarkdownStream wrapper', ({ make, panicMessage, st
     for await (const chunk of streamHtml(html))
       out += chunk
     expect(out).toBe('chunk:<chunk:pchunk:>chunk:chunk:🎉chunk:<chunk:/chunk:pchunk:>')
+  })
+
+  it('frees the binding stream when the source ends', async () => {
+    control.freed = 0
+    const html = new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue('<p>x</p>')
+        controller.close()
+      },
+    })
+    let out = ''
+    for await (const chunk of streamHtml(html))
+      out += chunk
+    expect(out).toBe('chunk:<p>x</p>')
+    expect(control.freed).toBe(1)
   })
 })
 

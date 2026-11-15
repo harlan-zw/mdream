@@ -132,5 +132,6 @@ export async function* streamHtmlToMarkdown(
       return held ? stream.processChunk(held) + stream.finish() : stream.finish()
     },
     takeData: () => stream.takeData(),
+    free: () => stream.free(),
   }, htmlStream, resolved, { mapError: error => wasmPanicError(error, __mdreamTakePanicMessage) })
 }
