@@ -3,10 +3,9 @@ import type { MdreamOptions } from './index.js'
 import type { ResolvedOptions } from './resolve-options.js'
 import {
   htmlToMarkdownBytes as _htmlToMarkdownBytes,
-  htmlToMarkdownResult as _htmlToMarkdownResult,
   MarkdownStream as _MarkdownStream,
 } from '../wasm/mdream_edge.js'
-import { convertResult, deliverPluginData } from './convert.js'
+import { convertResult, convertWasm, deliverPluginData } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 
 // `mdream/wasm`: the wasm-bindgen build for manual initialization. Await the
@@ -16,7 +15,7 @@ export type { InitInput, InitOutput, SyncInitInput } from '../wasm/mdream_edge.j
 export { default, initSync } from '../wasm/mdream_edge.js'
 
 export function htmlToMarkdownResult(html: string, options: Partial<MdreamOptions> = {}): MdreamNapiResult {
-  return convertResult(_htmlToMarkdownResult, html, options)
+  return convertResult((text, napiOpts) => convertWasm(text, napiOpts, _MarkdownStream), html, options)
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {

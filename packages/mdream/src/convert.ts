@@ -39,6 +39,58 @@ function hasCallbacks({ frontmatterCallback, extractionHandlers }: Callbacks): b
   return !!frontmatterCallback || !!extractionHandlers
 }
 
+const utf8 = new TextEncoder()
+
+/**
+ * Input bytes a WASM conversion passes in per call. On a fresh instance,
+ * 16 KiB grew linear memory by about half as much as 64 KiB per large page,
+ * at a time cost within measurement noise; smaller chunks were slower.
+ */
+const WASM_CHUNK_BYTES = 16 * 1024
+
+export interface WasmStream {
+  processChunk: (chunk: string) => string
+  processChunkBytes: (chunk: Uint8Array) => string
+  finish: () => string
+  takeData: () => Omit<MdreamNapiResult, 'markdown'>
+  free: () => void
+}
+
+/**
+ * One-shot conversion on a WASM engine, through a stream. WASM memory never
+ * shrinks, so it holds one chunk of UTF-8 input and the undrained output,
+ * not the whole input and output; a string argument would also be copied in
+ * at three bytes per UTF-16 unit once it holds non-ASCII text. A stream joins
+ * to the same output as one-shot conversion.
+ */
+export function convertWasm(
+  html: string,
+  napiOpts: HtmlToMarkdownOptions,
+  Stream: new (napiOpts: HtmlToMarkdownOptions) => WasmStream,
+): MdreamNapiResult {
+  const stream = new Stream(napiOpts)
+  try {
+    let markdown = ''
+    // Byte chunks drop a leading BOM as `TextDecoder` does; string input keeps it.
+    if (html.charCodeAt(0) === 0xFEFF) {
+      markdown += stream.processChunk(String.fromCharCode(0xFEFF))
+      html = html.slice(1)
+    }
+    const bytes = utf8.encode(html)
+    for (let start = 0; start < bytes.length; start += WASM_CHUNK_BYTES)
+      markdown += stream.processChunkBytes(bytes.subarray(start, start + WASM_CHUNK_BYTES))
+    markdown += stream.finish()
+    return { ...stream.takeData(), markdown }
+  }
+  finally {
+    // After a panic the instance has aborted; the panic is the error to report.
+    try {
+      stream.free()
+    }
+    catch {}
+  }
+}
+
 /** Resolves `options`, converts with the engine binding, and runs the callbacks. */
 export function convertResult(
   convert: (html: string, napiOpts: HtmlToMarkdownOptions) => MdreamNapiResult,

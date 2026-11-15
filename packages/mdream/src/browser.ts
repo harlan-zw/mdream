@@ -1,8 +1,8 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import type { MdreamOptions } from './index.js'
 import type { ResolvedOptions } from './resolve-options.js'
-import init, { __mdreamTakePanicMessage, htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream } from '../wasm/mdream_edge.js'
-import { convertResult, deliverPluginData, pumpStream } from './convert.js'
+import init, { __mdreamTakePanicMessage, MarkdownStream as _MarkdownStream } from '../wasm/mdream_edge.js'
+import { convertResult, convertWasm, deliverPluginData, pumpStream } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 import { createSurrogateCarry } from './surrogate-carry.js'
 import { wasmPanicError } from './wasm-panic.js'
@@ -23,7 +23,7 @@ ensureInit()
 
 function convert(html: string, napiOpts: HtmlToMarkdownOptions): MdreamNapiResult {
   try {
-    return _htmlToMarkdownResult(html, napiOpts)
+    return convertWasm(html, napiOpts, _MarkdownStream)
   }
   catch (error) {
     // A Rust panic aborts the WASM instance; surface its message (#195).

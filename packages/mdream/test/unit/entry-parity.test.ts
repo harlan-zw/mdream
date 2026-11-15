@@ -92,6 +92,28 @@ describe.each(entries)('$name entry', ({ name, convert, stream }) => {
     expect(await convert(PAGE, options), name).toBe(node.htmlToMarkdown(PAGE, options))
   })
 
+  // The WASM entries stream UTF-8 bytes; a lone surrogate and a BOM must
+  // convert as they do from a string.
+  it.each([
+    ['non-ASCII text', '<p>Ünïcödé — 日本語 🎉</p>'],
+    ['a lone surrogate', '<p>a\uD83Cb</p><p>c\uDF89</p>'],
+    ['a leading BOM', `${String.fromCharCode(0xFEFF)}<p>x</p>`],
+  ])('converts %s like the Node entry', async (_, html) => {
+    expect(await convert(html, {}), name).toBe(node.htmlToMarkdown(html, {}))
+  })
+
+  // The WASM entries pass a page in many chunks.
+  it.each(optionCases)('converts a page of many chunks with %s like the Node entry', async (_, options) => {
+    const big = PAGE.replace('<p class="font-bold">Bold</p>', '<p>Ünïcödé — 日本語 🎉 <a href="/b">b</a></p>'.repeat(3000))
+    expect(new TextEncoder().encode(big).length).toBeGreaterThan(128 * 1024)
+    const collecting = (seen: unknown[]): Partial<MdreamOptions> => ({ ...options, frontmatter: f => seen.push(f), extraction: { 'a[href]': e => seen.push(e) } })
+    const seen: unknown[] = []
+    const expected: unknown[] = []
+    expect(await convert(big, collecting(seen)), name).toBe(node.htmlToMarkdown(big, collecting(expected)))
+    expect(await convert(big, options), name).toBe(node.htmlToMarkdown(big, options))
+    expect(seen).toEqual(expected)
+  })
+
   it('calls the frontmatter callback and extraction handlers', async () => {
     const frontmatter = vi.fn()
     const link = vi.fn()
