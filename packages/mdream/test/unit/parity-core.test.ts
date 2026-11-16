@@ -69,6 +69,28 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<xmp>a</',
     '<title>a</x',
   ],
+  'heading inside a wrapper that writes no markers': [[
+    '<dl><dt>A<h1>y</h1>B</dt></dl>',
+    '<address>A<h1>y z</h1>B</address>',
+    '<label><h2>y</h2><b>B</b></label>',
+    '<small><h3>y</h3> B</small>',
+    '<abbr>A <h2>y</h2>B</abbr>',
+    '<a><h1>y</h1>B</a>',
+    '<label><span><h1>y</h1></span>B</label>',
+    '<b><h1>y</h1>B</b>',
+    '<a href="/x"><h1>y</h1>B</a>',
+    '<label><small><h1>y</h1>B</small></label>',
+    '<table><tr><td><label><h1>y</h1>B</label></td></tr></table>',
+    '<ul><li><label><h1>y</h1>B</label></li></ul>',
+    // An anchor inside a raw HTML block keeps its raw tag, so it writes markers
+    // there and the heading stays on its line.
+    '<details><a><h1>y</h1>B</a></details>',
+    '<details><div><a><h1>y</h1>B</a></div></details>',
+    '<summary><a><h1>y</h1>B</a></summary>',
+    '<address><a><h1>y</h1>B</a></address>',
+    '<dl><dd><a><h1>y</h1>B</a></dd></dl>',
+    '<details><label><h1>y</h1>B</label></details>',
+  ], ['text']],
   'block boundary trims the whole trailing space run': [
     '<ul><li><br></li><li>b</li></ul>',
     '<pre>nd  ',
