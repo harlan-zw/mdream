@@ -154,4 +154,7 @@ export const CONVERSION_CORPUS: string[] = [
   `<a href=/>Home</a>`,
   `<img src="/i.svg" /alt="tiktok" ><a/href=/x title=t/>y</a>`,
   `<a href /="x>y">z</a>`,
+  // Padded URLs
+  `<a href=" /p ">p</a> <a href=" https://x.com/ ">https://x.com/</a> <img src=" /i.png " alt="i"> <a href=" javascript:alert(1)">j</a>`,
+  `<h2>Q<a href=" #q">#</a></h2><p><a href=" #q ">up</a> <a href=" #nope">gone</a></p>`,
 ]

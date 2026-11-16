@@ -569,6 +569,33 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(markdown).toBe(`[Link](${expected})`)
   })
 
+  // The URL parser strips leading and trailing C0 controls and spaces first.
+  it.each([
+    [' http://other.example/x', 'http://other.example/x'],
+    [' /p ', 'https://example.com/p'],
+    ['&#9;/t&#10;', 'https://example.com/t'],
+    [' #x', '#x'],
+  ])('resolves the padded href %j as the URL parser reads it', async (href, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<a href="${href}">Link</a>`
+    const origin = 'https://example.com/docs/'
+    expect(htmlToMarkdown(html, { origin, engine })).toBe(`[Link](${expected})`)
+    expect(htmlToMarkdown(html, { origin, engine, format: 'html' })).toBe(`<a href="${expected}">Link</a>`)
+    expect(htmlToMarkdown(`<img src="${href}" alt="i">`, { origin, engine })).toBe(`![i](${expected})`)
+  })
+
+  it.each([
+    ' javascript:alert(1)',
+    '&#9;java&#10;script:alert(1) ',
+    ' data:text/html,x',
+  ])('keeps the padded unsafe href %j out of HTML output', async (href) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    for (const origin of [undefined, 'https://example.com/docs/']) {
+      expect(htmlToMarkdown(`<a href="${href}">Link</a>`, { origin, engine, format: 'html' })).toBe('Link')
+      expect(htmlToMarkdown(`<p><img src="${href}" alt="i">x</p>`, { origin, engine, format: 'html' })).toBe('<p>x</p>')
+    }
+  })
+
   it('uses the first href-bearing base', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<base target="_blank"><base href="../assets/"><base href="https://ignored.example/"><a href="page">Page</a> <img src="cover.png" alt="Cover">'
