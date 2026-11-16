@@ -626,7 +626,7 @@ fn walk_plain_attributes(bytes: &[u8], from: usize) -> PlainWalk {
           break;
         };
         let value_start = i + 2;
-        let Some(offset) = find_byte(&bytes[value_start..], quote) else {
+        let Some(offset) = find_quote(&bytes[value_start..], quote) else {
           break;
         };
         i = value_start + offset + 1;
@@ -657,7 +657,9 @@ fn walk_plain_attributes(bytes: &[u8], from: usize) -> PlainWalk {
 
 /// [`find_byte`] out of line on native. Inlined into
 /// [`walk_extracted_attributes`], it ran short of registers and rebuilt its
-/// constants every word: +4% on a long `src` value.
+/// constants every word: +4% on a long `src` value. Inlined into
+/// [`walk_plain_attributes`], it costs the same on a long unextracted value
+/// (`data-x`, `style`): +18% at 1 MiB.
 #[cfg_attr(not(target_arch = "wasm32"), inline(never))]
 fn find_quote(hay: &[u8], quote: u8) -> Option<usize> {
   find_byte(hay, quote)
