@@ -2283,6 +2283,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         if (start !== 0)
           textNode.value = value.slice(start)
+        // The output now ends with the boundary, not with what `lastChar` saw.
+        lastChar = '\n'
       }
     }
     if (textNode.trimsAtLineStart)
@@ -2687,6 +2689,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           lastChar = lastBuffEntry?.charAt(lastBuffEntry.length - 1) || ''
         }
       }
+
+      // A raw `<br>` is content after a raw HTML block, so the pending
+      // boundary goes in front of it, as in Rust. A hard break is whitespace.
+      if (pendingRawHtmlBoundary && breakOutput)
+        finishRawHtmlBlock(breakOutput, true)
 
       const captionHasAnchor = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
@@ -3407,8 +3414,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       handlerOutput = output[0]
     }
 
-    // Add spacing between inline elements if needed
-    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
+    // Add spacing between inline elements if needed. A pending raw HTML
+    // boundary is written first, as in Rust, so the output starts its line.
+    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])
+      && !(pendingRawHtmlBoundary && newLines < 2 && !isInsideRawHtmlBlock(state.depthMap))) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
@@ -3482,7 +3491,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (rawHtmlQuoteBoundary)
       finishRawHtmlBlock(`${output?.join('') ?? ''}>`, true)
 
-    if (pendingRawHtmlBoundary && !endsRawHtmlBlock && output) {
+    // Only an enter starts content after the block, as in Rust. A closer
+    // written at an exit stays on the block's line.
+    if (pendingRawHtmlBoundary && !endsRawHtmlBlock && output && eventType === NodeEventEnter) {
       if (newLines >= 2) {
         pendingRawHtmlBoundary = false
       }
