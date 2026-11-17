@@ -1918,7 +1918,7 @@ impl ConvertState {
       }
       // The general exit clears these first. Skipping that would let a pending
       // heading break or list rule reach the text after the item.
-      self.list_rule_pending = false;
+      self.list_rule_pending = ListBoundary::None;
       self.heading_break_pending = false;
     }
     let tag_id = node.tag_id;

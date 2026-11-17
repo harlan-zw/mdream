@@ -10217,6 +10217,24 @@ fn text_after_a_closed_nested_item_stays_escaped() {
 }
 
 #[test]
+fn preformatted_text_after_list_exit_keeps_its_lines() {
+  let html = "<ul><li>a</li></ul><pre>x\ny</pre>";
+  let expected = "- a\n\n```\nx\ny\n```";
+  assert_eq!(
+    html_to_markdown(html, HtmlToMarkdownOptions::default()),
+    expected
+  );
+
+  for split in 0..=html.len() {
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut streamed = processor.process_chunk(&html[..split]);
+    streamed.push_str(&processor.process_chunk(&html[split..]));
+    streamed.push_str(&processor.finish());
+    assert_eq!(streamed, expected, "split={split}");
+  }
+}
+
+#[test]
 fn lone_closer_after_closed_item_and_hard_break() {
   for (html, expected) in [
     (

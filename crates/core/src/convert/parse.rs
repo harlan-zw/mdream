@@ -490,7 +490,7 @@ impl ConvertState {
       && self.fast_paths_enabled()
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
-      && !self.list_rule_pending
+      && self.list_rule_pending == ListBoundary::None
       && !self.heading_break_pending
       && !self.pending_inline_whitespace
       && !self.pending_raw_html_boundary
