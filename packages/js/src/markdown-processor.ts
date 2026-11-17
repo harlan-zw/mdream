@@ -1228,6 +1228,35 @@ function dropVerticalTabMarker(buffer: string[], packed: number, markerType: num
   return true
 }
 
+/**
+ * Whether a link label holds more than whitespace as the Rust engine's
+ * `str::trim` counts it: Unicode White_Space, which has U+0085 and the
+ * no-break spaces but not U+FEFF.
+ */
+function hasLabelText(value: string): boolean {
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code === 32 || (code >= 9 && code <= 13))
+      continue
+    if (code < 0x85 || !(code === 0x85 || code === 0xA0 || code === 0x1680 || (code >= 0x2000 && code <= 0x200A)
+      || code === 0x2028 || code === 0x2029 || code === 0x202F || code === 0x205F || code === 0x3000)) {
+      return true
+    }
+  }
+  return false
+}
+
+/** Drop a link that `emptyLinkText` reads as having no label. */
+function dropBlankLink(buffer: string[], openFragment: number, positions?: OutputPositions): boolean {
+  for (let index = openFragment + 1; index < buffer.length; index++) {
+    if (hasLabelText(buffer[index]!))
+      return false
+  }
+  positions?.replace(openFragment, buffer.length, [])
+  buffer.length = openFragment
+  return true
+}
+
 function resetRetractedCaptionFrames(frames: number[] | undefined, count: number, fragment: number): void {
   if (!frames)
     return
@@ -1806,6 +1835,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   let openLinkHeadingBreak = false
   let openLinkCaptionBreakRun = 0
   let openLinkCaptionFlags: Uint8Array | undefined
+  // How many caption frames blank label text such as `&nbsp;` opened while
+  // `emptyLinkText` could still drop the link and take the opening with it.
+  let blankCaptionFrames = 0
   const clean = options.clean
   const cleanRules = typeof clean === 'object' && clean !== null ? clean : undefined
   const cleanEmptyLinkText = clean === true || cleanRules?.emptyLinkText === true
@@ -2048,6 +2080,30 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
   }
 
+  /**
+   * Blank text such as `&nbsp;` opens a caption and still leaves a link label
+   * empty. Rust keeps that caption open when `emptyLinkText` drops the link,
+   * so an opening that left with the link's `[`, or with an empty pair around
+   * the link, is written again.
+   */
+  function settleBlankCaption(): void {
+    const frames = captionFrames!
+    const end = Math.min(blankCaptionFrames, captionFrameCount)
+    for (let index = 0; index < end; index++) {
+      if ((frames[index * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0) {
+        // The newline the dropped opener carried belonged to the caption.
+        state.headingBreakPending = false
+        flushCaptionBreakRun()
+        prepareCaptionOutput(false)
+        commitCaptionFrames()
+        return
+      }
+    }
+    // Nothing can take the opening away any more.
+    if (openLinkFragment < 0 && openMarkerCount === 0)
+      commitCaptionFrames()
+  }
+
   function anchorPendingCaptions(fragment: number): void {
     const frames = captionFrames
     if (!frames)
@@ -2063,6 +2119,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   }
 
   function commitCaptionFrames(): void {
+    blankCaptionFrames = 0
     const frames = captionFrames
     if (!frames)
       return
@@ -2368,6 +2425,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
         if (start !== 0)
           textNode.value = value.slice(start)
+        // The output now ends with the boundary, not with what `lastChar` saw.
+        lastChar = '\n'
       }
     }
     if (textNode.trimsAtLineStart)
@@ -2384,7 +2443,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           return
         flushCaptionBreakRun(true)
         prepareCaptionOutput(false)
-        commitCaptionFrames()
+        // The anchor stays while the link may still be dropped.
+        if (openLinkFragment >= 0 && !hasLabelText(textNode.value))
+          blankCaptionFrames = captionFrameCount
+        else
+          commitCaptionFrames()
         captionBoundary = 0
       }
 
@@ -2516,7 +2579,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       if (openMarkerCount || openLinkFragment >= 0) {
         const hasVisibleText = textNode.containsWhitespace === false || hasNonWhitespace(textNode.value)
-        if (openLinkFragment >= 0 && hasVisibleText)
+        if (openLinkFragment >= 0 && hasVisibleText && hasLabelText(textNode.value))
           openLinkFragment = -openLinkFragment - 2
         // A decoded ASCII blank is no more content for an open pair than a
         // written one: Rust drops `<code>&#32;</code>` like `<code> </code>`.
@@ -2529,7 +2592,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
             || !isVerticalTabRun(textNode.value)) {
             openMarkerCount = 0
           }
-          commitCaptionFrames()
+          // Blank text in a link that may still be dropped keeps the anchor.
+          if (openLinkFragment < 0)
+            commitCaptionFrames()
         }
         else if (openMarkerCount && textNode.containsWhitespace !== true && textNode.value
           && (openMarkers[openMarkerCount - 1]! & MARKER_TYPE_MASK) > 4) {
@@ -2591,6 +2656,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     // Update depth for plugin access
     state.depth = node.depth
+    if (blankCaptionFrames !== 0)
+      settleBlankCaption()
 
     // Template nodes are parsed and exposed to plugins/extraction, but are
     // inert for output. Exclusion is copied to element descendants at open;
@@ -2780,6 +2847,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
 
+      // A raw `<br>` is content after a raw HTML block, so the pending
+      // boundary goes in front of it, as in Rust. A hard break is whitespace.
+      if (pendingRawHtmlBoundary && breakOutput)
+        finishRawHtmlBlock(breakOutput, true)
+
       const captionHasAnchor = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
         && captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 3] !== CAPTION_NO_ANCHOR
@@ -2896,7 +2968,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
         && tagId === TAG_A) {
-        if (dropEmptyLinkText(buff, openLinkFragment, state.outputPositions)) {
+        if (dropBlankLink(buff, openLinkFragment, state.outputPositions)) {
           noteBufferRewrite(state)
           if (openLinkHeadingBreak) {
             state.outputPositions?.replace(openLinkFragment - 1, openLinkFragment, [])
@@ -3518,8 +3590,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       handlerOutput = output[0]
     }
 
-    // Add spacing between inline elements if needed
-    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])) {
+    // Add spacing between inline elements if needed. A pending raw HTML
+    // boundary is written first, as in Rust, so the output starts its line.
+    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])
+      && !(pendingRawHtmlBoundary && newLines < 2 && !isInsideRawHtmlBlock(state.depthMap))) {
       state.buffer.push(' ')
       state.lastContentCache = ' '
     }
@@ -3593,7 +3667,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (rawHtmlQuoteBoundary)
       finishRawHtmlBlock(`${output?.join('') ?? ''}>`, true)
 
-    if (pendingRawHtmlBoundary && !endsRawHtmlBlock && output) {
+    // Only an enter starts content after the block, as in Rust. A closer
+    // written at an exit stays on the block's line.
+    if (pendingRawHtmlBoundary && !endsRawHtmlBlock && output && eventType === NodeEventEnter) {
       if (newLines >= 2) {
         pendingRawHtmlBoundary = false
       }

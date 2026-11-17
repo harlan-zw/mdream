@@ -8,6 +8,35 @@ import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText } from '../../src/text'
 
+describe('heading hashes followed by a blank of its own', () => {
+  it.each([
+    ['<label>x <h1>&#9;</h1>x</label>', 'x \\# \t\n\nx'],
+    ['<label>x <h1>&#9;</h1></label>', 'x \\#'],
+    ['<h2><u>x <h1>&#9;</h1></u></h2>', '## <u>x \\# \t</u>'],
+    ['<figcaption>x <h1>&#9;</h1>x</figcaption>', '*x \\# \t\n\nx*'],
+    ['<kbd>x <h1>&#9;</h1></kbd>', '`x \\# \t`'],
+    // The run and the blank in one entry were escaped already.
+    ['<label>x <h1>a #&#9;</h1>x</label>', 'x # a \\#\t\n\nx'],
+    // A run that opens the line is the marker of an empty heading.
+    ['<label><h1>&#9;</h1>x</label>', '# \t\n\nx'],
+  ])('escapes the run as Rust does: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const size of [1, 2, 3, 7]) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let index = 0; index < html.length; index += size)
+            controller.enqueue(html.slice(index, index + size))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output, `size=${size}`).toBe(expected)
+    }
+  })
+})
+
 describe('root conversion', () => {
   it.each([0, 1, 7])('supports mutable processAttributes with chunk size %i', async (chunkSize) => {
     const html = '<a>first</a><a href="/old" title="keep">second</a><a>third</a>'
@@ -219,6 +248,43 @@ describe('plugin reuse', () => {
     }
     const outputs = await Promise.all(pages.map(collect))
     expect(outputs).toEqual(pages.map(page => htmlToMarkdown(page, withMinimalPreset({ clean: false }))))
+  })
+})
+
+describe('raw HTML block before a closer', () => {
+  it.each([
+    ['<figcaption>k<h2>t</h2><address>A</address></figcaption>', '*k ## t\n\n<address>A</address>*'],
+    ['<figcaption>k<br><dl><dt>A</dt></dl></figcaption>', '*k  \n<dl><dt>A</dt></dl>*'],
+    ['<b>k<br><dl><dt>A</dt></dl></b>', '**k  \n<dl><dt>A</dt></dl>**'],
+    ['<a href="/x">k<br><address></address></a>', '[k  \n<address></address>](/x)'],
+    ['<blockquote><figcaption><h2>t</h2><address></address></figcaption></blockquote>', '> *## t\n>\n> <address></address>*'],
+    // Content after the block still starts on a line of its own.
+    ['<figcaption>k<h2>t</h2><address>A</address>z</figcaption>', '*k ## t\n\n<address>A</address>\n\nz*'],
+    ['<b>k<br><dl><dt>A</dt></dl><i>z</i></b>', '**k  \n<dl><dt>A</dt></dl>\n\n*z***'],
+    // The boundary goes in front of the next opener, with no space before it.
+    ['<a href="/x">k<br><details></details></a><a href="/y">z</a>', '[k  \n<details></details>\n\n](/x)\n\n[z](/y)'],
+    ['<a href="/x">k<br><details></details><a href="/y">z</a></a>', '[k  \n<details></details>\n\n](/x)\n\n[z](/y)'],
+    ['<a href="/x">k<br><details></details></a><del>z</del>', '[k  \n<details></details>\n\n](/x)\n\n~~z~~'],
+    // Text after the boundary starts its line too.
+    ['<ul><li><a href="/x">k<br><details></details></a><div>d</div></li></ul>', '- [k  \n  <details></details>\n\n](/x)\n\n  d'],
+    // A raw `<br>` is content too, so the boundary goes in front of it.
+    ['<h2>k<details><summary>s</summary></details><br><b>z</b></h2>', '## k<details><summary>s</summary>\n\n</details>\n\n<br>**z**'],
+    ['<h2><b>k<details><summary>s</summary></details></b><br>z</h2>', '## **k<details><summary>s</summary>\n\n</details>\n\n**\n\n<br>z'],
+  ])('keeps the closer on the line of the block: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (const size of [1, 2, 3, 7]) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (let index = 0; index < html.length; index += size)
+            controller.enqueue(html.slice(index, index + size))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output, `size=${size}`).toBe(expected)
+    }
   })
 })
 
