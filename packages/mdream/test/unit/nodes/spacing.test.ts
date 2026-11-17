@@ -39,6 +39,20 @@ describe.each(engines)('spacing $name', (engineConfig) => {
     expect(markdown).toBe('[a](b) [b](a)')
   })
 
+  // Text with no block ancestor drops the whitespace that leads it in the
+  // source at a line start. Whitespace decoded from a character reference is
+  // content there, as it is inside a paragraph.
+  it.each([
+    ['<hr> x y', '---\n\nx y'],
+    ['<hr>&#32;x y', '---\n\n x y'],
+    ['<p>a</p> &#32;x y', 'a\n\n x y'],
+    ['<hr>&#32;# x', '---\n\n \\# x'],
+    ['<hr><span>&#32;x y</span>', '---\n\n x y'],
+  ])('keeps decoded whitespace that leads root text for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
+
   it('block elements inside inline elements should have proper spacing', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<span><h4>Heading</h4><p>This is a paragraph with <strong>bold</strong> text.</p></span>'

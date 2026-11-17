@@ -73,13 +73,45 @@ pub(crate) fn tag_name_end(bytes: &[u8], from: usize) -> usize {
 
 const SWAR_WIDTH: usize = 8;
 
+/// First index at or after `from` holding a byte that is not whitespace.
+// Out of line: the callers are large functions with no register to spare, where
+// the same loop reloads its base pointer from the stack for every byte.
+#[inline(never)]
+pub(crate) fn whitespace_run_end(bytes: &[u8], from: usize) -> usize {
+  const SPACES: u64 = u64::from_le_bytes([b' '; SWAR_WIDTH]);
+  const TABS: u64 = u64::from_le_bytes([b'\t'; SWAR_WIDTH]);
+  let mut i = from;
+  loop {
+    // Indentation repeats one byte: count how much of each word it fills.
+    while let Some(chunk) = bytes
+      .get(i..)
+      .and_then(|rest| rest.first_chunk::<SWAR_WIDTH>())
+    {
+      let word = u64::from_le_bytes(*chunk);
+      let indent = if word as u8 == b'\t' { TABS } else { SPACES };
+      let differing = word ^ indent;
+      if differing != 0 {
+        i += (differing.trailing_zeros() / u8::BITS) as usize;
+        break;
+      }
+      i += SWAR_WIDTH;
+    }
+    // A line break, a change of indent byte, or the last bytes of the input.
+    match bytes.get(i) {
+      Some(&byte) if is_whitespace(byte) => i += 1,
+      _ => return i,
+    }
+  }
+}
+
+const BYTE_ONES: u64 = 0x0101_0101_0101_0101;
+const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
+
 /// The lowest set bit of the zero-byte test is exact: borrows run upward only.
 // One out-of-line copy in WASM, where each inlined loop costs bundle bytes.
 #[cfg_attr(target_arch = "wasm32", inline(never))]
 #[cfg_attr(not(target_arch = "wasm32"), inline)]
 pub(crate) fn find_byte(hay: &[u8], needle: u8) -> Option<usize> {
-  const BYTE_ONES: u64 = 0x0101_0101_0101_0101;
-  const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
   let pattern = BYTE_ONES * u64::from(needle);
   let (words, rest) = hay.as_chunks::<SWAR_WIDTH>();
   let mut offset = 0usize;
@@ -92,6 +124,96 @@ pub(crate) fn find_byte(hay: &[u8], needle: u8) -> Option<usize> {
     offset += SWAR_WIDTH;
   }
   rest.iter().position(|&b| b == needle).map(|p| offset + p)
+}
+
+/// First LF or CR, a word at a time like [`find_byte`]. The lowest hit of
+/// either test is exact, so the lowest of both is the first line end.
+#[inline(always)]
+pub(crate) fn find_line_end(hay: &[u8]) -> Option<usize> {
+  const LF: u64 = BYTE_ONES * b'\n' as u64;
+  const CR: u64 = BYTE_ONES * b'\r' as u64;
+  let (words, rest) = hay.as_chunks::<SWAR_WIDTH>();
+  let mut offset = 0usize;
+  for word in words {
+    let word = u64::from_le_bytes(*word);
+    let lf = word ^ LF;
+    let cr = word ^ CR;
+    let hits =
+      ((lf.wrapping_sub(BYTE_ONES) & !lf) | (cr.wrapping_sub(BYTE_ONES) & !cr)) & HIGH_BITS;
+    if hits != 0 {
+      return Some(offset + (hits.trailing_zeros() / u8::BITS) as usize);
+    }
+    offset += SWAR_WIDTH;
+  }
+  rest
+    .iter()
+    .position(|&b| b == b'\n' || b == b'\r')
+    .map(|p| offset + p)
+}
+
+/// [`find_byte`] for long runs such as script bodies: four words per step
+/// with one test, then `find_byte` places the match. Out of line and not for
+/// attribute values or short comments, where the wider step costs more than
+/// it saves.
+#[inline(never)]
+pub(crate) fn find_byte_far(hay: &[u8], needle: u8) -> Option<usize> {
+  const BLOCK: usize = 4 * SWAR_WIDTH;
+  let pattern = BYTE_ONES * u64::from(needle);
+  let mut offset = 0usize;
+  for block in hay.as_chunks::<BLOCK>().0 {
+    let mut hits = 0u64;
+    for word in block.as_chunks::<SWAR_WIDTH>().0 {
+      let word = u64::from_le_bytes(*word) ^ pattern;
+      hits |= word.wrapping_sub(BYTE_ONES) & !word;
+    }
+    // A borrow can flag a byte above a match, never a block without one.
+    if hits & HIGH_BITS != 0 {
+      break;
+    }
+    offset += BLOCK;
+  }
+  find_byte(&hay[offset..], needle).map(|p| offset + p)
+}
+
+/// Occurrences of `needle`. `str::matches(char).count()` makes a searcher
+/// call per match, costly on many short lines; a byte-by-byte count is
+/// costly on long ones. Jumping with `find_byte` is cheap on both.
+#[cfg_attr(target_arch = "wasm32", inline(never))]
+pub(crate) fn count_byte(hay: &[u8], needle: u8) -> usize {
+  let (mut count, mut rest) = (0, hay);
+  while let Some(p) = find_byte(rest, needle) {
+    count += 1;
+    rest = &rest[p + 1..];
+  }
+  count
+}
+
+/// First index of `needle` in `hay`. Used instead of `str::find(&str)`, whose
+/// two-way searcher costs about 2.6 KB of WASM; every needle here is a few
+/// bytes, so a first-byte scan and a compare is enough.
+pub(crate) fn find_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+  let Some((&first, rest)) = needle.split_first() else {
+    return Some(0);
+  };
+  let mut from = 0;
+  while let Some(offset) = find_byte(&hay[from..], first) {
+    let at = from + offset;
+    if hay[at + 1..].starts_with(rest) {
+      return Some(at);
+    }
+    from = at + 1;
+  }
+  None
+}
+
+/// Last index of `needle` in `hay`, for the same reason as [`find_bytes`].
+pub(crate) fn rfind_bytes(hay: &[u8], needle: &[u8]) -> Option<usize> {
+  if needle.is_empty() {
+    return Some(hay.len());
+  }
+  hay
+    .windows(needle.len())
+    .rposition(|window| window == needle)
 }
 
 pub(crate) struct CommentResult {
@@ -123,13 +245,10 @@ pub(crate) fn process_comment_or_doctype(html_chunk: &str, position: usize) -> C
       };
     }
     while i + 2 < chunk_length {
-      // Scanning for the dash on its own keeps this loop vectorizable; the
-      // three-byte window is only formed once a dash is found.
-      while i + 2 < chunk_length && bytes[i] != DASH_CHAR {
-        i += 1;
-      }
-      if i + 2 >= chunk_length {
-        break;
+      // Jump to the next dash; the three-byte window is only formed there.
+      match find_byte(&bytes[i..chunk_length - 2], DASH_CHAR) {
+        Some(offset) => i += offset,
+        None => break,
       }
       if bytes[i + 1] == DASH_CHAR {
         let after_dashes = bytes[i + 2];
@@ -451,6 +570,203 @@ pub(crate) fn process_tag_attributes(
   }
 }
 
+/// How far [`walk_plain_attributes`] got.
+enum PlainWalk {
+  /// The tag ended just before `end`, on `/>` when `slash`.
+  Done { end: usize, slash: bool },
+  /// Not a shape the walk handles: rescan from here, where the tokenizer is in
+  /// `State::Gap`.
+  Resume(usize),
+}
+
+/// Walk well-formed attributes (`name`, `name="value"`) in a straight line, for
+/// the scan that extracts nothing. Anything else (an unquoted value, a `=` with
+/// no name before it, a tag cut by the chunk) is left to the general loop.
+// Out of line: inlined, it grows the frame every start tag pays for.
+#[inline(never)]
+fn walk_plain_attributes(bytes: &[u8], from: usize) -> PlainWalk {
+  let mut i = from;
+  // Always a position where the tokenizer is in `State::Gap`. A bare name
+  // followed by whitespace leaves `AfterName`, which differs from `Gap` only on
+  // `=`; that byte restarts from the name, so the walk may treat both alike.
+  let mut boundary = i;
+  loop {
+    while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & NON_WHITESPACE_STOP == 0 {
+      i += 1;
+    }
+    let Some(&c) = bytes.get(i) else {
+      break;
+    };
+    if c == GT_CHAR {
+      return PlainWalk::Done {
+        end: i + 1,
+        slash: false,
+      };
+    }
+    if c == SLASH_CHAR || c == EQUALS_CHAR {
+      if c == SLASH_CHAR && bytes.get(i + 1) == Some(&GT_CHAR) {
+        return PlainWalk::Done {
+          end: i + 2,
+          slash: true,
+        };
+      }
+      break;
+    }
+    boundary = i;
+    i += 1;
+    while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & ATTR_NAME_STOP == 0 {
+      i += 1;
+    }
+    match bytes.get(i) {
+      Some(&EQUALS_CHAR) => {
+        let Some(&quote) = bytes
+          .get(i + 1)
+          .filter(|&&next| next == QUOTE_CHAR || next == APOS_CHAR)
+        else {
+          break;
+        };
+        let value_start = i + 2;
+        let Some(offset) = find_quote(&bytes[value_start..], quote) else {
+          break;
+        };
+        i = value_start + offset + 1;
+        boundary = i;
+      }
+      Some(&GT_CHAR) => {
+        return PlainWalk::Done {
+          end: i + 1,
+          slash: false,
+        };
+      }
+      Some(&SLASH_CHAR) => {
+        if bytes.get(i + 1) == Some(&GT_CHAR) {
+          return PlainWalk::Done {
+            end: i + 2,
+            slash: true,
+          };
+        }
+        break;
+      }
+      // Whitespace: the name stands alone unless a `=` follows it.
+      Some(_) => {}
+      None => break,
+    }
+  }
+  PlainWalk::Resume(boundary)
+}
+
+/// [`find_byte`] out of line on native. Inlined into
+/// [`walk_extracted_attributes`], it ran short of registers and rebuilt its
+/// constants every word: +4% on a long `src` value. Inlined into
+/// [`walk_plain_attributes`], it costs the same on a long unextracted value
+/// (`data-x`, `style`): +18% at 1 MiB.
+#[cfg_attr(not(target_arch = "wasm32"), inline(never))]
+fn find_quote(hay: &[u8], quote: u8) -> Option<usize> {
+  find_byte(hay, quote)
+}
+
+/// [`walk_plain_attributes`] for the extracting scan: each well-formed
+/// `name="value"` or bare `name` goes straight to [`push_attr`]. A `Resume`
+/// position is always one where the tokenizer is in `State::Gap` with every
+/// attribute before it already stored.
+// Out of line, like the plain walk: inlined it cost real pages 0.45%.
+#[inline(never)]
+fn walk_extracted_attributes(
+  html_chunk: &str,
+  from: usize,
+  mask: u16,
+  budget: &mut AttrBudget,
+  result: &mut Attributes,
+) -> PlainWalk {
+  let bytes = html_chunk.as_bytes();
+  let mut i = from;
+  loop {
+    while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & NON_WHITESPACE_STOP == 0 {
+      i += 1;
+    }
+    let Some(&c) = bytes.get(i) else {
+      return PlainWalk::Resume(i);
+    };
+    if c == GT_CHAR {
+      return PlainWalk::Done {
+        end: i + 1,
+        slash: false,
+      };
+    }
+    if c == SLASH_CHAR || c == EQUALS_CHAR {
+      if c == SLASH_CHAR && bytes.get(i + 1) == Some(&GT_CHAR) {
+        return PlainWalk::Done {
+          end: i + 2,
+          slash: true,
+        };
+      }
+      return PlainWalk::Resume(i);
+    }
+    let name_start = i;
+    i += 1;
+    while i < bytes.len() && SCAN_CLASS[bytes[i] as usize] & ATTR_NAME_STOP == 0 {
+      i += 1;
+    }
+    let name = &html_chunk[name_start..i];
+    match bytes.get(i) {
+      Some(&EQUALS_CHAR) => {
+        let Some(&quote) = bytes
+          .get(i + 1)
+          .filter(|&&next| next == QUOTE_CHAR || next == APOS_CHAR)
+        else {
+          return PlainWalk::Resume(name_start);
+        };
+        let value_start = i + 2;
+        let Some(offset) = find_quote(&bytes[value_start..], quote) else {
+          return PlainWalk::Resume(name_start);
+        };
+        let value_end = value_start + offset;
+        push_attr(
+          result,
+          mask,
+          budget,
+          name,
+          Some(&html_chunk[value_start..value_end]),
+        );
+        i = value_end + 1;
+      }
+      Some(&GT_CHAR) => {
+        push_attr(result, mask, budget, name, None);
+        return PlainWalk::Done {
+          end: i + 1,
+          slash: false,
+        };
+      }
+      Some(&SLASH_CHAR) => {
+        if bytes.get(i + 1) == Some(&GT_CHAR) {
+          push_attr(result, mask, budget, name, None);
+          return PlainWalk::Done {
+            end: i + 2,
+            slash: true,
+          };
+        }
+        return PlainWalk::Resume(name_start);
+      }
+      // Whitespace: the name stands alone unless a `=` follows it. A `/` or
+      // the chunk end there is left to the tokenizer, name included.
+      Some(_) => {
+        let mut next = i + 1;
+        while next < bytes.len() && SCAN_CLASS[bytes[next] as usize] & NON_WHITESPACE_STOP == 0 {
+          next += 1;
+        }
+        match bytes.get(next) {
+          None | Some(&(EQUALS_CHAR | SLASH_CHAR)) => return PlainWalk::Resume(name_start),
+          Some(_) => {
+            push_attr(result, mask, budget, name, None);
+            i = next;
+          }
+        }
+      }
+      None => return PlainWalk::Resume(name_start),
+    }
+  }
+}
+
 /// Walk a start tag to its `>`, extracting attributes on the way when
 /// `EXTRACT`. Finding `>` needs the same quote tracking the extraction does, so
 /// both come from one pass; the flag is a const so the `ATTR_NONE`
@@ -470,6 +786,34 @@ fn scan_tag<const EXTRACT: bool>(
   // state to distinguish a quoted value from a quote inside an unquoted one.
   let mut state = State::Gap;
   let mut i = position;
+
+  // Most tags end right after the name. Attributes follow it only after
+  // whitespace, and well-formed ones need none of the state dispatch below.
+  if !EXTRACT {
+    match bytes.get(i) {
+      Some(&GT_CHAR) => return TagScan::done(i + 1, self_closing, scan.budget.overflow),
+      Some(&next) if is_whitespace(next) => match walk_plain_attributes(bytes, i) {
+        PlainWalk::Done { end, slash } => {
+          return TagScan::done(end, slash || self_closing, scan.budget.overflow);
+        }
+        PlainWalk::Resume(boundary) => i = boundary,
+      },
+      _ => {}
+    }
+  } else {
+    match bytes.get(i) {
+      Some(&GT_CHAR) => return TagScan::done(i + 1, self_closing, scan.budget.overflow),
+      Some(&next) if is_whitespace(next) => {
+        match walk_extracted_attributes(html_chunk, i, scan.mask, &mut scan.budget, scan.result) {
+          PlainWalk::Done { end, slash } => {
+            return TagScan::done(end, slash || self_closing, scan.budget.overflow);
+          }
+          PlainWalk::Resume(boundary) => i = boundary,
+        }
+      }
+      _ => {}
+    }
+  }
 
   while i < chunk_length {
     let c = bytes[i];
@@ -507,9 +851,17 @@ fn scan_tag<const EXTRACT: bool>(
       }
       continue;
     }
-    if attribute_state != State::UnquotedValue && c == SLASH_CHAR {
-      // The `>` that would make this self-closing is in the next chunk. Feeding
-      // the `/` to the tokenizer now would bury it in an attribute name.
+    // Outside a value `/` ends the name; only a `>` right after it self-closes.
+    if c == SLASH_CHAR && matches!(attribute_state, State::Gap | State::Name | State::AfterName) {
+      // Without extraction no attribute is ever open. Skipping the call also
+      // lets the compiler drop `scan` from this instantiation.
+      if EXTRACT {
+        scan.finish(html_chunk, i);
+        scan.state = State::Gap;
+      } else {
+        state = State::Gap;
+      }
+      // The `>` that would make this self-closing is in the next chunk.
       if i + 1 == chunk_length {
         let mut carry = if EXTRACT {
           scan.suspend(html_chunk, i)
@@ -520,12 +872,15 @@ fn scan_tag<const EXTRACT: bool>(
         return TagScan::suspended(chunk_length, carry);
       }
       if bytes[i + 1] == GT_CHAR {
-        scan.finish(html_chunk, i);
         return TagScan::done(i + 2, true, scan.budget.overflow);
       }
+      i += 1;
+      continue;
     }
     if c == GT_CHAR {
-      scan.finish(html_chunk, i);
+      if EXTRACT {
+        scan.finish(html_chunk, i);
+      }
       return TagScan::done(i + 1, self_closing, scan.budget.overflow);
     }
 
@@ -575,19 +930,20 @@ fn push_attr(
   if mask != ATTR_ALL && mask & bit == 0 {
     return;
   }
-  // First occurrence wins, so a later duplicate is ignored and must not charge.
-  if bit != ATTR_NONE && result.contains_bit(bit) {
-    return;
-  }
-  if !budget.take(raw.len() + value.map_or(0, str::len)) {
-    return;
-  }
+  let cost = raw.len() + value.map_or(0, str::len);
   // A known name is fully described by `bit`; only the `ATTR_ALL` long tail
   // needs an owned, lowercased copy. Values decode into a recycled buffer.
   if bit == ATTR_NONE {
-    result.insert_custom(raw.to_ascii_lowercase().into_boxed_str(), value);
-  } else {
-    result.insert_known(bit, value);
+    if budget.take(cost) {
+      result.insert_custom(raw.to_ascii_lowercase().into_boxed_str(), value);
+    }
+    return;
+  }
+  // First occurrence wins, so a later duplicate is ignored and must not charge.
+  if let Some(slot) = result.vacant_bit(bit)
+    && budget.take(cost)
+  {
+    result.insert_known_at(slot, bit, value);
   }
 }
 
@@ -619,8 +975,9 @@ impl State {
   #[inline]
   fn step_without_extraction(self, c: u8) -> Self {
     match self {
+      // Outside a value `/` only separates attributes, as `scan_tag` reads it.
       Self::Gap => {
-        if is_whitespace(c) {
+        if is_whitespace(c) || c == SLASH_CHAR {
           Self::Gap
         } else {
           Self::Name
@@ -631,6 +988,8 @@ impl State {
           Self::BeforeValue
         } else if is_whitespace(c) {
           Self::AfterName
+        } else if c == SLASH_CHAR {
+          Self::Gap
         } else {
           Self::Name
         }
@@ -640,6 +999,8 @@ impl State {
           Self::BeforeValue
         } else if is_whitespace(c) {
           Self::AfterName
+        } else if c == SLASH_CHAR {
+          Self::Gap
         } else {
           Self::Name
         }
@@ -819,6 +1180,7 @@ pub(crate) struct TagCarry {
   /// Tokenizer position, including any quote still open around the value.
   state: State,
   /// A `/` that ended the chunk, still waiting to see whether a `>` follows.
+  /// The attribute before it is already stored, so `state` is `Gap`.
   slash: bool,
   name: String,
   value: String,
@@ -929,29 +1291,6 @@ impl TagCarry {
     self.state = State::Gap;
   }
 
-  /// The `/` held over from the previous chunk was not part of `/>`, so feed it
-  /// through the tokenizer as the ordinary byte it is.
-  fn replay_slash(&mut self, mask: u16, out: &mut Attributes) {
-    match self.state {
-      State::Gap => {
-        self.start();
-        self.state = State::Name;
-        self.push_name(mask, "/");
-      }
-      State::Name => self.push_name(mask, "/"),
-      State::AfterName => {
-        self.emit(mask, out, false);
-        self.state = State::Name;
-        self.push_name(mask, "/");
-      }
-      State::BeforeValue => {
-        self.state = State::UnquotedValue;
-        self.push_value(mask, "/");
-      }
-      State::UnquotedValue | State::Quoted(_) => self.push_value(mask, "/"),
-    }
-  }
-
   /// Consume the name run starting at `from`, whose first byte is known not to
   /// end it. Runs stop on ASCII delimiters, so every slice is char-aligned.
   fn run_name(&mut self, mask: u16, chunk: &str, from: usize) -> usize {
@@ -1027,16 +1366,15 @@ pub(crate) fn resume_tag_attributes(
   let chunk_length = bytes.len();
   let mut i = 0;
 
+  // The attribute before the `/` was stored when it suspended, leaving `Gap`.
   if carry.slash {
     if i == chunk_length {
       return TagResume::incomplete(chunk_length);
     }
     carry.slash = false;
     if bytes[i] == GT_CHAR {
-      carry.finish(mask, out);
       return TagResume::done(i + 1, true);
     }
-    carry.replay_slash(mask, out);
   }
 
   while i < chunk_length {
@@ -1044,15 +1382,17 @@ pub(crate) fn resume_tag_attributes(
 
     // Inside a quoted value nothing is markup.
     if !matches!(carry.state, State::Quoted(_)) {
-      if carry.state != State::UnquotedValue && c == SLASH_CHAR {
+      if c == SLASH_CHAR && matches!(carry.state, State::Gap | State::Name | State::AfterName) {
+        carry.finish(mask, out);
         if i + 1 == chunk_length {
           carry.slash = true;
           return TagResume::incomplete(chunk_length);
         }
         if bytes[i + 1] == GT_CHAR {
-          carry.finish(mask, out);
           return TagResume::done(i + 2, true);
         }
+        i += 1;
+        continue;
       }
       if c == GT_CHAR {
         carry.finish(mask, out);
@@ -1154,6 +1494,361 @@ fn scan_attrs(html: &str, position: usize, mask: u16) -> (bool, usize, Attribute
 mod tests {
   use super::*;
 
+  // The byte searches must agree with `str::find` and `str::rfind`, including
+  // overlapping prefixes of the needle and matches past the SWAR width.
+  #[test]
+  fn byte_searches_match_str_searches() {
+    let long = format!("{}]]>{}```", "]".repeat(40), "`".repeat(20));
+    let hays = [
+      "",
+      "]",
+      "]]",
+      "]]>",
+      "a]]>",
+      "]]]>",
+      "]]]]>x",
+      "a]b]]c]]>d]]>",
+      "x://y://",
+      "``````",
+      "a``b```c",
+      long.as_str(),
+    ];
+    let needles = ["", "]]>", "://", "```", "a", "]]]]>"];
+    for hay in hays {
+      for needle in needles {
+        assert_eq!(
+          find_bytes(hay.as_bytes(), needle.as_bytes()),
+          hay.find(needle),
+          "find {needle:?} in {hay:?}"
+        );
+        assert_eq!(
+          rfind_bytes(hay.as_bytes(), needle.as_bytes()),
+          hay.rfind(needle),
+          "rfind {needle:?} in {hay:?}"
+        );
+      }
+    }
+  }
+
+  /// The WHATWG tokenizer's attribute states from "before attribute name" on,
+  /// transcribed byte by byte with no run, jump or walk.
+  #[derive(Clone, Copy)]
+  enum Spec {
+    BeforeName,
+    Name,
+    AfterName,
+    BeforeValue,
+    Unquoted,
+    Quoted(u8),
+    AfterQuoted,
+    SelfClosing,
+  }
+
+  type TagEnd = Result<(usize, bool), (State, bool)>;
+
+  /// An open attribute's name bounds and, once its value opens, the value's.
+  type OpenAttr = (usize, usize, Option<(usize, usize)>);
+
+  fn store(out: &mut Vec<(String, String)>, name: &str, value: &str) {
+    let name = name.to_ascii_lowercase();
+    if !out.iter().any(|(seen, _)| *seen == name) {
+      out.push((name, value.to_string()));
+    }
+  }
+
+  /// What the tag scan has to agree with: the attributes complete before the
+  /// tag ended or the input ran out (the first of a name wins), and the tag end
+  /// with its self-closing flag, or the scan state the input ended in and
+  /// whether it ended on a `/` that a `>` would make self-closing.
+  fn spec_tokenize(html: &str) -> (Vec<(String, String)>, TagEnd) {
+    let bytes = html.as_bytes();
+    let mut out = Vec::new();
+    let mut state = Spec::BeforeName;
+    let mut open: Option<OpenAttr> = None;
+    let commit = |open: &mut Option<OpenAttr>, out: &mut Vec<_>| {
+      if let Some((name_start, name_end, value)) = open.take() {
+        let value = value.map_or("", |(start, end)| &html[start..end]);
+        store(out, &html[name_start..name_end], value);
+      }
+    };
+    for (i, &c) in bytes.iter().enumerate() {
+      let ws = is_whitespace(c);
+      let mut reconsume = true;
+      while reconsume {
+        reconsume = false;
+        state = match state {
+          Spec::BeforeName if ws => Spec::BeforeName,
+          Spec::BeforeName | Spec::AfterName if c == SLASH_CHAR => {
+            commit(&mut open, &mut out);
+            Spec::SelfClosing
+          }
+          Spec::BeforeName | Spec::AfterName if c == GT_CHAR => {
+            commit(&mut open, &mut out);
+            return (out, Ok((i + 1, false)));
+          }
+          // `=` here starts a name, like any other byte.
+          Spec::BeforeName => {
+            commit(&mut open, &mut out);
+            open = Some((i, i + 1, None));
+            Spec::Name
+          }
+          Spec::Name if ws => Spec::AfterName,
+          Spec::Name if c == SLASH_CHAR || c == GT_CHAR => {
+            commit(&mut open, &mut out);
+            reconsume = true;
+            Spec::AfterName
+          }
+          Spec::Name if c == EQUALS_CHAR => Spec::BeforeValue,
+          Spec::Name => {
+            if let Some((_, name_end, _)) = &mut open {
+              *name_end = i + 1;
+            }
+            Spec::Name
+          }
+          Spec::AfterName if ws => Spec::AfterName,
+          Spec::AfterName if c == EQUALS_CHAR => Spec::BeforeValue,
+          Spec::AfterName => {
+            reconsume = true;
+            Spec::BeforeName
+          }
+          Spec::BeforeValue if ws => Spec::BeforeValue,
+          Spec::BeforeValue if c == QUOTE_CHAR || c == APOS_CHAR => {
+            if let Some((_, _, value)) = &mut open {
+              *value = Some((i + 1, i + 1));
+            }
+            Spec::Quoted(c)
+          }
+          Spec::BeforeValue if c == GT_CHAR => {
+            commit(&mut open, &mut out);
+            return (out, Ok((i + 1, false)));
+          }
+          Spec::BeforeValue => {
+            if let Some((_, _, value)) = &mut open {
+              *value = Some((i, i));
+            }
+            reconsume = true;
+            Spec::Unquoted
+          }
+          Spec::Unquoted if ws => {
+            commit(&mut open, &mut out);
+            Spec::BeforeName
+          }
+          Spec::Unquoted if c == GT_CHAR => {
+            commit(&mut open, &mut out);
+            return (out, Ok((i + 1, false)));
+          }
+          Spec::Quoted(quote) if c == quote => {
+            commit(&mut open, &mut out);
+            Spec::AfterQuoted
+          }
+          Spec::Unquoted | Spec::Quoted(_) => {
+            if let Some((_, _, Some((_, end)))) = &mut open {
+              *end = i + 1;
+            }
+            state
+          }
+          Spec::AfterQuoted if ws => Spec::BeforeName,
+          Spec::AfterQuoted if c == SLASH_CHAR => Spec::SelfClosing,
+          Spec::AfterQuoted if c == GT_CHAR => return (out, Ok((i + 1, false))),
+          Spec::SelfClosing if c == GT_CHAR => return (out, Ok((i + 1, true))),
+          Spec::AfterQuoted | Spec::SelfClosing => {
+            reconsume = true;
+            Spec::BeforeName
+          }
+        };
+      }
+    }
+    let end = match state {
+      Spec::BeforeName | Spec::AfterQuoted => (State::Gap, false),
+      Spec::SelfClosing => (State::Gap, true),
+      Spec::Name => (State::Name, false),
+      Spec::AfterName => (State::AfterName, false),
+      Spec::BeforeValue => (State::BeforeValue, false),
+      Spec::Unquoted => (State::UnquotedValue, false),
+      Spec::Quoted(quote) => (State::Quoted(quote), false),
+    };
+    (out, Err(end))
+  }
+
+  // Every tag body up to seven bytes over the bytes the tokenizer tells
+  // apart, so each state meets each byte at a chunk end, at a `>` and mid-run.
+  #[test]
+  fn tag_scan_without_extraction_matches_the_tokenizer() {
+    const ALPHABET: [u8; 7] = *b"a =\"'/>";
+    const MAX_LEN: usize = 7;
+    let mut attrs = Attributes::new();
+    let mut buf = [0u8; MAX_LEN];
+    for len in 0..=MAX_LEN {
+      for mut code in 0..ALPHABET.len().pow(len as u32) {
+        for slot in &mut buf[..len] {
+          *slot = ALPHABET[code % ALPHABET.len()];
+          code /= ALPHABET.len();
+        }
+        let html = std::str::from_utf8(&buf[..len]).unwrap();
+        let scan = process_tag_attributes(html, 0, None, ATTR_NONE, AttrBudget::new(0), &mut attrs);
+        let want = spec_tokenize(html).1;
+        // The search for `>` alone, as a dropped or measured tag runs it.
+        let gt = want.ok().map(|(end, _)| end - 1);
+        assert_eq!(
+          tag_is_complete(html, 0, &mut PendingTagScan::new()),
+          gt,
+          "{html:?}"
+        );
+        for split in 1..len {
+          let mut pending = PendingTagScan::new();
+          let found = tag_is_complete(&html[..split], 0, &mut pending).or_else(|| {
+            pending.restart();
+            tag_is_complete(&html[split..], 0, &mut pending).map(|gt| split + gt)
+          });
+          assert_eq!(found, gt, "{html:?} split at {split}");
+        }
+        match want {
+          Ok((end, self_closing)) => assert!(
+            scan.complete && scan.new_position == end && scan.self_closing == self_closing,
+            "{html:?}: got ({}, {}, {}), want ({end}, {self_closing})",
+            scan.complete,
+            scan.new_position,
+            scan.self_closing
+          ),
+          Err((state, slash)) => {
+            let carry = scan.carry.as_deref();
+            assert!(
+              !scan.complete
+                && scan.new_position == len
+                && carry.is_some_and(|carry| carry.state == state && carry.slash == slash),
+              "{html:?}: suspended scan disagrees"
+            );
+          }
+        }
+      }
+    }
+  }
+
+  fn assert_extraction_matches(html: &str, mask: u16, attrs: &mut Attributes) {
+    let (mut want, want_end) = spec_tokenize(html);
+    if mask != ATTR_ALL {
+      want.retain(|(name, _)| mask & attr_bit(name.as_bytes()) != 0);
+    }
+    let scan = process_tag_attributes(html, 0, None, mask, AttrBudget::new(0), attrs);
+    let got: Vec<(String, String)> = attrs
+      .iter()
+      .map(|(name, value)| (name.to_string(), value.to_string()))
+      .collect();
+    assert_eq!(got, want, "{html:?} mask {mask:#x}: attributes");
+    match want_end {
+      Ok((end, self_closing)) => assert!(
+        scan.complete && scan.new_position == end && scan.self_closing == self_closing,
+        "{html:?} mask {mask:#x}: got ({}, {}, {}), want ({end}, {self_closing})",
+        scan.complete,
+        scan.new_position,
+        scan.self_closing
+      ),
+      Err((state, slash)) => {
+        let carry = scan.carry.as_deref();
+        assert!(
+          !scan.complete
+            && scan.new_position == html.len()
+            && carry.is_some_and(|carry| carry.state == state && carry.slash == slash),
+          "{html:?} mask {mask:#x}: suspended scan disagrees"
+        );
+      }
+    }
+  }
+
+  // Every body up to six tokens, so each state meets each byte in the
+  // straight-line walk and in the loop it hands over to. One name is masked
+  // in: duplicates, bare names and a name the mask rejects are kept or dropped
+  // as the tokenizer would.
+  #[test]
+  fn tag_scan_with_extraction_matches_the_tokenizer() {
+    const TOKENS: [&str; 8] = ["href", "x", " ", "=", "\"", "'", "/", ">"];
+    const MAX_TOKENS: usize = 6;
+    let mut attrs = Attributes::new();
+    let mut html = String::new();
+    for count in 0..=MAX_TOKENS {
+      for mut code in 0..TOKENS.len().pow(count as u32) {
+        html.clear();
+        for _ in 0..count {
+          html.push_str(TOKENS[code % TOKENS.len()]);
+          code /= TOKENS.len();
+        }
+        assert_extraction_matches(&html, ATTR_HREF, &mut attrs);
+        assert_extraction_matches(&html, ATTR_ALL, &mut attrs);
+      }
+    }
+  }
+
+  /// [`assert_extraction_matches`] with the tag cut at `splits`, each later
+  /// chunk resumed from the carry of the one before.
+  fn assert_resumed_extraction_matches(html: &str, splits: &[usize], mask: u16) {
+    let (mut want, want_end) = spec_tokenize(html);
+    if mask != ATTR_ALL {
+      want.retain(|(name, _)| mask & attr_bit(name.as_bytes()) != 0);
+    }
+    let mut attrs = Attributes::new();
+    let first = splits.first().map_or(html.len(), |&end| end);
+    let scan = process_tag_attributes(
+      &html[..first],
+      0,
+      None,
+      mask,
+      AttrBudget::new(0),
+      &mut attrs,
+    );
+    let got_end = if scan.complete {
+      Ok((scan.new_position, scan.self_closing))
+    } else {
+      let mut carry = scan.carry.expect("an incomplete scan carries its state");
+      let mut start = first;
+      let mut end = Err(());
+      for &stop in splits.iter().skip(1).chain(std::iter::once(&html.len())) {
+        let resume = resume_tag_attributes(&html[start..stop], false, mask, &mut carry, &mut attrs);
+        if resume.complete {
+          end = Ok((start + resume.new_position, resume.self_closing));
+          break;
+        }
+        start = stop;
+      }
+      end.map_err(|()| (carry.state, carry.slash))
+    };
+    let got: Vec<(String, String)> = attrs
+      .iter()
+      .map(|(name, value)| (name.to_string(), value.to_string()))
+      .collect();
+    assert_eq!(
+      got, want,
+      "{html:?} split at {splits:?} mask {mask:#x}: attributes"
+    );
+    assert!(
+      got_end == want_end,
+      "{html:?} split at {splits:?} mask {mask:#x}: tag end disagrees"
+    );
+  }
+
+  // A tag cut anywhere, once or at every byte, reads as it does whole.
+  #[test]
+  fn tag_scan_resumed_at_any_split_matches_the_tokenizer() {
+    const TOKENS: [&str; 8] = ["href", "x", " ", "=", "\"", "'", "/", ">"];
+    const MAX_TOKENS: usize = 5;
+    let mut html = String::new();
+    for count in 1..=MAX_TOKENS {
+      for mut code in 0..TOKENS.len().pow(count as u32) {
+        html.clear();
+        for _ in 0..count {
+          html.push_str(TOKENS[code % TOKENS.len()]);
+          code /= TOKENS.len();
+        }
+        let every_byte: Vec<usize> = (1..html.len()).collect();
+        for mask in [ATTR_HREF, ATTR_ALL] {
+          for split in 1..html.len() {
+            assert_resumed_extraction_matches(&html, &[split], mask);
+          }
+          assert_resumed_extraction_matches(&html, &every_byte, mask);
+        }
+      }
+    }
+  }
+
   #[test]
   fn whitespace_detection() {
     for c in *b" \t\n\r" {
@@ -1175,16 +1870,27 @@ mod tests {
           }
           let mut hay = vec![fill; len];
           assert_eq!(find_byte(&hay, needle), None, "len {len} fill {fill:#x}");
+          assert_eq!(
+            find_byte_far(&hay, needle),
+            None,
+            "far len {len} fill {fill:#x}"
+          );
           for at in 0..len {
             hay[at] = needle;
             // A later duplicate must not win over the first match.
             if at + 3 < len {
               hay[at + 3] = needle;
             }
+            let want = hay.iter().position(|&b| b == needle);
             assert_eq!(
               find_byte(&hay, needle),
-              hay.iter().position(|&b| b == needle),
+              want,
               "needle {needle:#x} at {at} len {len} fill {fill:#x}"
+            );
+            assert_eq!(
+              find_byte_far(&hay, needle),
+              want,
+              "far needle {needle:#x} at {at} len {len} fill {fill:#x}"
             );
             hay.fill(fill);
           }
