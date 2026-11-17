@@ -465,7 +465,7 @@ describe.each(engines)('links $name', (engineConfig) => {
         .toBe('Title')
     }
     expect(htmlToMarkdown('before<a href="/x" title="Title"><img src="/i" alt="\u00A0"></a>after', { engine, format: 'text' }))
-      .toBe('before \u00A0after')
+      .toBe('before \u00A0 after')
     expect(htmlToMarkdown('before<img src="/i" alt=" ">after', { engine, format: 'text' }))
       .toBe('before after')
 

@@ -1067,6 +1067,8 @@ pub struct ConvertState {
   /// would cross the break into the text, where JS only trims the break.
   break_after_last_text: bool,
   last_node_is_inline: bool,
+  /// Text output: the last output was an image's text, so the next text owes it a separator.
+  image_text_pending: bool,
   /// A collapsed trailing space trimmed from the end of an inline element.
   /// It stays deferred until later visible inline content appears so Markdown
   /// delimiters close before the separator and streaming output has no
@@ -1490,6 +1492,7 @@ impl ConvertState {
       has_last_text_node: false,
       break_after_last_text: false,
       last_node_is_inline: false,
+      image_text_pending: false,
       pending_inline_whitespace: false,
       pending_leading_blank: false,
       pending_pair_separator: false,
