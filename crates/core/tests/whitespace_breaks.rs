@@ -56,6 +56,38 @@ fn relocated_link_space_is_a_wrap_boundary() {
   }
 }
 
+// A link's `[` already parts the label from what precedes it, so source
+// whitespace that leads the label is dropped, whatever empty element stands
+// before it. Whitespace decoded from a character reference is content, and
+// whitespace after an image or a word still separates.
+#[test]
+fn link_label_drops_the_source_space_that_leads_it() {
+  for (html, expected) in [
+    (r#"<a href="/f"><i class="fa"></i> Lima</a>"#, "[Lima](/f)"),
+    (r#"<a href="/f"><span></span> Lima</a>"#, "[Lima](/f)"),
+    (r#"<a href="/f"><svg></svg> Lima</a>"#, "[Lima](/f)"),
+    (
+      r#"<p>x<a href="/f"><span></span> Lima</a></p>"#,
+      "x [Lima](/f)",
+    ),
+    (
+      r#"<p><a href="/f"><svg></svg> Docs</a> <a href="/g"><svg></svg> Blog</a></p>"#,
+      "[Docs](/f) [Blog](/g)",
+    ),
+    (r#"<a href="/f"><span></span>&#32;Lima</a>"#, "[ Lima](/f)"),
+    (
+      r#"<a href="/f"><img src="/i.png" alt="i"> Lima</a>"#,
+      "[![i](/i.png) Lima](/f)",
+    ),
+    (r#"<a href="/f"><b>x</b> Lima</a>"#, "[**x** Lima](/f)"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
 // ── Block spacing after a one-character line ──
 
 #[test]
