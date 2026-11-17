@@ -4571,9 +4571,16 @@ impl ConvertState {
         .last()
         .is_none_or(|frame| frame.content_start <= self.empty_item_line_start)
     {
-      // Keep the exit guard for a live link: the item exit still uses it
-      // to preserve continuation indentation after a hard break.
-      self.resolve_item_marker(self.depth_map[TAG_A as usize] == 0);
+      // Trailing whitespace can precede a hard break whose continuation indent
+      // still needs the exit guard. Answer the line hold without clearing it.
+      // A live link also needs that guard until the item exits.
+      let at_exit = self.depth_map[TAG_A as usize] == 0
+        && self
+          .buffer
+          .as_bytes()
+          .last()
+          .is_some_and(|byte| !byte.is_ascii_whitespace());
+      self.resolve_item_marker(at_exit);
     }
   }
 
