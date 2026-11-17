@@ -1782,6 +1782,7 @@ impl ConvertState {
       // Same step as the general enter, which arms the empty-item guard. Plain
       // text never writes an item marker, so the general enter skips it there.
       if !plain_text!(self) && !self.in_table_cell() {
+        self.record_list_item_output(output_start);
         self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
       }
     }
@@ -1911,6 +1912,9 @@ impl ConvertState {
       self.last_node_is_inline = node.is_inline;
       return;
     }
+    let tag_id = node.tag_id;
+    let is_inline = node.is_inline;
+    let spacing = node.spacing;
     if li {
       #[cfg(test)]
       {
@@ -1919,11 +1923,9 @@ impl ConvertState {
       // The general exit clears these first. Skipping that would let a pending
       // heading break or list rule reach the text after the item.
       self.list_rule_pending = ListBoundary::None;
+      self.trim_empty_list_tail();
       self.heading_break_pending = false;
     }
-    let tag_id = node.tag_id;
-    let is_inline = node.is_inline;
-    let spacing = node.spacing;
     if link {
       let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
       self.link.empty_text_pending = false;
@@ -1941,6 +1943,7 @@ impl ConvertState {
     {
       self.simple_exits += 1;
     }
+    let node = self.stack.retired();
     let output = self.get_exit_output(node, 1);
     let new_line_config = self.calculate_new_line_config(tag_id, spacing, false);
     let configured_new_lines = new_line_config[1];
@@ -2495,15 +2498,12 @@ impl ConvertState {
     });
 
     if !plain_text!(self) && tag_id == Some(TAG_LI) && !self.in_table_cell() {
-      if self.buffer.len() > output_start
-        && (!enter_is_literal
-          || output
-            .as_deref()
-            .is_some_and(|value| has_visible(value.as_bytes())))
-        && stack_len > 1
-        && matches!(self.stack[stack_len - 2].tag_id, Some(TAG_UL | TAG_OL))
+      if !enter_is_literal
+        || output
+          .as_deref()
+          .is_some_and(|value| has_visible(value.as_bytes()))
       {
-        self.stack[stack_len - 2].has_list_item_output = true;
+        self.record_list_item_output(output_start);
       }
       if !enter_is_literal {
         self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
@@ -2944,19 +2944,7 @@ impl ConvertState {
     let tag_id = node.tag_id;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = ListBoundary::None;
-      // Nothing visible followed the nested list, so its separator would only
-      // leave a blank line that turns the list loose.
-      if self.list_tail_start != usize::MAX {
-        let start = self.list_tail_start.min(self.buffer.len());
-        if self.buffer[start..]
-          .bytes()
-          .all(|byte| byte.is_ascii_whitespace())
-        {
-          self.truncate_buffer(start);
-          self.last_content_cache_len = 0;
-        }
-        self.list_tail_start = usize::MAX;
-      }
+      self.trim_empty_list_tail();
       if matches!(
         self.caption_boundary,
         CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
@@ -4799,6 +4787,32 @@ impl ConvertState {
         .released_break_lines
         .iter()
         .any(|run| (start..=end).contains(run))
+  }
+
+  /// Discard a nested list separator when no visible parent content followed.
+  fn trim_empty_list_tail(&mut self) {
+    if self.list_tail_start != usize::MAX {
+      let start = self.list_tail_start.min(self.buffer.len());
+      if self.buffer[start..]
+        .bytes()
+        .all(|byte| byte.is_ascii_whitespace())
+      {
+        self.truncate_buffer(start);
+        self.last_content_cache_len = 0;
+      }
+      self.list_tail_start = usize::MAX;
+    }
+  }
+
+  /// Both item emitters must let the enclosing list retain its exit boundary.
+  fn record_list_item_output(&mut self, output_start: usize) {
+    let stack_len = self.stack.len();
+    if self.buffer.len() > output_start
+      && stack_len > 1
+      && matches!(self.stack[stack_len - 2].tag_id, Some(TAG_UL | TAG_OL))
+    {
+      self.stack[stack_len - 2].has_list_item_output = true;
+    }
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from

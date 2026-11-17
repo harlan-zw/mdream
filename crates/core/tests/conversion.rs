@@ -12,6 +12,46 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
+#[test]
+fn nested_ordered_item_does_not_capture_parent_text() {
+  let html = "<ul><li><ol><li></li></ol>text</li></ul>";
+  let expected = "-\n  1.\n\n  text";
+  assert_eq!(convert(html), expected);
+  for split in 0..=html.len() {
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let mut output = processor.process_chunk(&html[..split]);
+    output.push_str(&processor.process_chunk(&html[split..]));
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected, "split={split}");
+  }
+  #[cfg(fuzzing)]
+  for fast in [false, true] {
+    use mdream::fuzz_bridge::{convert_with_fast_paths, stream_with_fast_paths};
+    assert_eq!(
+      convert_with_fast_paths(
+        html,
+        HtmlToMarkdownOptions::default(),
+        OutputFormat::Markdown,
+        fast
+      ),
+      expected,
+      "fast={fast}"
+    );
+    for split in 0..=html.len() {
+      assert_eq!(
+        stream_with_fast_paths(
+          &[&html[..split], &html[split..]],
+          HtmlToMarkdownOptions::default(),
+          OutputFormat::Markdown,
+          fast,
+        ),
+        expected,
+        "fast={fast}, split={split}"
+      );
+    }
+  }
+}
+
 fn filter_exclude(selectors: &[&str]) -> HtmlToMarkdownOptions {
   HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
