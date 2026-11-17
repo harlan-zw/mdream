@@ -123,13 +123,23 @@ impl Attributes {
   }
 
   /// Store a known attribute by bit. The first occurrence wins, as in HTML.
-  #[inline]
+  #[cfg(test)]
   pub fn insert_known(&mut self, bit: u16, value: Option<&str>) {
+    if let Some(index) = self.vacant_bit(bit) {
+      self.insert_known_at(index, bit, value);
+    }
+  }
+
+  /// The slot a new `bit` attribute takes, or `None` when one is stored.
+  #[inline]
+  pub(crate) fn vacant_bit(&self, bit: u16) -> Option<usize> {
     debug_assert!(bit != ATTR_NONE, "a known attribute has a bit");
-    let index = match self.locate_bit(bit) {
-      Ok(_) => return,
-      Err(index) => index,
-    };
+    self.locate_bit(bit).err()
+  }
+
+  /// Store a known attribute in the slot [`Self::vacant_bit`] returned.
+  #[inline]
+  pub(crate) fn insert_known_at(&mut self, index: usize, bit: u16, value: Option<&str>) {
     let slot = self.claim_slot(index);
     slot.bit = bit;
     write_attribute_value(&mut slot.value, value);
@@ -173,7 +183,15 @@ impl Attributes {
 fn write_attribute_value(buffer: &mut String, value: Option<&str>) {
   match value {
     Some(value) => {
-      reset_buffer(buffer, value.len());
+      // A slot is reused across elements; rounding a value it keeps up keeps a
+      // slightly longer one from replacing it again.
+      let len = value.len();
+      if buffer.capacity() < len {
+        let keep = len <= RETAINED_VALUE_CAPACITY;
+        replace_buffer(buffer, if keep { len.next_power_of_two() } else { len });
+      } else {
+        buffer.clear();
+      }
       decode_html_attribute_entities_into(value, buffer);
     }
     None => buffer.clear(),
@@ -364,7 +382,7 @@ impl NodeStack {
 
   /// Drop a retired node's large values and extras once its exit is emitted.
   /// Otherwise a slot above the live depth holds them until the document ends.
-  #[inline]
+  #[inline(always)]
   pub fn release_retired(&mut self) {
     let node = &mut self.nodes[self.len];
     node.attributes.clear();

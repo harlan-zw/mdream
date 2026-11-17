@@ -23,6 +23,8 @@ export interface EngineStream {
   processChunkBytes?: (chunk: Uint8Array) => string
   finish: () => string
   takeData: () => PluginData
+  /** Frees the engine stream; WASM streams otherwise wait for GC. */
+  free?: () => void
 }
 
 /** Calls the frontmatter callback and extraction handlers with what a conversion collected. */
@@ -37,6 +39,94 @@ export function deliverPluginData(data: PluginData, { frontmatterCallback, extra
 
 function hasCallbacks({ frontmatterCallback, extractionHandlers }: Callbacks): boolean {
   return !!frontmatterCallback || !!extractionHandlers
+}
+
+const utf8 = new TextEncoder()
+
+/**
+ * Input bytes a WASM conversion passes in per call. On a fresh instance,
+ * 16 KiB grew linear memory by about half as much as 64 KiB per large page,
+ * at a time cost within measurement noise; smaller chunks were slower.
+ */
+const WASM_CHUNK_BYTES = 16 * 1024
+/**
+ * Inputs up to this size convert in one call: below it, setting up a stream
+ * costs more than it saves, and the copy stays under 1 KiB.
+ */
+const WASM_ONE_SHOT_MAX = 256
+
+export interface WasmStream {
+  processChunk: (chunk: string) => string
+  processChunkBytes: (chunk: Uint8Array) => string
+  finish: () => string
+  takeData: () => Omit<MdreamNapiResult, 'markdown'>
+  free: () => void
+}
+
+/** The bindings of one WASM instance a conversion may use. */
+export interface WasmEngine {
+  oneShot: (html: string, napiOpts: HtmlToMarkdownOptions) => MdreamNapiResult
+  /** Only the entries that take bytes pass it; without it, bytes stream. */
+  bytes?: (html: Uint8Array, napiOpts: HtmlToMarkdownOptions) => string
+  Stream: new (napiOpts: HtmlToMarkdownOptions) => WasmStream
+}
+
+/**
+ * One-shot conversion on a WASM engine, through a stream. WASM memory never
+ * shrinks, so it holds one chunk of UTF-8 input and the undrained output,
+ * not the whole input and output; a string argument would also be copied in
+ * at three bytes per UTF-16 unit once it holds non-ASCII text. A stream joins
+ * to the same output as one-shot conversion.
+ */
+export function convertWasm(html: string, napiOpts: HtmlToMarkdownOptions, engine: WasmEngine): MdreamNapiResult {
+  if (html.length <= WASM_ONE_SHOT_MAX)
+    return engine.oneShot(html, napiOpts)
+  return withWasmStream(engine, napiOpts, (stream) => {
+    let markdown = ''
+    // Byte chunks drop a leading BOM as `TextDecoder` does; string input keeps it.
+    if (html.charCodeAt(0) === 0xFEFF) {
+      markdown += stream.processChunk(String.fromCharCode(0xFEFF))
+      html = html.slice(1)
+    }
+    const bytes = new Uint8Array(WASM_CHUNK_BYTES)
+    for (let start = 0; start < html.length;) {
+      // Every UTF-16 unit takes at least one byte, so the units before a slice's
+      // last leave at most one byte free. `encodeInto` stops at a code point that
+      // does not fit, so the high half of a surrogate pair a slice cuts is
+      // encoded with its low half in the next slice rather than alone.
+      const { read, written } = utf8.encodeInto(html.slice(start, start + WASM_CHUNK_BYTES), bytes)
+      markdown += stream.processChunkBytes(bytes.subarray(0, written))
+      start += read
+    }
+    return { markdown: markdown + stream.finish(), ...stream.takeData() }
+  })
+}
+
+/** Byte conversion on a WASM engine; a large input streams as `convertWasm` does. */
+export function convertWasmBytes(html: Uint8Array, napiOpts: HtmlToMarkdownOptions, engine: WasmEngine): string {
+  if (html.length <= WASM_ONE_SHOT_MAX && engine.bytes)
+    return engine.bytes(html, napiOpts)
+  return withWasmStream(engine, napiOpts, (stream) => {
+    let markdown = ''
+    // The stream carries a code point split across chunks to the next one.
+    for (let start = 0; start < html.length; start += WASM_CHUNK_BYTES)
+      markdown += stream.processChunkBytes(html.subarray(start, start + WASM_CHUNK_BYTES))
+    return markdown + stream.finish()
+  })
+}
+
+function withWasmStream<T>(engine: WasmEngine, napiOpts: HtmlToMarkdownOptions, use: (stream: WasmStream) => T): T {
+  const stream = new engine.Stream(napiOpts)
+  try {
+    return use(stream)
+  }
+  finally {
+    // After a panic the instance has aborted; the panic is the error to report.
+    try {
+      stream.free()
+    }
+    catch {}
+  }
 }
 
 /** Resolves `options`, converts with the engine binding, and runs the callbacks. */
@@ -56,6 +146,14 @@ export interface PumpOptions {
   mapError?: (error: unknown) => unknown
 }
 
+/** Frees the engine stream; a binding whose instance is gone must not mask the pump's error. */
+function freeStream(stream: EngineStream): void {
+  try {
+    stream.free?.()
+  }
+  catch {}
+}
+
 /**
  * Feeds `htmlStream` through an engine stream, yields the Markdown, then runs
  * the callbacks once the whole document is read.
@@ -66,9 +164,10 @@ export async function* pumpStream(
   callbacks: Callbacks,
   { mapError = error => error }: PumpOptions = {},
 ): AsyncIterable<string> {
-  const reader = htmlStream.getReader()
   const decoder = stream.processChunkBytes ? undefined : new TextDecoder()
+  let reader: ReadableStreamDefaultReader<Uint8Array | string> | undefined
   try {
+    reader = htmlStream.getReader()
     while (true) {
       const { done, value } = await reader.read()
       if (done)
@@ -97,6 +196,7 @@ export async function* pumpStream(
     throw mapError(error)
   }
   finally {
-    reader.releaseLock()
+    freeStream(stream)
+    reader?.releaseLock()
   }
 }
