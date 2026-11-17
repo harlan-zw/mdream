@@ -4548,15 +4548,17 @@ impl ConvertState {
     self.empty_item_len = self.buffer.len();
   }
 
-  /// Answer the guard between tokens, where the buffer reads the same whatever
-  /// the chunking, once the item's first byte is final: settled content ends
-  /// the buffer and no open construct can take it back. The exit would answer
-  /// the same, and waiting for it pins the marker's line and everything the
-  /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
-  /// blank line also survives a nested list whose first `<li>` dropped it.
+  /// Answer the guard at token and text-piece boundaries, independent of chunks.
+  /// Content before trailing whitespace settles the item once no open construct
+  /// can take it back. Waiting for the whitespace to end can pin the whole item.
+  /// The blank line also survives a nested list whose first `<li>` dropped it.
   pub(crate) fn settle_item_marker(&mut self) {
     if self.buffer.len() > self.empty_item_len
-      && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
+      && self
+        .held_whitespace
+        .start(self.buffer.as_bytes(), self.buffer.len(), |byte| {
+          byte.is_ascii_whitespace()
+        }) > self.empty_item_len
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
       && self.code_fence.is_none()

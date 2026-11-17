@@ -1996,6 +1996,95 @@ fn a_long_quote_of_short_lines_is_not_held_back() {
   assert_eq!((batch.markdown, batch.truncated), (uncapped, false));
 }
 
+#[test]
+fn a_nested_items_first_text_run_streams_before_it_closes() {
+  let text = "word ".repeat(64 * 1024);
+  for (prefix, suffix) in [
+    ("<ul><li>r<ul><li>", "</li></ul></li></ul>"),
+    ("<ul><li>r<ul><li><em>", "</em></li></ul></li></ul>"),
+    ("<ul><li>r<ul><li><strong>", "</strong></li></ul></li></ul>"),
+    ("<ul><li>r<ul><li><a href=/u>", "</a></li></ul></li></ul>"),
+    ("<ol><li><ol><li><p>", "</p></li></ol></li></ol>"),
+    ("<ul><li>r<ul><li><code>x</code> ", "</li></ul></li></ul>"),
+  ] {
+    let html = format!("{prefix}{text}{suffix}");
+    let expected = html_to_markdown_result(&html, options(0)).markdown;
+    for cap in [0, 64 * 1024] {
+      let mut p = MarkdownStreamProcessor::new(options(cap));
+      let mut out = p.process_chunk(prefix);
+      for chunk in text.as_bytes().chunks(8190) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      assert!(
+        out.len() > text.len() / 2,
+        "cap={cap}: yielded {}",
+        out.len()
+      );
+      out.push_str(&p.process_chunk(suffix));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "cap={cap}");
+      assert!(!p.truncated(), "cap={cap}");
+      for chunk in [1, 37, 64 * 1024, html.len()] {
+        assert_eq!(
+          stream_reporting(&html, chunk, cap),
+          (expected.clone(), false),
+          "prefix={prefix} cap={cap} chunk={chunk}"
+        );
+      }
+      assert!(
+        peak(&html, 8190, cap) < (8 * CAP) as u64,
+        "prefix={prefix} cap={cap}"
+      );
+    }
+  }
+}
+
+#[test]
+fn a_nested_item_marker_hold_is_capped() {
+  let cap = 8;
+  for (name, content) in [
+    (
+      "bare marker",
+      "<ul><li><ul><li><ul><li><ul><li></li></ul></li></ul></li></ul></li></ul>",
+    ),
+    (
+      "marker before code",
+      "<ul><li><ul><li><ul><li><ul><li><code>x</code></li></ul></li></ul></li></ul></li></ul>",
+    ),
+  ] {
+    let html = format!("<ul><li>r<ul><li>{content}</li></ul></li></ul><p>after</p>");
+    let batch = html_to_markdown_result(&html, options(cap));
+    assert!(batch.truncated, "{name}");
+    assert!(!batch.markdown.contains("after"), "{name}");
+    for split in 0..=html.len() {
+      assert_eq!(
+        stream_parts(&[&html[..split], &html[split..]], cap),
+        (batch.markdown.clone(), true),
+        "{name} split={split}"
+      );
+    }
+  }
+}
+
+#[test]
+fn short_text_nodes_after_code_do_not_pin_a_nested_item() {
+  let html = format!(
+    "<ul><li>r<ul><li><code>x</code>word {}</li></ul></li></ul>",
+    "<span>word </span>".repeat(128 * 1024)
+  );
+  let expected = html_to_markdown_result(&html, options(0)).markdown;
+  for cap in [0, CAP] {
+    for chunk in [1, 37, 8190, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, cap),
+        (expected.clone(), false),
+        "cap={cap} chunk={chunk}"
+      );
+    }
+    assert!(peak(&html, 8190, cap) < (8 * CAP) as u64, "cap={cap}");
+  }
+}
+
 // A first item whose marker sits right under its parent's line owes a blank line
 // when a block opens it on the next line. That is known once the block writes,
 // yet the marker's line was held until the item's exit, pinning everything the

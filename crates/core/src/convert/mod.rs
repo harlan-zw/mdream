@@ -1955,7 +1955,11 @@ impl ConvertState {
     };
     self.process_text_buffer_piece(text_buffer, false);
     self.entity_seals = tail_seals;
-    // A blank link's text can outgrow the cap within a single run.
+    // Piece boundaries depend on content, so settle the marker here as well
+    // as at token boundaries before charging output that still cannot stream.
+    if self.empty_item_hazard {
+      self.settle_item_marker();
+    }
     self.check_held_output();
     self.last_node_is_inline = true;
     text_buffer.push_str(&tail);
@@ -3212,6 +3216,24 @@ impl ConvertState {
       return true;
     }
     let mut floor = len;
+    // An unresolved item marker pins its line even when no quote or link does.
+    // Settlement may still be blocked by an open inline construct or whitespace.
+    if self.item_marker_line_held() {
+      // Code bounds and drops its own held content. Charge only the prefix
+      // before it, so that exhausting code can still retain following nodes.
+      let end = self
+        .code_spans
+        .first()
+        .map(|span| span.output_start)
+        .or_else(|| self.code_fence.as_ref().map(|fence| fence.output_start));
+      if let Some(end) = end {
+        if end.saturating_sub(self.empty_item_line_start) > cap {
+          return true;
+        }
+      } else {
+        floor = floor.min(self.empty_item_line_start);
+      }
+    }
     // A link holds while its text is blank, since its close may still drop it.
     // Other link holds end within the link's URL length.
     if let Some(bracket_pos) = std::iter::once(&self.link)
