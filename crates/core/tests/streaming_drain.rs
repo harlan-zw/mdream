@@ -264,6 +264,24 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
+fn a_dropped_empty_link_in_a_nested_item_streams_like_one_shot() {
+  let empty_link_text = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<p>x</p><ul><li><ul><li><a href=\"\">&nbsp;</a></li></ul></li></ul>",
+    "<ul><li><ul><li><ul><li><ul><li><a href=\"\">&nbsp;",
+  ] {
+    assert_stream_matches(html, empty_link_text.clone());
+    assert_stream_matches_every_split(html, empty_link_text.clone());
+  }
+}
+
+#[test]
 fn a_fence_inside_a_quote_boundary_streams_like_one_shot() {
   for html in [
     "<li><blockquote/><em><pre><blockquote>",

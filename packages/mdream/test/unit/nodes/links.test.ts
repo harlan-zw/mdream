@@ -163,6 +163,45 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(htmlToMarkdown(html, { clean, engine })).toBe(expected)
   })
 
+  it.each([
+    ['<p>x <a href="/u">&nbsp;</a> y</p>', 'x  y'],
+    ['<p>x <a href="/u" title="t">&#11;</a> y</p>', 'x  y'],
+    ['<p>x <a href="/u">&#32;</a> y</p>', 'x  y'],
+    ['<p>x <a href="/u">&#8195;&#12288;</a> y</p>', 'x  y'],
+    ['<p>x <a href="/u">\u0085</a> y</p>', 'x  y'],
+    ['<p>x <a href="/u"><span>&nbsp;</span> <b></b>&nbsp;</a> y</p>', 'x  y'],
+    ['<h2>T <a href="/u">&nbsp;</a></h2>', '## T'],
+    ['<ul><li>a</li><li><a href="/u">&nbsp;</a></li></ul>', '- a\n-'],
+    // U+FEFF is not White_Space, and a label with text keeps its blanks.
+    ['<p>x <a href="/u">&#65279;</a> y</p>', 'x [﻿](/u) y'],
+    ['<p>x <a href="/u">&nbsp;z</a> y</p>', 'x [ z](/u) y'],
+    // The blank text opens the caption, which outlives the dropped link.
+    ['<figure><img src="p.png" alt="p"><figcaption><a href="/u">&nbsp;</a> c</figcaption></figure>', '![p](p.png)\n\n* c*'],
+    ['<figure><img src="p.png" alt="p"><figcaption><a href="/u"><br>&nbsp;</a> c</figcaption></figure>', '![p](p.png)\n\n* c*'],
+    ['<figure><img src="p.png" alt="p"><figcaption><em><a href="/u">&#11;</a></em> c</figcaption></figure>', '![p](p.png)\n\n* c*'],
+    ['<figure><img src="p.png" alt="p"><figcaption><em><a href="/u">&nbsp;</a></em><a href="/v">&nbsp;</a> d</figcaption></figure>', '![p](p.png)\n\n*** d*'],
+    // Without a link the vertical tab stays caption text.
+    ['<figure><img src="p.png" alt="p"><figcaption><em>&#11;</em> c</figcaption></figure>', '![p](p.png)\n\n*\u000B c*'],
+  ])('drops a link whose label is only Unicode whitespace: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, clean: { emptyLinkText: true } }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    for (let cut = 0; cut < html.length; cut++) {
+      const parts = cut === 0 ? Array.from(html) : [html.slice(0, cut), html.slice(cut)]
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, options))
+        markdown += chunk
+      expect(markdown, cut === 0 ? 'one character at a time' : `split at ${cut}`).toBe(expected)
+    }
+  })
+
   it('keeps a balanced visible raw HTML link with clean enabled', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<details><a href="/x">Visible</a></details>', { clean: true, engine }))
