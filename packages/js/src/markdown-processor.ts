@@ -1691,6 +1691,7 @@ export interface MarkdownStreamContext {
   inRawHtmlRegion: () => boolean
   getNonQuoteHeldOutputFragment: (final?: boolean) => number
   getHeldOutputFragment: (final?: boolean) => number
+  compactPrefix: (fragment: number, retained: string) => boolean
   settleItemMarker: () => void
   markYielded: () => void
 }
@@ -4027,6 +4028,30 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     inRawHtmlRegion: () => inRawHtmlRegion,
     getNonQuoteHeldOutputFragment,
     getHeldOutputFragment,
+    compactPrefix(fragment, retained) {
+      // Compact emphasis holds only. Other mutable owners keep their buffers.
+      if (!closedMarkerCount || cleanPass || state.outputPositions || state.blockquotes.length
+        || gfmLifecycle.openCodeSpans.length || openLinkFragment !== -1
+        || captionFrameCount || literalOpeners.length || state.codeFence
+        || state.emptyItemFragment !== undefined) {
+        return false
+      }
+      const removed = fragment - 1
+      state.buffer.splice(0, fragment, retained)
+      for (let index = 0; index < openMarkerCount; index++)
+        openMarkers[index] = openMarkers[index]! - (removed << 3)
+      for (let index = 0; index < closedMarkerCount; index++)
+        closedMarkers[index]! -= removed
+      if (unmergedOpener >= fragment)
+        unmergedOpener -= removed
+      else
+        unmergedOpener = unmergedSlot = -1
+      pendingSpaceFragment = pendingSpaceFragment >= fragment ? pendingSpaceFragment - removed : -1
+      captionLineEnd = 0
+      captionLineFragment = -1
+      noteBufferRewrite(state)
+      return true
+    },
     settleItemMarker() {
       // Settle an open marker-line guard when the item's first content already
       // answers it, so the drain's hold never outlives the marker's own line.

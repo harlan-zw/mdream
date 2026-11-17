@@ -186,16 +186,20 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
       bufferScan[0] = true
   }
 
-  function compactQuotePrefix(fragment: number, content: string, start: number): number {
-    if (state.blockquotes.length === 0 || start <= 0 || state.outputPositions
-      || context.getNonQuoteHeldOutputFragment() !== Infinity) {
+  function compactHeldPrefix(fragment: number, content: string, start: number): number {
+    if (start <= 0)
+      return 0
+    if (state.blockquotes.length > 0) {
+      if (state.outputPositions || context.getNonQuoteHeldOutputFragment() !== Infinity)
+        return 0
+      state.buffer.splice(0, fragment, content.slice(start))
+      noteBufferRewrite(state)
+      for (const frame of state.blockquotes)
+        frame.fragment -= fragment - 1
+    }
+    else if (!context.compactPrefix(fragment, content.slice(start))) {
       return 0
     }
-    const retained = content.slice(start)
-    state.buffer.splice(0, fragment, retained)
-    noteBufferRewrite(state)
-    for (const frame of state.blockquotes)
-      frame.fragment -= fragment - 1
     quoteScan = undefined
     bufferScan[1] = Math.max(0, bufferScan[1] - fragment + 1)
     bufferScan[2] = 1
@@ -290,12 +294,12 @@ export function createMarkdownDrain(context: MarkdownStreamContext, _hasPlugins:
     // Yielded slices otherwise retain one full parent string per chunk.
     // Wrapping also needs the current line until leading trim stops changing it.
     const wrapping = !!options.wrapWidth
-    if (hasYieldedContent && fragmentHeld && state.blockquotes.length > 0 && !headingHeld && !inPre && (!wrapping || leadingTrimmed === 0)) {
+    if (hasYieldedContent && fragmentHeld && !headingHeld && !inPre && (!wrapping || leadingTrimmed === 0)) {
       observeStableOutput(content, stableLength + leadingTrimmed)
       let retainedStart = stableLength + leadingTrimmed - 17
       if (wrapping)
         retainedStart = Math.min(retainedStart, content.lastIndexOf('\n', stableLength + leadingTrimmed - 1))
-      const removed = compactQuotePrefix(heldFragment, content, Math.max(0, retainedStart))
+      const removed = compactHeldPrefix(heldFragment, content, Math.max(0, retainedStart))
       lastYieldedLength -= removed
     }
     if (hasYieldedContent && !fragmentHeld && !headingHeld && (!retainMutableFragments || !inPre) && (!wrapping || leadingTrimmed === 0)) {

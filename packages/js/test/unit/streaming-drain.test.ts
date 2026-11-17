@@ -1,5 +1,5 @@
 import type { ParseState } from '../../src/parse'
-import type { MdreamOptions, TransformPlugin } from '../../src/types'
+import type { MdreamOptions, MdreamRuntimeState, TransformPlugin } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
@@ -249,6 +249,33 @@ describe('streaming drain parity', () => {
     }
     expect(markdown).toBe(htmlToMarkdown(html))
     expect(yields).toBeGreaterThan(50)
+  })
+
+  it.each([
+    ['<b>x</b>', 8],
+    ['<b><i>x</i></b>', 15],
+    ['<b>x</b><i></i>', 15],
+    ['<b><i>x</i></b>', 1],
+    ['<b>x</b><i></i>', 1],
+  ] as const)('bounds retained output across touching emphasis chunks: %s at width %i', async (chunk, chunkSize) => {
+    const html = `${chunk.repeat(4096)}<b><b> </b></b><i></i>tail`
+    let state: MdreamRuntimeState | undefined
+    const plugin = createPlugin({
+      processTextNode(_, currentState) {
+        state = currentState as MdreamRuntimeState
+      },
+    })
+    let markdown = ''
+    let peakCharacters = 0
+    let peakFragments = 0
+    for await (const output of streamHtmlToMarkdown(chunkedStream(html, chunkSize), { plugins: [plugin] })) {
+      markdown += output
+      peakCharacters = Math.max(peakCharacters, state!.buffer.reduce((length, fragment) => length + fragment.length, 0))
+      peakFragments = Math.max(peakFragments, state!.buffer.length)
+    }
+    expect(markdown).toBe(htmlToMarkdown(html))
+    expect(peakCharacters).toBeLessThan(128)
+    expect(peakFragments).toBeLessThan(32)
   })
 
   it('bounds retained output while streaming a raw HTML anchor body', () => {
