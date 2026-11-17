@@ -269,6 +269,13 @@ pub const ATTR_START: u16 = 1 << 10;
 pub const ATTR_COLSPAN: u16 = 1 << 11;
 pub const ATTR_DATA_LANGUAGE: u16 = 1 << 12;
 pub const ATTR_DATA_LANG: u16 = 1 << 13;
+/// `style`, read by the filter's `display:none` / `visibility:hidden` check.
+pub const ATTR_STYLE: u16 = 1 << 14;
+/// `hidden`, read by the filter's hidden-element check.
+pub const ATTR_HIDDEN: u16 = 1 << 15;
+/// Every attribute, including names with no bit. A mask built from known bits
+/// reaches it only by naming all sixteen, which no mask does; doing so would
+/// keep extra names, never drop one.
 pub const ATTR_ALL: u16 = u16::MAX;
 
 /// Reverse of [`attr_bit`], for re-serialisation and extraction output.
@@ -289,6 +296,8 @@ pub(crate) const fn attr_name(bit: u16) -> &'static str {
     ATTR_COLSPAN => "colspan",
     ATTR_DATA_LANGUAGE => "data-language",
     ATTR_DATA_LANG => "data-lang",
+    ATTR_STYLE => "style",
+    ATTR_HIDDEN => "hidden",
     _ => "",
   }
 }
@@ -309,78 +318,68 @@ pub(crate) const MAX_WANTED_ATTR_NAME: usize = {
   max
 };
 
-/// Case-insensitive, length-first so the common miss costs one compare.
+const WORD_BYTES: usize = u64::BITS as usize / u8::BITS as usize;
+const ASCII_CASE_BIT: u8 = 0x20;
+
+/// `name` as a word with its letters lowercased; `name.len() <= WORD_BYTES`.
+/// Setting the case bit also maps a few control bytes onto punctuation, which
+/// no attribute name can contain.
+#[inline(always)]
+fn folded_word(name: &[u8]) -> u64 {
+  const CASE_BITS: u64 = u64::from_le_bytes([ASCII_CASE_BIT; WORD_BYTES]);
+  let mut bytes = [0u8; WORD_BYTES];
+  bytes[..name.len()].copy_from_slice(name);
+  let name_lanes_case_bits = CASE_BITS >> (u8::BITS as usize * (WORD_BYTES - name.len()));
+  u64::from_le_bytes(bytes) | name_lanes_case_bits
+}
+
+const fn literal_word(literal: &[u8]) -> u64 {
+  let mut word = 0u64;
+  let mut i = 0;
+  while i < literal.len() {
+    word |= (literal[i] as u64) << (u8::BITS as usize * i);
+    i += 1;
+  }
+  word
+}
+
+/// Case-insensitive, length-first. Names that fit a word compare as one.
 #[inline]
 pub(crate) fn attr_bit(name: &[u8]) -> u16 {
+  const ALT: u64 = literal_word(b"alt");
+  const SRC: u64 = literal_word(b"src");
+  const HREF: u64 = literal_word(b"href");
+  const NAME: u64 = literal_word(b"name");
+  const TITLE: u64 = literal_word(b"title");
+  const CLASS: u64 = literal_word(b"class");
+  const ALIGN: u64 = literal_word(b"align");
+  const START: u64 = literal_word(b"start");
+  const CONTENT: u64 = literal_word(b"content");
+  const COLSPAN: u64 = literal_word(b"colspan");
+  const PROPERTY: u64 = literal_word(b"property");
+  const STYLE: u64 = literal_word(b"style");
+  const HIDDEN: u64 = literal_word(b"hidden");
   match name.len() {
-    3 => {
-      if name.eq_ignore_ascii_case(b"alt") {
-        ATTR_ALT
-      } else if name.eq_ignore_ascii_case(b"src") {
-        ATTR_SRC
-      } else {
-        ATTR_NONE
-      }
-    }
-    4 => {
-      if name.eq_ignore_ascii_case(b"href") {
-        ATTR_HREF
-      } else if name.eq_ignore_ascii_case(b"name") {
-        ATTR_NAME
-      } else {
-        ATTR_NONE
-      }
-    }
-    5 => {
-      if name.eq_ignore_ascii_case(b"title") {
-        ATTR_TITLE
-      } else if name.eq_ignore_ascii_case(b"class") {
-        ATTR_CLASS
-      } else if name.eq_ignore_ascii_case(b"align") {
-        ATTR_ALIGN
-      } else if name.eq_ignore_ascii_case(b"start") {
-        ATTR_START
-      } else {
-        ATTR_NONE
-      }
-    }
-    7 => {
-      if name.eq_ignore_ascii_case(b"content") {
-        ATTR_CONTENT
-      } else if name.eq_ignore_ascii_case(b"colspan") {
-        ATTR_COLSPAN
-      } else {
-        ATTR_NONE
-      }
-    }
-    8 => {
-      if name.eq_ignore_ascii_case(b"property") {
-        ATTR_PROPERTY
-      } else {
-        ATTR_NONE
-      }
-    }
-    9 => {
-      if name.eq_ignore_ascii_case(b"data-lang") {
-        ATTR_DATA_LANG
-      } else {
-        ATTR_NONE
-      }
-    }
-    10 => {
-      if name.eq_ignore_ascii_case(b"aria-label") {
-        ATTR_ARIA_LABEL
-      } else {
-        ATTR_NONE
-      }
-    }
-    13 => {
-      if name.eq_ignore_ascii_case(b"data-language") {
-        ATTR_DATA_LANGUAGE
-      } else {
-        ATTR_NONE
-      }
-    }
+    3..=WORD_BYTES => match (name.len(), folded_word(name)) {
+      (3, ALT) => ATTR_ALT,
+      (3, SRC) => ATTR_SRC,
+      (4, HREF) => ATTR_HREF,
+      (4, NAME) => ATTR_NAME,
+      (5, TITLE) => ATTR_TITLE,
+      (5, CLASS) => ATTR_CLASS,
+      (5, ALIGN) => ATTR_ALIGN,
+      (5, START) => ATTR_START,
+      (5, STYLE) => ATTR_STYLE,
+      (6, HIDDEN) => ATTR_HIDDEN,
+      (7, CONTENT) => ATTR_CONTENT,
+      (7, COLSPAN) => ATTR_COLSPAN,
+      (8, PROPERTY) => ATTR_PROPERTY,
+      _ => ATTR_NONE,
+    },
+    // Longer than one word: compare bytes.
+    9 if name.eq_ignore_ascii_case(b"data-lang") => ATTR_DATA_LANG,
+    10 if name.eq_ignore_ascii_case(b"aria-label") => ATTR_ARIA_LABEL,
+    13 if name.eq_ignore_ascii_case(b"data-language") => ATTR_DATA_LANGUAGE,
     _ => ATTR_NONE,
   }
 }
@@ -464,9 +463,9 @@ pub fn get_tag_id_ci_bytes(name: &[u8]) -> Option<u8> {
 /// literals; the compiler lowers this to a length + first-byte decision tree
 /// with fixed-size `memcmp` leaves. Returns `None` for any tag not in the
 /// built-in set; callers can opt those tags into a rendering via `tagOverrides`.
-// One out-of-line copy in WASM, where each inlined match costs bundle bytes.
-#[cfg_attr(target_arch = "wasm32", inline(never))]
-fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
+#[cfg(any(test, not(target_arch = "wasm32")))]
+#[inline]
+fn get_tag_id_matched(bytes: &[u8]) -> Option<u8> {
   Some(match bytes {
     b"figcaption" => TAG_FIGCAPTION,
     b"blockquote" => TAG_BLOCKQUOTE,
@@ -583,4 +582,184 @@ fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
     b"a" => TAG_A,
     _ => return None,
   })
+}
+
+/// Hash of a tag name for [`TAG_HASH`]: first two and last two bytes, folded
+/// with the length, multiplied by an odd constant and keeping the top bits.
+/// Names of length 1 read index 0 for the missing bytes, so every length is in
+/// bounds; the empty name is rejected by the caller.
+#[cfg(any(test, target_arch = "wasm32"))]
+#[inline(always)]
+const fn tag_hash(bytes: &[u8]) -> usize {
+  let len = bytes.len();
+  let key = (bytes[0] as u32
+    | (bytes[(len > 1) as usize] as u32) << 8
+    | (bytes[len.saturating_sub(2)] as u32) << 16
+    | (bytes[len - 1] as u32) << 24)
+    ^ len as u32;
+  (key.wrapping_mul(TAG_HASH_MUL) >> (32 - TAG_HASH_BITS)) as usize
+}
+
+#[cfg(any(test, target_arch = "wasm32"))]
+const TAG_HASH_BITS: u32 = 9;
+#[cfg(any(test, target_arch = "wasm32"))]
+const TAG_HASH_MUL: u32 = 0x5e43_9de7;
+#[cfg(any(test, target_arch = "wasm32"))]
+const TAG_HASH_EMPTY: u8 = u8::MAX;
+
+/// Slot -> tag ID for every built-in name. Built at compile time; a collision
+/// fails the build, so the table is exact without a fallback chain.
+#[cfg(any(test, target_arch = "wasm32"))]
+static TAG_HASH: [u8; 1 << TAG_HASH_BITS] = {
+  let mut table = [TAG_HASH_EMPTY; 1 << TAG_HASH_BITS];
+  let mut id = 0;
+  while id < MAX_TAG_ID {
+    let slot = tag_hash(TAG_NAMES[id].as_bytes());
+    assert!(table[slot] == TAG_HASH_EMPTY, "tag hash collision");
+    table[slot] = id as u8;
+    id += 1;
+  }
+  table
+};
+
+/// Hashed lookup: one probe, then a full name compare so a non-tag that lands
+/// in an occupied slot still misses.
+#[cfg(any(test, target_arch = "wasm32"))]
+#[inline]
+fn get_tag_id_hashed(bytes: &[u8]) -> Option<u8> {
+  if bytes.is_empty() {
+    return None;
+  }
+  let id = TAG_HASH[tag_hash(bytes)];
+  if id == TAG_HASH_EMPTY || TAG_NAMES[id as usize].as_bytes() != bytes {
+    return None;
+  }
+  Some(id)
+}
+
+/// Built-in tag lookup. The hashed table is used on wasm, where each inlined
+/// match arm costs bundle bytes; native keeps the match (its lowering is
+/// faster there). Both are checked against each other in tests.
+#[cfg(target_arch = "wasm32")]
+#[inline]
+fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
+  get_tag_id_hashed(bytes)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[inline]
+fn get_tag_id_bytes(bytes: &[u8]) -> Option<u8> {
+  get_tag_id_matched(bytes)
+}
+
+#[cfg(test)]
+mod tag_hash_tests {
+  use super::*;
+
+  #[test]
+  fn hashed_lookup_matches_match_lookup() {
+    for (id, name) in TAG_NAMES.iter().enumerate() {
+      let name = name.as_bytes();
+      assert_eq!(get_tag_id_hashed(name), Some(id as u8), "{id}");
+      assert_eq!(get_tag_id_hashed(name), get_tag_id_matched(name), "{id}");
+      // Each one-byte edit of a real name: the hash may land in an occupied
+      // slot, and the full compare must still reject it.
+      let mut edited = name.to_vec();
+      for pos in 0..edited.len() {
+        let original = edited[pos];
+        for byte in b'a'..=b'z' {
+          edited[pos] = byte;
+          assert_eq!(get_tag_id_hashed(&edited), get_tag_id_matched(&edited));
+        }
+        edited[pos] = original;
+      }
+    }
+    for probe in [&b""[..], b"x", b"DIV", b"htmlx", b"my-element", b"spanspan"] {
+      assert_eq!(
+        get_tag_id_hashed(probe),
+        get_tag_id_matched(probe),
+        "{probe:?}"
+      );
+    }
+  }
+}
+
+#[cfg(test)]
+mod attr_bit_tests {
+  use super::*;
+
+  /// The byte-wise definition `attr_bit` must keep matching.
+  fn reference(name: &[u8]) -> u16 {
+    const KNOWN: &[(&[u8], u16)] = &[
+      (b"alt", ATTR_ALT),
+      (b"src", ATTR_SRC),
+      (b"href", ATTR_HREF),
+      (b"name", ATTR_NAME),
+      (b"title", ATTR_TITLE),
+      (b"class", ATTR_CLASS),
+      (b"align", ATTR_ALIGN),
+      (b"start", ATTR_START),
+      (b"content", ATTR_CONTENT),
+      (b"colspan", ATTR_COLSPAN),
+      (b"property", ATTR_PROPERTY),
+      (b"data-lang", ATTR_DATA_LANG),
+      (b"aria-label", ATTR_ARIA_LABEL),
+      (b"data-language", ATTR_DATA_LANGUAGE),
+      (b"style", ATTR_STYLE),
+      (b"hidden", ATTR_HIDDEN),
+    ];
+    KNOWN
+      .iter()
+      .find(|(known, _)| name.eq_ignore_ascii_case(known))
+      .map_or(ATTR_NONE, |&(_, bit)| bit)
+  }
+
+  // Every byte at every position of each known name, its uppercase form, and
+  // one byte more or less, so a lane that folds wrongly or a length that
+  // leaks into the next lane shows up.
+  #[test]
+  fn word_compare_matches_bytewise_compare() {
+    let names: &[&[u8]] = &[
+      b"alt",
+      b"src",
+      b"href",
+      b"name",
+      b"title",
+      b"class",
+      b"align",
+      b"start",
+      b"content",
+      b"colspan",
+      b"property",
+      b"data-lang",
+      b"aria-label",
+      b"data-language",
+      b"style",
+      b"hidden",
+      b"data-x",
+    ];
+    for name in names {
+      let mut probe = name.to_vec();
+      assert_eq!(attr_bit(&probe), reference(&probe), "{probe:?}");
+      for at in 0..name.len() {
+        for byte in 0..=u8::MAX {
+          probe[at] = byte;
+          assert_eq!(attr_bit(&probe), reference(&probe), "{probe:?}");
+        }
+        probe[at] = name[at].to_ascii_uppercase();
+        assert_eq!(attr_bit(&probe), reference(&probe), "{probe:?}");
+      }
+      for extra in [b'a', b'-', 0] {
+        let mut longer = name.to_vec();
+        longer.push(extra);
+        assert_eq!(attr_bit(&longer), reference(&longer), "{longer:?}");
+      }
+      assert_eq!(
+        attr_bit(&name[1..]),
+        reference(&name[1..]),
+        "{:?}",
+        &name[1..]
+      );
+    }
+  }
 }

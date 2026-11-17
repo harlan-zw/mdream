@@ -61,6 +61,25 @@ describe('select option tree construction', () => {
       .toBe('one two\n\nafter')
   })
 
+  it.each([
+    ['<p>h<select></select>B</p>', 'h B'],
+    ['<p>h <select><option>o</option></select> B</p>', 'h o B'],
+    ['<p>h<select><option>o<option>p</select>B</p>', 'h o p B'],
+    ['<p>h<em>x<select></select>y</em>B</p>', 'h*x y*B'],
+    ['<p>h<a href="/u"><select><option>o</option></select></a>B</p>', 'h [o](/u)B'],
+    ['<p>h<optgroup><option>o</option></optgroup>B</p>', 'h o B'],
+    ['<blockquote><p>h<select></select>B</p></blockquote>', '> h B'],
+    ['<p>h<select><option>o</p>B', 'h o\n\nB'],
+    ['<p>h<select><div>d</div></select>B</p>', 'h\n\nd\n\nB'],
+  ])('keeps an open paragraph across a select or a stray optgroup: %s', (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+  })
+
+  it('parents a select and a stray optgroup to the open paragraph', () => {
+    for (const [html, tagId] of [['<p>h<select></select>B</p>', TAG_SELECT], ['<p>h<optgroup></optgroup>B</p>', TAG_OPTGROUP]] as [string, number][])
+      expect(enteredElements(html).find(node => node.tagId === tagId)?.parent?.tagId).toBe(TAG_P)
+  })
+
   it('does not recover through a template boundary', () => {
     const html = '<select><option>outer<template><option>hidden</template><option>after</select>'
     expect(htmlToMarkdown(html)).toBe('outer after')
@@ -82,6 +101,10 @@ describe('streaming select recovery', () => {
       [
         ['<select><optgroup label=a><option>one<option>two<opt', 'group label=b><option>three</sel', 'ect><p>after</p>'],
         '<select><optgroup label=a><option>one<option>two<optgroup label=b><option>three</select><p>after</p>',
+      ],
+      [
+        ['<p>h <sel', 'ect><option>o</opt', 'ion></select> B</p><p>after</p>'],
+        '<p>h <select><option>o</option></select> B</p><p>after</p>',
       ],
     ] as [string[], string][]) {
       const split = await streamConvert(chunks)

@@ -68,7 +68,7 @@ import {
 } from './const'
 import { parserTagHandlers } from './parser-tags'
 import { resolveUrl } from './url'
-import { decodeHTMLEntities, hasNonWhitespace, traverseUpToFirstBlockNode } from './utils'
+import { decodeHTMLEntities, hasNonWhitespace, leadingWhitespaceLength, traverseUpToFirstBlockNode } from './utils'
 
 // The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
 const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
@@ -98,12 +98,7 @@ function captureBaseHref(state: ParseState, href: string | undefined): void {
     return
   }
   state.baseHrefSeen = true
-  // Strip leading and trailing C0 controls and space, as the URL spec does.
-  let start = 0
-  let end = href.length
-  while (start < end && href.charCodeAt(start) <= 0x20) start++
-  while (end > start && href.charCodeAt(end - 1) <= 0x20) end--
-  const base = resolveUrl(href.slice(start, end), target.options.origin)
+  const base = resolveUrl(href, target.options.origin)
   // A UTF-16 unit is at least one UTF-8 byte, so the length check bounds the encode.
   if (
     HTTP_BASE_RE.test(base)
@@ -137,6 +132,7 @@ const FORM_FEED_CHAR = 12 // '\f'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
 const OPEN_BRACKET_CHAR = 91 // '['
 
+// Ordered so the states outside any value compare below ATTRIBUTE_BEFORE_VALUE.
 const ATTRIBUTE_GAP = 0
 const ATTRIBUTE_NAME = 1
 const ATTRIBUTE_AFTER_NAME = 2
@@ -1547,6 +1543,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     if (rootText.length === 0) {
       return
     }
+    const sourceLead = containsWhitespace ? leadingWhitespaceLength(rootText) : 0
     if (state.hasEncodedHtmlEntity) {
       rootText = decodeHTMLEntities(String(rootText), false, shouldProtectDecodedEntityReferences(state))
       state.hasEncodedHtmlEntity = false
@@ -1562,8 +1559,10 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     }
     if (state.endTagClosedNothing)
       rootTextNode.joinsPrevious = true
-    if (containsWhitespace)
+    if (sourceLead !== 0) {
       rootTextNode.trimsAtLineStart = true
+      rootTextNode.sourceLead = sourceLead
+    }
     state.endTagClosedNothing = false
     handleEvent({ type: NodeEventEnter, node: rootTextNode })
     state.lastTextNode = rootTextNode
@@ -1645,6 +1644,7 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     return
   }
 
+  const sourceLead = containsWhitespace && !inPreTag ? leadingWhitespaceLength(text) : 0
   if (state.hasEncodedHtmlEntity) {
     text = decodeHTMLEntities(String(text), false, shouldProtectDecodedEntityReferences(state))
     state.hasEncodedHtmlEntity = false
@@ -1664,6 +1664,8 @@ function processTextBuffer(textBuffer: string, state: ParseState, handleEvent: (
     textNode.joinsPrevious = true
   if (inlineAtRoot)
     textNode.trimsAtLineStart = true
+  if (sourceLead !== 0)
+    textNode.sourceLead = sourceLead
   state.endTagClosedNothing = false
 
   for (const parent of parentsToIncrement) {
@@ -2202,9 +2204,10 @@ function processOpeningTag(
         }
       }
     }
-    else {
-      // Remaining recovery tags are all in CLOSES_P, so they close an open <p>
-      // first, then any heading/list-item implied end.
+    else if (CLOSES_P[tagId] === 1) {
+      // A <select> or an <optgroup> with no select open reaches this point and
+      // closes nothing. The rest close an open <p> first, then any
+      // heading/list-item implied end.
       if (parserTagDepth(state, TAG_P) > 0) {
         closeImpliedTo(state, SINGLE_P, P_SCOPE_BOUNDARY, handleEvent)
       }
@@ -2396,16 +2399,27 @@ function scanAttributes(
   while (i < length) {
     const charCode = source.charCodeAt(i)
 
-    if (stopAtTagEnd && state !== ATTRIBUTE_QUOTED_VALUE) {
-      if (state !== ATTRIBUTE_UNQUOTED_VALUE
-        && charCode === SLASH_CHAR
-        && i + 1 < length
-        && source.charCodeAt(i + 1) === GT_CHAR) {
+    // Outside a value `/` ends the name; only a `>` right after it self-closes.
+    if (charCode === SLASH_CHAR && state <= ATTRIBUTE_AFTER_NAME) {
+      if (stopAtTagEnd && i + 1 < length && source.charCodeAt(i + 1) === GT_CHAR) {
         selfClosing = true
         valueEnd = i
         newPosition = i + 2
         break
       }
+      if (state !== ATTRIBUTE_GAP) {
+        attributes = setAttribute(
+          attributes,
+          source.substring(nameStart, state === ATTRIBUTE_NAME ? i : nameEnd),
+          '',
+        )
+        state = ATTRIBUTE_GAP
+      }
+      i++
+      continue
+    }
+
+    if (stopAtTagEnd && state !== ATTRIBUTE_QUOTED_VALUE) {
       if (charCode === GT_CHAR) {
         valueEnd = i
         newPosition = i + 1
