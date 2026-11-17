@@ -6,7 +6,7 @@ import {
   htmlToMarkdownResult as _htmlToMarkdownResult,
   MarkdownStream as _MarkdownStream,
 } from '../wasm/mdream_edge.js'
-import { convertResult, deliverPluginData } from './convert.js'
+import { convertResult, convertWasm, convertWasmBytes, deliverPluginData } from './convert.js'
 import { resolveOptions } from './resolve-options.js'
 
 // `mdream/wasm`: the wasm-bindgen build for manual initialization. Await the
@@ -15,8 +15,10 @@ import { resolveOptions } from './resolve-options.js'
 export type { InitInput, InitOutput, SyncInitInput } from '../wasm/mdream_edge.js'
 export { default, initSync } from '../wasm/mdream_edge.js'
 
+const engine = { oneShot: _htmlToMarkdownResult, bytes: _htmlToMarkdownBytes, Stream: _MarkdownStream }
+
 export function htmlToMarkdownResult(html: string, options: Partial<MdreamOptions> = {}): MdreamNapiResult {
-  return convertResult(_htmlToMarkdownResult, html, options)
+  return convertResult((text, napiOpts) => convertWasm(text, napiOpts, engine), html, options)
 }
 
 export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}): string {
@@ -27,7 +29,7 @@ export function htmlToMarkdownBytes(html: Uint8Array, options: Partial<MdreamOpt
   const resolved = resolveOptions(options)
   if (resolved.frontmatterCallback || resolved.extractionHandlers)
     return htmlToMarkdown(new TextDecoder().decode(html), options)
-  return _htmlToMarkdownBytes(html, resolved.napiOpts)
+  return convertWasmBytes(html, resolved.napiOpts, engine)
 }
 
 /** Streaming converter. Runs the frontmatter and extraction callbacks in `finish()`. */
