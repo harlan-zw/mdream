@@ -98,12 +98,7 @@ function captureBaseHref(state: ParseState, href: string | undefined): void {
     return
   }
   state.baseHrefSeen = true
-  // Strip leading and trailing C0 controls and space, as the URL spec does.
-  let start = 0
-  let end = href.length
-  while (start < end && href.charCodeAt(start) <= 0x20) start++
-  while (end > start && href.charCodeAt(end - 1) <= 0x20) end--
-  const base = resolveUrl(href.slice(start, end), target.options.origin)
+  const base = resolveUrl(href, target.options.origin)
   // A UTF-16 unit is at least one UTF-8 byte, so the length check bounds the encode.
   if (
     HTTP_BASE_RE.test(base)

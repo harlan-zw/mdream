@@ -13,7 +13,8 @@ use crate::types::{
   TagOverrideConfig, TailwindData,
 };
 use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url, slugify_heading,
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url,
+  slugify_heading, trim_url,
 };
 use std::borrow::Cow;
 

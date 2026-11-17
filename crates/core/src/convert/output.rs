@@ -1739,7 +1739,7 @@ impl ConvertState {
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
-          && href.is_some_and(|href| {
+          && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
@@ -2598,7 +2598,7 @@ impl ConvertState {
       if self.streaming || self.options.max_node_bytes != 0 {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = has_rewrite_anchor
-          && href.is_some_and(|href| {
+          && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
@@ -2695,7 +2695,7 @@ impl ConvertState {
         let in_heading = self.in_heading();
         if in_heading
           && let Some(href) = attributes.get_bit(ATTR_HREF)
-          && href.starts_with('#')
+          && trim_url(href).starts_with('#')
           && text_len > 0
         {
           self.keep_link_text(bracket_pos, text_len, is_inline);
