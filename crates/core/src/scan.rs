@@ -851,9 +851,17 @@ fn scan_tag<const EXTRACT: bool>(
       }
       continue;
     }
-    if attribute_state != State::UnquotedValue && c == SLASH_CHAR {
-      // The `>` that would make this self-closing is in the next chunk. Feeding
-      // the `/` to the tokenizer now would bury it in an attribute name.
+    // Outside a value `/` ends the name; only a `>` right after it self-closes.
+    if c == SLASH_CHAR && matches!(attribute_state, State::Gap | State::Name | State::AfterName) {
+      // Without extraction no attribute is ever open. Skipping the call also
+      // lets the compiler drop `scan` from this instantiation.
+      if EXTRACT {
+        scan.finish(html_chunk, i);
+        scan.state = State::Gap;
+      } else {
+        state = State::Gap;
+      }
+      // The `>` that would make this self-closing is in the next chunk.
       if i + 1 == chunk_length {
         let mut carry = if EXTRACT {
           scan.suspend(html_chunk, i)
@@ -864,13 +872,10 @@ fn scan_tag<const EXTRACT: bool>(
         return TagScan::suspended(chunk_length, carry);
       }
       if bytes[i + 1] == GT_CHAR {
-        // Without extraction no attribute is ever open. Skipping the call also
-        // lets the compiler drop `scan` from this instantiation.
-        if EXTRACT {
-          scan.finish(html_chunk, i);
-        }
         return TagScan::done(i + 2, true, scan.budget.overflow);
       }
+      i += 1;
+      continue;
     }
     if c == GT_CHAR {
       if EXTRACT {
@@ -970,8 +975,9 @@ impl State {
   #[inline]
   fn step_without_extraction(self, c: u8) -> Self {
     match self {
+      // Outside a value `/` only separates attributes, as `scan_tag` reads it.
       Self::Gap => {
-        if is_whitespace(c) {
+        if is_whitespace(c) || c == SLASH_CHAR {
           Self::Gap
         } else {
           Self::Name
@@ -982,6 +988,8 @@ impl State {
           Self::BeforeValue
         } else if is_whitespace(c) {
           Self::AfterName
+        } else if c == SLASH_CHAR {
+          Self::Gap
         } else {
           Self::Name
         }
@@ -991,6 +999,8 @@ impl State {
           Self::BeforeValue
         } else if is_whitespace(c) {
           Self::AfterName
+        } else if c == SLASH_CHAR {
+          Self::Gap
         } else {
           Self::Name
         }
@@ -1170,6 +1180,7 @@ pub(crate) struct TagCarry {
   /// Tokenizer position, including any quote still open around the value.
   state: State,
   /// A `/` that ended the chunk, still waiting to see whether a `>` follows.
+  /// The attribute before it is already stored, so `state` is `Gap`.
   slash: bool,
   name: String,
   value: String,
@@ -1280,29 +1291,6 @@ impl TagCarry {
     self.state = State::Gap;
   }
 
-  /// The `/` held over from the previous chunk was not part of `/>`, so feed it
-  /// through the tokenizer as the ordinary byte it is.
-  fn replay_slash(&mut self, mask: u16, out: &mut Attributes) {
-    match self.state {
-      State::Gap => {
-        self.start();
-        self.state = State::Name;
-        self.push_name(mask, "/");
-      }
-      State::Name => self.push_name(mask, "/"),
-      State::AfterName => {
-        self.emit(mask, out, false);
-        self.state = State::Name;
-        self.push_name(mask, "/");
-      }
-      State::BeforeValue => {
-        self.state = State::UnquotedValue;
-        self.push_value(mask, "/");
-      }
-      State::UnquotedValue | State::Quoted(_) => self.push_value(mask, "/"),
-    }
-  }
-
   /// Consume the name run starting at `from`, whose first byte is known not to
   /// end it. Runs stop on ASCII delimiters, so every slice is char-aligned.
   fn run_name(&mut self, mask: u16, chunk: &str, from: usize) -> usize {
@@ -1378,16 +1366,15 @@ pub(crate) fn resume_tag_attributes(
   let chunk_length = bytes.len();
   let mut i = 0;
 
+  // The attribute before the `/` was stored when it suspended, leaving `Gap`.
   if carry.slash {
     if i == chunk_length {
       return TagResume::incomplete(chunk_length);
     }
     carry.slash = false;
     if bytes[i] == GT_CHAR {
-      carry.finish(mask, out);
       return TagResume::done(i + 1, true);
     }
-    carry.replay_slash(mask, out);
   }
 
   while i < chunk_length {
@@ -1395,15 +1382,17 @@ pub(crate) fn resume_tag_attributes(
 
     // Inside a quoted value nothing is markup.
     if !matches!(carry.state, State::Quoted(_)) {
-      if carry.state != State::UnquotedValue && c == SLASH_CHAR {
+      if c == SLASH_CHAR && matches!(carry.state, State::Gap | State::Name | State::AfterName) {
+        carry.finish(mask, out);
         if i + 1 == chunk_length {
           carry.slash = true;
           return TagResume::incomplete(chunk_length);
         }
         if bytes[i + 1] == GT_CHAR {
-          carry.finish(mask, out);
           return TagResume::done(i + 2, true);
         }
+        i += 1;
+        continue;
       }
       if c == GT_CHAR {
         carry.finish(mask, out);
@@ -1541,27 +1530,144 @@ mod tests {
     }
   }
 
-  /// The tokenizer one byte at a time, with no run and no jump: what the tag
-  /// scan has to agree with. Returns the tag end and self-closing flag, or the
-  /// state the chunk ended in and whether it ended on a pending `/`.
-  fn reference_tag_end(bytes: &[u8]) -> Result<(usize, bool), (State, bool)> {
-    let mut state = State::Gap;
-    for (i, &c) in bytes.iter().enumerate() {
-      if !matches!(state, State::Quoted(_)) {
-        if state != State::UnquotedValue && c == SLASH_CHAR {
-          match bytes.get(i + 1) {
-            None => return Err((state, true)),
-            Some(&GT_CHAR) => return Ok((i + 2, true)),
-            Some(_) => {}
-          }
-        }
-        if c == GT_CHAR {
-          return Ok((i + 1, false));
-        }
-      }
-      state = state.step_without_extraction(c);
+  /// The WHATWG tokenizer's attribute states from "before attribute name" on,
+  /// transcribed byte by byte with no run, jump or walk.
+  #[derive(Clone, Copy)]
+  enum Spec {
+    BeforeName,
+    Name,
+    AfterName,
+    BeforeValue,
+    Unquoted,
+    Quoted(u8),
+    AfterQuoted,
+    SelfClosing,
+  }
+
+  type TagEnd = Result<(usize, bool), (State, bool)>;
+
+  /// An open attribute's name bounds and, once its value opens, the value's.
+  type OpenAttr = (usize, usize, Option<(usize, usize)>);
+
+  fn store(out: &mut Vec<(String, String)>, name: &str, value: &str) {
+    let name = name.to_ascii_lowercase();
+    if !out.iter().any(|(seen, _)| *seen == name) {
+      out.push((name, value.to_string()));
     }
-    Err((state, false))
+  }
+
+  /// What the tag scan has to agree with: the attributes complete before the
+  /// tag ended or the input ran out (the first of a name wins), and the tag end
+  /// with its self-closing flag, or the scan state the input ended in and
+  /// whether it ended on a `/` that a `>` would make self-closing.
+  fn spec_tokenize(html: &str) -> (Vec<(String, String)>, TagEnd) {
+    let bytes = html.as_bytes();
+    let mut out = Vec::new();
+    let mut state = Spec::BeforeName;
+    let mut open: Option<OpenAttr> = None;
+    let commit = |open: &mut Option<OpenAttr>, out: &mut Vec<_>| {
+      if let Some((name_start, name_end, value)) = open.take() {
+        let value = value.map_or("", |(start, end)| &html[start..end]);
+        store(out, &html[name_start..name_end], value);
+      }
+    };
+    for (i, &c) in bytes.iter().enumerate() {
+      let ws = is_whitespace(c);
+      let mut reconsume = true;
+      while reconsume {
+        reconsume = false;
+        state = match state {
+          Spec::BeforeName if ws => Spec::BeforeName,
+          Spec::BeforeName | Spec::AfterName if c == SLASH_CHAR => {
+            commit(&mut open, &mut out);
+            Spec::SelfClosing
+          }
+          Spec::BeforeName | Spec::AfterName if c == GT_CHAR => {
+            commit(&mut open, &mut out);
+            return (out, Ok((i + 1, false)));
+          }
+          // `=` here starts a name, like any other byte.
+          Spec::BeforeName => {
+            commit(&mut open, &mut out);
+            open = Some((i, i + 1, None));
+            Spec::Name
+          }
+          Spec::Name if ws => Spec::AfterName,
+          Spec::Name if c == SLASH_CHAR || c == GT_CHAR => {
+            commit(&mut open, &mut out);
+            reconsume = true;
+            Spec::AfterName
+          }
+          Spec::Name if c == EQUALS_CHAR => Spec::BeforeValue,
+          Spec::Name => {
+            if let Some((_, name_end, _)) = &mut open {
+              *name_end = i + 1;
+            }
+            Spec::Name
+          }
+          Spec::AfterName if ws => Spec::AfterName,
+          Spec::AfterName if c == EQUALS_CHAR => Spec::BeforeValue,
+          Spec::AfterName => {
+            reconsume = true;
+            Spec::BeforeName
+          }
+          Spec::BeforeValue if ws => Spec::BeforeValue,
+          Spec::BeforeValue if c == QUOTE_CHAR || c == APOS_CHAR => {
+            if let Some((_, _, value)) = &mut open {
+              *value = Some((i + 1, i + 1));
+            }
+            Spec::Quoted(c)
+          }
+          Spec::BeforeValue if c == GT_CHAR => {
+            commit(&mut open, &mut out);
+            return (out, Ok((i + 1, false)));
+          }
+          Spec::BeforeValue => {
+            if let Some((_, _, value)) = &mut open {
+              *value = Some((i, i));
+            }
+            reconsume = true;
+            Spec::Unquoted
+          }
+          Spec::Unquoted if ws => {
+            commit(&mut open, &mut out);
+            Spec::BeforeName
+          }
+          Spec::Unquoted if c == GT_CHAR => {
+            commit(&mut open, &mut out);
+            return (out, Ok((i + 1, false)));
+          }
+          Spec::Quoted(quote) if c == quote => {
+            commit(&mut open, &mut out);
+            Spec::AfterQuoted
+          }
+          Spec::Unquoted | Spec::Quoted(_) => {
+            if let Some((_, _, Some((_, end)))) = &mut open {
+              *end = i + 1;
+            }
+            state
+          }
+          Spec::AfterQuoted if ws => Spec::BeforeName,
+          Spec::AfterQuoted if c == SLASH_CHAR => Spec::SelfClosing,
+          Spec::AfterQuoted if c == GT_CHAR => return (out, Ok((i + 1, false))),
+          Spec::SelfClosing if c == GT_CHAR => return (out, Ok((i + 1, true))),
+          Spec::AfterQuoted | Spec::SelfClosing => {
+            reconsume = true;
+            Spec::BeforeName
+          }
+        };
+      }
+    }
+    let end = match state {
+      Spec::BeforeName | Spec::AfterQuoted => (State::Gap, false),
+      Spec::SelfClosing => (State::Gap, true),
+      Spec::Name => (State::Name, false),
+      Spec::AfterName => (State::AfterName, false),
+      Spec::BeforeValue => (State::BeforeValue, false),
+      Spec::Unquoted => (State::UnquotedValue, false),
+      Spec::Quoted(quote) => (State::Quoted(quote), false),
+    };
+    (out, Err(end))
   }
 
   // Every tag body up to seven bytes over the bytes the tokenizer tells
@@ -1580,7 +1686,23 @@ mod tests {
         }
         let html = std::str::from_utf8(&buf[..len]).unwrap();
         let scan = process_tag_attributes(html, 0, None, ATTR_NONE, AttrBudget::new(0), &mut attrs);
-        match reference_tag_end(&buf[..len]) {
+        let want = spec_tokenize(html).1;
+        // The search for `>` alone, as a dropped or measured tag runs it.
+        let gt = want.ok().map(|(end, _)| end - 1);
+        assert_eq!(
+          tag_is_complete(html, 0, &mut PendingTagScan::new()),
+          gt,
+          "{html:?}"
+        );
+        for split in 1..len {
+          let mut pending = PendingTagScan::new();
+          let found = tag_is_complete(&html[..split], 0, &mut pending).or_else(|| {
+            pending.restart();
+            tag_is_complete(&html[split..], 0, &mut pending).map(|gt| split + gt)
+          });
+          assert_eq!(found, gt, "{html:?} split at {split}");
+        }
+        match want {
           Ok((end, self_closing)) => assert!(
             scan.complete && scan.new_position == end && scan.self_closing == self_closing,
             "{html:?}: got ({}, {}, {}), want ({end}, {self_closing})",
@@ -1602,70 +1724,8 @@ mod tests {
     }
   }
 
-  type TagEnd = Result<(usize, bool), (State, bool)>;
-
-  fn store(out: &mut Vec<(String, String)>, name: &str, value: &str) {
-    let name = name.to_ascii_lowercase();
-    if !out.iter().any(|(seen, _)| *seen == name) {
-      out.push((name, value.to_string()));
-    }
-  }
-
-  /// Extraction one byte at a time, with no run, jump or walk: the attributes
-  /// stored before the tag ended or the chunk ran out (the first of a name
-  /// wins), and the tag end as [`reference_tag_end`] reports it.
-  fn reference_attributes(html: &str) -> (Vec<(String, String)>, TagEnd) {
-    let bytes = html.as_bytes();
-    let mut out = Vec::new();
-    let mut state = State::Gap;
-    let (mut name_start, mut name_end, mut value_start) = (0, 0, 0);
-    for (i, &c) in bytes.iter().enumerate() {
-      if !matches!(state, State::Quoted(_)) {
-        let mut end = (c == GT_CHAR).then_some((i + 1, false));
-        if state != State::UnquotedValue && c == SLASH_CHAR {
-          match bytes.get(i + 1) {
-            None => return (out, Err((state, true))),
-            Some(&GT_CHAR) => end = Some((i + 2, true)),
-            Some(_) => {}
-          }
-        }
-        if let Some(end) = end {
-          match state {
-            State::Name => store(&mut out, &html[name_start..i], ""),
-            State::AfterName | State::BeforeValue => {
-              store(&mut out, &html[name_start..name_end], "");
-            }
-            State::UnquotedValue => {
-              store(&mut out, &html[name_start..name_end], &html[value_start..i]);
-            }
-            State::Gap | State::Quoted(_) => {}
-          }
-          return (out, Ok(end));
-        }
-      }
-      // The tokenizer's own steps; only the name and value bounds are recorded here.
-      let next = state.step_without_extraction(c);
-      match (state, next) {
-        (State::AfterName, State::Name) => {
-          store(&mut out, &html[name_start..name_end], "");
-          name_start = i;
-        }
-        (State::Gap, State::Name) => name_start = i,
-        (State::Name, State::BeforeValue | State::AfterName) => name_end = i,
-        (State::BeforeValue, State::Quoted(_)) => value_start = i + 1,
-        (State::BeforeValue, State::UnquotedValue) => value_start = i,
-        (State::UnquotedValue | State::Quoted(_), State::Gap) => {
-          store(&mut out, &html[name_start..name_end], &html[value_start..i]);
-        }
-        _ => {}
-      }
-      state = next;
-    }
-    (out, Err((state, false)))
-  }
-
   fn assert_extraction_matches(html: &str, mask: u16, attrs: &mut Attributes) {
-    let (mut want, want_end) = reference_attributes(html);
+    let (mut want, want_end) = spec_tokenize(html);
     if mask != ATTR_ALL {
       want.retain(|(name, _)| mask & attr_bit(name.as_bytes()) != 0);
     }
@@ -1714,6 +1774,77 @@ mod tests {
         }
         assert_extraction_matches(&html, ATTR_HREF, &mut attrs);
         assert_extraction_matches(&html, ATTR_ALL, &mut attrs);
+      }
+    }
+  }
+
+  /// [`assert_extraction_matches`] with the tag cut at `splits`, each later
+  /// chunk resumed from the carry of the one before.
+  fn assert_resumed_extraction_matches(html: &str, splits: &[usize], mask: u16) {
+    let (mut want, want_end) = spec_tokenize(html);
+    if mask != ATTR_ALL {
+      want.retain(|(name, _)| mask & attr_bit(name.as_bytes()) != 0);
+    }
+    let mut attrs = Attributes::new();
+    let first = splits.first().map_or(html.len(), |&end| end);
+    let scan = process_tag_attributes(
+      &html[..first],
+      0,
+      None,
+      mask,
+      AttrBudget::new(0),
+      &mut attrs,
+    );
+    let got_end = if scan.complete {
+      Ok((scan.new_position, scan.self_closing))
+    } else {
+      let mut carry = scan.carry.expect("an incomplete scan carries its state");
+      let mut start = first;
+      let mut end = Err(());
+      for &stop in splits.iter().skip(1).chain(std::iter::once(&html.len())) {
+        let resume = resume_tag_attributes(&html[start..stop], false, mask, &mut carry, &mut attrs);
+        if resume.complete {
+          end = Ok((start + resume.new_position, resume.self_closing));
+          break;
+        }
+        start = stop;
+      }
+      end.map_err(|()| (carry.state, carry.slash))
+    };
+    let got: Vec<(String, String)> = attrs
+      .iter()
+      .map(|(name, value)| (name.to_string(), value.to_string()))
+      .collect();
+    assert_eq!(
+      got, want,
+      "{html:?} split at {splits:?} mask {mask:#x}: attributes"
+    );
+    assert!(
+      got_end == want_end,
+      "{html:?} split at {splits:?} mask {mask:#x}: tag end disagrees"
+    );
+  }
+
+  // A tag cut anywhere, once or at every byte, reads as it does whole.
+  #[test]
+  fn tag_scan_resumed_at_any_split_matches_the_tokenizer() {
+    const TOKENS: [&str; 8] = ["href", "x", " ", "=", "\"", "'", "/", ">"];
+    const MAX_TOKENS: usize = 5;
+    let mut html = String::new();
+    for count in 1..=MAX_TOKENS {
+      for mut code in 0..TOKENS.len().pow(count as u32) {
+        html.clear();
+        for _ in 0..count {
+          html.push_str(TOKENS[code % TOKENS.len()]);
+          code /= TOKENS.len();
+        }
+        let every_byte: Vec<usize> = (1..html.len()).collect();
+        for mask in [ATTR_HREF, ATTR_ALL] {
+          for split in 1..html.len() {
+            assert_resumed_extraction_matches(&html, &[split], mask);
+          }
+          assert_resumed_extraction_matches(&html, &every_byte, mask);
+        }
       }
     }
   }

@@ -150,4 +150,8 @@ export const CONVERSION_CORPUS: string[] = [
   `<ul><li><dl><dt>l</dt></dl><br><br>l</li></ul>`,
   `<dl><dt>l</dt></dl><br><br>l`,
   `<p><b>Note\v<em></em></b> text</p>`,
+  // Start tag slashes
+  `<a href=/>Home</a>`,
+  `<img src="/i.svg" /alt="tiktok" ><a/href=/x title=t/>y</a>`,
+  `<a href /="x>y">z</a>`,
 ]

@@ -137,6 +137,7 @@ const FORM_FEED_CHAR = 12 // '\f'
 const CARRIAGE_RETURN_CHAR = 13 // '\r'
 const OPEN_BRACKET_CHAR = 91 // '['
 
+// Ordered so the states outside any value compare below ATTRIBUTE_BEFORE_VALUE.
 const ATTRIBUTE_GAP = 0
 const ATTRIBUTE_NAME = 1
 const ATTRIBUTE_AFTER_NAME = 2
@@ -2397,16 +2398,27 @@ function scanAttributes(
   while (i < length) {
     const charCode = source.charCodeAt(i)
 
-    if (stopAtTagEnd && state !== ATTRIBUTE_QUOTED_VALUE) {
-      if (state !== ATTRIBUTE_UNQUOTED_VALUE
-        && charCode === SLASH_CHAR
-        && i + 1 < length
-        && source.charCodeAt(i + 1) === GT_CHAR) {
+    // Outside a value `/` ends the name; only a `>` right after it self-closes.
+    if (charCode === SLASH_CHAR && state <= ATTRIBUTE_AFTER_NAME) {
+      if (stopAtTagEnd && i + 1 < length && source.charCodeAt(i + 1) === GT_CHAR) {
         selfClosing = true
         valueEnd = i
         newPosition = i + 2
         break
       }
+      if (state !== ATTRIBUTE_GAP) {
+        attributes = setAttribute(
+          attributes,
+          source.substring(nameStart, state === ATTRIBUTE_NAME ? i : nameEnd),
+          '',
+        )
+        state = ATTRIBUTE_GAP
+      }
+      i++
+      continue
+    }
+
+    if (stopAtTagEnd && state !== ATTRIBUTE_QUOTED_VALUE) {
       if (charCode === GT_CHAR) {
         valueEnd = i
         newPosition = i + 1
