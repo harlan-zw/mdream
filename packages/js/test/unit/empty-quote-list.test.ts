@@ -29,6 +29,10 @@ describe('empty quotes opening list items', () => {
   }
 
   it.each([
+    ['<blockquote><ul><li>a<blockquote></blockquote><blockquote>q</blockquote></li></ul></blockquote>', '> - a\n>   > q'],
+    ['<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>', '> - ***\n>\n>   \n>\n>   tail'],
+    ['<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>', '- ***\n\n  \n  > > > q'],
+    ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n  > > q'],
     ['<li><blockquote/><em><pre><blockquote>', '- *\n\n  ```\n  \n\n  ```\n\n  *'],
     ['<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>', '- x\n\n  - \n  \n\n  y'],
     ['<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>', '- *\n\n  ```\n  \n\n  ```\n\n  *'],

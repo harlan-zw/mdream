@@ -1641,6 +1641,8 @@ function commitGfmAction(
         // can share a fragment, so this is not only the innermost.
         for (const frame of state.blockquotes)
           frame.fragment = Math.min(frame.fragment, state.buffer.length)
+        // Collapsing a separator can also remove this event's output anchor.
+        outputStart = Math.min(outputStart, state.buffer.length)
         noteBufferRewrite(state)
       }
       const before = lastOutputChar(state.buffer)
