@@ -12,6 +12,84 @@ fn convert(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
 }
 
+#[test]
+fn empty_quotes_keep_following_content_on_the_item_marker_line() {
+  for quote in [
+    "<blockquote></blockquote>",
+    "<blockquote><p></p></blockquote>",
+    "<blockquote><div></div></blockquote>",
+  ] {
+    for (before, after, expected) in [
+      ("<ul><li>", "tail</li></ul>", "- tail"),
+      ("<ul><li>", "<hr>tail</li></ul>", "- ***\n\n  tail"),
+      (
+        "<ul><li>x<ul><li>",
+        "<hr>tail</li></ul></li></ul>",
+        "- x\n  - ***\n\n    tail",
+      ),
+      ("<ol start=\"10\"><li>", "tail</li></ol>", "10. tail"),
+      (
+        "<blockquote><ul><li>",
+        "<hr>tail</li></ul></blockquote>",
+        "> - ***\n>\n>   tail",
+      ),
+    ] {
+      let html = format!("{before}{quote}{after}");
+      assert_eq!(convert(&html), expected, "{html}");
+      for split in 0..=html.len() {
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = processor.process_chunk(&html[..split]);
+        output.push_str(&processor.process_chunk(&html[split..]));
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "{html} split={split}");
+      }
+    }
+  }
+}
+
+#[test]
+fn empty_quote_continuations_survive_stream_compaction() {
+  let lead = format!("<p>{}</p>", "preceding text ".repeat(800));
+  for quote in [
+    "<blockquote></blockquote>",
+    "<blockquote><p></p></blockquote>",
+    "<blockquote><div></div></blockquote>",
+  ] {
+    for body in [
+      "tail",
+      "<hr>tail",
+      "<p>tail</p>",
+      "<h2>tail</h2>",
+      "<em>tail</em>",
+      "<pre><code>x</code></pre>",
+      "<blockquote>q</blockquote>",
+      "<span></span>tail",
+    ] {
+      for (before, after) in [
+        ("<ul><li>", "</li><li>next</li></ul>"),
+        ("<ul><li>x<ul><li>", "</li></ul><p>parent</p></li></ul>"),
+        ("<ol start=\"10\"><li>", "</li></ol>"),
+      ] {
+        let tail = format!("{before}{quote}{body}{after}");
+        let expected = convert(&format!("{lead}{before}{body}{after}"));
+        assert_eq!(convert(&format!("{lead}{tail}")), expected, "{tail}");
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = processor.process_chunk(&lead);
+        for offset in 0..tail.len() {
+          output.push_str(&processor.process_chunk(&tail[offset..offset + 1]));
+        }
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "{tail}");
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut output = processor.process_chunk(&format!("{lead}{before}<blockquote>"));
+        output.push_str(&processor.process_chunk(&format!("{}{body}{after}", &quote[12..])));
+        output.push_str(&processor.finish());
+        assert_eq!(output, expected, "{tail} split after opener");
+      }
+    }
+  }
+}
+
 fn filter_exclude(selectors: &[&str]) -> HtmlToMarkdownOptions {
   HtmlToMarkdownOptions {
     plugins: Some(PluginConfig {
@@ -2645,25 +2723,25 @@ fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
 }
 
 #[test]
-fn blockquote_parent_continuation_settles_at_a_wrapped_fence() {
+fn empty_quotes_before_wrapped_fences_keep_the_item_marker_line() {
   // A fence opened inside the wrapper took the separator. Restoring it later
   // would cut the fence's own bytes.
   for (html, expected) in [
     (
       "<li><blockquote/><em><pre><blockquote>",
-      "- \n\n  *\n\n  ```\n  \n\n  ```\n\n  *",
+      "- *\n\n  ```\n  \n\n  ```\n\n  *",
     ),
     (
       "<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>",
-      "- \n\n  *\n\n  ```\n  \n\n  ```\n\n  *",
+      "- *\n\n  ```\n  \n\n  ```\n\n  *",
     ),
     (
       "<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>",
-      "- \n\n  *\n\n  ```\n  \n\n  ### h\n  ```\n\n  *",
+      "- *\n\n  ```\n  \n\n  ### h\n  ```\n\n  *",
     ),
     (
       "<ul><li><blockquote></blockquote><b><pre><code>x</code></pre></b></li></ul>",
-      "- \n\n  **\n\n  ```\n  x\n  ```\n\n  **",
+      "- **\n\n  ```\n  x\n  ```\n\n  **",
     ),
   ] {
     assert_eq!(convert(html), expected, "{html}");
@@ -8747,6 +8825,10 @@ fn paragraph_after_empty_nested_quote() {
   assert_eq!(
     convert("<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>"),
     "- x\n\n  - \n  \n\n  y"
+  );
+  assert_eq!(
+    convert("<ul><li>x<ul><li><blockquote></blockquote></li></ul><p>y</p></li></ul>"),
+    "- x\n\n  - \n\n  y"
   );
 }
 
