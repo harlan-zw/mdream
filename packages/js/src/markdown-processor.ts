@@ -1742,6 +1742,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // first, an entity-decoded blank. That node has no whitespace flag yet, so
   // it is not visible text on its own (0 when there is none).
   let blankMarkerCount = 0
+  // A block boundary wrote newlines after the last text node.
+  let breakAfterLastText = false
   // The fragment holding the space the current event's pending separator wrote.
   let pendingSpaceFragment = -1
   // The current event wrote no space for a pending separator because its own
@@ -2527,6 +2529,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       }
     }
     state.lastTextNode = textNode
+    breakAfterLastText = false
   }
 
   /**
@@ -2809,7 +2812,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           parent = parent.parent
         }
         if (!parentInPre || element.parent?.tagId === TAG_PRE) {
-          if (breakOutput?.endsWith('\n') && !parentInPre) {
+          // The break a block wrote after the text is not the text's whitespace.
+          if (breakOutput?.endsWith('\n') && !parentInPre && !breakAfterLastText) {
             const trimmed = trimAsciiWhitespaceEnd(lastFragment)
             if (trimmed.length !== lastFragment.length && buff.at(-1) === lastFragment) {
               state.outputPositions?.replace(buff.length - 1, buff.length, [trimmed])
@@ -3356,6 +3360,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           newLines = Math.max(0, configuredNewLines - newlineRunBefore(buff, buff.length))
       }
       const newlinesStr = '\n'.repeat(newLines)
+      // The text no longer ends the output: these newlines are the block's
+      // break, not whitespace the text ended with.
+      if (eventType === NodeEventExit || !output)
+        breakAfterLastText = true
 
       if (eventType === NodeEventEnter) {
         if (output) {
@@ -3378,7 +3386,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // Only trim whitespace in specific cases where it's safe
       // Don't trim if we're about to add inline content that needs spacing
       // Don't trim before block elements that need their own spacing
-      if (lastFragment && state.lastTextNode?.containsWhitespace && (!!node.parent || isInlineElement) && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
+      // Only an exit that writes something itself, as a raw HTML closer
+      // does, takes the break a block wrote after the last text.
+      if (lastFragment && state.lastTextNode?.containsWhitespace && !(breakAfterLastText && !(output && eventType === NodeEventExit)) && (!!node.parent || isInlineElement) && 'value' in state.lastTextNode && typeof state.lastTextNode.value === 'string') {
         let parent = node.parent
         let parentInPre = false
         while (parent) {

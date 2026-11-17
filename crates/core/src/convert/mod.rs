@@ -1062,9 +1062,9 @@ pub struct ConvertState {
   last_text_node_depth: usize,
   last_text_node_index: usize,
   has_last_text_node: bool,
-  /// A block boundary wrote newlines after the last text node. The trim's
-  /// cached run is then measured from behind those newlines, so a reach-back
-  /// would cross the break into the text, where JS only trims the break.
+  /// A block boundary wrote newlines after the last text node, so the text no
+  /// longer ends the output. A reach-back from a later boundary that writes
+  /// nothing would trim that break as if the text had ended with it.
   break_after_last_text: bool,
   last_node_is_inline: bool,
   /// Text output: the last output was an image's text, so the next text owes it a separator.
