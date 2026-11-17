@@ -1400,6 +1400,7 @@ impl ConvertState {
     keeps_markers: bool,
   ) {
     let separator_end = std::mem::replace(&mut self.pending_space_end, usize::MAX);
+    let separator_owned = std::mem::take(&mut self.pending_space_owned);
     if let Some(id) = marker_tag
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && let Some(emitted) = output
@@ -1408,11 +1409,15 @@ impl ConvertState {
       && self.buffer.ends_with(emitted)
     {
       let marker_start = self.buffer.len() - emitted.len();
-      let follows_separator = separator_end == self.drained + marker_start;
+      let separator_written = separator_end == self.drained + marker_start;
       #[cfg(debug_assertions)]
-      if follows_separator {
+      if separator_written {
         self.check_written_before(separator_end, b" ");
       }
+      // An opener that starts with its own space, as inline code in a list
+      // item does, stood in for the pending separator.
+      let follows_separator =
+        separator_written || (separator_owned && emitted.as_bytes()[0] == b' ');
       let run_len = match self.open_markers.last() {
         Some(outer)
           if inline_marker_type <= 4 && outer.kind <= 4 && outer.content_start == marker_start =>
@@ -1750,7 +1755,7 @@ impl ConvertState {
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
-          && href.is_some_and(|href| {
+          && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
@@ -1827,12 +1832,19 @@ impl ConvertState {
       if content.iter().all(|&b| is_whitespace(b)) {
         // `output_start` keeps the opener's own separator, not the spacing `write_output` adds.
         let mut end = open_marker.output_start;
-        if open_marker.follows_separator && end > 0 && self.buffer.as_bytes()[end - 1] == b' ' {
-          end -= 1;
-          self.pending_inline_whitespace = true;
-          self.pending_leading_blank = true;
-          self.pending_pair_separator = open_marker.separator_trimmed;
-          self.pending_decoded_blank = false;
+        if open_marker.follows_separator {
+          let bytes = self.buffer.as_bytes();
+          // The separator is the opener's own space or the one in front of it.
+          let owned = bytes.get(end) == Some(&b' ');
+          if owned || (end > 0 && bytes[end - 1] == b' ') {
+            if !owned {
+              end -= 1;
+            }
+            self.pending_inline_whitespace = true;
+            self.pending_leading_blank = true;
+            self.pending_pair_separator = open_marker.separator_trimmed;
+            self.pending_decoded_blank = false;
+          }
         }
         self.truncate_buffer(end);
         if open_marker.starts_at_hard_break {
@@ -2263,6 +2275,7 @@ impl ConvertState {
     let mut quote_sibling_separator = false;
     let mut caption_heading_enter = false;
     let mut consumes_caption_boundary = false;
+    let mut opens_caption = false;
     if !caption_fast {
       let caption_active =
         self.caption_boundary != CaptionBoundary::None || !self.caption_frames.is_empty();
@@ -2295,6 +2308,12 @@ impl ConvertState {
         false
       };
       if visible_output && (tag_id != Some(TAG_BLOCKQUOTE) || enter_is_literal) {
+        opens_caption = !enter_is_literal
+          && !tentative_caption_output
+          && self
+            .caption_frames
+            .last()
+            .is_some_and(|frame| !matches!(frame.state, CaptionState::Committed));
         self.materialize_caption_frames(if caption_enter && enter_is_literal {
           CaptionMaterialization::ExplicitCommit
         } else if tentative_caption_output {
@@ -2618,7 +2637,7 @@ impl ConvertState {
       if self.streaming || self.options.max_node_bytes != 0 {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = has_rewrite_anchor
-          && href.is_some_and(|href| {
+          && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
                 || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
@@ -2651,6 +2670,13 @@ impl ConvertState {
 
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
       self.caption_boundary = CaptionBoundary::None;
+    } else if opens_caption
+      && is_inline
+      && !matches!(tag_id, Some(TAG_IMG | TAG_BR))
+      && self.caption_boundary == CaptionBoundary::None
+    {
+      // Inline output that opens a caption leaves the next source space to it.
+      self.caption_boundary = CaptionBoundary::ConsumeSpace;
     }
 
     // Clean: track heading start for slug collection
@@ -2715,7 +2741,7 @@ impl ConvertState {
         let in_heading = self.in_heading();
         if in_heading
           && let Some(href) = attributes.get_bit(ATTR_HREF)
-          && href.starts_with('#')
+          && trim_url(href).starts_with('#')
           && text_len > 0
         {
           self.keep_link_text(bracket_pos, text_len, is_inline);
@@ -3110,6 +3136,7 @@ impl ConvertState {
     }
 
     let mut caption_exit_spacing = 0;
+    let mut caption_opened = false;
     if caption_exit {
       let top = self.caption_frames.len().saturating_sub(1);
       self.expand_deferred_caption_breaks_until(top, false);
@@ -3141,6 +3168,7 @@ impl ConvertState {
               .any(|byte| !is_whitespace(byte) && !matches!(byte, b'*' | b'~' | b'`' | b'"'))
           {
             caption_exit_spacing = frame.spacing[1];
+            caption_opened = true;
           } else {
             self.truncate_buffer(output_start);
             self.pending_inline_whitespace |= restore_pending_whitespace;
@@ -3158,6 +3186,7 @@ impl ConvertState {
         }
         CaptionState::Committed => {
           caption_exit_spacing = frame.spacing[1];
+          caption_opened = true;
         }
       }
       self.write_deferred_break_run(deferred_breaks, false);
@@ -3379,6 +3408,9 @@ impl ConvertState {
     }
     if caption_exit_spacing > 0 {
       self.caption_boundary = CaptionBoundary::Pending(caption_exit_spacing);
+    } else if caption_opened && self.caption_boundary == CaptionBoundary::ConsumeSpace {
+      // The space an opened caption owned does not outlive it.
+      self.caption_boundary = CaptionBoundary::None;
     }
     // Reuse the deferred block boundary: it already ignores invisible output
     // and supplies list continuation indentation, without taxing plain text.
@@ -6984,6 +7016,7 @@ impl ConvertState {
     // sit outside its Markdown delimiter. Resolve it only when later visible
     // inline output begins; block boundaries and line breaks subsume it.
     self.pending_space_end = usize::MAX;
+    self.pending_space_owned = false;
     let pending_caption = output_str.is_empty()
       && configured_new_lines == 0
       && (!is_enter
@@ -7037,6 +7070,11 @@ impl ConvertState {
             // would keep a space written after the pair from being output.
             self.pending_space_trimmed = !self.pending_leading_blank || pair_owed;
           }
+        } else if first == b' ' && self.is_markdown() {
+          // The output's own space takes the separator's place. An empty pair
+          // dropped with it owes the separator again.
+          self.pending_space_owned = true;
+          self.pending_space_trimmed = !self.pending_leading_blank || pair_owed;
         }
         self.pending_inline_whitespace = false;
       }
@@ -7401,17 +7439,20 @@ impl ConvertState {
     }
     // A heading's own collapse keeps its block spacing, but in a table cell that
     // newline would end the row. The count holds the heading only while it is
-    // open: at its exit the heading is already popped, so a count of 1 there is
-    // a collapsing ancestor. Only an ancestor writing visible inline Markdown
+    // open: at its exit the heading is already popped, so the count there is
+    // its collapsing ancestors. Only one writing visible inline Markdown
     // (`<a>`, `<b>`, `<code>`) suppresses the blank line, since its text
-    // continues inline; a marker-less wrapper (label, small, abbr, time, bdo,
-    // ruby, rt, rp) lets the heading close its block.
+    // continues inline; marker-less wrappers (label, small, abbr, time, bdo,
+    // ruby, rt, rp, a raw `<dt>` or `<address>`) let the heading close its
+    // block, however many there are. Text output keeps the one-ancestor rule:
+    // there the engines already differ at that depth.
     let is_heading = matches!(tag_id, Some(id) if (TAG_H1..=TAG_H6).contains(&id));
     let heading_owns_collapse =
       is_enter && is_heading && self.collapse_non_span_depth == 1 && !self.in_table_cell();
     let heading_exit_in_markerless_collapse = !is_enter
       && is_heading
-      && self.collapse_non_span_depth == 1
+      && (self.collapse_non_span_depth == 1
+        || (self.collapse_non_span_depth > 1 && !plain_text!(self)))
       && !self.in_table_cell()
       && !self.collapse_wrapper_emits_inline_markdown();
     // On enter the node is already counted as a collapsing ancestor of itself.
@@ -7495,21 +7536,16 @@ impl ConvertState {
     }
   }
 
-  /// The depth-1 collapsing ancestor at a heading's exit is the only open
-  /// non-span contributor, so the innermost match is it. Returns `false` when
-  /// none is found, keeping the previous suppression.
+  /// Whether a collapsing ancestor open at a heading's exit, spans aside,
+  /// writes inline Markdown around it.
   #[inline]
   fn collapse_wrapper_emits_inline_markdown(&self) -> bool {
-    self
-      .stack
-      .iter()
-      .rev()
-      .find(|node| {
-        node.collapses_inner_white_space
-          && !node.excluded_from_markdown
-          && node.tag_id != Some(TAG_SPAN)
-      })
-      .is_some_and(|node| self.wrapper_emits_inline_markdown(node))
+    self.stack.iter().any(|node| {
+      node.collapses_inner_white_space
+        && !node.excluded_from_markdown
+        && node.tag_id != Some(TAG_SPAN)
+        && self.wrapper_emits_inline_markdown(node)
+    })
   }
 
   /// Whether the heading at the top of the stack (`is_enter`) or just popped

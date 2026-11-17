@@ -47,6 +47,16 @@ describe('html attribute tokenization', () => {
     expect(parseAttributes(source)).toEqual(expected)
   })
 
+  it.each([
+    [`href=/`, { href: '/' }],
+    [`href=/x/ title=t`, { href: '/x/', title: 't' }],
+    [`src="/i.svg" /alt="tiktok"`, { src: '/i.svg', alt: 'tiktok' }],
+    [`title/href=/x`, { title: '', href: '/x' }],
+    [`title //href=/x`, { title: '', href: '/x' }],
+  ])('treats a slash outside a value as an attribute separator for %s', (source, expected) => {
+    expect(parseAttributes(source)).toEqual(expected)
+  })
+
   it('keeps the isolated parser EOF recovery for an unterminated quoted value', () => {
     expect(parseAttributes('title="unterminated')).toEqual({ title: 'unterminated' })
   })
@@ -67,6 +77,22 @@ describe('html attribute tokenization', () => {
     [
       `<a href=/a/b/>link</a>`,
       `[link](/a/b/)`,
+    ],
+    [
+      `<a href=/>Home</a>`,
+      `[Home](/)`,
+    ],
+    [
+      `<img src="/i.svg" /alt="tiktok" >`,
+      `![tiktok](/i.svg)`,
+    ],
+    [
+      `<a/href=/x>y</a>`,
+      `[y](/x)`,
+    ],
+    [
+      `<a href /="x>y">z</a>`,
+      `[y">z]()`,
     ],
   ])('keeps conversion aligned with browser attributes for %s', (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)

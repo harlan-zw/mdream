@@ -569,6 +569,33 @@ describe.each(engines)('links $name', (engineConfig) => {
     expect(markdown).toBe(`[Link](${expected})`)
   })
 
+  // The URL parser strips leading and trailing C0 controls and spaces first.
+  it.each([
+    [' http://other.example/x', 'http://other.example/x'],
+    [' /p ', 'https://example.com/p'],
+    ['&#9;/t&#10;', 'https://example.com/t'],
+    [' #x', '#x'],
+  ])('resolves the padded href %j as the URL parser reads it', async (href, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const html = `<a href="${href}">Link</a>`
+    const origin = 'https://example.com/docs/'
+    expect(htmlToMarkdown(html, { origin, engine })).toBe(`[Link](${expected})`)
+    expect(htmlToMarkdown(html, { origin, engine, format: 'html' })).toBe(`<a href="${expected}">Link</a>`)
+    expect(htmlToMarkdown(`<img src="${href}" alt="i">`, { origin, engine })).toBe(`![i](${expected})`)
+  })
+
+  it.each([
+    ' javascript:alert(1)',
+    '&#9;java&#10;script:alert(1) ',
+    ' data:text/html,x',
+  ])('keeps the padded unsafe href %j out of HTML output', async (href) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    for (const origin of [undefined, 'https://example.com/docs/']) {
+      expect(htmlToMarkdown(`<a href="${href}">Link</a>`, { origin, engine, format: 'html' })).toBe('Link')
+      expect(htmlToMarkdown(`<p><img src="${href}" alt="i">x</p>`, { origin, engine, format: 'html' })).toBe('<p>x</p>')
+    }
+  })
+
   it('uses the first href-bearing base', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     const html = '<base target="_blank"><base href="../assets/"><base href="https://ignored.example/"><a href="page">Page</a> <img src="cover.png" alt="Cover">'
@@ -869,6 +896,36 @@ describe.each(engines)('links $name', (engineConfig) => {
     const html = '<a href="#section" title="Go to section">Link</a>'
     const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('[Link](#section "Go to section")')
+  })
+
+  // A link's `[` already parts the label from what precedes it, so source
+  // whitespace that leads the label is dropped, whatever empty element stands
+  // before it. Whitespace decoded from a character reference is content, and
+  // whitespace after an image or a word still separates.
+  it.each([
+    ['<a href="/f"><i class="fa"></i> Lima</a>', '[Lima](/f)'],
+    ['<a href="/f"><span></span> Lima</a>', '[Lima](/f)'],
+    ['<a href="/f"><svg></svg> Lima</a>', '[Lima](/f)'],
+    ['<a href="/f"><div></div> Lima</a>', '[Lima](/f)'],
+    ['<p>x<a href="/f"><span></span> Lima</a></p>', 'x [Lima](/f)'],
+    ['<p><a href="/f"><svg></svg> Docs</a> <a href="/g"><svg></svg> Blog</a></p>', '[Docs](/f) [Blog](/g)'],
+    ['<a href="/f"><span></span>&#32;Lima</a>', '[ Lima](/f)'],
+    ['<a href="/f"><img src="/i.png" alt="i"> Lima</a>', '[![i](/i.png) Lima](/f)'],
+    ['<a href="/f"><b>x</b> Lima</a>', '[**x** Lima](/f)'],
+  ])('drops the source space that leads a link label for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        for (const character of html)
+          controller.enqueue(character)
+        controller.close()
+      },
+    })
+    let streamed = ''
+    for await (const chunk of streamHtmlToMarkdown(stream, { engine }))
+      streamed += chunk
+    expect(streamed).toBe(expected)
   })
 
   it('handles multiple links with text in paragraph', async () => {
