@@ -108,6 +108,12 @@ fn parse_clean(v: &JsValue) -> Option<mdream::types::CleanConfig> {
   if v.is_undefined() || v.is_null() {
     return None;
   }
+  // `clean: false` reaches here as a primitive. Each Reflect::get on it would
+  // throw a TypeError, and building one costs microseconds; every key reads as
+  // undefined either way.
+  if !v.is_object() && !v.is_function() {
+    return Some(mdream::types::CleanConfig::default());
+  }
   Some(mdream::types::CleanConfig {
     urls: as_bool(&get_prop(v, "urls")).unwrap_or(false),
     fragments: as_bool(&get_prop(v, "fragments")).unwrap_or(false),

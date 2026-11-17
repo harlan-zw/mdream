@@ -56,6 +56,38 @@ fn relocated_link_space_is_a_wrap_boundary() {
   }
 }
 
+// A link's `[` already parts the label from what precedes it, so source
+// whitespace that leads the label is dropped, whatever empty element stands
+// before it. Whitespace decoded from a character reference is content, and
+// whitespace after an image or a word still separates.
+#[test]
+fn link_label_drops_the_source_space_that_leads_it() {
+  for (html, expected) in [
+    (r#"<a href="/f"><i class="fa"></i> Lima</a>"#, "[Lima](/f)"),
+    (r#"<a href="/f"><span></span> Lima</a>"#, "[Lima](/f)"),
+    (r#"<a href="/f"><svg></svg> Lima</a>"#, "[Lima](/f)"),
+    (
+      r#"<p>x<a href="/f"><span></span> Lima</a></p>"#,
+      "x [Lima](/f)",
+    ),
+    (
+      r#"<p><a href="/f"><svg></svg> Docs</a> <a href="/g"><svg></svg> Blog</a></p>"#,
+      "[Docs](/f) [Blog](/g)",
+    ),
+    (r#"<a href="/f"><span></span>&#32;Lima</a>"#, "[ Lima](/f)"),
+    (
+      r#"<a href="/f"><img src="/i.png" alt="i"> Lima</a>"#,
+      "[![i](/i.png) Lima](/f)",
+    ),
+    (r#"<a href="/f"><b>x</b> Lima</a>"#, "[**x** Lima](/f)"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
 // ── Block spacing after a one-character line ──
 
 #[test]
@@ -2779,6 +2811,30 @@ fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
 }
 
 #[test]
+fn block_break_survives_an_inline_wrapper_closing_after_text_with_a_space() {
+  for (html, expected) in [
+    ("<label><h2>y z</h2></label>B", "## y z\n\nB"),
+    ("<label><h2>yz</h2></label>B", "## yz\n\nB"),
+    ("<span><p>y z</p></span>B", "y z\n\nB"),
+    ("<span><div>y z</div></span><b>B</b>", "y z\n\n**B**"),
+    ("<small><h3>a b c</h3></small> B", "### a b c\n\nB"),
+    ("<center><p>y z</p></center><br>B", "y z\n\n  \nB"),
+    (
+      "<pre><center><ul><li>y z</li></ul></center></pre>",
+      "```\n\n- y z\n\n\n```",
+    ),
+    // The space that ends the text is still trimmed.
+    ("<label><h2>y z </h2></label>B", "## y z\n\nB"),
+    ("<p><b>y z </b>B</p>", "**y z** B"),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
 fn written_space_after_a_leading_blank_survives_an_element_that_starts_no_line() {
   for (html, expected) in [
     ("Aa<span> </span> <form><span>Bb</span></form>", "Aa Bb"),
@@ -2887,6 +2943,49 @@ fn inline_code_in_a_list_item_keeps_its_separator_after_an_element_that_writes_n
     ),
     (
       "<ul><li>Aa<span> </span> <section><code>Bb</code></section></li></ul>",
+      "- Aa `Bb`",
+    ),
+  ] {
+    assert_eq!(md(html), expected, "{html}");
+    for width in [1, 2, 3, 11] {
+      assert_eq!(md_streamed(html, width), expected, "width={width} {html}");
+    }
+  }
+}
+
+#[test]
+fn empty_inline_code_in_a_list_item_gives_the_separator_back() {
+  for (html, expected) in [
+    (
+      "<ul><li>Aa<span> </span><code></code>Bb</li></ul>",
+      "- Aa Bb",
+    ),
+    (
+      "<ul><li>Aa<span> </span>&#32;<code></code>Bb</li></ul>",
+      "- Aa Bb",
+    ),
+    (
+      "<ol><li>Aa<i> </i><code><svg></svg></code><b>Bb</b></li></ol>",
+      "1. Aa **Bb**",
+    ),
+    (
+      "<ul><li>x<ul><li>Aa<span> </span><code> </code>Bb</li></ul></li></ul>",
+      "- x\n  - Aa Bb",
+    ),
+    // No separator was pending, so the opener's own space goes with it.
+    ("<ul><li>Aa<code></code>Bb</li></ul>", "- AaBb"),
+    // A line end still takes the separator.
+    (
+      "<ul><li>Aa<span> </span><code></code><p>Bb</p></li></ul>",
+      "- Aa\n\n  Bb",
+    ),
+    // A pair that stays keeps the space as its own.
+    (
+      "<ul><li>Aa<span> </span><code>x</code>Bb</li></ul>",
+      "- Aa `x`Bb",
+    ),
+    (
+      "<ul><li>Aa<span> </span><code></code><code>Bb</code></li></ul>",
       "- Aa `Bb`",
     ),
   ] {
