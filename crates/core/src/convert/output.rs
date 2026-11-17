@@ -2469,13 +2469,15 @@ impl ConvertState {
 
     if tag_id == Some(TAG_IMG)
       && !enter_is_literal
-      && output.as_deref().is_some_and(|emitted| {
-        self.buffer.len() > output_start
-          && self.last_content_cache_len == emitted.len()
-          && (!plain_text!(self) || emitted.as_bytes().iter().any(|&byte| !is_whitespace(byte)))
-      })
+      && self.buffer.len() > output_start
+      && let Some(emitted) = output.as_deref()
     {
-      self.mark_rendered_child_content();
+      self.image_text_pending |= plain_text!(self) && !emitted.is_empty();
+      if self.last_content_cache_len == emitted.len()
+        && (!plain_text!(self) || emitted.as_bytes().iter().any(|&byte| !is_whitespace(byte)))
+      {
+        self.mark_rendered_child_content();
+      }
     }
 
     // Escaping matters only while the anchor's *exit* will still build a
@@ -4104,6 +4106,7 @@ impl ConvertState {
     } else {
       self.last_content_cache_len = self.push_code_span_content(text, false);
     }
+    self.image_text_pending = false;
 
     if self.options.max_node_bytes != 0
       && self.in_heading()
@@ -6956,6 +6959,8 @@ impl ConvertState {
     closes_emphasis: bool,
   ) {
     let output_str = output.unwrap_or("");
+    // Image text no longer ends the output.
+    self.image_text_pending &= output_str.is_empty();
     if is_enter {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
@@ -7309,7 +7314,8 @@ impl ConvertState {
     {
       return false;
     }
-    if self.last_node_is_inline {
+    // Image text ends a word, as a block boundary does.
+    if self.last_node_is_inline && !self.image_text_pending {
       return false;
     }
     // Malformed attribute quoting can carry a start tag past its `>` and leave

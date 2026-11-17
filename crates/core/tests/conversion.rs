@@ -323,6 +323,86 @@ fn plain_text_images_never_fall_back_to_a_data_url() {
   );
 }
 
+/// Text output, one-shot and streamed with every split and byte by byte.
+fn assert_text_streams(html: &str, expected: &str, options: &HtmlToMarkdownOptions) {
+  assert_eq!(html_to_text(html, options.clone()), expected, "{html}");
+  for split in 1..html.len() {
+    let mut p = MarkdownStreamProcessor::new_with_format(options.clone(), OutputFormat::Text);
+    let mut out = p.process_chunk(&html[..split]);
+    out.push_str(&p.process_chunk(&html[split..]));
+    out.push_str(&p.finish());
+    assert_eq!(out, expected, "{html} split at {split}");
+  }
+  let mut p = MarkdownStreamProcessor::new_with_format(options.clone(), OutputFormat::Text);
+  let mut out = String::new();
+  for byte in 0..html.len() {
+    out.push_str(&p.process_chunk(&html[byte..=byte]));
+  }
+  out.push_str(&p.finish());
+  assert_eq!(out, expected, "{html} byte by byte");
+}
+
+#[test]
+fn plain_text_image_text_is_set_apart_from_the_text_after_it() {
+  for (html, expected) in [
+    (r#"<p><img alt="Logo">Welcome</p>"#, "Logo Welcome"),
+    (r#"<p>Hi<img alt="Logo">there</p>"#, "Hi Logo there"),
+    (
+      r#"<p><img src="/a.png" title="Logo">Welcome</p>"#,
+      "Logo Welcome",
+    ),
+    (r#"<p><img src="/a.png">cap</p>"#, "/a.png cap"),
+    (r#"<p><img src="data:image/png;base64,AA==">cap</p>"#, "cap"),
+    (r#"<p><img alt="Logo"> Welcome</p>"#, "Logo Welcome"),
+    (r#"<p><img alt="Logo">.</p>"#, "Logo."),
+    (r#"<p><img alt="Logo">, then</p>"#, "Logo, then"),
+    (r#"<p><img alt="Logo">(beta)</p>"#, "Logo (beta)"),
+    (r#"<p>(<img alt="Logo">)</p>"#, "(Logo)"),
+    (
+      r#"<p>Hi <img alt="Logo"></p><p>next</p>"#,
+      "Hi Logo\n\nnext",
+    ),
+    (r#"<p><img alt="A"><img alt="B">c</p>"#, "A B c"),
+    (r#"<p><img alt="A"><img alt="">c</p>"#, "A c"),
+    (r#"<p><img alt="A"><q>q</q></p>"#, "A \"q\""),
+    (
+      r#"<p><a href="/x"><img alt="Logo"></a>Welcome</p>"#,
+      "Logo Welcome",
+    ),
+    (
+      r#"<p><a href="/x"><img alt="Logo">Home</a></p>"#,
+      "Logo Home",
+    ),
+    (
+      r#"<ul><li><img alt="i">Item</li><li><img alt="j"></li></ul>"#,
+      "i Item\nj",
+    ),
+    (
+      r#"<table><tr><td><img alt="a">b</td><td><img alt="c"></td></tr></table>"#,
+      "a b\tc",
+    ),
+    // `<pre>` text gets no added separators.
+    (r#"<pre><img alt="A">x</pre>"#, "Ax"),
+  ] {
+    assert_text_streams(html, expected, &HtmlToMarkdownOptions::default());
+  }
+  let cleaned = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..Default::default()
+  };
+  assert_text_streams(
+    r#"<p><img alt="A"><img src="/b.png">c</p>"#,
+    "A c",
+    &cleaned,
+  );
+  let wrapped = HtmlToMarkdownOptions {
+    wrap_width: 8,
+    ..Default::default()
+  };
+  let html = r#"<p>aaaa<img alt="Logo">Welcome home</p>"#;
+  assert_text_streams(html, "aaaa Logo\nWelcome\nhome", &wrapped);
+}
+
 #[test]
 fn plain_text_pre_preserves_content_without_synthetic_formatting() {
   assert_eq!(

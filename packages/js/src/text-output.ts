@@ -458,6 +458,8 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
   // `tagOverrides` opener, in pairs. A length of -1 marks one that output
   // has already followed.
   const literalOpeners: number[] = []
+  // The last output was an image's text, so the next text owes it a separator.
+  let imageTextPending = false
 
   // A separator written while nothing follows the innermost open literal
   // opener would split it from the content after it.
@@ -549,8 +551,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       if (last === '\n' && !state.depthMap[TAG_PRE])
         node.value = trimAsciiWhitespaceStart(node.value)
     }
-    if (!state.depthMap[TAG_PRE] && shouldAddSpacingBeforeText(last, lastNode, node))
+    // Image text ends a word, as a block boundary does.
+    if (!state.depthMap[TAG_PRE] && shouldAddSpacingBeforeText(last, imageTextPending ? undefined : lastNode, node))
       node.value = ` ${node.value}`
+    imageTextPending = false
 
     const width = state.options.wrapWidth
     if (hasPlugins) {
@@ -593,6 +597,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     }
     let output: string | undefined
     let literalEnter = false
+    let imageText = false
     // A quotation with only whitespace since its opener emits nothing, but
     // keeps the space its opener added. Openers above this one belong to
     // quotations inside it whose exit never came.
@@ -635,8 +640,9 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       output = elementOutput(element, event.type, state)
       if (event.type === NodeEventEnter && output) {
         const override = state.options.tagOverrides?.[element.name]
-        literalEnter = typeof override === 'object' && override.enter !== undefined
-          && (element.tagHandler?.isInline ?? element.tagId === -1)
+        const overridden = typeof override === 'object' && override.enter !== undefined
+        literalEnter = overridden && (element.tagHandler?.isInline ?? element.tagId === -1)
+        imageText = !overridden && element.tagId === TAG_IMG
       }
     }
 
@@ -679,6 +685,8 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
 
     const outputStart = state.buffer.length
     appendOutput(state, element, event.type, output, literalOpeners.length !== 0 && followsLiteralOpener())
+    if (output)
+      imageTextPending = imageText
     if (literalEnter && state.buffer.length > outputStart)
       literalOpeners.push(element.depth, state.buffer.length)
     if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {

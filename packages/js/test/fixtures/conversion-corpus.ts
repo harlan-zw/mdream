@@ -157,4 +157,6 @@ export const CONVERSION_CORPUS: string[] = [
   // Padded URLs
   `<a href=" /p ">p</a> <a href=" https://x.com/ ">https://x.com/</a> <img src=" /i.png " alt="i"> <a href=" javascript:alert(1)">j</a>`,
   `<h2>Q<a href=" #q">#</a></h2><p><a href=" #q ">up</a> <a href=" #nope">gone</a></p>`,
+  // Image text followed by text
+  `<p><img alt="Logo">Welcome <img src="/a.png">cap<img alt="A"><img alt="B">. <a href="/x"><img title="T"></a>(x)</p><ul><li><img alt="i">Item</li></ul><table><tr><td><img alt="a">b</td><td>c</td></tr></table><pre><img alt="p">q</pre>`,
 ]
