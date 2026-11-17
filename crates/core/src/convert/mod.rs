@@ -13,7 +13,8 @@ use crate::types::{
   TagOverrideConfig, TailwindData,
 };
 use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url, slugify_heading,
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url,
+  slugify_heading, trim_url,
 };
 use std::borrow::Cow;
 
@@ -1097,6 +1098,9 @@ pub struct ConvertState {
   /// enter wrote for a pending separator, so an opener written right after it
   /// can take it along.
   pending_space_end: usize,
+  /// The current element's enter wrote no space for a pending separator
+  /// because its own output starts with one.
+  pending_space_owned: bool,
   /// Stream position after the last separator written on its own, which is
   /// not part of the text after it.
   separator_end: usize,
@@ -1509,6 +1513,7 @@ impl ConvertState {
       pending_decoded_blank: false,
       pending_space_trimmed: false,
       pending_space_end: usize::MAX,
+      pending_space_owned: false,
       separator_end: usize::MAX,
       cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
@@ -3540,6 +3545,13 @@ impl ConvertState {
     } else {
       self.get_markdown_chunk_with_final(true)
     }
+  }
+
+  /// Whether the open link's `[` ends the output, so text written now leads
+  /// its label.
+  #[inline]
+  pub(crate) fn leads_link_label(&self) -> bool {
+    self.link.open && self.link.bracket_emitted && self.link.bracket_pos + 1 == self.buffer.len()
   }
 
   #[inline]

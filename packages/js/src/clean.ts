@@ -13,7 +13,7 @@
 
 import type { Cleaner, CleanOptions, CleanPass, CleanTarget, CleanView, ElementNode } from './types'
 import { FRAGMENT_LINK_CLOSE, FRAGMENT_LINK_OPEN, TAG_A, TAG_CODE, TAG_H1, TAG_H6 } from './const'
-import { resolveUrl } from './url'
+import { resolveUrl, trimUrl } from './url'
 import { isInsideHeading } from './utils'
 
 const ALL_RULES: CleanOptions = {
@@ -140,7 +140,7 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
       if (textLength === 0)
         return false
       // Like Rust, the title takes no part: `[url](url "t")` is redundant too.
-      const selfLink = selfLinkHeadings && href.charCodeAt(0) === 35 /* # */ && isInsideHeading(depthMap)
+      const selfLink = selfLinkHeadings && trimUrl(href).charCodeAt(0) === 35 /* # */ && isInsideHeading(depthMap)
       if (!selfLink && !(redundantLinks && spells(buffer, bracket + 1, textLength, resolveUrl(href, target.options?.origin, rules))))
         return false
       // Everything past the `[` belongs to this link and is closed, so folding
