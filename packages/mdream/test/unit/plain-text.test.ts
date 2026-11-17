@@ -138,13 +138,13 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
   })
 
   it.each([
-    ['<p>a<img src="x.png" alt="pic">b</p>', 'a picb', undefined],
+    ['<p>a<img src="x.png" alt="pic">b</p>', 'a pic b', undefined],
     ['<p>(<img src="x.png" alt="pic">)</p>', '(pic)', undefined],
-    ['<p>a<img src="x.png" alt=".pic">b</p>', 'a.picb', undefined],
+    ['<p>a<img src="x.png" alt=".pic">b</p>', 'a.pic b', undefined],
     ['<p>(<q>x</q>)</p>', '("x")', undefined],
-    ['<p>a<sup><img src="x.png" alt="pic">2</sup>z</p>', 'a**pic2**z', { sup: { enter: '**', exit: '**' } }],
+    ['<p>a<sup><img src="x.png" alt="pic">2</sup>z</p>', 'a**pic 2**z', { sup: { enter: '**', exit: '**' } }],
     ['<p>a<sup><q></q>2</sup>z</p>', 'a**2**z', { sup: { enter: '**', exit: '**' } }],
-    ['<p>a<sup><img src="x.png" alt="pic">2</sup>z</p>', 'a^ pic2^z', { sup: { enter: '^', exit: '^' } }],
+    ['<p>a<sup><img src="x.png" alt="pic">2</sup>z</p>', 'a^ pic 2^z', { sup: { enter: '^', exit: '^' } }],
     ['<p>a&#11;<img src="x.png" alt="pic"></p>', 'a\u000B pic', undefined],
     ['<p>a&#12;<q>x</q></p>', 'a\f "x"', undefined],
     ['<table><tr><td><pre>* </pre><img src="f.png"></td></tr></table>', '* f.png', undefined],
@@ -168,6 +168,59 @@ describe.each(engines)('plain text output $name', (engineConfig) => {
         },
       })
       expect((await collect(streamHtmlToMarkdown(stream, options))).trimEnd(), `split=${split}`).toBe(expected)
+    }
+  })
+
+  it.each([
+    ['<p><img alt="Logo">Welcome</p>', 'Logo Welcome', undefined],
+    ['<p>Hi<img alt="Logo">there</p>', 'Hi Logo there', undefined],
+    ['<p><img src="/a.png" title="Logo">Welcome</p>', 'Logo Welcome', undefined],
+    ['<p><img src="/a.png">cap</p>', '/a.png cap', undefined],
+    ['<p><img src="/a.png">cap</p>', 'https://ex.com/a.png cap', { origin: 'https://ex.com' }],
+    ['<p><img src="data:image/png;base64,AA==">cap</p>', 'cap', undefined],
+    ['<p><img alt="Logo"> Welcome</p>', 'Logo Welcome', undefined],
+    ['<p><img alt="Logo">\nWelcome</p>', 'Logo Welcome', undefined],
+    ['<p><img alt="Logo ">Welcome</p>', 'Logo Welcome', undefined],
+    ['<p><img alt="Logo">.</p>', 'Logo.', undefined],
+    ['<p><img alt="Logo">, then; done!</p>', 'Logo, then; done!', undefined],
+    ['<p><img alt="Logo">(beta)</p>', 'Logo (beta)', undefined],
+    ['<p>(<img alt="Logo">)</p>', '(Logo)', undefined],
+    ['<p>Hi <img alt="Logo"></p><p>next</p>', 'Hi Logo\n\nnext', undefined],
+    ['<p><img alt="Logo"><br>next</p>', 'Logo\nnext', undefined],
+    ['<p><img alt="A"><img alt="B">c</p>', 'A B c', undefined],
+    ['<p><img alt="A"><img alt="">c</p>', 'A c', undefined],
+    ['<p><img alt="A"><img src="/b.png">c</p>', 'A /b.png c', undefined],
+    ['<p><img alt="A"><img src="/b.png">c</p>', 'A c', { clean: true }],
+    ['<p><img alt="A"><q>q</q></p>', 'A "q"', undefined],
+    ['<p><img alt="A"><q></q>b</p>', 'A b', undefined],
+    ['<p><img alt="A"><span> </span>b</p>', 'A b', undefined],
+    ['<p><b><img alt="A"></b>b</p>', 'A b', undefined],
+    ['<p><a href="/x"><img alt="Logo"></a>Welcome</p>', 'Logo Welcome', undefined],
+    ['<p><a href="/x"><img alt="Logo">Home</a> page</p>', 'Logo Home page', undefined],
+    ['<ul><li><img alt="i">Item</li><li><img alt="j"></li></ul>', 'i Item\nj', undefined],
+    ['<table><tr><td><img alt="a">b</td><td><img alt="c"></td><td>d</td></tr></table>', 'a b\tc\td', undefined],
+    ['<figure><img alt="A"><figcaption>cap</figcaption></figure>', 'A\n\ncap', undefined],
+    // `<pre>` text gets no added separators.
+    ['<pre><img alt="A">x</pre>', 'Ax', undefined],
+    ['<p>aaaa<img alt="Logo">Welcome home</p>', 'aaaa Logo\nWelcome\nhome', { wrapWidth: 8 }],
+  ])('separates image text from the text after it: %s', async (html, expected, extra) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    const options = { engine, format: 'text' as const, ...extra }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+    const splits = Array.from({ length: html.length - 1 }, (_, index) => [index + 1])
+    splits.push(Array.from({ length: html.length - 1 }, (_, index) => index + 1))
+    for (const points of splits) {
+      const stream = new ReadableStream<string>({
+        start(controller) {
+          let start = 0
+          for (const point of [...points, html.length]) {
+            controller.enqueue(html.slice(start, point))
+            start = point
+          }
+          controller.close()
+        },
+      })
+      expect(await collect(streamHtmlToMarkdown(stream, options)), `splits=${points}`).toBe(expected)
     }
   })
 

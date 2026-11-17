@@ -264,6 +264,24 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
+fn a_dropped_empty_link_in_a_nested_item_streams_like_one_shot() {
+  let empty_link_text = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<p>x</p><ul><li><ul><li><a href=\"\">&nbsp;</a></li></ul></li></ul>",
+    "<ul><li><ul><li><ul><li><ul><li><a href=\"\">&nbsp;",
+  ] {
+    assert_stream_matches(html, empty_link_text.clone());
+    assert_stream_matches_every_split(html, empty_link_text.clone());
+  }
+}
+
+#[test]
 fn a_fence_inside_a_quote_boundary_streams_like_one_shot() {
   for html in [
     "<li><blockquote/><em><pre><blockquote>",
@@ -374,6 +392,46 @@ fn figcaption_streaming_matches_one_shot() {
     (
       "<figcaption><a href=\"/x\">a</a> x</figcaption>",
       "*[a](/x) x*",
+    ),
+    // Inline HTML that opens a caption leaves the next source space to the
+    // caption, as an empty link does, with or without spacing before it.
+    (
+      "<figcaption><mark></mark> x</figcaption>",
+      "*<mark></mark>x*",
+    ),
+    (
+      "<figure><img src=\"/i.png\" alt=\"i\"><figcaption><sub></sub> x</figcaption></figure>",
+      "![i](/i.png)\n\n*<sub></sub>x*",
+    ),
+    (
+      "<p>a</p><figcaption><u></u> x</figcaption>",
+      "a\n\n*<u></u>x*",
+    ),
+    (
+      "<strong><figcaption><mark></mark> x</figcaption>y</strong>",
+      "***<mark></mark>x*y**",
+    ),
+    (
+      "<figcaption><b><mark></mark></b> x</figcaption>",
+      "***<mark></mark>**x*",
+    ),
+    (
+      "<figcaption><mark>m</mark> x</figcaption>",
+      "*<mark>m</mark> x*",
+    ),
+    // A text node of only whitespace goes whole, decoded whitespace included.
+    (
+      "<figcaption><sub>&#9;<br>z</sub></figcaption>",
+      "*<sub>  \nz</sub>*",
+    ),
+    (
+      "<figcaption><mark></mark>&#9;x</figcaption>",
+      "*<mark></mark>\tx*",
+    ),
+    // The space after the caption is not the caption's.
+    (
+      "<strong><figcaption><mark></mark> </figcaption> y</strong>",
+      "***<mark></mark>* y**",
     ),
     (
       "<figcaption><a href=\"x\"><br></a>x</figcaption>",

@@ -65,8 +65,19 @@ fn scheme_matches(rest: &[u8], scheme: &[u8]) -> bool {
   false
 }
 
+/// `href` without the leading and trailing C0 controls and spaces the URL parser strips.
+#[inline]
+pub(crate) fn trim_url(href: &str) -> &str {
+  // Nearly every URL has nothing to strip, so only test its ends inline.
+  match href.as_bytes() {
+    [first, .., last] if *first > b' ' && *last > b' ' => href,
+    [] => href,
+    _ => trim_url_ends(href),
+  }
+}
+
 #[inline(never)]
-fn trim_url_c0(href: &str) -> &[u8] {
+fn trim_url_ends(href: &str) -> &str {
   let bytes = href.as_bytes();
   let start = bytes
     .iter()
@@ -76,7 +87,8 @@ fn trim_url_c0(href: &str) -> &[u8] {
     .iter()
     .rposition(|&byte| byte > b' ')
     .map_or(start, |last| last + 1);
-  &bytes[start..end]
+  // UTF-8 continuation bytes are all >= 0x80, so neither cut splits a character.
+  &href[start..end]
 }
 
 /// Whether `href` cannot represent meaningful navigation: a bare `#`, or a
@@ -86,9 +98,7 @@ fn trim_url_c0(href: &str) -> &[u8] {
 /// form of `java&#9;script:` are recognised. An interior space is *not* removed
 /// by the URL parser, so `java script:x` stays an ordinary relative URL.
 pub(crate) fn is_empty_link_href(href: &str) -> bool {
-  // Leading and trailing C0 controls and spaces are stripped. UTF-8
-  // continuation bytes are all >= 0x80, so this cannot split a character.
-  let rest = trim_url_c0(href);
+  let rest = trim_url(href).as_bytes();
 
   match rest.first().map(u8::to_ascii_lowercase) {
     Some(b'#') => rest.len() == 1,
@@ -101,7 +111,7 @@ pub(crate) fn is_empty_link_href(href: &str) -> bool {
 
 /// Whether `src` is a `data:` URL, with the same preprocessing as [`is_empty_link_href`].
 pub(crate) fn is_data_url(src: &str) -> bool {
-  scheme_matches(trim_url_c0(src), b"data:")
+  scheme_matches(trim_url(src).as_bytes(), b"data:")
 }
 
 #[inline]
@@ -111,7 +121,7 @@ fn is_scheme_char(byte: u8) -> bool {
 
 /// Whether a URL is safe to emit into an HTML href or src attribute.
 pub(crate) fn is_safe_html_url(href: &str, image: bool) -> bool {
-  let rest = trim_url_c0(href);
+  let rest = trim_url(href).as_bytes();
   if rest.is_empty() {
     return false;
   }
@@ -594,7 +604,7 @@ struct BaseUrl<'a> {
 impl<'a> BaseUrl<'a> {
   fn split(origin: &'a str) -> Option<Self> {
     let bytes = origin.as_bytes();
-    let mut i = origin.find("://")? + 3;
+    let mut i = crate::scan::find_bytes(bytes, b"://")? + 3;
     let mut root_end = None;
     while i < bytes.len() {
       match bytes[i] {
@@ -744,11 +754,13 @@ fn join_origin_prefix(origin: &str, url: &str) -> String {
 /// most [`MAX_BASE_HREF_LEN`] bytes is usable as a base; anything else is `None`,
 /// so resolution stays on `origin`.
 pub(crate) fn resolve_base_href(href: &str, origin: Option<&str>) -> Option<String> {
-  let resolved = resolve_url(href.trim_matches(|c: char| c <= ' '), origin, false);
+  let resolved = resolve_url(href, origin, false);
   if resolved.len() > MAX_BASE_HREF_LEN {
     return None;
   }
-  let (scheme, authority) = BaseUrl::split(&resolved)?.root.split_once("://")?;
+  let root = BaseUrl::split(&resolved)?.root;
+  let separator = crate::scan::find_bytes(root.as_bytes(), b"://")?;
+  let (scheme, authority) = (&root[..separator], &root[separator + 3..]);
   // The host follows any userinfo and precedes any port; an empty host is no origin.
   let host = authority
     .rsplit_once('@')
@@ -770,6 +782,8 @@ fn cleaned(resolved: String, needs_clean: bool) -> Cow<'static, str> {
 
 #[inline]
 pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -> Cow<'a, str> {
+  // Read it as the URL parser and `is_safe_html_url` do: padding never makes it relative.
+  let url = trim_url(url);
   if url.is_empty() || url.starts_with('#') {
     return Cow::Borrowed(url);
   }
@@ -1113,6 +1127,38 @@ mod tests {
     assert_eq!(
       resolve_url("https://x.com/a", None, false),
       "https://x.com/a"
+    );
+  }
+
+  /// The URL parser strips leading and trailing C0 controls and spaces before
+  /// anything else, so a padded absolute URL stays absolute.
+  #[test]
+  fn resolve_url_strips_what_the_url_parser_strips() {
+    let origin = Some("https://ex.com/a/b/");
+    for (url, with_origin, without) in [
+      (
+        " http://other.example/x",
+        "http://other.example/x",
+        "http://other.example/x",
+      ),
+      ("\t/p \n", "https://ex.com/p", "/p"),
+      ("\u{1}q\u{1f}", "https://ex.com/a/b/q", "q"),
+      (
+        " //cdn.example/y ",
+        "https://cdn.example/y",
+        "https://cdn.example/y",
+      ),
+      (" #x ", "#x", "#x"),
+      (" \r\n", "", ""),
+      // An inner space is no part of the strip.
+      (" a b ", "https://ex.com/a/b/a b", "a b"),
+    ] {
+      assert_eq!(resolve_url(url, origin, false), with_origin, "{url:?}");
+      assert_eq!(resolve_url(url, None, false), without, "{url:?}");
+    }
+    assert_eq!(
+      resolve_url(" /p?utm_source=x&id=1 ", origin, true),
+      "https://ex.com/p?id=1"
     );
   }
 

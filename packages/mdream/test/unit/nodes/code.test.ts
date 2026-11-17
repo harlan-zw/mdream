@@ -1,5 +1,6 @@
+import { ReadableStream } from 'node:stream/web'
 import { describe, expect, it } from 'vitest'
-import { engines, htmlToMarkdown, resolveEngine } from '../../utils/engines'
+import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '../../utils/engines'
 
 const RE_CODE_BLOCK_WITH_FUNCTION = /```[\s\S]*function example.*if \(true\).*```/s
 const RE_IF_TRUE_BLOCK = /^if \(true\) \{$/
@@ -176,5 +177,37 @@ Text without newline above.
     const html = '<pre><code><![CDATA[\none two\nthree four\n]]></code></pre>'
     const markdown = htmlToMarkdown(html, { engine })
     expect(markdown).toBe('```\n\n```')
+  })
+
+  it.each([
+    ['<p>x <code>&#32;</code> y</p>', 'x  y'],
+    ['<p>x<kbd>&#9;</kbd>y</p>', 'xy'],
+    ['<h2>T <samp>&#10;</samp></h2>', '## T'],
+    ['<p>x <var>&#32;<b></b></var> y</p>', 'x  y'],
+    ['<ul><li>a <code>&#13;&#12;</code></li></ul>', '- a'],
+    ['<p>x <code>&#32;</code><code>z</code> y</p>', 'x `z` y'],
+    ['<p>x <q>&#32;</q> y</p>', 'x  y'],
+    // A vertical tab, a no-break space and text next to the blank are content.
+    ['<p>x <code>&#11;</code> y</p>', 'x `\u000B` y'],
+    ['<p>x <code>&nbsp;</code> y</p>', 'x `\u00A0` y'],
+    ['<p>x <code>&#32;a</code> y</p>', 'x ` a` y'],
+    ['<p>x <q>&#32;&#11;</q> y</p>', 'x " \u000B" y'],
+  ])('drops an inline code span or quote that holds only a decoded blank: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let cut = 0; cut < html.length; cut++) {
+      const parts = cut === 0 ? Array.from(html) : [html.slice(0, cut), html.slice(cut)]
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (const part of parts)
+            controller.enqueue(part)
+          controller.close()
+        },
+      })
+      let markdown = ''
+      for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+        markdown += chunk
+      expect(markdown, cut === 0 ? 'one character at a time' : `split at ${cut}`).toBe(expected)
+    }
   })
 })
