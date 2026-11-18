@@ -4583,6 +4583,14 @@ impl ConvertState {
           .last()
           .is_some_and(|byte| !byte.is_ascii_whitespace());
       self.resolve_item_marker(at_exit);
+      // Content starting on a later line owes the blank line whatever follows, so
+      // insert it now instead of holding the item until it exits. The guard stays
+      // armed for the exit's hard-break trim.
+      if self.item_marker_line_held() {
+        self.resolve_item_marker(true);
+        self.empty_item_hazard = true;
+        self.empty_item_answered = true;
+      }
     }
   }
 
@@ -5248,7 +5256,11 @@ impl ConvertState {
     // Counted in one-shot conversion too, so the cap cuts both at the same tag.
     self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
     // A run per break would grow with the held tabs; the bytes are charged to the cap instead.
-    if !self.streaming || self.vertical_tab_hold_start().is_some() {
+    // A held marker line is charged as written, so one-shot conversion must measure the same.
+    if !self.streaming
+      || self.vertical_tab_hold_start().is_some()
+      || (self.options.max_node_bytes != 0 && self.item_marker_line_held())
+    {
       return false;
     }
     if let Some(run) = self.streaming_break_runs.last_mut()

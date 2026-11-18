@@ -2091,6 +2091,73 @@ fn a_nested_items_link_settles_its_marker_as_one_shot_does() {
 }
 
 #[test]
+fn a_nested_item_opening_on_a_later_line_streams_before_it_closes() {
+  let text = "word ".repeat(64 * 1024);
+  for (prefix, suffix) in [
+    ("<ul><li>r<ul><li><br>", "</li></ul></li></ul>"),
+    ("<ul><li>r<ul><li><br><span>", "</span></li></ul></li></ul>"),
+    (
+      "<ul><li>r<ul><li><br><a href=/u>",
+      "</a></li></ul></li></ul>",
+    ),
+    ("<ul><li>r<ul><li><br><br><em>", "</em></li></ul></li></ul>"),
+  ] {
+    let html = format!("{prefix}{text}{suffix}<p>after</p>");
+    let expected = html_to_markdown_result(&html, options(0)).markdown;
+    for cap in [0, CAP] {
+      let mut p = MarkdownStreamProcessor::new(options(cap));
+      let mut out = p.process_chunk(prefix);
+      for chunk in text.as_bytes().chunks(8190) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      assert!(
+        out.len() > text.len() / 2,
+        "prefix={prefix} cap={cap}: yielded {}",
+        out.len()
+      );
+      for chunk in [1, 37, 64 * 1024, html.len()] {
+        assert_eq!(
+          stream_reporting(&html, chunk, cap),
+          (expected.clone(), false),
+          "prefix={prefix} cap={cap} chunk={chunk}"
+        );
+      }
+    }
+  }
+}
+
+#[test]
+fn breaks_before_a_held_nested_item_measure_as_one_shot() {
+  // Streaming keeps a `<br>` run as one copy and a count.
+  for (html, cap) in [
+    (
+      format!(
+        "<ol><li><ol><li><br><br><pre>{}</pre></li></ol></li></ol><p>after</p>",
+        "x ".repeat(480)
+      ),
+      1024,
+    ),
+    (
+      format!(
+        "<ul><li>r<ul><li>{}<em>{}</em></li></ul></li></ul><p>after</p>",
+        "<br>".repeat(200),
+        "word ".repeat(400)
+      ),
+      2048,
+    ),
+  ] {
+    let batch = html_to_markdown_result(&html, options(cap));
+    for chunk in [1, 37, 4096, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, cap),
+        (batch.markdown.clone(), batch.truncated),
+        "cap={cap} chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
 fn short_text_nodes_after_code_do_not_pin_a_nested_item() {
   let html = format!(
     "<ul><li>r<ul><li><code>x</code>word {}</li></ul></li></ul>",
