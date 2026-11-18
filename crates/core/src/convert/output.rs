@@ -1729,6 +1729,7 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, false);
       self.link.bracket_emitted = emitted_bracket;
+      self.link.rewrites_bracket = emitted_bracket;
       if emitted_bracket && heading_break_prefix_len != 0 {
         self.link.heading_break_prefix_len = heading_break_prefix_len;
         self.link.starts_at_hard_break =
@@ -2589,6 +2590,7 @@ impl ConvertState {
           self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
       }
       let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
+      self.link.rewrites_bracket = has_rewrite_anchor;
       // One-shot conversion sets this too: until visible text arrives, the close
       // may drop the link, so the item marker guard must not count its `[`.
       self.link.empty_text_pending =

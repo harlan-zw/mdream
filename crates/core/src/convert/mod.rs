@@ -355,6 +355,9 @@ struct LinkOutputState {
   hold_released: bool,
   /// Set in one-shot conversion too, like `pins_output`.
   empty_text_pending: bool,
+  /// The close may still rewrite or drop an emitted `[`. Set in one-shot
+  /// conversion too, unlike the streamed `hold_released` it starts from.
+  rewrites_bracket: bool,
   /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
   /// past the link into the text and rewrites whatever bracket it finds there.
   bracket_emitted: bool,
@@ -3530,8 +3533,12 @@ impl ConvertState {
   fn open_link_drop_floor(&self) -> Option<usize> {
     std::iter::once(&self.link)
       .chain(&self.parent_links)
+      // A streamed-out bracket can no longer be dropped, and its rebased offset
+      // is stale. Its marker line was drained, so the marker was answered.
       .filter(|link| {
         link.open
+          && link.rewrites_bracket
+          && !link.hold_released
           && (link.empty_text_pending
             || !self.open_markers.is_empty()
             || !self.code_spans.is_empty()
