@@ -22,7 +22,7 @@ if (!types.includes('struct HtmlToMarkdownOptions')) {
 }
 execFileSync('cargo', ['update', '-p', 'mdream', '--manifest-path', resolve(project, 'Cargo.toml')], { stdio: 'inherit' })
 for (const mode of ['cpu', 'alloc']) {
-  execFileSync('cargo', ['build', '--release', '--locked', '--manifest-path', resolve(project, 'Cargo.toml'), ...(mode === 'alloc' ? ['--features', 'alloc'] : [])], { stdio: 'inherit' })
+  execFileSync('cargo', ['build', '--release', '--locked', '--manifest-path', resolve(project, 'Cargo.toml'), ...(mode === 'alloc' ? ['--no-default-features', '--features', 'alloc'] : [])], { stdio: 'inherit' })
   cpSync(resolve(project, 'target/release/mdream-perf'), resolve(out, mode))
 }
 writeFileSync(resolve(out, 'build.json'), JSON.stringify({
