@@ -2067,6 +2067,30 @@ fn a_nested_item_marker_hold_is_capped() {
 }
 
 #[test]
+fn a_nested_items_link_settles_its_marker_as_one_shot_does() {
+  // Streaming alone holds a link while its text is no longer than its URL.
+  for html in [
+    "<ul><li>r<ul><li><a href=/u>word</a></li></ul></li></ul><p>after</p>".to_string(),
+    format!(
+      "<ul><li>r<ul><li><a href=/{}>{}</a></li></ul></li></ul><p>after</p>",
+      "u".repeat(CAP - 12),
+      "x".repeat(CAP - 4)
+    ),
+  ] {
+    let cap = if html.len() < 100 { 8 } else { CAP };
+    let batch = html_to_markdown_result(&html, options(cap));
+    assert!(!batch.truncated && batch.markdown.ends_with("after"));
+    for chunk in [1, 37, 4096, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, cap),
+        (batch.markdown.clone(), false),
+        "cap={cap} chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
 fn short_text_nodes_after_code_do_not_pin_a_nested_item() {
   let html = format!(
     "<ul><li>r<ul><li><code>x</code>word {}</li></ul></li></ul>",

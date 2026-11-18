@@ -3524,6 +3524,23 @@ impl ConvertState {
       .min()
   }
 
+  /// The holds of `link_hold_required` that one-shot conversion shares. The item
+  /// marker settles on these, so a capped stream charges its line as one-shot does.
+  #[inline]
+  fn open_link_drop_floor(&self) -> Option<usize> {
+    std::iter::once(&self.link)
+      .chain(&self.parent_links)
+      .filter(|link| {
+        link.open
+          && (link.empty_text_pending
+            || !self.open_markers.is_empty()
+            || !self.code_spans.is_empty()
+            || trim_ascii_whitespace_end(&self.buffer) <= link.bracket_pos + 1)
+      })
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
+      .min()
+  }
+
   /// Free already-yielded output so streaming memory stays O(window), not
   /// O(document). Fragment cleaning still needs the full output buffer.
   /// Frontmatter and extraction keep their metadata separately.

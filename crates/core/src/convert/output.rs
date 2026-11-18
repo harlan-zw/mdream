@@ -4562,7 +4562,7 @@ impl ConvertState {
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
       && self.code_fence.is_none()
-      && self.open_link_hold_floor().is_none()
+      && self.open_link_drop_floor().is_none()
       && self.first_tentative_caption_start().is_none()
       // The blank line leaves quote frames where they are, right only for those
       // the item sits in.
@@ -4624,7 +4624,7 @@ impl ConvertState {
           .open_markers
           .first()
           .is_some_and(|marker| opens_the_item(marker.output_start))
-        || self.open_link_hold_floor().is_some_and(opens_the_item)
+        || self.open_link_drop_floor().is_some_and(opens_the_item)
         || self
           .first_tentative_caption_start()
           .is_some_and(opens_the_item))
