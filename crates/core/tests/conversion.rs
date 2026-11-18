@@ -3550,9 +3550,11 @@ fn an_item_emptied_by_a_dropped_link_does_not_underline_the_text_above() {
       "<ol><li>a<ol><li><a href=\"/f\">&nbsp;</a></li></ol></li></ol>",
       "1. a\n\n   1.",
     ),
+    // An empty parent has no text to underline. A blank line would turn its
+    // nested item into a sibling, so dropping the link must keep the nesting.
     (
       "<ul><li><ul><li><a href=\"/f\">&nbsp;</a></li></ul></li></ul>",
-      "-\n\n  -",
+      "-\n  -",
     ),
     // Text after the dropped link still settles the marker's line.
     (
