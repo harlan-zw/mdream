@@ -4711,13 +4711,13 @@ impl ConvertState {
       self.shift_offsets_at_or_after(at);
     }
     // Settled before its exit, the item can still hold an open link, whose close
-    // reads its bracket, and completed links that fragment cleaning rewrites.
+    // reads its bracket. Recorded fragment links are left as at the exit: their
+    // cleanup checks each one's bytes and skips one that moved.
     for link in std::iter::once(&mut self.link).chain(self.parent_links.iter_mut()) {
       if link.open && link.bracket_pos >= at {
         link.bracket_pos += inserted;
       }
     }
-    self.shift_fragment_links_after(at, inserted as isize);
     let from = self.drained + at;
     self.move_stream_positions(|pos| Some(if pos >= from { pos + inserted } else { pos }));
     for frame in &mut self.blockquotes {
