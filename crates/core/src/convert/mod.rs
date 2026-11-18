@@ -3190,6 +3190,17 @@ impl ConvertState {
     }
   }
 
+  /// What the `<br>` runs streaming keeps as one copy and a count add between
+  /// `start` and `end` once written out, as one-shot conversion writes them.
+  fn break_run_extra(&self, start: usize, end: usize) -> usize {
+    self
+      .streaming_break_runs
+      .iter()
+      .filter(|run| run.output_start >= start && run.output_start < end)
+      .map(|run| run.unit.len().saturating_mul(run.count.saturating_sub(1)))
+      .fold(0, usize::saturating_add)
+  }
+
   /// Whether output held back behind an open construct has outgrown
   /// `max_node_bytes`. Measured from the construct's structure, never from what a
   /// flush happened to release, so chunking cannot move where it fires.
@@ -3207,6 +3218,23 @@ impl ConvertState {
     if self.held_break_bytes > cap {
       return true;
     }
+    // An unresolved item marker pins its line even when no quote or link does.
+    // Settlement may still be blocked by an open inline construct or whitespace.
+    // Fragment cleaning retains the whole document anyway, as for a quote.
+    if !self.retains_whole_document() && self.item_marker_line_held() {
+      let start = self.empty_item_line_start;
+      // Code bounds and drops its own held content. Charge only the prefix
+      // before it, so that exhausting code can still retain following nodes.
+      let end = self
+        .code_spans
+        .first()
+        .map(|span| span.output_start)
+        .or_else(|| self.code_fence.as_ref().map(|fence| fence.output_start))
+        .unwrap_or(self.buffer.len());
+      if end.saturating_sub(start) + self.break_run_extra(start, end) > cap {
+        return true;
+      }
+    }
     let len = self.buffer.len();
     if len <= cap {
       return false;
@@ -3219,24 +3247,6 @@ impl ConvertState {
       return true;
     }
     let mut floor = len;
-    // An unresolved item marker pins its line even when no quote or link does.
-    // Settlement may still be blocked by an open inline construct or whitespace.
-    if self.item_marker_line_held() {
-      // Code bounds and drops its own held content. Charge only the prefix
-      // before it, so that exhausting code can still retain following nodes.
-      let end = self
-        .code_spans
-        .first()
-        .map(|span| span.output_start)
-        .or_else(|| self.code_fence.as_ref().map(|fence| fence.output_start));
-      if let Some(end) = end {
-        if end.saturating_sub(self.empty_item_line_start) > cap {
-          return true;
-        }
-      } else {
-        floor = floor.min(self.empty_item_line_start);
-      }
-    }
     // A link holds while its text is blank, since its close may still drop it.
     // Other link holds end within the link's URL length.
     if let Some(bracket_pos) = std::iter::once(&self.link)
@@ -3530,7 +3540,9 @@ impl ConvertState {
   /// The holds of `link_hold_required` that one-shot conversion shares. The item
   /// marker settles on these, so a capped stream charges its line as one-shot does.
   #[inline]
-  fn open_link_drop_floor(&self) -> Option<usize> {
+  /// `content_end` is where the buffer's trailing whitespace starts, which the
+  /// callers track incrementally: rescanning it here grows with a run of breaks.
+  fn open_link_drop_floor(&self, content_end: usize) -> Option<usize> {
     std::iter::once(&self.link)
       .chain(&self.parent_links)
       // A streamed-out bracket can no longer be dropped, and its rebased offset
@@ -3542,7 +3554,7 @@ impl ConvertState {
           && (link.empty_text_pending
             || !self.open_markers.is_empty()
             || !self.code_spans.is_empty()
-            || trim_ascii_whitespace_end(&self.buffer) <= link.bracket_pos + 1)
+            || content_end <= link.bracket_pos + 1)
       })
       .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()

@@ -4555,16 +4555,15 @@ impl ConvertState {
   /// can take it back. Waiting for the whitespace to end can pin the whole item.
   /// The blank line also survives a nested list whose first `<li>` dropped it.
   pub(crate) fn settle_item_marker(&mut self) {
-    if self.buffer.len() > self.empty_item_len
-      && self
-        .held_whitespace
-        .start(self.buffer.as_bytes(), self.buffer.len(), |byte| {
-          byte.is_ascii_whitespace()
-        }) > self.empty_item_len
+    if self.buffer.len() <= self.empty_item_len {
+      return;
+    }
+    let content_end = self.trailing_whitespace_start();
+    if content_end > self.empty_item_len
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
       && self.code_fence.is_none()
-      && self.open_link_drop_floor().is_none()
+      && self.open_link_drop_floor(content_end).is_none()
       && self.first_tentative_caption_start().is_none()
       // The blank line leaves quote frames where they are, right only for those
       // the item sits in.
@@ -4594,6 +4593,15 @@ impl ConvertState {
     }
   }
 
+  #[inline]
+  fn trailing_whitespace_start(&mut self) -> usize {
+    self
+      .held_whitespace
+      .start(self.buffer.as_bytes(), self.buffer.len(), |byte| {
+        byte.is_ascii_whitespace()
+      })
+  }
+
   /// The marker's line may still get a newline inserted, so it must stay put.
   #[inline]
   pub(crate) fn item_marker_line_held(&self) -> bool {
@@ -4613,6 +4621,11 @@ impl ConvertState {
       self.empty_item_hazard = !at_exit;
       return;
     }
+    let content_end = if at_exit {
+      0
+    } else {
+      self.trailing_whitespace_start()
+    };
     // A rewrite behind the recorded length followed by multi-byte content can
     // leave the offset mid-codepoint, which panics on slicing.
     let mut end = self.empty_item_len.min(self.buffer.len());
@@ -4634,7 +4647,9 @@ impl ConvertState {
           .open_markers
           .first()
           .is_some_and(|marker| opens_the_item(marker.output_start))
-        || self.open_link_drop_floor().is_some_and(opens_the_item)
+        || self
+          .open_link_drop_floor(content_end)
+          .is_some_and(opens_the_item)
         || self
           .first_tentative_caption_start()
           .is_some_and(opens_the_item))
@@ -4691,13 +4706,18 @@ impl ConvertState {
     // turns `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's
     // sibling rather than its child. A frame the item opened starts past the line
     // and moves with its content, or it quotes from the wrong byte.
-    // `link_bracket_pos` needs no shift either — a pending `[` is the tail this
-    // function has already returned on.
-
     let inserted = separator.len() - replaced;
     for _ in 0..inserted {
       self.shift_offsets_at_or_after(at);
     }
+    // Settled before its exit, the item can still hold an open link, whose close
+    // reads its bracket, and completed links that fragment cleaning rewrites.
+    for link in std::iter::once(&mut self.link).chain(self.parent_links.iter_mut()) {
+      if link.open && link.bracket_pos >= at {
+        link.bracket_pos += inserted;
+      }
+    }
+    self.shift_fragment_links_after(at, inserted as isize);
     let from = self.drained + at;
     self.move_stream_positions(|pos| Some(if pos >= from { pos + inserted } else { pos }));
     for frame in &mut self.blockquotes {
@@ -5256,11 +5276,7 @@ impl ConvertState {
     // Counted in one-shot conversion too, so the cap cuts both at the same tag.
     self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
     // A run per break would grow with the held tabs; the bytes are charged to the cap instead.
-    // A held marker line is charged as written, so one-shot conversion must measure the same.
-    if !self.streaming
-      || self.vertical_tab_hold_start().is_some()
-      || (self.options.max_node_bytes != 0 && self.item_marker_line_held())
-    {
+    if !self.streaming || self.vertical_tab_hold_start().is_some() {
       return false;
     }
     if let Some(run) = self.streaming_break_runs.last_mut()

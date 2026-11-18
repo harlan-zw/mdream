@@ -2158,6 +2158,52 @@ fn breaks_before_a_held_nested_item_measure_as_one_shot() {
 }
 
 #[test]
+fn settling_a_nested_item_early_moves_its_open_link() {
+  let html =
+    r#"<ul><li>r<ul><li><br><a href="https://x.com/">https://x.com/</a> more</li></ul></li></ul>"#;
+  let expected = "- r\n\n  -   \n    <https://x.com/> more";
+  for cap in [0, CAP] {
+    assert_eq!(
+      html_to_markdown_result(html, options(cap)).markdown,
+      expected
+    );
+    for chunk in [1, 37, html.len()] {
+      assert_eq!(
+        stream_reporting(html, chunk, cap),
+        (expected.to_string(), false),
+        "cap={cap} chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
+fn fragment_cleaning_does_not_charge_a_held_nested_item() {
+  // Fragment cleaning retains the whole document, so holding the line costs nothing.
+  let html = format!(
+    "<ul><li>r<ul><li><blockquote>{}</blockquote></li></ul></li></ul><p>after</p>",
+    "<p>a line of words</p>".repeat(8000)
+  );
+  let opts = |cap| HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..options(cap)
+  };
+  let uncapped = html_to_markdown_result(&html, opts(0)).markdown;
+  let capped = html_to_markdown_result(&html, opts(CAP));
+  assert_eq!(
+    (capped.markdown, capped.truncated),
+    (uncapped.clone(), false)
+  );
+  let mut p = MarkdownStreamProcessor::new(opts(CAP));
+  let mut out = String::new();
+  for chunk in html.as_bytes().chunks(4096) {
+    out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+  }
+  out.push_str(&p.finish());
+  assert_eq!((out, p.truncated()), (uncapped, false));
+}
+
+#[test]
 fn short_text_nodes_after_code_do_not_pin_a_nested_item() {
   let html = format!(
     "<ul><li>r<ul><li><code>x</code>word {}</li></ul></li></ul>",
