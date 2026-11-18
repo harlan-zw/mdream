@@ -2067,6 +2067,31 @@ fn a_nested_item_marker_hold_is_capped() {
 }
 
 #[test]
+fn a_blockquote_inside_a_nested_item_uses_its_own_cap() {
+  let cap = 64;
+  let retained = "x".repeat(cap);
+  let expected = format!("- r\n\n  - \n    > {retained}\n\nafter");
+  for extra in ["", "x"] {
+    let html = format!(
+      "<ul><li>r<ul><li><blockquote>{retained}{extra}</blockquote></li></ul></li></ul><p>after</p>"
+    );
+    let truncated = !extra.is_empty();
+    let batch = html_to_markdown_result(&html, options(cap));
+    assert_eq!(
+      (batch.markdown, batch.truncated),
+      (expected.clone(), truncated)
+    );
+    for split in 0..=html.len() {
+      assert_eq!(
+        stream_parts(&[&html[..split], &html[split..]], cap),
+        (expected.clone(), truncated),
+        "extra={extra:?} split={split}"
+      );
+    }
+  }
+}
+
+#[test]
 fn a_nested_items_link_settles_its_marker_as_one_shot_does() {
   // Streaming alone holds a link while its text is no longer than its URL.
   for html in [

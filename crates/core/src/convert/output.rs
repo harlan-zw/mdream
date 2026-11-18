@@ -4565,12 +4565,12 @@ impl ConvertState {
       && self.code_fence.is_none()
       && self.open_link_drop_floor(content_end).is_none()
       && self.first_tentative_caption_start().is_none()
-      // The blank line leaves quote frames where they are, right only for those
-      // the item sits in.
-      && self
-        .blockquotes
-        .last()
-        .is_none_or(|frame| frame.content_start <= self.empty_item_line_start)
+      // A quote opened after the marker can use its own cap once the marker
+      // settles. With fragment cleaning, keep the existing rewrite order:
+      // finalize the quote's link offsets before inserting the item separator.
+      && self.blockquotes.last().is_none_or(|frame| {
+        frame.content_start <= self.empty_item_line_start || !self.retains_whole_document()
+      })
     {
       // Trailing whitespace can precede a hard break whose continuation indent
       // still needs the exit guard. Answer the line hold without clearing it.
