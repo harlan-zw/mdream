@@ -3190,17 +3190,6 @@ impl ConvertState {
     }
   }
 
-  /// What the `<br>` runs streaming keeps as one copy and a count add between
-  /// `start` and `end` once written out, as one-shot conversion writes them.
-  fn break_run_extra(&self, start: usize, end: usize) -> usize {
-    self
-      .streaming_break_runs
-      .iter()
-      .filter(|run| run.output_start >= start && run.output_start < end)
-      .map(|run| run.unit.len().saturating_mul(run.count.saturating_sub(1)))
-      .fold(0, usize::saturating_add)
-  }
-
   /// Whether output held back behind an open construct has outgrown
   /// `max_node_bytes`. Measured from the construct's structure, never from what a
   /// flush happened to release, so chunking cannot move where it fires.
@@ -3231,7 +3220,7 @@ impl ConvertState {
         .map(|span| span.output_start)
         .or_else(|| self.code_fence.as_ref().map(|fence| fence.output_start))
         .unwrap_or(self.buffer.len());
-      if end.saturating_sub(start) + self.break_run_extra(start, end) > cap {
+      if end.saturating_sub(start) > cap {
         return true;
       }
     }

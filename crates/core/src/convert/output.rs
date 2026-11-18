@@ -5261,6 +5261,13 @@ impl ConvertState {
     }
   }
 
+  /// A capped stream charges a held marker line as written, as one-shot does.
+  #[cold]
+  #[inline(never)]
+  fn charges_marker_line(&self) -> bool {
+    self.options.max_node_bytes != 0 && self.item_marker_line_held()
+  }
+
   fn defer_streaming_break(&mut self, fragment: &str) -> bool {
     if !self.blockquotes.is_empty()
       || self.retains_whole_document()
@@ -5276,7 +5283,10 @@ impl ConvertState {
     // Counted in one-shot conversion too, so the cap cuts both at the same tag.
     self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
     // A run per break would grow with the held tabs; the bytes are charged to the cap instead.
-    if !self.streaming || self.vertical_tab_hold_start().is_some() {
+    if !self.streaming
+      || (self.empty_item_hazard && self.charges_marker_line())
+      || self.vertical_tab_hold_start().is_some()
+    {
       return false;
     }
     if let Some(run) = self.streaming_break_runs.last_mut()
