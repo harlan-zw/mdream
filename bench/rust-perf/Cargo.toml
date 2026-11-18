@@ -7,8 +7,8 @@ publish = false
 [workspace]
 
 [features]
-default = ["cpu"]
-cpu = ["dep:libc"]
+default = [ "cpu" ]
+cpu = [ "dep:libc" ]
 alloc = []
 
 [dependencies]
