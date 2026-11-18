@@ -356,6 +356,9 @@ struct LinkOutputState {
   hold_released: bool,
   /// Set in one-shot conversion too, like `pins_output`.
   empty_text_pending: bool,
+  /// The close may still rewrite or drop an emitted `[`. Set in one-shot
+  /// conversion too, unlike the streamed `hold_released` it starts from.
+  rewrites_bracket: bool,
   /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
   /// past the link into the text and rewrites whatever bracket it finds there.
   bracket_emitted: bool,
@@ -2364,7 +2367,11 @@ impl ConvertState {
     };
     self.process_text_buffer_piece(text_buffer, false);
     self.entity_seals = tail_seals;
-    // A blank link's text can outgrow the cap within a single run.
+    // Piece boundaries depend on content, so settle the marker here as well
+    // as at token boundaries before charging output that still cannot stream.
+    if self.empty_item_hazard {
+      self.settle_item_marker();
+    }
     self.check_held_output();
     self.last_node_is_inline = true;
     text_buffer.push_str(&tail);
@@ -3635,6 +3642,23 @@ impl ConvertState {
     if self.held_break_bytes > cap {
       return true;
     }
+    // An unresolved item marker pins its line even when no quote or link does.
+    // Settlement may still be blocked by an open inline construct or whitespace.
+    // Fragment cleaning retains the whole document anyway, as for a quote.
+    if !self.retains_whole_document() && self.item_marker_line_held() {
+      let start = self.empty_item_line_start;
+      // Code bounds and drops its own held content. Charge only the prefix
+      // before it, so that exhausting code can still retain following nodes.
+      let end = self
+        .code_spans
+        .first()
+        .map(|span| span.output_start)
+        .or_else(|| self.code_fence.as_ref().map(|fence| fence.output_start))
+        .unwrap_or(self.buffer.len());
+      if end.saturating_sub(start) > cap {
+        return true;
+      }
+    }
     let len = self.buffer.len();
     if len <= cap {
       return false;
@@ -3951,6 +3975,29 @@ impl ConvertState {
     std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| self.link_hold_required(link))
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
+      .min()
+  }
+
+  /// The holds of `link_hold_required` that one-shot conversion shares. The item
+  /// marker settles on these, so a capped stream charges its line as one-shot does.
+  #[inline]
+  /// `content_end` is where the buffer's trailing whitespace starts, which the
+  /// callers track incrementally: rescanning it here grows with a run of breaks.
+  fn open_link_drop_floor(&self, content_end: usize) -> Option<usize> {
+    std::iter::once(&self.link)
+      .chain(&self.parent_links)
+      // A streamed-out bracket can no longer be dropped, and its rebased offset
+      // is stale. Its marker line was drained, so the marker was answered.
+      .filter(|link| {
+        link.open
+          && link.rewrites_bracket
+          && !link.hold_released
+          && (link.empty_text_pending
+            || !self.open_markers.is_empty()
+            || !self.code_spans.is_empty()
+            || content_end <= link.bracket_pos + 1)
+      })
       .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
   }
