@@ -1829,8 +1829,7 @@ impl ConvertState {
       };
       self.begin_link(bracket_pos, false, false);
       self.link.bracket_emitted = emitted_bracket;
-      self.link.empty_text_pending =
-        emitted_bracket && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+      self.link.rewrites_bracket = emitted_bracket;
       if emitted_bracket && heading_break_prefix_len != 0 {
         self.link.heading_break_prefix_len = heading_break_prefix_len;
         self.link.starts_at_hard_break =
@@ -1851,6 +1850,11 @@ impl ConvertState {
         self.link.url_max_len = href.map_or(0, |href| {
           URL_RESOLVE_SLACK + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
         });
+      } else if self.empty_item_hazard {
+        // One-shot keeps no link hold, but the guard of the open item has to
+        // know that `emptyLinkText` may still drop this link and leave it empty.
+        self.link.empty_text_pending =
+          emitted_bracket && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
       }
 
       if !(self.open_markers.is_empty() || self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
@@ -2709,6 +2713,7 @@ impl ConvertState {
           self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
       }
       let has_rewrite_anchor = emitted_bracket && !exit_is_overridden;
+      self.link.rewrites_bracket = has_rewrite_anchor;
       // One-shot conversion sets this too: until visible text arrives, the close
       // may drop the link, so the item marker guard must not count its `[`.
       self.link.empty_text_pending =
@@ -2730,6 +2735,11 @@ impl ConvertState {
             URL_RESOLVE_SLACK + self.options.origin.as_deref().map_or(0, str::len) + 1 + href.len()
           });
         }
+      } else if self.empty_item_hazard {
+        // One-shot keeps no link hold, but the guard of the open item has to
+        // know that `emptyLinkText` may still drop this link and leave it empty.
+        self.link.empty_text_pending =
+          emitted_bracket && !exit_is_overridden && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
       }
     }
 
@@ -4806,31 +4816,56 @@ impl ConvertState {
     self.empty_item_len = self.buffer.len();
   }
 
-  /// Answer the guard between tokens, where the buffer reads the same whatever
-  /// the chunking, once the item's first byte is final: settled content ends
-  /// the buffer and no open construct can take it back. The exit would answer
-  /// the same, and waiting for it pins the marker's line and everything the
-  /// item writes after it, uncharged to `max_node_bytes`. Answered here, the
-  /// blank line also survives a nested list whose first `<li>` dropped it.
+  /// Answer the guard at token and text-piece boundaries, independent of chunks.
+  /// Content before trailing whitespace settles the item once no open construct
+  /// can take it back. Waiting for the whitespace to end can pin the whole item.
+  /// The blank line also survives a nested list whose first `<li>` dropped it.
   pub(crate) fn settle_item_marker(&mut self) {
-    if self.buffer.len() > self.empty_item_len
-      && self.buffer.as_bytes().last().is_some_and(|byte| !byte.is_ascii_whitespace())
+    if self.buffer.len() <= self.empty_item_len {
+      return;
+    }
+    let content_end = self.trailing_whitespace_start();
+    if content_end > self.empty_item_len
       && self.open_markers.is_empty()
       && self.code_spans.is_empty()
       && self.code_fence.is_none()
-      && self.open_link_hold_floor().is_none()
+      && self.open_link_drop_floor(content_end).is_none()
       && self.first_tentative_caption_start().is_none()
-      // The blank line leaves quote frames where they are, right only for those
-      // the item sits in.
-      && self
-        .blockquotes
-        .last()
-        .is_none_or(|frame| frame.content_start <= self.empty_item_line_start)
+      // A quote opened after the marker can use its own cap once the marker
+      // settles. With fragment cleaning, keep the existing rewrite order:
+      // finalize the quote's link offsets before inserting the item separator.
+      && self.blockquotes.last().is_none_or(|frame| {
+        frame.content_start <= self.empty_item_line_start || !self.retains_whole_document()
+      })
     {
-      // Keep the exit guard for a live link: the item exit still uses it
-      // to preserve continuation indentation after a hard break.
-      self.resolve_item_marker(self.depth_map[TAG_A as usize] == 0);
+      // Trailing whitespace can precede a hard break whose continuation indent
+      // still needs the exit guard. Answer the line hold without clearing it.
+      // A live link also needs that guard until the item exits.
+      let at_exit = self.depth_map[TAG_A as usize] == 0
+        && self
+          .buffer
+          .as_bytes()
+          .last()
+          .is_some_and(|byte| !byte.is_ascii_whitespace());
+      self.resolve_item_marker(at_exit);
+      // Content starting on a later line owes the blank line whatever follows, so
+      // insert it now instead of holding the item until it exits. The guard stays
+      // armed for the exit's hard-break trim.
+      if self.item_marker_line_held() {
+        self.resolve_item_marker(true);
+        self.empty_item_hazard = true;
+        self.empty_item_answered = true;
+      }
     }
+  }
+
+  #[inline]
+  fn trailing_whitespace_start(&mut self) -> usize {
+    self
+      .held_whitespace
+      .start(self.buffer.as_bytes(), self.buffer.len(), |byte| {
+        byte.is_ascii_whitespace()
+      })
   }
 
   /// The marker's line may still get a newline inserted, so it must stay put.
@@ -4852,6 +4887,11 @@ impl ConvertState {
       self.empty_item_hazard = !at_exit;
       return;
     }
+    let content_end = if at_exit {
+      0
+    } else {
+      self.trailing_whitespace_start()
+    };
     // A rewrite behind the recorded length followed by multi-byte content can
     // leave the offset mid-codepoint, which panics on slicing.
     let mut end = self.empty_item_len.min(self.buffer.len());
@@ -4873,7 +4913,9 @@ impl ConvertState {
           .open_markers
           .first()
           .is_some_and(|marker| opens_the_item(marker.output_start))
-        || self.open_link_hold_floor().is_some_and(opens_the_item)
+        || self
+          .open_link_drop_floor(content_end)
+          .is_some_and(opens_the_item)
         || self
           .first_tentative_caption_start()
           .is_some_and(opens_the_item))
@@ -4930,12 +4972,17 @@ impl ConvertState {
     // turns `- \n  >\n  > -` into `- \n\n  > -`, which GFM reads as the list's
     // sibling rather than its child. A frame the item opened starts past the line
     // and moves with its content, or it quotes from the wrong byte.
-    // `link_bracket_pos` needs no shift either — a pending `[` is the tail this
-    // function has already returned on.
-
     let inserted = separator.len() - replaced;
     for _ in 0..inserted {
       self.shift_offsets_at_or_after(at);
+    }
+    // Settled before its exit, the item can still hold an open link, whose close
+    // reads its bracket. Recorded fragment links are left as at the exit: their
+    // cleanup checks each one's bytes and skips one that moved.
+    for link in std::iter::once(&mut self.link).chain(self.parent_links.iter_mut()) {
+      if link.open && link.bracket_pos >= at {
+        link.bracket_pos += inserted;
+      }
     }
     let from = self.drained + at;
     self.move_stream_positions(|pos| Some(if pos >= from { pos + inserted } else { pos }));
@@ -5480,6 +5527,13 @@ impl ConvertState {
     }
   }
 
+  /// A capped stream charges a held marker line as written, as one-shot does.
+  #[cold]
+  #[inline(never)]
+  fn charges_marker_line(&self) -> bool {
+    self.options.max_node_bytes != 0 && self.item_marker_line_held()
+  }
+
   fn defer_streaming_break(&mut self, fragment: &str) -> bool {
     if !self.blockquotes.is_empty()
       || self.retains_whole_document()
@@ -5495,7 +5549,10 @@ impl ConvertState {
     // Counted in one-shot conversion too, so the cap cuts both at the same tag.
     self.held_break_bytes = self.held_break_bytes.saturating_add(fragment.len());
     // A run per break would grow with the held tabs; the bytes are charged to the cap instead.
-    if !self.streaming || self.vertical_tab_hold_start().is_some() {
+    if !self.streaming
+      || (self.empty_item_hazard && self.charges_marker_line())
+      || self.vertical_tab_hold_start().is_some()
+    {
       return false;
     }
     if let Some(run) = self.streaming_break_runs.last_mut()
