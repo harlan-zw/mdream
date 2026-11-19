@@ -1916,6 +1916,29 @@ fn streaming_holds_full_whitespace_run_before_a_droppable_marker() {
   }
 }
 
+// Streaming holds a run of identical `<br>` breaks and writes one copy, so a
+// retraction to the run's start takes back only one break and writes the rest
+// back. An empty pair whose whole content was that run has to take all of it,
+// or the breaks it dropped stay in the output.
+#[test]
+fn streaming_drops_a_held_break_run_with_its_empty_pair() {
+  assert_eq!(
+    html_to_markdown("<b>a</b><b><br><br>", HtmlToMarkdownOptions::default()),
+    "**a**"
+  );
+  for html in [
+    "<b>a</b><b><br><br>",
+    "<b>></b><b><br><br>",
+    "<b>a</b><b><br><br><br>",
+    "<em>a</em><em><br><br>",
+    "<b>a</b><b><br><br>c",
+    "<b>a</b><b><br><br></b><br><br>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // A block boundary trims the trailing spaces of the run before it, and the
 // cached run length has to shrink with them. Left stale, it outruns the buffer
 // wherever a drain has already cut the front, and a later reach-back trim then
