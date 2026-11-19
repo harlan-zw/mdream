@@ -3964,7 +3964,9 @@ impl ConvertState {
       // A blank line between the marker and the fence ends the item, leaving the
       // block a sibling of the list, so a pending marker takes no separator.
       let indent = self.list_indent.as_str();
-      let open = self.block_open_prefix(indent).unwrap_or(Cow::Borrowed(""));
+      let open = self
+        .block_open_prefix(indent, "")
+        .unwrap_or(Cow::Borrowed(""));
       format!("{open}```{1}\n{0}", indent, self.pre_fence_lang)
     } else {
       format!("```{}\n", self.pre_fence_lang)
@@ -6183,7 +6185,7 @@ impl ConvertState {
     if configured_new_lines == 0 {
       return None;
     }
-    let open = self.block_open_prefix(prefix);
+    let open = self.block_open_prefix(prefix, "");
     let content = self.buffer.strip_suffix(prefix).unwrap_or(&self.buffer);
     let trailing_new_lines = content
       .as_bytes()
@@ -6751,13 +6753,15 @@ impl ConvertState {
     }
   }
 
-  /// Separation a block needs to open at the content column `prefix` describes,
-  /// or `None` when the buffer already sits there.
-  fn block_open_prefix(&self, prefix: &str) -> Option<Cow<'static, str>> {
+  /// Build the separator and suffix together, or return `None` when the buffer
+  /// already sits at the content column `prefix` describes.
+  fn block_open_prefix(&self, prefix: &str, suffix: &str) -> Option<Cow<'static, str>> {
     if self.block_open_needs_break() {
-      Some(Cow::Owned(Self::join_block_fragment("\n\n", prefix, "")))
+      Some(Cow::Owned(Self::join_block_fragment(
+        "\n\n", prefix, suffix,
+      )))
     } else if !prefix.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') {
-      Some(Cow::Owned(prefix.to_string()))
+      Some(Cow::Owned(Self::join_block_fragment("", prefix, suffix)))
     } else {
       None
     }
@@ -7033,14 +7037,9 @@ impl ConvertState {
             .is_some_and(|parent| parent.tag_id == Some(TAG_LI))
         {
           let prefix = self.continuation_prefix();
-          Some(match self.block_open_prefix(&prefix) {
-            Some(open) => Cow::Owned(Self::join_block_fragment(
-              &open,
-              "",
-              HEADING_PREFIXES[depth],
-            )),
-            None => Cow::Borrowed(HEADING_PREFIXES[depth]),
-          })
+          self
+            .block_open_prefix(&prefix, HEADING_PREFIXES[depth])
+            .or(Some(Cow::Borrowed(HEADING_PREFIXES[depth])))
         } else {
           Some(Cow::Borrowed(HEADING_PREFIXES[depth]))
         }
@@ -7059,20 +7058,18 @@ impl ConvertState {
         if prefix.is_empty() && self.depth_map[TAG_LI as usize] == 0 {
           return Some(Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE));
         }
-        Some(match self.block_open_prefix(&prefix) {
-          // Sharing the marker's line, where a rule of the bullet's own
-          // character would make the whole line a thematic break and take the
-          // item with it.
-          None if !prefix.is_empty() && !self.last_item_star => {
-            Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT)
-          }
-          None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE),
-          Some(open) => Cow::Owned(Self::join_block_fragment(
-            &open,
-            "",
-            MARKDOWN_HORIZONTAL_RULE,
-          )),
-        })
+        Some(
+          match self.block_open_prefix(&prefix, MARKDOWN_HORIZONTAL_RULE) {
+            // Sharing the marker's line, where a rule of the bullet's own
+            // character would make the whole line a thematic break and take the
+            // item with it.
+            None if !prefix.is_empty() && !self.last_item_star => {
+              Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT)
+            }
+            None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE),
+            Some(open) => open,
+          },
+        )
       }
       TAG_STRONG | TAG_B => {
         if self.depth_map[TAG_B as usize] > 1 {
@@ -7131,7 +7128,7 @@ impl ConvertState {
       // its content column: glued to preceding text it swallows the table's first
       // row, and at column 0 it takes the table out of the item.
       TAG_CAPTION if self.depth_map[TAG_LI as usize] > 0 && !self.in_table_cell() => {
-        self.block_open_prefix(&self.list_indent)
+        self.block_open_prefix(&self.list_indent, "")
       }
       TAG_BLOCKQUOTE => {
         // The completed subtree receives quote prefixes once every structural
@@ -7168,7 +7165,9 @@ impl ConvertState {
             let indent = self.list_indent.as_str();
             // A blank line between the marker and the fence ends the item, leaving
             // the block a sibling of the list.
-            let open = self.block_open_prefix(indent).unwrap_or(Cow::Borrowed(""));
+            let open = self
+              .block_open_prefix(indent, "")
+              .unwrap_or(Cow::Borrowed(""));
             let mut s = String::with_capacity(open.len() + indent.len() + 4 + lang.len() + 1);
             s.push_str(&open);
             s.push_str("```");
