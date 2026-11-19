@@ -1759,17 +1759,21 @@ impl ConvertState {
     self.hard_break_end = usize::MAX;
     self.trim_trailing_spaces();
     let new_lines = 2usize.saturating_sub(self.trailing_new_lines() as usize);
-    let mut separator = String::with_capacity(new_lines + self.list_indent.len());
-    for _ in 0..new_lines {
-      separator.push('\n');
-    }
-    separator.push_str(&self.list_indent);
-    // Prepend rather than replace: a pre/table enter fragment can carry its
-    // own opener (fence, row marker), which must follow the separator.
-    *output = Some(match output.take() {
-      Some(fragment) => Cow::Owned(format!("{separator}{fragment}")),
-      None => Cow::Owned(separator),
-    });
+    // A pre or table fragment can carry its own opener after the separator.
+    *output = Some(Cow::Owned(Self::join_block_fragment(
+      &"\n\n"[..new_lines],
+      &self.list_indent,
+      output.as_deref().unwrap_or_default(),
+    )));
+  }
+
+  #[cfg_attr(target_arch = "wasm32", inline(never))]
+  fn join_block_fragment(prefix: &str, indent: &str, fragment: &str) -> String {
+    let mut output = String::with_capacity(prefix.len() + indent.len() + fragment.len());
+    output.push_str(prefix);
+    output.push_str(indent);
+    output.push_str(fragment);
+    output
   }
 
   /// Resolve a pending heading break at an element's enter. Output that starts
@@ -1801,7 +1805,7 @@ impl ConvertState {
     } else if has_visible(fragment.as_bytes()) {
       self.heading_break_pending = false;
       let fragment = fragment.trim_start_matches(' ');
-      let prefixed = format!("\n\n{}{fragment}", self.list_indent);
+      let prefixed = Self::join_block_fragment("\n\n", &self.list_indent, fragment);
       return (Some(Cow::Owned(prefixed)), 2 + self.list_indent.len());
     }
     (output, 0)
@@ -1826,7 +1830,7 @@ impl ConvertState {
 
   fn flush_heading_break(&mut self) {
     self.heading_break_pending = false;
-    let separator = format!("\n\n{}", self.list_indent);
+    let separator = Self::join_block_fragment("\n\n", &self.list_indent, "");
     self.last_content_cache_len = self.push_code_span_content(&separator, true);
   }
 
@@ -1850,10 +1854,10 @@ impl ConvertState {
       return output;
     }
     self.trim_trailing_spaces();
-    Some(Cow::Owned(format!(
-      "\n\n{}{}",
-      self.list_indent,
-      output.as_deref().unwrap_or_default()
+    Some(Cow::Owned(Self::join_block_fragment(
+      "\n\n",
+      &self.list_indent,
+      output.as_deref().unwrap_or_default(),
     )))
   }
 
@@ -6751,7 +6755,7 @@ impl ConvertState {
   /// or `None` when the buffer already sits there.
   fn block_open_prefix(&self, prefix: &str) -> Option<Cow<'static, str>> {
     if self.block_open_needs_break() {
-      Some(Cow::Owned(format!("\n\n{prefix}")))
+      Some(Cow::Owned(Self::join_block_fragment("\n\n", prefix, "")))
     } else if !prefix.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') {
       Some(Cow::Owned(prefix.to_string()))
     } else {
@@ -6841,7 +6845,7 @@ impl ConvertState {
       self.buffer.push_str(&prefix);
       self.last_content_cache_len = 2 + prefix.len();
     } else {
-      let output = format!("\n\n{prefix}");
+      let output = Self::join_block_fragment("\n\n", &prefix, "");
       self.last_content_cache_len = self.push_code_span_content(&output, true);
     }
     self.list_rule_pending = false;
@@ -7000,7 +7004,7 @@ impl ConvertState {
           if prefix.is_empty() {
             Some(Cow::Borrowed("  \n"))
           } else {
-            Some(Cow::Owned(format!("  \n{prefix}")))
+            Some(Cow::Owned(Self::join_block_fragment("  \n", &prefix, "")))
           }
         }
       }
@@ -7017,7 +7021,11 @@ impl ConvertState {
           && !self.quote_at_start()
         {
           let prefix = self.continuation_prefix();
-          Some(Cow::Owned(format!("\n{prefix}{}", HEADING_PREFIXES[depth])))
+          Some(Cow::Owned(Self::join_block_fragment(
+            "\n",
+            &prefix,
+            HEADING_PREFIXES[depth],
+          )))
         } else if !self.list_indent.is_empty()
           && !self.heading_kept_inline_in_item(true)
           && _ancestors
@@ -7026,7 +7034,11 @@ impl ConvertState {
         {
           let prefix = self.continuation_prefix();
           Some(match self.block_open_prefix(&prefix) {
-            Some(open) => Cow::Owned(format!("{open}{}", HEADING_PREFIXES[depth])),
+            Some(open) => Cow::Owned(Self::join_block_fragment(
+              &open,
+              "",
+              HEADING_PREFIXES[depth],
+            )),
             None => Cow::Borrowed(HEADING_PREFIXES[depth]),
           })
         } else {
@@ -7055,7 +7067,11 @@ impl ConvertState {
             Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT)
           }
           None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE),
-          Some(open) => Cow::Owned(format!("{open}{MARKDOWN_HORIZONTAL_RULE}")),
+          Some(open) => Cow::Owned(Self::join_block_fragment(
+            &open,
+            "",
+            MARKDOWN_HORIZONTAL_RULE,
+          )),
         })
       }
       TAG_STRONG | TAG_B => {
@@ -8643,14 +8659,14 @@ impl ConvertState {
     match self.line_state_before_row() {
       LineBeforeRow::Row if indent.is_empty() => Cow::Borrowed("\n| "),
       LineBeforeRow::Content if indent.is_empty() => Cow::Borrowed("\n\n| "),
-      LineBeforeRow::Row => Cow::Owned(format!("\n{indent}| ")),
-      LineBeforeRow::Content => Cow::Owned(format!("\n\n{indent}| ")),
+      LineBeforeRow::Row => Cow::Owned(Self::join_block_fragment("\n", indent, "| ")),
+      LineBeforeRow::Content => Cow::Owned(Self::join_block_fragment("\n\n", indent, "| ")),
       // A pending list marker already supplies the column; only a fresh line
       // needs the indent written.
       LineBeforeRow::Open
         if !indent.is_empty() && self.buffer.as_bytes().last() == Some(&b'\n') =>
       {
-        Cow::Owned(format!("{indent}| "))
+        Cow::Owned(Self::join_block_fragment("", indent, "| "))
       }
       LineBeforeRow::Open => Cow::Borrowed("| "),
     }

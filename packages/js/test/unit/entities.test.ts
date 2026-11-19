@@ -28,6 +28,11 @@ describe('html character references', () => {
       .toBe('\u00A0©ϑ')
   })
 
+  it('decodes Greek names on both sides of the final sigma slot', () => {
+    expect(decodeHTMLEntities('&Rho; &rho; &Sigma; &sigma; &sigmaf; &rho &Sigma'))
+      .toBe('Ρ ρ Σ σ ς &rho &Sigma')
+  })
+
   it('uses the attribute ambiguous-ampersand rule for legacy names', () => {
     expect(decodeHTMLEntities('&copycat &copy=1 &copy! &copy;cat', true))
       .toBe('&copycat &copy=1 ©! ©cat')
