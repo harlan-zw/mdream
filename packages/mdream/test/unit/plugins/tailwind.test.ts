@@ -31,6 +31,18 @@ describe.each(engines)('tailwind addon %s', ({ name: _name, engine }) => {
     expect(markdown).toBe('**This is bold text**')
   })
 
+  // The delimiter goes ahead of the text, so the output trim leaves the
+  // whitespace that leads the text and the marker behind it stays inert.
+  it.each([
+    ['<p class="font-bold">&#32;&#32;&#32;&#32;# x</p>', '**    # x**'],
+    ['<p class="italic">&#9;- x</p>', '*\t- x*'],
+  ])('leaves a marker behind whitespace bare after a generated delimiter for %s', async (html, expected) => {
+    expect(htmlToMarkdown(html, {
+      engine: await resolveEngine(engine),
+      plugins: { tailwind: true },
+    })).toBe(expected)
+  })
+
   it('converts font-semibold to markdown bold', async () => {
     const html = '<p class="font-semibold">This is semibold text</p>'
     const markdown = htmlToMarkdown(html, {

@@ -1394,6 +1394,10 @@ pub struct ConvertState {
   /// Once streaming starts, whitespace at the front of a drained buffer is
   /// content, not document-leading whitespace.
   has_streamed_output: bool,
+  /// Whether a drain has removed output. One that cut only document-leading
+  /// whitespace, which the start trim never yields, leaves the buffer at the
+  /// output start still.
+  drained_content: bool,
   /// Two bytes immediately before the retained buffer, initialized as virtual
   /// newlines at the document start. When a later rewrite trims the buffer
   /// empty, spacing and newline counts still see the one-shot context. An
@@ -1871,6 +1875,7 @@ impl ConvertState {
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
+      drained_content: false,
       flushed_tail: [b'\n'; 2],
       cut_line_lead: CutLineLead::Uncut,
       cut_line: LineRead::START,
@@ -4161,6 +4166,7 @@ impl ConvertState {
       self.bare_marker_text = text;
     }
     self.note_link_release(drain_end);
+    self.drained_content = self.drained_content || !self.buffer[..drain_end].trim_end().is_empty();
     self.note_list_gap_drain(drain_end);
     #[cfg(debug_assertions)]
     {
