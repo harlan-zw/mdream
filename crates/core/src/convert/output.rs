@@ -143,6 +143,28 @@ static EMPHASIS_EXIT_TAG: [bool; MAX_TAG_ID] = {
   table
 };
 
+/// Inline marker kind per tag id, 0 for none: 1 strong, 2 emphasis,
+/// 3 strikethrough, 4 citation, 5 code-like span, 6 quotation. Every exit
+/// reads it, and one lookup is cheaper than the comparisons a match compiles to.
+static INLINE_MARKER_TYPE: [u8; 256] = {
+  let mut table = [0; 256];
+  table[TAG_STRONG as usize] = 1;
+  table[TAG_B as usize] = 1;
+  table[TAG_DFN as usize] = 1;
+  table[TAG_EM as usize] = 2;
+  table[TAG_I as usize] = 2;
+  table[TAG_DEL as usize] = 3;
+  table[TAG_S as usize] = 3;
+  table[TAG_STRIKE as usize] = 3;
+  table[TAG_CITE as usize] = 4;
+  table[TAG_KBD as usize] = 5;
+  table[TAG_CODE as usize] = 5;
+  table[TAG_SAMP as usize] = 5;
+  table[TAG_VAR as usize] = 5;
+  table[TAG_Q as usize] = 6;
+  table
+};
+
 /// Escape-set bits for link and image writers, one byte per character.
 const DESTINATION_ESCAPE_BIT: u8 = 1;
 const TITLE_ESCAPE_BIT: u8 = 2;
@@ -518,14 +540,9 @@ impl ConvertState {
 
   #[inline]
   fn inline_marker_type(tag_id: u8) -> Option<u8> {
-    match tag_id {
-      TAG_STRONG | TAG_B | TAG_DFN => Some(1),
-      TAG_EM | TAG_I => Some(2),
-      TAG_DEL | TAG_S | TAG_STRIKE => Some(3),
-      TAG_CITE => Some(4),
-      TAG_KBD | TAG_CODE | TAG_SAMP | TAG_VAR => Some(5),
-      TAG_Q => Some(6),
-      _ => None,
+    match INLINE_MARKER_TYPE[tag_id as usize] {
+      0 => None,
+      kind => Some(kind),
     }
   }
 
@@ -1411,14 +1428,14 @@ impl ConvertState {
       Self::override_for_node(overrides, self.override_idx.as_deref(), li)
         .and_then(|ov| ov.enter.as_deref())
     });
-    let selected = self.list_markers.last().map_or(0, |m| m.selected);
+    let selected = self.list_frames.last().map_or(0, |frame| frame.selected);
     let written = enter.map_or(selected, |enter| written_list_marker(enter.as_bytes()));
     if written != 0
-      && let Some(marker) = self.list_markers.last_mut()
+      && let Some(frame) = self.last_tracked_list_frame_mut()
     {
-      marker.written = written;
+      frame.written = written;
     }
-    self.last_item_star = written == b'*';
+    self.last_item_marker = written;
   }
 
   /// Whether a code span marker applies: outside `<pre>` and raw HTML.
@@ -1482,6 +1499,14 @@ impl ConvertState {
     !self.has_tag_overrides() && self.fast_path_state_ok()
   }
 
+  /// The exits the simple emitter takes outside `SIMPLE_EMIT_TAG`: a custom
+  /// tag's, and those of the voids `<br>` and `<img>`, whose enters are special
+  /// but whose exits, with no override, do nothing the simple exit does not.
+  #[inline(always)]
+  pub(crate) fn simple_exit_ok(&self, tag_id: Option<u8>) -> bool {
+    matches!(tag_id, None | Some(TAG_BR | TAG_IMG)) && self.custom_element_fast_path_ok()
+  }
+
   /// A plain `<li>` takes the simple emitters with the item steps added. Kept
   /// out of `SIMPLE_EMIT_TAG` so the other tags never test for it.
   /// Same gate as `common_fast_path_ok(Some(TAG_LI))`. The li slot is decided
@@ -1509,7 +1534,7 @@ impl ConvertState {
     pending: u8,
   ) {
     let separator_end = std::mem::replace(&mut self.pending_space_end, usize::MAX);
-    let separator_owned = std::mem::take(&mut self.pending_space_owned);
+    let separator_owned = separator_end == PENDING_SPACE_OWNED;
     if let Some(id) = marker_tag
       && let Some(inline_marker_type) = Self::inline_marker_type(id)
       && let Some(emitted) = output
@@ -1703,14 +1728,21 @@ impl ConvertState {
   }
 
   /// Remember the emphasis closer an exit wrote at the end of the output.
+  /// Every exit calls this and almost none is emphasis, so only the tag test is
+  /// inline.
   #[inline(always)]
   fn note_closed_marker(&mut self, marker_tag: Option<u8>, emitted: Option<&str>) {
     if let Some(id) = marker_tag
       && matches!(Self::inline_marker_type(id), Some(1 | 2 | 4))
       && let Some(emitted) = emitted
-      && !emitted.is_empty()
-      && self.buffer.ends_with(emitted)
     {
+      self.note_emphasis_closer(emitted);
+    }
+  }
+
+  #[inline(never)]
+  fn note_emphasis_closer(&mut self, emitted: &str) {
+    if !emitted.is_empty() && self.buffer.ends_with(emitted) {
       let end = self.buffer.len();
       let start = end - emitted.len();
       if self
@@ -2110,7 +2142,7 @@ impl ConvertState {
       // Same step as the general enter, which arms the empty-item guard. Plain
       // text never writes an item marker, so the general enter skips it there.
       if !plain_text!(self) && !self.in_table_cell() {
-        self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+        self.record_item_entry(self.stack[stack_len - 1].index as usize, output_start);
       }
     }
 
@@ -2309,7 +2341,7 @@ impl ConvertState {
     } else {
       self.element_fast_path_ok(node.tag_id)
         || self.text_element_fast_path_ok(node.tag_id)
-        || (node.tag_id.is_none() && self.custom_element_fast_path_ok())
+        || self.simple_exit_ok(node.tag_id)
     });
     if node.excluded_from_markdown || node.enter_skipped {
       self.last_node_is_inline = node.is_inline;
@@ -2946,7 +2978,7 @@ impl ConvertState {
     });
 
     if !plain_text!(self) && !enter_is_literal && tag_id == Some(TAG_LI) && !self.in_table_cell() {
-      self.record_item_marker(self.stack[stack_len - 1].index as usize, output_start);
+      self.record_item_entry(self.stack[stack_len - 1].index as usize, output_start);
     }
 
     // The blank line that re-enables Markdown must be looked for *inside* the
@@ -3894,10 +3926,10 @@ impl ConvertState {
     if has_override
       && matches!(tag_id, Some(TAG_UL | TAG_OL))
       && let Some(exit) = effective
-      && let Some(marker) = self.list_markers.last_mut()
-      && let Some(written) = exit_list_marker(exit.as_bytes(), marker.written != 0)
+      && let Some(frame) = self.list_frames.last_mut()
+      && let Some(written) = exit_list_marker(exit.as_bytes(), frame.written != 0)
     {
-      marker.written = written;
+      frame.written = written;
       self.sibling_list_marker = 0;
     }
     if consumes_caption_boundary {
@@ -5028,17 +5060,41 @@ impl ConvertState {
   /// the document: the trim removes all the whitespace before it, in `text`
   /// and in the buffer alike, so no amount of it works as indentation there.
   /// The marker test goes first, keeping the buffer scan to text that ends
-  /// the blank output it reads.
-  #[inline]
+  /// the blank output it reads. Past the document start the buffer almost
+  /// always ends in visible output, which rules a marker out before any of the
+  /// work below.
+  #[inline(always)]
   fn output_start_marker(&self, text: &str) -> Option<usize> {
-    if self.has_streamed_output {
+    if text.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+      || self.has_streamed_output
+      || self
+        .buffer
+        .as_bytes()
+        .last()
+        .is_some_and(|&byte| byte.is_ascii_graphic())
+    {
       return None;
     }
+    self.blank_output_start_marker(text)
+  }
+
+  #[inline(never)]
+  fn blank_output_start_marker(&self, text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     let lead = match bytes.first()? {
       b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9' => 0,
       b'\t'..=b'\r' | b' ' | 0x80..=0xff => {
-        let lead = text.len() - text.trim_start().len();
+        // The ASCII run decides it unless a non-ASCII byte ends it, which
+        // may be more Unicode whitespace.
+        let ascii_lead = bytes
+          .iter()
+          .position(|byte| !matches!(byte, b'\t'..=b'\r' | b' '))
+          .unwrap_or(bytes.len());
+        let lead = if bytes.get(ascii_lead).is_some_and(|&byte| byte >= 0x80) {
+          text.len() - text.trim_start().len()
+        } else {
+          ascii_lead
+        };
         if !matches!(
           bytes.get(lead),
           Some(b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9')
@@ -5370,17 +5426,23 @@ impl ConvertState {
     };
   }
 
-  /// Arm the empty-item guard for the `<li>` whose marker was just written from
-  /// `output_start`. A marker line continuing the paragraph above turns a lone
-  /// marker into a setext underline: the text becomes a heading and the item
-  /// disappears. A blank line, or a sibling marker, opens its own block instead.
-  fn record_item_marker(&mut self, index: usize, output_start: usize) {
-    // Only a list's first item can follow a paragraph, so every later sibling
-    // skips the line scan below.
-    if index != 0 {
+  /// Arm the empty-item guard for a list's first `<li>`, or clear it for a
+  /// later sibling, which cannot follow a paragraph.
+  #[inline(always)]
+  fn record_item_entry(&mut self, index: usize, output_start: usize) {
+    if index == 0 {
+      self.record_item_marker(output_start);
+    } else {
       self.empty_item_hazard = false;
-      return;
     }
+  }
+
+  /// Arm the empty-item guard for a list's first `<li>`, whose marker was just
+  /// written from `output_start`. A marker line continuing the paragraph above
+  /// turns a lone marker into a setext underline: the text becomes a heading
+  /// and the item disappears. A blank line, or a sibling marker, opens its own
+  /// block instead. Callers test `index == 0` first, so later siblings skip it.
+  fn record_item_marker(&mut self, output_start: usize) {
     let output_start = output_start.min(self.buffer.len());
     let bytes = self.buffer.as_bytes();
     let line_start = bytes[output_start..]
@@ -7081,7 +7143,7 @@ impl ConvertState {
             // Sharing the marker's line, where a rule of the bullet's own
             // character would make the whole line a thematic break and take the
             // item with it.
-            None if !prefix.is_empty() && !self.last_item_star => {
+            None if !prefix.is_empty() && self.last_item_marker != b'*' => {
               Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT)
             }
             None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE),
@@ -7265,7 +7327,7 @@ impl ConvertState {
         // is written to the buffer.
         let ordered = _ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
         // The innermost list's character; an item outside any list takes `-`.
-        let marker = self.list_markers.last().map_or(0, |m| m.selected);
+        let marker = self.list_frames.last().map_or(0, |frame| frame.selected);
         if ordered.is_none() && self.list_indent.len() <= MAX_BORROWED_INDENT {
           debug_assert!(self.list_indent.bytes().all(|b| b == b' '));
           let bullets = if marker == b'*' {
@@ -7891,8 +7953,11 @@ impl ConvertState {
     closes_emphasis: bool,
   ) {
     let output_str = output.unwrap_or("");
-    // Image text no longer ends the output.
-    self.image_text_pending &= output_str.is_empty();
+    // Image text no longer ends the output. Tested first, so the common case
+    // stores nothing.
+    if self.image_text_pending && !output_str.is_empty() {
+      self.image_text_pending = false;
+    }
     if is_enter {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
@@ -7916,7 +7981,6 @@ impl ConvertState {
     // sit outside its Markdown delimiter. Resolve it only when later visible
     // inline output begins; block boundaries and line breaks subsume it.
     self.pending_space_end = usize::MAX;
-    self.pending_space_owned = false;
     let pending_caption = output_str.is_empty()
       && configured_new_lines == 0
       && (!is_enter
@@ -7974,7 +8038,7 @@ impl ConvertState {
         } else if first == b' ' && self.is_markdown() {
           // The output's own space takes the separator's place. An empty pair
           // dropped with it owes the separator again.
-          self.pending_space_owned = true;
+          self.pending_space_end = PENDING_SPACE_OWNED;
           self.pending_space_trimmed = !self.pending_leading_blank || pair_owed;
         }
         self.pending_inline_whitespace = false;
@@ -8241,11 +8305,6 @@ impl ConvertState {
 
   #[inline]
   pub(crate) fn needs_spacing(&self, last_byte: u8, first_byte: u8) -> bool {
-    // A strikethrough opener touches its content; a closer or a literal
-    // tilde keeps the separator.
-    if last_byte == b'~' && !self.open_markers.is_empty() {
-      return first_byte == b'~';
-    }
     if matches!(last_byte, b' ' | b'\n' | b'\t') {
       return false;
     }
@@ -8263,7 +8322,10 @@ impl ConvertState {
     {
       return false;
     }
-    true
+    // A strikethrough opener touches its content; a closer or a literal
+    // tilde keeps the separator. Tested last: every earlier answer is the
+    // same for a `~`.
+    !(last_byte == b'~' && !self.open_markers.is_empty()) || first_byte == b'~'
   }
 
   #[inline]

@@ -3782,6 +3782,17 @@ fn a_rule_inside_a_list_item_keeps_its_own_block() {
 }
 
 #[test]
+fn a_rule_in_a_list_with_no_items_of_its_own_reads_the_marker_before_it() {
+  // The nested list wrote no marker, so the rule's line still shares the
+  // marker of the item that opened it, where `* ***` would be a thematic
+  // break and take the item with it.
+  assert_eq!(
+    convert("<ul><li>a</li></ul><ul><li><ul><hr></ul></li></ul>"),
+    "- a\n\n* ---"
+  );
+}
+
+#[test]
 fn a_rule_around_a_deferred_fence_resumes_the_item() {
   // The rule's separator is written unconditionally, and the block reads the
   // output as it was before the fence it opens.
