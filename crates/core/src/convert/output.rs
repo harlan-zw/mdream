@@ -4552,13 +4552,20 @@ impl ConvertState {
       return None;
     }
     let bytes = text.as_bytes();
-    let lead = text.len() - text.trim_start().len();
-    if !matches!(
-      bytes.get(lead),
-      Some(b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9')
-    ) {
-      return None;
-    }
+    let lead = match bytes.first()? {
+      b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9' => 0,
+      b'\t'..=b'\r' | b' ' | 0x80..=0xff => {
+        let lead = text.len() - text.trim_start().len();
+        if !matches!(
+          bytes.get(lead),
+          Some(b'#' | b'-' | b'+' | b'>' | b'=' | b'0'..=b'9')
+        ) {
+          return None;
+        }
+        lead
+      }
+      _ => return None,
+    };
     // A table writes a line ending as a character reference, which is content.
     if self.depth_map[TAG_TABLE as usize] > 0
       && bytes[..lead].iter().any(|b| matches!(b, b'\n' | b'\r'))
