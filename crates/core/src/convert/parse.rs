@@ -302,38 +302,60 @@ fn is_hidden(node: &ElementNode) -> bool {
 }
 
 impl ConvertState {
-  /// Open the marker entry of a `<ul>`/`<ol>`.
+  /// Open the frame of a `<ul>`/`<ol>`.
+  ///
+  /// `tracked` says whether the list takes part in sibling marker tracking.
+  /// An inline list without overrides does not, and carries the enclosing
+  /// list's character so its items read the marker they did before.
   #[inline(never)]
-  fn push_list_marker(&mut self, ordered: bool, skip_node: bool) {
-    let marker = if skip_node {
+  fn push_list_frame(&mut self, ordered: bool, skip_node: bool, tracked: bool) {
+    let selected = if !tracked {
+      self.list_frames.last().map_or(0, |frame| frame.selected)
+    } else if skip_node {
       if ordered { b'.' } else { b'-' }
     } else {
       self.next_list_marker(ordered)
     };
-    self.list_markers.push(ListMarker {
-      selected: marker,
+    self.list_frames.push(ListFrame {
+      item_count: 0,
+      selected,
       written: 0,
+      tracked,
     });
   }
 
-  /// Close what [`Self::push_list_marker`] opened for the same element, or end
-  /// the run of a list inside the quote that just closed.
+  /// Close the frame of a `<ul>`/`<ol>`. An empty list writes nothing, leaving
+  /// the one before it in place.
   #[inline(never)]
-  fn pop_list_marker(&mut self, id: u8) {
-    if id == TAG_UL || id == TAG_OL {
-      // An empty list writes nothing, leaving the one before it in place.
-      if let Some(marker) = self.list_markers.pop()
-        && marker.written != 0
-      {
-        self.sibling_list_marker = marker.written;
-        self.sibling_list_depth = self.depth_map[TAG_LI as usize];
-        self.sibling_list_quotes = self.blockquotes.len();
-        self.list_gap_from = self.buffer.len();
-      }
-    } else if self.sibling_list_quotes > self.blockquotes.len() {
-      // The quote's frame is gone, and the list before it was inside.
+  fn close_list_frame(&mut self) {
+    if let Some(frame) = self.list_frames.pop()
+      && frame.tracked
+      && frame.written != 0
+    {
+      self.sibling_list_marker = frame.written;
+      self.sibling_list_depth = self.depth_map[TAG_LI as usize];
+      self.sibling_list_quotes = self.blockquotes.len();
+      self.list_gap_from = self.buffer.len();
+    }
+  }
+
+  /// End the run of a list that was inside a quote which just closed.
+  #[inline]
+  fn close_quoted_list_run(&mut self) {
+    // The quote's frame is gone, and the list before it was inside.
+    if self.sibling_list_quotes > self.blockquotes.len() {
       self.sibling_list_marker = 0;
     }
+  }
+
+  /// The innermost list frame that takes part in marker tracking, mutable.
+  #[inline]
+  pub(super) fn last_tracked_list_frame_mut(&mut self) -> Option<&mut ListFrame> {
+    self
+      .list_frames
+      .iter_mut()
+      .rev()
+      .find(|frame| frame.tracked)
   }
 
   /// The tag id a `tagOverrides` alias gives a start or end tag name. Callers
@@ -1470,8 +1492,6 @@ impl ConvertState {
     // The parent is the top node, so its walk index is the one `stack.last()` gave.
     let parent = self.stack.len().checked_sub(1);
     let current_walk_index = parent.map_or(0, |p| self.stack[p].current_walk_index);
-    let extras = NodeExtras::for_tag(is_builtin, tag_name);
-
     let (mut h_inline, h_excludes, h_non_nesting, h_collapses, h_spacing) =
       if let Some(h) = tag_handler {
         (
@@ -1518,7 +1538,7 @@ impl ConvertState {
         .is_some_and(|tw| tw.hidden);
     let tag = self.stack.push_slot();
     std::mem::swap(&mut tag.attributes, &mut self.attr_scratch);
-    tag.extras = extras;
+    tag.reset_extras(is_builtin, tag_name);
     tag.tag_id = tag_id;
     tag.depth = self.depth;
     tag.index = current_walk_index;
@@ -1716,23 +1736,21 @@ impl ConvertState {
               .and_then(|value| super::output::parse_bounded_u32(value, MAX_ORDERED_START)),
           );
         }
-        self.list_item_counts.push(0);
         // A skipped node writes nothing and takes no part, as its events take
         // none in the JS engine. Lists are blocks unless an override makes one
-        // inline, and the close takes the same test, so push and pop pair up.
-        if !self.stack[idx].is_inline || self.has_tag_overrides() {
-          self.push_list_marker(ordered, skip_node);
-        }
+        // inline; an inline list still holds a frame for its item count.
+        let tracked = !self.stack[idx].is_inline || self.has_tag_overrides();
+        self.push_list_frame(ordered, skip_node, tracked);
       }
       // An item's position counts only the items before it: a script, template
       // or stray text ahead of it must not renumber it or make it a later item.
       Some(TAG_LI) => {
         if let Some(p) = parent
           && matches!(self.stack[p].tag_id, Some(TAG_OL | TAG_UL))
-          && let Some(count) = self.list_item_counts.last_mut()
+          && let Some(frame) = self.list_frames.last_mut()
         {
-          self.stack[idx].index = *count;
-          *count += 1;
+          self.stack[idx].index = frame.item_count;
+          frame.item_count += 1;
         }
       }
       _ => {}
@@ -1832,11 +1850,16 @@ impl ConvertState {
       if width != 0 && !excluded {
         if self.has_tag_overrides() {
           self.note_item_with_overrides();
-        } else if let Some(marker) = self.list_markers.last_mut() {
-          marker.written = marker.selected;
-          self.last_item_star = marker.selected == b'*';
         } else {
-          self.last_item_star = false;
+          let selected = self
+            .last_tracked_list_frame_mut()
+            .map(|frame| {
+              // The list's own character is what its items wrote.
+              frame.written = frame.selected;
+              frame.selected
+            })
+            .unwrap_or(0);
+          self.last_item_marker = selected;
         }
       }
     }
@@ -1886,7 +1909,6 @@ impl ConvertState {
       node_excluded,
       node_enter_skipped,
       node_child_text_index,
-      node_is_inline,
     ) = {
       let node = self.stack.retired();
       (
@@ -1896,9 +1918,10 @@ impl ConvertState {
         node.excluded_from_markdown,
         node.enter_skipped,
         node.child_text_node_index,
-        node.is_inline,
       )
     };
+    #[cfg(debug_assertions)]
+    let node_is_inline = self.stack.retired().is_inline;
 
     // Each marker holds the shallowest open match, so only its own close clears it.
     if self.hidden_since_depth == Some(node_depth) {
@@ -2008,18 +2031,6 @@ impl ConvertState {
           }
           self.refresh_raw_html_block(id);
           self.update_in_pre_on_close(id);
-          if id == TAG_OL {
-            self.ordered_starts.pop();
-            self.list_item_counts.pop();
-          } else if id == TAG_UL {
-            self.list_item_counts.pop();
-          }
-          if id == TAG_LI
-            && let Some(w) = self.list_indent_widths.pop()
-          {
-            let new_len = self.list_indent.len().saturating_sub(w as usize);
-            self.list_indent.truncate(new_len);
-          }
         }
         self.depth -= 1;
         self.has_encoded_html_entity = false;
@@ -2045,7 +2056,7 @@ impl ConvertState {
         && self.li_fast_path_ok()
       {
         self.emit_exit_simple::<true>(false);
-      } else if node_tag_id.is_none() && self.custom_element_fast_path_ok() {
+      } else if self.simple_exit_ok(node_tag_id) {
         self.emit_exit_simple::<false>(false);
       } else {
         self.close_node_general_exit();
@@ -2059,7 +2070,7 @@ impl ConvertState {
         && self.li_simple_state_ok()
       {
         self.emit_exit_simple::<true>(false);
-      } else if node_tag_id.is_none() && self.custom_element_fast_path_ok() {
+      } else if self.simple_exit_ok(node_tag_id) {
         self.emit_exit_simple::<false>(false);
       } else {
         self.close_node_general_exit();
@@ -2084,14 +2095,19 @@ impl ConvertState {
     self.has_encoded_html_entity = false;
     self.just_closed_tag = true;
 
+    // The retired slot still holds the node: exits read it in place or put it
+    // back, so the tail reads `is_inline` there instead of carrying it across
+    // the exit.
+    #[cfg(debug_assertions)]
+    debug_assert_eq!(self.stack.retired().is_inline, node_is_inline);
     if let Some(id) = node_tag_id {
-      self.close_tail(id, node_is_inline);
+      self.close_tail(id);
     }
   }
 
   /// Close work past the depth count, for the tags `CLOSE_TAIL_TAG` names.
   #[inline(always)]
-  fn close_tail(&mut self, id: u8, node_is_inline: bool) {
+  fn close_tail(&mut self, id: u8) {
     use super::output::{
       CLOSE_BLOCKQUOTE, CLOSE_LI, CLOSE_OL, CLOSE_PRE, CLOSE_RAW_BLOCK, CLOSE_TAIL_TAG, CLOSE_UL,
     };
@@ -2100,17 +2116,9 @@ impl ConvertState {
       CLOSE_PRE => self.update_in_pre_on_close(id),
       CLOSE_OL => {
         self.ordered_starts.pop();
-        self.list_item_counts.pop();
-        if !node_is_inline || self.has_tag_overrides() {
-          self.pop_list_marker(id);
-        }
+        self.close_list_frame();
       }
-      CLOSE_UL => {
-        self.list_item_counts.pop();
-        if !node_is_inline || self.has_tag_overrides() {
-          self.pop_list_marker(id);
-        }
-      }
+      CLOSE_UL => self.close_list_frame(),
       CLOSE_LI => {
         if let Some(w) = self.list_indent_widths.pop() {
           let new_len = self.list_indent.len().saturating_sub(w as usize);
@@ -2123,8 +2131,8 @@ impl ConvertState {
       // would. A quote inside a list item is re-quoted frame by frame by the
       // flush too, so there it would only add work.
       CLOSE_BLOCKQUOTE => {
-        if !node_is_inline || self.has_tag_overrides() {
-          self.pop_list_marker(id);
+        if !self.stack.retired().is_inline || self.has_tag_overrides() {
+          self.close_quoted_list_run();
         }
         if self
           .blockquotes
@@ -2216,6 +2224,60 @@ impl ConvertState {
     }
   }
 
+  /// An end tag while a node cap recovery is open. Returns whether the
+  /// recovery consumed it; otherwise it closes as usual.
+  #[cold]
+  #[inline(never)]
+  fn close_tag_in_overflow(&mut self, name: &str, tag_id: Option<u8>, is_builtin: bool) -> bool {
+    if self.overflow_opaque_depth > 0 {
+      if self.overflow_raw_name.is_some() {
+        let closes_opaque_root = self.matches_opaque_tag(name);
+        self.overflow_raw_name = None;
+        self.overflow_raw_excludes_text = false;
+        if closes_opaque_root {
+          self.clear_opaque_overflow();
+        }
+      } else if self.matches_opaque_tag(name) {
+        self.overflow_opaque_depth -= 1;
+        if self.overflow_opaque_depth == 0 {
+          self.clear_opaque_overflow();
+        }
+      }
+      self.just_closed_tag = true;
+      return true;
+    }
+
+    if self.end_tag_is_void(name, tag_id, is_builtin) {
+      self.just_closed_tag = true;
+      return true;
+    }
+    if self.overflow_raw_name.is_some() {
+      let closes_root = self.matches_overflow_tag(name, tag_id, is_builtin);
+      self.overflow_raw_name = None;
+      self.overflow_raw_excludes_text = false;
+      if closes_root {
+        self.clear_overflow();
+      }
+      self.just_closed_tag = true;
+      return true;
+    }
+    if self.matches_overflow_tag(name, tag_id, is_builtin) {
+      self.overflow_same_name_depth -= 1;
+      if self.overflow_same_name_depth == 0 {
+        self.clear_overflow();
+      }
+      self.just_closed_tag = true;
+      return true;
+    }
+    if tag_id.is_some_and(|id| self.depth_map[id as usize] > 0) {
+      self.clear_overflow();
+      false
+    } else {
+      self.just_closed_tag = true;
+      true
+    }
+  }
+
   pub(crate) fn process_closing_tag_name(&mut self, tag_name_raw: &str) -> bool {
     let builtin_tag_id = crate::consts::get_tag_id_ci_bytes(tag_name_raw.as_bytes());
     let tag_name: Cow<str> = if builtin_tag_id.is_some() {
@@ -2248,53 +2310,10 @@ impl ConvertState {
       }
     }
 
-    if self.overflow_opaque_depth > 0 {
-      if self.overflow_raw_name.is_some() {
-        let closes_opaque_root = self.matches_opaque_tag(name);
-        self.overflow_raw_name = None;
-        self.overflow_raw_excludes_text = false;
-        if closes_opaque_root {
-          self.clear_opaque_overflow();
-        }
-      } else if self.matches_opaque_tag(name) {
-        self.overflow_opaque_depth -= 1;
-        if self.overflow_opaque_depth == 0 {
-          self.clear_opaque_overflow();
-        }
-      }
-      self.just_closed_tag = true;
+    if (self.overflow_opaque_depth > 0 || self.overflow_same_name_depth > 0)
+      && self.close_tag_in_overflow(name, tag_id, is_builtin)
+    {
       return true;
-    }
-
-    if self.overflow_same_name_depth > 0 {
-      if self.end_tag_is_void(name, tag_id, is_builtin) {
-        self.just_closed_tag = true;
-        return true;
-      }
-      if self.overflow_raw_name.is_some() {
-        let closes_root = self.matches_overflow_tag(name, tag_id, is_builtin);
-        self.overflow_raw_name = None;
-        self.overflow_raw_excludes_text = false;
-        if closes_root {
-          self.clear_overflow();
-        }
-        self.just_closed_tag = true;
-        return true;
-      }
-      if self.matches_overflow_tag(name, tag_id, is_builtin) {
-        self.overflow_same_name_depth -= 1;
-        if self.overflow_same_name_depth == 0 {
-          self.clear_overflow();
-        }
-        self.just_closed_tag = true;
-        return true;
-      }
-      if tag_id.is_some_and(|id| self.depth_map[id as usize] > 0) {
-        self.clear_overflow();
-      } else {
-        self.just_closed_tag = true;
-        return true;
-      }
     }
 
     if let Some(curr) = self.stack.last()

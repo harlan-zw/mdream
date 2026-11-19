@@ -449,6 +449,11 @@ pub fn get_tag_id_ci_bytes(name: &[u8]) -> Option<u8> {
   if let Some(id) = get_tag_id_bytes(name) {
     return Some(id);
   }
+  // No uppercase byte means lowercasing cannot change the name, so the miss
+  // is final.
+  if !name.iter().any(u8::is_ascii_uppercase) {
+    return None;
+  }
   let mut buf = [0u8; MAX_BUILTIN_TAG_LEN];
   let mut i = 0;
   while i < len {

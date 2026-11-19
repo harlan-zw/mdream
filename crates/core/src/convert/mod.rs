@@ -142,6 +142,9 @@ const TEXT_RUN_SPLIT_SCAN: usize = 64;
 /// opener to still take it back. More than a few empty elements never write
 /// that much, and without a bound a run of quotes would hold a stream.
 const CLOSED_MARKER_REACH: usize = 32;
+/// `pending_space_end` when the enter's own output starts with the space, so
+/// no position is recorded. No stream position reaches it.
+const PENDING_SPACE_OWNED: usize = usize::MAX - 1;
 
 /// Offset after which a text run may be cut. A space settles entity decoding
 /// and escaper lookahead, so any content may be cut there; otherwise, if
@@ -681,14 +684,21 @@ const MAX_CELL_SPAN: u8 = 64;
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;
 
-/// The marker characters of an open `<ul>`/`<ol>`.
+/// Per-open-`<ul>`/`<ol>` state: how many items it has and the marker
+/// characters its items use.
 #[derive(Clone, Copy)]
-struct ListMarker {
-  /// Character the built-in enter of its items writes.
+struct ListFrame {
+  /// `<li>` children opened so far.
+  item_count: u32,
+  /// Character the built-in enter of its items writes. A list that takes no
+  /// part in marker tracking carries the enclosing list's character, so its
+  /// items keep reading the marker they saw before.
   selected: u8,
   /// Character the latest marker in the list actually used, which an override
   /// can make any other one, or 0 before an item wrote a marker.
   written: u8,
+  /// Whether this list takes part in sibling marker tracking.
+  tracked: bool,
 }
 
 // Clean mode bitmask flags
@@ -1130,11 +1140,10 @@ pub struct ConvertState {
   pending_space_trimmed: bool,
   /// Stream position (see `drained`) after the space the current element's
   /// enter wrote for a pending separator, so an opener written right after it
-  /// can take it along.
+  /// can take it along. `usize::MAX` when there is none, and
+  /// [`PENDING_SPACE_OWNED`] when the enter wrote no space for a pending
+  /// separator because its own output starts with one.
   pending_space_end: usize,
-  /// The current element's enter wrote no space for a pending separator
-  /// because its own output starts with one.
-  pending_space_owned: bool,
   /// Stream position after the last separator written on its own, which is
   /// not part of the text after it.
   separator_end: usize,
@@ -1264,8 +1273,9 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
-  /// Marker characters of each open `<ul>`/`<ol>`, innermost last.
-  list_markers: Vec<ListMarker>,
+  /// State of each open `<ul>`/`<ol>`, innermost last: its item count and the
+  /// marker characters its items use.
+  list_frames: Vec<ListFrame>,
   /// Last marker character of the list that last closed with items, or 0 once
   /// visible output leaving the buffer, or the close of a quote around it, ends
   /// its run. CommonMark joins the next list of the same type into it, blank
@@ -1280,11 +1290,10 @@ pub struct ConvertState {
   /// whitespace already scanned. Lowered by rewrites and shifted by drains.
   /// Read only while `sibling_list_marker` is set.
   list_gap_from: usize,
-  /// The latest item marker is `*`, where a rule on its line reads `* ***`.
-  last_item_star: bool,
-  /// `<li>` children opened so far in each open `<ol>` or `<ul>`, innermost
-  /// last. An item's position among them numbers it and marks the list's first.
-  list_item_counts: Vec<u32>,
+  /// The latest item marker written, or 0 before one. A rule on its line reads
+  /// `* ***`, so it needs to know the marker is not `*`. Not the innermost
+  /// list's: a list with no items of its own keeps the one before it.
+  last_item_marker: u8,
 
   /// `<pre>` fenced-code deferral (issue #97). A bare `<pre>` (no `<code>`
   /// child) becomes a fenced code block, but the opening fence is deferred
@@ -1614,7 +1623,6 @@ impl ConvertState {
       pending_decoded_blank: false,
       pending_space_trimmed: false,
       pending_space_end: usize::MAX,
-      pending_space_owned: false,
       separator_end: usize::MAX,
       cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
@@ -1669,13 +1677,12 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       ordered_starts: Vec::new(),
-      list_markers: Vec::new(),
+      list_frames: Vec::with_capacity(8),
       sibling_list_marker: 0,
       sibling_list_depth: 0,
       sibling_list_quotes: 0,
       list_gap_from: 0,
-      last_item_star: false,
-      list_item_counts: Vec::new(),
+      last_item_marker: 0,
 
       pre_fence_pending: false,
       pre_fence_pending_depth: 0,

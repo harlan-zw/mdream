@@ -225,8 +225,9 @@ pub(crate) struct TailwindData {
 /// The two rare per-node fields, boxed together so every node stays small.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NodeExtras {
-  /// Only set for custom (non-builtin) tags; built-in names come from `tag_id`.
-  pub custom_name: Option<Box<str>>,
+  /// Only non-empty for custom (non-builtin) tags; built-in names come from
+  /// `tag_id`. A `String`, so a stack slot reuses it for the next custom tag.
+  pub custom_name: String,
   pub tailwind: Option<TailwindData>,
 }
 
@@ -237,7 +238,7 @@ impl NodeExtras {
   pub fn for_tag(is_builtin: bool, tag_name: &str) -> Option<Box<Self>> {
     (!is_builtin).then(|| {
       Box::new(Self {
-        custom_name: Some(tag_name.into()),
+        custom_name: tag_name.into(),
         tailwind: None,
       })
     })
@@ -272,7 +273,26 @@ pub(crate) struct ElementNode {
 impl ElementNode {
   #[inline]
   pub fn custom_name(&self) -> Option<&str> {
-    self.extras.as_ref().and_then(|e| e.custom_name.as_deref())
+    self
+      .extras
+      .as_ref()
+      .map(|e| e.custom_name.as_str())
+      .filter(|name| !name.is_empty())
+  }
+
+  /// Set the extras of a node opened in this slot, reusing the box a custom
+  /// tag left here instead of allocating one per custom tag.
+  #[inline]
+  pub fn reset_extras(&mut self, is_builtin: bool, tag_name: &str) {
+    if let Some(extras) = &mut self.extras {
+      extras.custom_name.clear();
+      if !is_builtin {
+        extras.custom_name.push_str(tag_name);
+      }
+      extras.tailwind = None;
+    } else if !is_builtin {
+      self.extras = NodeExtras::for_tag(false, tag_name);
+    }
   }
 
   #[inline]
@@ -382,11 +402,18 @@ impl NodeStack {
 
   /// Drop a retired node's large values and extras once its exit is emitted.
   /// Otherwise a slot above the live depth holds them until the document ends.
+  /// A short custom name's box stays, emptied, for the slot's next custom tag.
   #[inline(always)]
   pub fn release_retired(&mut self) {
     let node = &mut self.nodes[self.len];
     node.attributes.clear();
-    node.extras = None;
+    if let Some(extras) = &mut node.extras {
+      if extras.tailwind.is_some() || extras.custom_name.capacity() > RETAINED_VALUE_CAPACITY {
+        node.extras = None;
+      } else {
+        extras.custom_name.clear();
+      }
+    }
   }
 
   /// Move the retired node out, leaving an empty node in its slot.
