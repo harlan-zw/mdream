@@ -177,7 +177,7 @@ fn run(case: &Case, verify: bool) -> Value {
     }
   }
 }
-#[cfg(not(feature = "alloc"))]
+#[cfg(feature = "cpu")]
 fn cpu_ms() -> f64 {
   let mut time = libc::timespec {
     tv_sec: 0,
@@ -203,7 +203,7 @@ fn main() {
     let case = &cases[command.case];
     let result = match command.mode.as_str() {
       "verify" => run(case, true),
-      #[cfg(not(feature = "alloc"))]
+      #[cfg(feature = "cpu")]
       "cpu" => {
         let start = cpu_ms();
         for _ in 0..command.iterations {
