@@ -32,4 +32,27 @@ describe.each(engines)('escaping $name', (engineConfig) => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown(html, { engine })).toBe(expected)
   })
+
+  // The output trim removes the whitespace that leads the document, so a block
+  // marker behind any amount of it starts the document. The same whitespace
+  // is kept anywhere else, where four spaces of it make the marker inert.
+  it.each([
+    ['<p>&#32;&#32;&#32;&#32;# x</p>', '\\# x'],
+    ['&#32;&#32;&#32;&#32;# x', '\\# x'],
+    ['<p>&#9;- x</p>', '\\- x'],
+    ['<p>&nbsp;&gt; x</p>', '\\> x'],
+    ['<p>&nbsp;# x</p>', '\\# x'],
+    ['<p>&nbsp;1. x</p>', '1\\. x'],
+    ['<p>&#10;&#32;&#32;&#32;&#32;1. x</p>', '1\\. x'],
+    ['<p>&#32;&#32;&#32;&#32;<b></b># x</p>', '\\# x'],
+    ['<p>&#32;&#32;&#32;&#32;1<b></b>. x</p>', '1\\. x'],
+    ['<p>&#13;&#10;5<b></b>. x</p>', '5\\. x'],
+    ['<p>&#32;&#32;&#32;&#32;x # y</p>', 'x # y'],
+    ['<p>a</p><p>&#32;&#32;&#32;&#32;# x</p>', 'a\n\n    # x'],
+    ['<blockquote>&#32;&#32;&#32;&#32;# x</blockquote>', '>     # x'],
+    ['<ul><li>&#32;&#32;&#32;&#32;# x</li></ul>', '-     # x'],
+  ])('escapes a block marker behind trimmed leading whitespace for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+  })
 })
