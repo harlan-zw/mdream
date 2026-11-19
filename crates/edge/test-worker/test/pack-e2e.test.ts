@@ -78,7 +78,9 @@ export default {
   it('ships the wasm runtime files in the tarball', () => {
     expect(tarballFiles).toContain('package/dist/edge.mjs')
     expect(tarballFiles).toContain('package/wasm/mdream_edge.js')
-    expect(tarballFiles).toContain('package/wasm/mdream_edge_bg.wasm')
+    expect(tarballFiles.filter(file => file.endsWith('/mdream_edge_bg.wasm'))).toEqual([
+      'package/wasm/mdream_edge_bg.wasm',
+    ])
   })
 
   it('rejects package imports of the internal Markdown WASM files', () => {

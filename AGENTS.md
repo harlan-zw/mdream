@@ -37,7 +37,7 @@ When you finish a task, always run `pnpm typecheck` to ensure that the code is t
 - Build all packages: `pnpm build` (root). This includes the NAPI and WASI builds in `crates/node`.
 - Build the Rust bindings that `packages/mdream` needs, then the JS packages:
   - NAPI: `pnpm --dir crates/node run build:platform`
-  - Edge WASM: `node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm --out-name mdream_edge`, and again with `--target bundler --out-dir packages/mdream/wasm-bundler`
+  - Edge WASM: `pnpm --filter mdream build:edge`
   - JS packages: `pnpm -r --filter './packages/**' run build`
   - `.github/workflows/test.yml` (Node Tests job) is the reference sequence.
 - Test all: `pnpm test` (root - installs playwright first)
