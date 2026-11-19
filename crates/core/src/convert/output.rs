@@ -688,7 +688,7 @@ impl ConvertState {
     if value.is_empty() {
       return 0;
     }
-    let cap = self.options.max_node_bytes;
+    let cap = self.options.node_byte_limit();
     if cap == 0 || self.code_spans.is_empty() {
       self.buffer.push_str(value);
       return value.len();
@@ -699,7 +699,7 @@ impl ConvertState {
 
   /// Whether [`Self::push_code_span_content`] drops everything it is given.
   fn drops_code_span_content(&self) -> bool {
-    self.options.max_node_bytes != 0
+    self.options.node_byte_limit() != 0
       && self
         .code_spans
         .first()
@@ -732,7 +732,7 @@ impl ConvertState {
   /// replacement is structural Markdown; shrinking rewrites are always safe.
   #[inline]
   fn replace_code_span_content(&mut self, range: std::ops::Range<usize>, value: &str) -> bool {
-    let cap = self.options.max_node_bytes;
+    let cap = self.options.node_byte_limit();
     if cap != 0
       && let Some(span) = self.code_spans.first()
       && range.start >= span.content_start
@@ -789,13 +789,13 @@ impl ConvertState {
     // honoured there. Its expanded form still has to fit the aggregate budget.
     if self.depth_map[TAG_TABLE as usize] > 0 && self.buffer[span.content_start..].contains('|') {
       let content = &self.buffer[span.content_start..];
-      let escaped_cap = if self.options.max_node_bytes == 0 {
+      let escaped_cap = if self.options.node_byte_limit() == 0 {
         usize::MAX
       } else if let Some(outer) = self.code_spans.first() {
         let held = self.buffer.len().saturating_sub(outer.content_start);
-        content.len() + self.options.max_node_bytes.saturating_sub(held)
+        content.len() + self.options.node_byte_limit().saturating_sub(held)
       } else {
-        self.options.max_node_bytes
+        self.options.node_byte_limit()
       };
       let mut escaped = String::with_capacity(content.len().min(escaped_cap));
       for ch in content.chars() {
@@ -1014,13 +1014,13 @@ impl ConvertState {
       }
     }
 
-    if self.options.max_node_bytes != 0
+    if self.options.node_byte_limit() != 0
       && let Some(span) = self.code_spans.first()
       && frame.content_start >= span.content_start
       && quoted.len() > content.len()
     {
       let held = self.buffer.len().saturating_sub(span.content_start);
-      if span.exhausted || held - content.len() + quoted.len() > self.options.max_node_bytes {
+      if span.exhausted || held - content.len() + quoted.len() > self.options.node_byte_limit() {
         self.code_spans[0].exhausted = true;
         self.truncated = true;
         self.blockquote_scratch = quoted;
@@ -2402,7 +2402,7 @@ impl ConvertState {
   pub(crate) fn link_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
     tag_id == Some(TAG_A)
       && self.common_fast_path_ok(tag_id)
-      && self.options.max_node_bytes == 0
+      && self.options.node_byte_limit() == 0
       && !self.raw_html_block_open
       && self.depth_map[TAG_PRE as usize] == 0
   }
@@ -3075,7 +3075,7 @@ impl ConvertState {
         has_rewrite_anchor && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0;
       // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
       // `max_node_bytes` has to charge what the link holds back.
-      if self.streaming || self.options.max_node_bytes != 0 {
+      if self.streaming || self.options.node_byte_limit() != 0 {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = has_rewrite_anchor
           && href.map(trim_url).is_some_and(|href| {
@@ -3354,7 +3354,7 @@ impl ConvertState {
 
     let link_text_end = self.buffer.len();
     if let Some(href) = attributes.get_bit(ATTR_HREF) {
-      let capped_code_span = self.options.max_node_bytes != 0 && !self.code_spans.is_empty();
+      let capped_code_span = self.options.node_byte_limit() != 0 && !self.code_spans.is_empty();
       let resolved = resolved_href
         .unwrap_or_else(|| resolve_url(href, self.options.origin.as_deref(), self.clean_urls()));
       let resolved = resolved.as_ref();
@@ -4484,11 +4484,11 @@ impl ConvertState {
         self.caption_boundary = CaptionBoundary::None;
       }
     }
-    if self.options.max_node_bytes != 0
+    if self.options.node_byte_limit() != 0
       && let Some(content_start) = self.code_fence.as_ref().map(|fence| fence.content_start)
     {
       let held = self.buffer.len().saturating_sub(content_start);
-      let kept = clamp_to_char_boundary(text, self.options.max_node_bytes.saturating_sub(held));
+      let kept = clamp_to_char_boundary(text, self.options.node_byte_limit().saturating_sub(held));
       if kept.len() != text.len() {
         self.truncated = true;
         if kept.is_empty() {
@@ -4602,9 +4602,9 @@ impl ConvertState {
       // its cap measures. A deep list's indent multiplies each line, and the
       // check above saw only the raw text: stop building once past the cap.
       let budget = match &self.code_fence {
-        Some(fence) if self.options.max_node_bytes != 0 => self
+        Some(fence) if self.options.node_byte_limit() != 0 => self
           .options
-          .max_node_bytes
+          .node_byte_limit()
           .saturating_sub(self.buffer.len().saturating_sub(fence.content_start)),
         _ => usize::MAX,
       };
@@ -4755,7 +4755,7 @@ impl ConvertState {
     self.cache_follows_separator = self.take_follows_separator();
     if self.wrap_width() != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char, owns_leading_space, wrap_separator);
-    } else if self.options.max_node_bytes == 0 {
+    } else if self.options.node_byte_limit() == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
       self.push_text_uncapped(text, add_space);
     } else if !owns_space && self.should_add_spacing_before_text(last_char, text) {
@@ -4770,7 +4770,7 @@ impl ConvertState {
     }
     self.image_text_pending = false;
 
-    if self.options.max_node_bytes != 0
+    if self.options.node_byte_limit() != 0
       && self.in_heading()
       && let Some(written) = self.buffer.as_bytes().get(written_from..)
     {
@@ -6141,7 +6141,7 @@ impl ConvertState {
   #[cold]
   #[inline(never)]
   fn charges_marker_line(&self) -> bool {
-    self.options.max_node_bytes != 0 && self.item_marker_line_held()
+    self.options.node_byte_limit() != 0 && self.item_marker_line_held()
   }
 
   fn defer_streaming_break(&mut self, fragment: &str) -> bool {
@@ -6861,7 +6861,7 @@ impl ConvertState {
 
   fn flush_list_rule(&mut self) {
     let prefix = self.continuation_prefix();
-    if self.options.max_node_bytes == 0 || self.code_spans.is_empty() {
+    if self.options.node_byte_limit() == 0 || self.code_spans.is_empty() {
       self.buffer.reserve(2 + prefix.len());
       self.buffer.push_str("\n\n");
       self.buffer.push_str(&prefix);
@@ -7787,7 +7787,7 @@ impl ConvertState {
     // leaves the boundary pending until content can be emitted again.
     if missing + indent_len == 0 {
       // The output's own line breaks are the whole boundary.
-    } else if self.options.max_node_bytes != 0 && !self.code_spans.is_empty() {
+    } else if self.options.node_byte_limit() != 0 && !self.code_spans.is_empty() {
       let mut separator = String::with_capacity(missing + indent_len);
       separator.push_str(&"\n\n"[..missing]);
       separator.push_str(&self.list_indent[..indent_len]);

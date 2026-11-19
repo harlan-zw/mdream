@@ -41,7 +41,9 @@ const outName = argValue('--out-name', 'mdream_edge')
 const features = argValue('--features', '')
 const edgeDir = resolve(import.meta.dirname, '../crates/edge')
 
-const cargoArgs = features ? ['--', '--features', features] : []
+const cargoArgs = ['--', '--config', 'target.wasm32-unknown-unknown.rustflags=["--cfg=mdream_edge_wasm"]']
+if (features)
+  cargoArgs.push('--features', features)
 
 execFileSync('wasm-pack', ['build', '--target', target, '--out-dir', outDir, '--out-name', outName, ...withMarkdownFeature(cargoArgs)], {
   cwd: edgeDir,
