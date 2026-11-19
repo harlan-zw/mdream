@@ -73,3 +73,7 @@ export const parserTagHandlers: Record<number, TagHandler> = {
   [TAG_XMP]: rawText,
   [TAG_PLAINTEXT]: rawText,
 }
+/** A built-in void tag that an override holds open (`isSelfClosing: false`). */
+export function isOpenVoidTag(handler: TagHandler | undefined, tagId: number | undefined): boolean {
+  return handler?.isSelfClosing === false && !!parserTagHandlers[tagId ?? -1]?.isSelfClosing
+}

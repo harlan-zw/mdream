@@ -564,12 +564,11 @@ impl TagScan {
 pub(crate) fn process_tag_attributes(
   html_chunk: &str,
   position: usize,
-  tag_handler: Option<&crate::types::TagHandler>,
+  self_closing: bool,
   attr_mask: u16,
   budget: AttrBudget,
   out: &mut Attributes,
 ) -> TagScan {
-  let self_closing = tag_handler.is_some_and(|h| h.is_self_closing);
   if attr_mask == ATTR_NONE {
     scan_tag::<false>(html_chunk, position, self_closing, ATTR_NONE, budget, out)
   } else {
@@ -1493,7 +1492,7 @@ pub(crate) fn parse_attributes(attr_str: &str, mask: u16) -> Attributes {
 #[cfg(test)]
 fn scan_attrs(html: &str, position: usize, mask: u16) -> (bool, usize, Attributes, bool) {
   let mut attrs = Attributes::new();
-  let scan = process_tag_attributes(html, position, None, mask, AttrBudget::new(0), &mut attrs);
+  let scan = process_tag_attributes(html, position, false, mask, AttrBudget::new(0), &mut attrs);
   (scan.complete, scan.new_position, attrs, scan.self_closing)
 }
 
@@ -1692,7 +1691,8 @@ mod tests {
           code /= ALPHABET.len();
         }
         let html = std::str::from_utf8(&buf[..len]).unwrap();
-        let scan = process_tag_attributes(html, 0, None, ATTR_NONE, AttrBudget::new(0), &mut attrs);
+        let scan =
+          process_tag_attributes(html, 0, false, ATTR_NONE, AttrBudget::new(0), &mut attrs);
         let want = spec_tokenize(html).1;
         // The search for `>` alone, as a dropped or measured tag runs it.
         let gt = want.ok().map(|(end, _)| end - 1);
@@ -1736,7 +1736,7 @@ mod tests {
     if mask != ATTR_ALL {
       want.retain(|(name, _)| mask & attr_bit(name.as_bytes()) != 0);
     }
-    let scan = process_tag_attributes(html, 0, None, mask, AttrBudget::new(0), attrs);
+    let scan = process_tag_attributes(html, 0, false, mask, AttrBudget::new(0), attrs);
     let got: Vec<(String, String)> = attrs
       .iter()
       .map(|(name, value)| (name.to_string(), value.to_string()))
@@ -1797,7 +1797,7 @@ mod tests {
     let scan = process_tag_attributes(
       &html[..first],
       0,
-      None,
+      false,
       mask,
       AttrBudget::new(0),
       &mut attrs,
