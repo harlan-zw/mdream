@@ -4501,8 +4501,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     getNonQuoteHeldOutputFragment,
     getHeldOutputFragment,
     compactPrefix(fragment, retained) {
-      // Compact emphasis holds only. Other mutable owners keep their buffers.
-      if (!closedMarkerCount || cleanPass || state.outputPositions || state.blockquotes.length
+      // Compact emphasis holds only. A cleaner without a live link has no
+      // buffer positions to rebase.
+      if (!closedMarkerCount || (cleanPass && cleanPass.held() !== Infinity)
+        || state.outputPositions || state.blockquotes.length
         || gfmLifecycle.openCodeSpans.length || openLinkFragment !== -1
         || captionFrameCount || literalOpeners.length || state.codeFence
         || state.emptyItemFragment !== undefined) {

@@ -2109,7 +2109,14 @@ impl ConvertState {
       }
     }
 
-    self.record_enter_marker(tag_id, output.as_deref(), output_start, false, true, pending);
+    self.record_enter_marker(
+      tag_id,
+      output.as_deref(),
+      output_start,
+      false,
+      true,
+      pending,
+    );
 
     // An element that writes nothing, like a dropped `<svg>`, is no boundary.
     if !is_inline && (configured_new_lines > 0 || has_own_output) && !self.open_markers.is_empty() {

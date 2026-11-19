@@ -21,10 +21,7 @@ const CASES: &[(&str, &str)] = &[
     r##"<p><strong><a href="/x">b</a> </strong><code><em>c</em></code></p>"##,
     "**[b](/x)** `*c*`",
   ),
-  (
-    r##"<li>a<strong>(b)</strong><b>c</b></li>"##,
-    "- a**(b)c**",
-  ),
+  (r##"<li>a<strong>(b)</strong><b>c</b></li>"##, "- a**(b)c**"),
   (
     r##"<blockquote>a<strong>(b)</strong><b>c</b></blockquote>"##,
     "> a**(b)c**",

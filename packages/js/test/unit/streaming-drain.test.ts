@@ -1,6 +1,7 @@
 import type { ParseState } from '../../src/parse'
 import type { MdreamOptions, MdreamRuntimeState, TransformPlugin } from '../../src/types'
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createMarkdownProcessor } from '../../src/markdown-processor'
 import { createMarkdownDrain } from '../../src/markdown-stream'
@@ -257,7 +258,8 @@ describe('streaming drain parity', () => {
     ['<b>x</b><i></i>', 15],
     ['<b><i>x</i></b>', 1],
     ['<b>x</b><i></i>', 1],
-  ] as const)('bounds retained output across touching emphasis chunks: %s at width %i', async (chunk, chunkSize) => {
+    ['<b>x</b>', 8, true],
+  ] as const)('bounds retained output across touching emphasis chunks: %s at width %i', async (chunk, chunkSize, removeRedundantLinks?) => {
     const html = `${chunk.repeat(4096)}<b><b> </b></b><i></i>tail`
     let state: MdreamRuntimeState | undefined
     const plugin = createPlugin({
@@ -268,12 +270,13 @@ describe('streaming drain parity', () => {
     let markdown = ''
     let peakCharacters = 0
     let peakFragments = 0
-    for await (const output of streamHtmlToMarkdown(chunkedStream(html, chunkSize), { plugins: [plugin] })) {
+    const cleaner = removeRedundantLinks ? clean({ redundantLinks: true }) : undefined
+    for await (const output of streamHtmlToMarkdown(chunkedStream(html, chunkSize), { clean: cleaner, plugins: [plugin] })) {
       markdown += output
       peakCharacters = Math.max(peakCharacters, state!.buffer.reduce((length, fragment) => length + fragment.length, 0))
       peakFragments = Math.max(peakFragments, state!.buffer.length)
     }
-    expect(markdown).toBe(htmlToMarkdown(html))
+    expect(markdown).toBe(htmlToMarkdown(html, { clean: cleaner }))
     expect(peakCharacters).toBeLessThan(128)
     expect(peakFragments).toBeLessThan(32)
   })
