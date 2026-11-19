@@ -80,11 +80,20 @@ export default {
     expect(tarballFiles).toContain('package/wasm/mdream_edge_bg.wasm')
   })
 
-  it('converts HTML after Nitro bundles the packaged edge entry', async () => {
+  it.each(['full', 'mdream-markdown'])('converts HTML after Nitro bundles the %s edge build', async (profile) => {
+    const markdownOnly = profile === 'mdream-markdown'
     const handler = join(tmp, 'src/nitro-handler.mjs')
     writeFileSync(handler, `
 import { htmlToMarkdown, streamHtmlToMarkdown } from 'mdream'
 export default async (event) => {
+  if (event.path.endsWith('/options')) {
+    try {
+      return htmlToMarkdown('<h1>Hello</h1>', { format: 'text' })
+    }
+    catch (error) {
+      return String(error)
+    }
+  }
   if (event.path.endsWith('/stream')) {
     const html = new ReadableStream({ start(controller) {
       controller.enqueue('<h1>Stream</h1><ul><li>One</li><li>Two</li></ul>')
@@ -103,6 +112,7 @@ export default async (event) => {
       preset: 'cloudflare_module',
       compatibilityDate: '2025-03-14',
       experimental: { wasm: true },
+      exportConditions: markdownOnly ? ['workerd', 'mdream-markdown'] : ['workerd'],
       cloudflare: { nodeCompat: true },
       handlers: [{ route: '/api/**', handler }],
       rollupConfig: { onwarn(warning, handler) {
@@ -126,6 +136,12 @@ export default async (event) => {
       expect(await res.text()).toBe('# Hello\n\nWorld')
       const streamRes = await worker.fetch('/api/stream', { signal: AbortSignal.timeout(15000) })
       expect(await streamRes.text()).toBe('# Stream\n\n- One\n- Two')
+      const optionsRes = await worker.fetch('/api/options', { signal: AbortSignal.timeout(15000) })
+      const options = await optionsRes.text()
+      if (markdownOnly)
+        expect(options).toContain('Remove the mdream-markdown condition')
+      else
+        expect(options).toBe('Hello')
     }
     finally {
       await worker.stop()

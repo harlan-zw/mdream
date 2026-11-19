@@ -39,13 +39,27 @@ try {
   const rebased = source
     .replaceAll(`from "./${binary}"`, `from "../wasm/${binary}"`)
     .replaceAll(`from "./${glue}"`, `from "../wasm/${glue}"`)
+  // A bundler can bypass a re-export-only module when it treats modules
+  // as side-effect-free. Make the exports depend on WASM initialization.
+  const reexports = /\n__wbg_set_wasm\(wasm\);\nwasm\.__wbindgen_start\(\);\nexport \{([^}]+)\} from "[^"]+";/
+  const names = rebased.match(reexports)?.[1]?.trim()
+  if (!names)
+    throw new Error('Missing initialization and exports in the Markdown WASM entry.')
+  const initialized = rebased.replace(reexports, `
+function initialize() {
+  __wbg_set_wasm(wasm);
+  wasm.__wbindgen_start();
+  return imports;
+}
+export const { ${names} } = initialize();
+`)
   mkdirSync(join(packageDir, 'wasm'), { recursive: true })
   mkdirSync(join(packageDir, 'wasm-bundler'), { recursive: true })
   for (const file of [binary, entry, `${name}.d.ts`])
     copyFileSync(join(web, file), join(packageDir, 'wasm', file))
   copyFileSync(join(bundler, glue), join(packageDir, 'wasm', glue))
   copyFileSync(join(bundler, `${name}.d.ts`), join(packageDir, 'wasm-bundler', `${name}.d.ts`))
-  writeFileSync(join(packageDir, 'wasm-bundler', entry), rebased)
+  writeFileSync(join(packageDir, 'wasm-bundler', entry), initialized)
 }
 finally {
   rmSync(workDir, { recursive: true, force: true })
