@@ -4,6 +4,12 @@ import { describe, expect, it } from 'vitest'
 describe('repository lint policy', () => {
   const eslint = new ESLint()
 
+  it('accepts native benchmark manifest formatting', async () => {
+    const results = await eslint.lintFiles(['bench/rust-perf/Cargo.toml'])
+
+    expect(results.flatMap(result => result.messages)).toEqual([])
+  })
+
   it('accepts existing release tooling formatting after dependency updates', async () => {
     const results = await eslint.lintFiles([
       'scripts/pack-previews.mjs',

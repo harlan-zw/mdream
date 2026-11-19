@@ -91,6 +91,7 @@ function flushBlockquoteLines(state: MarkdownState): boolean {
     buffer.push(fragment)
   for (const frame of frames) {
     frame.fragment = start + 1
+    frame.itemSeparatorFragments = 0
     frame.followsWhitespace = true
   }
   noteBufferRewrite(state)

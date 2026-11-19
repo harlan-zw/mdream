@@ -114,7 +114,7 @@ jobs:
           pnpm test:bundle-size:rust-native
           node bench/rust-perf/build.ts "$PWD" bench/bundle/dist/rust-perf
           # The generated lockfile matches this revision's core version.
-          cargo test --locked --manifest-path bench/bundle/dist/rust-perf/harness/Cargo.toml --features alloc
+          RUSTFLAGS="-Dunused-crate-dependencies" cargo test --locked --manifest-path bench/bundle/dist/rust-perf/harness/Cargo.toml --no-default-features --features alloc
 
       - name: Run shared Rust benchmarks
         run: |
