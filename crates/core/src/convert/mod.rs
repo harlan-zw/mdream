@@ -1438,9 +1438,14 @@ impl ConvertState {
   }
 
   pub fn new(options: HtmlToMarkdownOptions, capacity: usize, format: OutputFormat) -> Self {
+    #[cfg(mdream_edge_wasm)]
+    assert_eq!(
+      options.max_node_bytes, 0,
+      "Edge WASM requires max_node_bytes to be 0"
+    );
     // Read wrap width before `options` is moved into the struct below.
     let options_wrap_width = options.wrap_width;
-    let options_max_node_bytes = options.max_node_bytes;
+    let options_max_node_bytes = options.node_byte_limit();
     let mut s = Self {
       depth_map: [0; MAX_TAG_ID],
       raw_html_block_open: false,
@@ -1781,12 +1786,15 @@ impl ConvertState {
           bits | crate::selector::selector_list_attr_bits(parsed)
         });
       let filter_needs_all = s.has_filter
-        && (s.options.max_node_bytes != 0 || !s.is_markdown() || filter_selector_bits == ATTR_ALL);
+        && (s.options.node_byte_limit() != 0
+          || !s.is_markdown()
+          || filter_selector_bits == ATTR_ALL);
       if s.has_filter {
         s.filter_attr_bits = ATTR_STYLE | ATTR_HIDDEN | (filter_selector_bits & ATTR_CLASS);
       }
-      s.attrs_force_all =
-        filter_needs_all || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
+      s.attrs_force_all = filter_needs_all
+        || s.has_extraction
+        || (s.has_tailwind && s.options.node_byte_limit() != 0);
       s.attr_extra_mask = if s.attrs_force_all {
         ATTR_ALL
       } else {
@@ -1811,7 +1819,7 @@ impl ConvertState {
     // whole element to emit nothing. An active extraction still gets capped, as
     // an extracted text node does.
     if !self.extraction_tracked.is_empty() {
-      let cap = self.options.max_node_bytes;
+      let cap = self.options.node_byte_limit();
       let clamped = push_capped_text_node(
         &mut self.script_text_buffer,
         text,
@@ -1904,7 +1912,7 @@ impl ConvertState {
   /// Only a byte cap can be exceeded, so the uncapped case is one inlined test.
   #[inline(always)]
   fn check_held_output(&mut self) {
-    if self.options.max_node_bytes != 0 {
+    if self.options.node_byte_limit() != 0 {
       self.check_held_output_capped();
     }
   }
@@ -2081,7 +2089,7 @@ impl ConvertState {
     }
     let bytes = chunk.as_bytes();
     let chunk_length = bytes.len();
-    let max_node_bytes = self.options.max_node_bytes;
+    let max_node_bytes = self.options.node_byte_limit();
     let mut i = 0;
     // Raw start of the text/tag run currently held in `text_buffer`. Any tail
     // carried to the next chunk is returned raw from here, never the decoded
@@ -3098,8 +3106,8 @@ impl ConvertState {
       Discard::Tag(_) => true,
     };
     if discard_loses_output
-      || (self.options.max_node_bytes != 0
-        && leftover.len() > self.options.max_node_bytes
+      || (self.options.node_byte_limit() != 0
+        && leftover.len() > self.options.node_byte_limit()
         && !dropped)
       || self
         .pending_start
@@ -3118,7 +3126,7 @@ impl ConvertState {
         self.truncated |= push_capped_text_node(
           &mut self.parse_text_buffer,
           leftover,
-          self.options.max_node_bytes,
+          self.options.node_byte_limit(),
           &mut self.text_node_exhausted,
         );
         let kept = &leftover[..self.parse_text_buffer.len() - before_len];
@@ -3147,7 +3155,7 @@ impl ConvertState {
         self.truncated |= push_capped_text_node(
           &mut buf,
           leftover,
-          self.options.max_node_bytes,
+          self.options.node_byte_limit(),
           &mut self.text_node_exhausted,
         );
         self.complete_text_node(&mut buf);
@@ -3317,7 +3325,7 @@ impl ConvertState {
   /// `max_node_bytes`. Measured from the construct's structure, never from what a
   /// flush happened to release, so chunking cannot move where it fires.
   fn held_output_exceeds_cap(&mut self) -> bool {
-    let cap = self.options.max_node_bytes;
+    let cap = self.options.node_byte_limit();
     // The counter only bounds the run from above: output that survives between
     // two runs (`<br>`, an image) breaks it without resetting the count. Past the
     // cap the buffer's actual run decides.

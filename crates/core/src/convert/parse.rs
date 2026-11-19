@@ -1065,7 +1065,7 @@ impl ConvertState {
     let tag_handler = tag_id.and_then(get_tag_handler);
     // A custom name is owned by the node and by any suspended scan, so it is
     // charged; the `#cdata-section` pseudo-tag is a literal, not document bytes.
-    let mut budget = AttrBudget::new(self.options.max_node_bytes);
+    let mut budget = AttrBudget::new(self.options.node_byte_limit());
     if !is_builtin && tag_name.as_bytes().first() != Some(&b'#') {
       budget.charge(tag_name.len());
     }

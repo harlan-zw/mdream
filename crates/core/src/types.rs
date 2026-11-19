@@ -849,6 +849,17 @@ pub struct HtmlToMarkdownOptions {
 }
 
 impl HtmlToMarkdownOptions {
+  /// Only Rust callers can set a node byte limit. The packaged edge build
+  /// compiles the corresponding checks out.
+  #[inline(always)]
+  pub(crate) const fn node_byte_limit(&self) -> usize {
+    if cfg!(mdream_edge_wasm) {
+      0
+    } else {
+      self.max_node_bytes
+    }
+  }
+
   /// Set the base URL for resolving relative links and images.
   ///
   /// ```rust
