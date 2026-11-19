@@ -10,6 +10,10 @@ const name = 'mdream_markdown'
 const binary = `${name}_bg.wasm`
 const glue = `${name}_bg.js`
 const entry = `${name}.js`
+const types = `${name}.d.ts`
+const webEntry = `${name}_web.js`
+const webTypes = `${name}_web.d.ts`
+const destination = join(packageDir, 'wasm-bundler')
 const web = join(workDir, 'web')
 const bundler = join(workDir, 'bundler')
 
@@ -29,23 +33,14 @@ try {
   if (!readFileSync(join(web, binary)).equals(readFileSync(join(bundler, binary))))
     throw new Error('Browser and edge Markdown WASM binaries differ.')
 
-  // Nitro resolves the WASM imports relative to the binary. Keep the bundler
-  // glue beside the binary shared by both targets.
   const source = readFileSync(join(bundler, entry), 'utf8')
-  for (const file of [binary, glue]) {
-    if (!source.includes(`from "./${file}"`))
-      throw new Error(`Missing ${file} import in the Markdown WASM entry.`)
-  }
-  const rebased = source
-    .replaceAll(`from "./${binary}"`, `from "../wasm/${binary}"`)
-    .replaceAll(`from "./${glue}"`, `from "../wasm/${glue}"`)
   // A bundler can bypass a re-export-only module when it treats modules
   // as side-effect-free. Make the exports depend on WASM initialization.
   const reexports = /\n__wbg_set_wasm\(wasm\);\nwasm\.__wbindgen_start\(\);\nexport \{([^}]+)\} from "[^"]+";/
-  const names = rebased.match(reexports)?.[1]?.trim()
+  const names = source.match(reexports)?.[1]?.trim()
   if (!names)
     throw new Error('Missing initialization and exports in the Markdown WASM entry.')
-  const initialized = rebased.replace(reexports, `
+  const initialized = source.replace(reexports, `
 function initialize() {
   __wbg_set_wasm(wasm);
   wasm.__wbindgen_start();
@@ -53,13 +48,19 @@ function initialize() {
 }
 export const { ${names} } = initialize();
 `)
-  mkdirSync(join(packageDir, 'wasm'), { recursive: true })
-  mkdirSync(join(packageDir, 'wasm-bundler'), { recursive: true })
-  for (const file of [binary, entry, `${name}.d.ts`])
-    copyFileSync(join(web, file), join(packageDir, 'wasm', file))
-  copyFileSync(join(bundler, glue), join(packageDir, 'wasm', glue))
-  copyFileSync(join(bundler, `${name}.d.ts`), join(packageDir, 'wasm-bundler', `${name}.d.ts`))
-  writeFileSync(join(packageDir, 'wasm-bundler', entry), initialized)
+  // Keep the shared binary alongside its glue for Nitro's relative imports.
+  // This directory is outside the public mdream/wasm/* package exports.
+  mkdirSync(destination, { recursive: true })
+  copyFileSync(join(web, binary), join(destination, binary))
+  for (const file of [glue, types])
+    copyFileSync(join(bundler, file), join(destination, file))
+  writeFileSync(join(destination, entry), initialized)
+  writeFileSync(join(destination, webEntry), readFileSync(join(web, entry), 'utf8').replace(`"./${types}"`, `"./${webTypes}"`))
+  copyFileSync(join(web, types), join(destination, webTypes))
+
+  // Remove the old layout if this package was previously built in place.
+  for (const file of [binary, glue, entry, types])
+    rmSync(join(packageDir, 'wasm', file), { force: true })
 }
 finally {
   rmSync(workDir, { recursive: true, force: true })

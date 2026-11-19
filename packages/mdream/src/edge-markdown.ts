@@ -3,6 +3,7 @@ import { __mdreamTakePanicMessage, htmlToMarkdownResult, MarkdownStream as WasmS
 import { resolveMarkdownOptions } from './resolve-markdown-options.js'
 import { convertWasmHtml, pumpWasmStream, WasmMarkdownStream } from './wasm-converter.js'
 
+export type { CleanOptions, ExtractedElement, FrontmatterConfig, TagOverride } from './index.js'
 export type { MarkdownOptions as MdreamOptions } from './resolve-markdown-options.js'
 
 const bindings = { oneShot: htmlToMarkdownResult, Stream: WasmStream, takePanicMessage: __mdreamTakePanicMessage }

@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.edge.json",
+  "compilerOptions": {
+    "customConditions": ["workerd", "mdream-markdown"]
+  },
+  "files": ["./markdown.ts"]
+}

@@ -54,3 +54,20 @@ it('rejects unavailable features for both one-shot and streaming conversions', a
   const stream = streamHtmlToMarkdown(source, { frontmatter: true })
   await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow('does not support the `frontmatter` option')
 })
+
+it('rejects an unsupported format supplied by a class getter', async () => {
+  class Options {
+    origin = 'https://example.com'
+    get format() {
+      return 'text' as const
+    }
+  }
+
+  const conversion = htmlToMarkdown(html, new Options() as unknown as typeof options)
+  await expect(conversion).rejects.toThrow('does not support the `format` option')
+})
+
+it('rejects a non-enumerable cleanup option before starting a stream', async () => {
+  const hiddenOptions = Object.defineProperty({ origin: options.origin }, 'clean', { value: true })
+  await expect(createMarkdownStream(hiddenOptions)).rejects.toThrow('does not support the `clean` option')
+})

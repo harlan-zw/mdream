@@ -1,5 +1,6 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -78,6 +79,19 @@ export default {
     expect(tarballFiles).toContain('package/dist/edge.mjs')
     expect(tarballFiles).toContain('package/wasm/mdream_edge.js')
     expect(tarballFiles).toContain('package/wasm/mdream_edge_bg.wasm')
+  })
+
+  it('rejects package imports of the internal Markdown WASM files', () => {
+    const resolvePackage = createRequire(join(tmp, 'src/index.mjs')).resolve
+    for (const file of ['mdream_markdown.js', 'mdream_markdown_bg.js', 'mdream_markdown_bg.wasm']) {
+      expect(() => resolvePackage(`mdream/wasm/${file}`))
+        .toThrow()
+      expect(() => resolvePackage(`mdream/wasm-bundler/${file}`))
+        .toThrow(expect.objectContaining({ code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' }))
+    }
+    expect(() => resolvePackage('mdream/wasm-bundler/mdream_markdown_web.js'))
+      .toThrow(expect.objectContaining({ code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' }))
+    expect(resolvePackage('mdream/wasm/mdream_edge_bg.wasm')).toBe(join(tmp, 'node_modules/mdream/wasm/mdream_edge_bg.wasm'))
   })
 
   it.each(['full', 'mdream-markdown'])('converts HTML after Nitro bundles the %s edge build', async (profile) => {
