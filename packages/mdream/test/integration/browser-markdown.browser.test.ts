@@ -71,3 +71,10 @@ it('rejects a non-enumerable cleanup option before starting a stream', async () 
   const hiddenOptions = Object.defineProperty({ origin: options.origin }, 'clean', { value: true })
   await expect(createMarkdownStream(hiddenOptions)).rejects.toThrow('does not support the `clean` option')
 })
+
+it('rejects unsupported options hidden on the options object', async () => {
+  const hiddenOptions = Object.defineProperty({ origin: options.origin }, 'plugins', {
+    value: { tailwind: true },
+  })
+  await expect(htmlToMarkdown(html, hiddenOptions)).rejects.toThrow('does not support the `plugins` option')
+})

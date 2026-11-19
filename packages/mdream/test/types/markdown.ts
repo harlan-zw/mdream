@@ -21,3 +21,9 @@ export const browserMarkdown: Promise<string> = browserHtmlToMarkdown('<h1>Hi</h
 htmlToMarkdown('<h1>Hi</h1>', { format: 'text' })
 // @ts-expect-error Cleanup requires the full build.
 browserHtmlToMarkdown('<h1>Hi</h1>', { clean: true })
+
+const fullBuildOptions = { origin: 'https://example.com', clean: true }
+// @ts-expect-error A variable with a full-build option must also be rejected.
+browserHtmlToMarkdown('<h1>Hi</h1>', fullBuildOptions)
+// @ts-expect-error A variable with a full-build option must also be rejected.
+htmlToMarkdown('<h1>Hi</h1>', fullBuildOptions)
