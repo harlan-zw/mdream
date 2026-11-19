@@ -8,6 +8,36 @@ import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
+describe('adjacent emphasis and empty list code', () => {
+  it.each([
+    ['<strong>Aa</strong><strong>Bb</strong>', '**AaBb**'],
+    ['<strong><em>Aa</em></strong><strong><em>Bb</em></strong>', '***AaBb***'],
+    ['<strong>Aa</strong><i></i><strong>Bb</strong>', '**AaBb**'],
+    ['<b>Aa</b><b> </b>x', '**Aa** x'],
+    ['<strong>Aa</strong> <strong>Bb</strong>', '**Aa** **Bb**'],
+    ['<ul><li>Aa<span> </span><code></code>Bb</li></ul>', '- Aa Bb'],
+    ['<ol><li>Aa<i> </i><code><svg></svg></code><b>Bb</b></li></ol>', '1. Aa **Bb**'],
+    ['<ul><li>Aa<code></code>Bb</li></ul>', '- AaBb'],
+    ['<ul><li><b>Aa</b><b>Bb</b><span> </span><code></code>Cc</li></ul>', '- **AaBb** Cc'],
+    ['<ul><li>Aa<span> </span><code></code><b>Bb</b><b>Cc</b></li></ul>', '- Aa **BbCc**'],
+  ])('preserves formatting and word separators: %s', async (html, expected) => {
+    expect(htmlToMarkdown(html)).toBe(expected)
+    for (let split = 0; split <= html.length; split++) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          controller.enqueue(html.slice(0, split))
+          controller.enqueue(html.slice(split))
+          controller.close()
+        },
+      })
+      let output = ''
+      for await (const chunk of streamHtmlToMarkdown(input))
+        output += chunk
+      expect(output, `split=${split}`).toBe(expected)
+    }
+  })
+})
+
 describe('heading hashes followed by a blank of its own', () => {
   it.each([
     ['<label>x <h1>&#9;</h1>x</label>', 'x \\# \t\n\nx'],

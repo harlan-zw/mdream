@@ -7,6 +7,12 @@ use mdream::types::HtmlToMarkdownOptions;
 use mdream::{html_to_markdown, html_to_text};
 
 const CASES: &[(&str, &str)] = &[
+  ("<strong>b!</strong><strong></strong>c", "**b!**&#99;"),
+  (
+    "<strong>b!</strong><strong><em></em></strong>c",
+    "**b!**&#99;",
+  ),
+  ("<strong>b!</strong><strong>c!</strong>d", "**b!c!**&#100;"),
   (
     r##"<p><strong><a href="/x">b</a> </strong><kbd><b>c</b></kbd></p>"##,
     "**[b](/x)** `**c**`",
@@ -15,25 +21,22 @@ const CASES: &[(&str, &str)] = &[
     r##"<p><strong><a href="/x">b</a> </strong><code><em>c</em></code></p>"##,
     "**[b](/x)** `*c*`",
   ),
-  (
-    r##"<li>a<strong>(b)</strong><b>c</b></li>"##,
-    "- a**(b)****c**",
-  ),
+  (r##"<li>a<strong>(b)</strong><b>c</b></li>"##, "- a**(b)c**"),
   (
     r##"<blockquote>a<strong>(b)</strong><b>c</b></blockquote>"##,
-    "> a**(b)****c**",
+    "> a**(b)c**",
   ),
   (
     r##"<h2>a<strong>(b)</strong><b>c</b></h2>"##,
-    "## a**(b)****c**",
+    "## a**(b)c**",
   ),
   (
     r##"<table><tr><td>a<strong>(b)</strong><b>c</b></td></tr></table>"##,
-    "| a**(b)****c** |\n| --- |",
+    "| a**(b)c** |\n| --- |",
   ),
   (
     r##"<a href="/y">a<strong>(b)</strong><b>c</b></a>"##,
-    "[a**(b)****c**](/y)",
+    "[a**(b)c**](/y)",
   ),
   (
     r##"<ul><li><i><a href="/r">Sub (v.)</a></i></li><li><a href="/d"><strong>Domain</strong>/Super</a></li></ul>"##,
@@ -47,7 +50,7 @@ const CASES: &[(&str, &str)] = &[
     r##"<strong>b!</strong><code><em>c</em></code>"##,
     "**b!**`*c*`",
   ),
-  (r##"<p>a<strong>(b)</strong><b>c</b></p>"##, "a**(b)****c**"),
+  (r##"<p>a<strong>(b)</strong><b>c</b></p>"##, "a**(b)c**"),
   (
     r##"<p><strong><a href="/x">b</a> </strong><b>c</b></p>"##,
     "**[b](/x)** **c**",
@@ -123,11 +126,11 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r#"<p><b><i>a</i></b><b><a href="/y">x</a></b></p>"#,
-    "***a*****[x](/y)**",
+    "***a*[x](/y)**",
   ),
   (
     r#"<p><b><a href="/x">a</a></b><b><i>c</i></b></p>"#,
-    "**[a](/x)*****c***",
+    "**[a](/x)*c***",
   ),
   (
     r#"<p>a<strong><a href="/x">b</a></strong></p>"#,
