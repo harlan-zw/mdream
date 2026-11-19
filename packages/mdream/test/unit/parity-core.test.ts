@@ -209,6 +209,13 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<strong>h<span> </span>&#32;</strong>x',
     'Aa<span> </span>&#32;<form><span>Bb</span></form>',
   ], ['markdown', 'text']],
+  'block that opens its own line after a raw HTML block in a list item': [[
+    '<ul><li><dd>A</dd><h3>t</h3></li></ul>',
+    '<ol><li>Aa</li><li><dd>Lima</dd><hr></li></ol>',
+    '<ul><li>x<ul><li><address>A</address><h3>t</h3></li></ul></li></ul>',
+    '<blockquote><ul><li><dl><dt>A</dt></dl><hr></li></ul></blockquote>',
+    '<ul><li><dd>A</dd><p>t</p></li></ul>',
+  ], ['markdown']],
   'decoded blank after a blank that opened an inline element': [[
     'Aa<span> </span>&#32; <form><span>Bb</span></form>',
     'Aa<span> </span>&#9;<form><span>Bb</span></form>',
@@ -245,6 +252,18 @@ const GROUPS: Record<string, string[] | [string[], Format[]]> = {
     '<ul><li><span><span>Aa</span> </span><p>Bb</p></li></ul>',
     '<ul><li><span><span>Aa</span> </span><i></i> <p>Bb</p></li></ul>',
   ], ['markdown', 'text']],
+  'block break after text with a space inside an inline wrapper': [[
+    '<span><h2>y z</h2></span>B',
+    '<span><p>y z</p></span>B',
+    '<span><div>y z</div></span><b>B</b>',
+  ], ['markdown', 'text']],
+  'block break after text with a space inside a wrapper the text format differs on': [[
+    '<label><h2>y z</h2></label>B',
+    '<small><h3>a b c</h3></small> B',
+    '<p><b><p>y z</p></b><br>B</p>',
+    '<center><p>y z</p></center><br>B',
+    '<pre><center><ul><li>y z</li></ul></center></pre>',
+  ], ['markdown']],
   'link title after a pair dropped in an earlier block': [[
     '<blockquote><br><em>h</em><i></i></blockquote><a href="/x" title="x">x</a>',
   ], ['markdown']],

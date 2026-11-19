@@ -1996,6 +1996,257 @@ fn a_long_quote_of_short_lines_is_not_held_back() {
   assert_eq!((batch.markdown, batch.truncated), (uncapped, false));
 }
 
+#[test]
+fn a_nested_items_first_text_run_streams_before_it_closes() {
+  let text = "word ".repeat(64 * 1024);
+  for (prefix, suffix) in [
+    ("<ul><li>r<ul><li>", "</li></ul></li></ul>"),
+    ("<ul><li>r<ul><li><em>", "</em></li></ul></li></ul>"),
+    ("<ul><li>r<ul><li><strong>", "</strong></li></ul></li></ul>"),
+    ("<ul><li>r<ul><li><a href=/u>", "</a></li></ul></li></ul>"),
+    ("<ol><li><ol><li><p>", "</p></li></ol></li></ol>"),
+    ("<ul><li>r<ul><li><code>x</code> ", "</li></ul></li></ul>"),
+  ] {
+    let html = format!("{prefix}{text}{suffix}");
+    let expected = html_to_markdown_result(&html, options(0)).markdown;
+    for cap in [0, 64 * 1024] {
+      let mut p = MarkdownStreamProcessor::new(options(cap));
+      let mut out = p.process_chunk(prefix);
+      for chunk in text.as_bytes().chunks(8190) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      assert!(
+        out.len() > text.len() / 2,
+        "cap={cap}: yielded {}",
+        out.len()
+      );
+      out.push_str(&p.process_chunk(suffix));
+      out.push_str(&p.finish());
+      assert_eq!(out, expected, "cap={cap}");
+      assert!(!p.truncated(), "cap={cap}");
+      for chunk in [1, 37, 64 * 1024, html.len()] {
+        assert_eq!(
+          stream_reporting(&html, chunk, cap),
+          (expected.clone(), false),
+          "prefix={prefix} cap={cap} chunk={chunk}"
+        );
+      }
+      assert!(
+        peak(&html, 8190, cap) < (8 * CAP) as u64,
+        "prefix={prefix} cap={cap}"
+      );
+    }
+  }
+}
+
+#[test]
+fn a_nested_item_marker_hold_is_capped() {
+  let cap = 8;
+  for (name, content) in [
+    (
+      "bare marker",
+      "<ul><li><ul><li><ul><li><ul><li></li></ul></li></ul></li></ul></li></ul>",
+    ),
+    (
+      "marker before code",
+      "<ul><li><ul><li><ul><li><ul><li><code>x</code></li></ul></li></ul></li></ul></li></ul>",
+    ),
+  ] {
+    let html = format!("<ul><li>r<ul><li>{content}</li></ul></li></ul><p>after</p>");
+    let batch = html_to_markdown_result(&html, options(cap));
+    assert!(batch.truncated, "{name}");
+    assert!(!batch.markdown.contains("after"), "{name}");
+    for split in 0..=html.len() {
+      assert_eq!(
+        stream_parts(&[&html[..split], &html[split..]], cap),
+        (batch.markdown.clone(), true),
+        "{name} split={split}"
+      );
+    }
+  }
+}
+
+#[test]
+fn a_blockquote_inside_a_nested_item_uses_its_own_cap() {
+  let cap = 64;
+  let retained = "x".repeat(cap);
+  let expected = format!("- r\n\n  - \n    > {retained}\n\nafter");
+  for extra in ["", "x"] {
+    let html = format!(
+      "<ul><li>r<ul><li><blockquote>{retained}{extra}</blockquote></li></ul></li></ul><p>after</p>"
+    );
+    let truncated = !extra.is_empty();
+    let batch = html_to_markdown_result(&html, options(cap));
+    assert_eq!(
+      (batch.markdown, batch.truncated),
+      (expected.clone(), truncated)
+    );
+    for split in 0..=html.len() {
+      assert_eq!(
+        stream_parts(&[&html[..split], &html[split..]], cap),
+        (expected.clone(), truncated),
+        "extra={extra:?} split={split}"
+      );
+    }
+  }
+}
+
+#[test]
+fn a_nested_items_link_settles_its_marker_as_one_shot_does() {
+  // Streaming alone holds a link while its text is no longer than its URL.
+  for html in [
+    "<ul><li>r<ul><li><a href=/u>word</a></li></ul></li></ul><p>after</p>".to_string(),
+    format!(
+      "<ul><li>r<ul><li><a href=/{}>{}</a></li></ul></li></ul><p>after</p>",
+      "u".repeat(CAP - 12),
+      "x".repeat(CAP - 4)
+    ),
+  ] {
+    let cap = if html.len() < 100 { 8 } else { CAP };
+    let batch = html_to_markdown_result(&html, options(cap));
+    assert!(!batch.truncated && batch.markdown.ends_with("after"));
+    for chunk in [1, 37, 4096, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, cap),
+        (batch.markdown.clone(), false),
+        "cap={cap} chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
+fn a_nested_item_opening_on_a_later_line_streams_before_it_closes() {
+  let text = "word ".repeat(64 * 1024);
+  for (prefix, suffix) in [
+    ("<ul><li>r<ul><li><br>", "</li></ul></li></ul>"),
+    ("<ul><li>r<ul><li><br><span>", "</span></li></ul></li></ul>"),
+    (
+      "<ul><li>r<ul><li><br><a href=/u>",
+      "</a></li></ul></li></ul>",
+    ),
+    ("<ul><li>r<ul><li><br><br><em>", "</em></li></ul></li></ul>"),
+  ] {
+    let html = format!("{prefix}{text}{suffix}<p>after</p>");
+    let expected = html_to_markdown_result(&html, options(0)).markdown;
+    for cap in [0, CAP] {
+      let mut p = MarkdownStreamProcessor::new(options(cap));
+      let mut out = p.process_chunk(prefix);
+      for chunk in text.as_bytes().chunks(8190) {
+        out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+      }
+      assert!(
+        out.len() > text.len() / 2,
+        "prefix={prefix} cap={cap}: yielded {}",
+        out.len()
+      );
+      for chunk in [1, 37, 64 * 1024, html.len()] {
+        assert_eq!(
+          stream_reporting(&html, chunk, cap),
+          (expected.clone(), false),
+          "prefix={prefix} cap={cap} chunk={chunk}"
+        );
+      }
+    }
+  }
+}
+
+#[test]
+fn breaks_before_a_held_nested_item_measure_as_one_shot() {
+  // Streaming keeps a `<br>` run as one copy and a count.
+  for (html, cap) in [
+    (
+      format!(
+        "<ol><li><ol><li><br><br><pre>{}</pre></li></ol></li></ol><p>after</p>",
+        "x ".repeat(480)
+      ),
+      1024,
+    ),
+    (
+      format!(
+        "<ul><li>r<ul><li>{}<em>{}</em></li></ul></li></ul><p>after</p>",
+        "<br>".repeat(200),
+        "word ".repeat(400)
+      ),
+      2048,
+    ),
+  ] {
+    let batch = html_to_markdown_result(&html, options(cap));
+    for chunk in [1, 37, 4096, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, cap),
+        (batch.markdown.clone(), batch.truncated),
+        "cap={cap} chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
+fn settling_a_nested_item_early_moves_its_open_link() {
+  let html =
+    r#"<ul><li>r<ul><li><br><a href="https://x.com/">https://x.com/</a> more</li></ul></li></ul>"#;
+  let expected = "- r\n\n  -   \n    <https://x.com/> more";
+  for cap in [0, CAP] {
+    assert_eq!(
+      html_to_markdown_result(html, options(cap)).markdown,
+      expected
+    );
+    for chunk in [1, 37, html.len()] {
+      assert_eq!(
+        stream_reporting(html, chunk, cap),
+        (expected.to_string(), false),
+        "cap={cap} chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
+fn fragment_cleaning_does_not_charge_a_held_nested_item() {
+  // Fragment cleaning retains the whole document, so holding the line costs nothing.
+  let html = format!(
+    "<ul><li>r<ul><li><blockquote>{}</blockquote></li></ul></li></ul><p>after</p>",
+    "<p>a line of words</p>".repeat(8000)
+  );
+  let opts = |cap| HtmlToMarkdownOptions {
+    clean: Some(CleanConfig::all()),
+    ..options(cap)
+  };
+  let uncapped = html_to_markdown_result(&html, opts(0)).markdown;
+  let capped = html_to_markdown_result(&html, opts(CAP));
+  assert_eq!(
+    (capped.markdown, capped.truncated),
+    (uncapped.clone(), false)
+  );
+  let mut p = MarkdownStreamProcessor::new(opts(CAP));
+  let mut out = String::new();
+  for chunk in html.as_bytes().chunks(4096) {
+    out.push_str(&p.process_chunk(std::str::from_utf8(chunk).unwrap()));
+  }
+  out.push_str(&p.finish());
+  assert_eq!((out, p.truncated()), (uncapped, false));
+}
+
+#[test]
+fn short_text_nodes_after_code_do_not_pin_a_nested_item() {
+  let html = format!(
+    "<ul><li>r<ul><li><code>x</code>word {}</li></ul></li></ul>",
+    "<span>word </span>".repeat(128 * 1024)
+  );
+  let expected = html_to_markdown_result(&html, options(0)).markdown;
+  for cap in [0, CAP] {
+    for chunk in [1, 37, 8190, html.len()] {
+      assert_eq!(
+        stream_reporting(&html, chunk, cap),
+        (expected.clone(), false),
+        "cap={cap} chunk={chunk}"
+      );
+    }
+    assert!(peak(&html, 8190, cap) < (8 * CAP) as u64, "cap={cap}");
+  }
+}
+
 // A first item whose marker sits right under its parent's line owes a blank line
 // when a block opens it on the next line. That is known once the block writes,
 // yet the marker's line was held until the item's exit, pinning everything the
