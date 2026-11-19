@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { defineBuildConfig } from 'obuild/config'
 import { rolldown as createBundle } from 'rolldown'
+import { encodeWasm } from './src/wasm-encoding.js'
 
 const rolldown = {
   external: [/\.\.\/napi\//],
@@ -44,13 +45,13 @@ export default defineBuildConfig({
         return
 
       // The CDN script (`dist/iife.js`): src/iife.ts and the wasm-bindgen glue
-      // in one minified IIFE, with the WASM binary inlined as base64. A
+      // in one minified IIFE, with the encoded WASM binary inlined. A
       // missing binary or a failed bundle fails the build.
-      const wasmBase64 = readFileSync(resolve(cwd, 'wasm/mdream_edge_bg.wasm')).toString('base64')
+      const encodedWasm = encodeWasm(readFileSync(resolve(cwd, 'wasm/mdream_edge_bg.wasm')))
       const bundle = await createBundle({
         input: resolve(cwd, 'src/iife.ts'),
         platform: 'browser',
-        transform: { define: { __MDREAM_WASM_BASE64__: JSON.stringify(wasmBase64) } },
+        transform: { define: { __MDREAM_WASM__: JSON.stringify(encodedWasm) } },
       })
       const outputPath = resolve(cwd, 'dist/iife.js')
       try {

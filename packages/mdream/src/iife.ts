@@ -1,14 +1,16 @@
 import type { HtmlToMarkdownOptions, MdreamNapiResult } from '../napi/index.js'
 import type { MdreamOptions } from './index.js'
+import type { EncodedWasm } from './wasm-encoding.js'
 import { __mdreamTakePanicMessage, htmlToMarkdownResult as _htmlToMarkdownResult, MarkdownStream as _MarkdownStream, initSync } from '../wasm/mdream_edge.js'
 import { convertResult, convertWasm } from './convert.js'
+import { decodeWasm } from './wasm-encoding.js'
 import { wasmPanicError } from './wasm-panic.js'
 
 // The CDN build (`dist/iife.js`). build.config.ts bundles this module as an
-// IIFE and defines `__MDREAM_WASM_BASE64__` as the WASM binary, so
+// IIFE and embeds the WASM binary, so
 // `window.mdream` is ready at load.
 
-declare const __MDREAM_WASM_BASE64__: string
+declare const __MDREAM_WASM__: EncodedWasm
 
 declare global {
   interface Window {
@@ -38,11 +40,7 @@ async function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {}
 }
 
 if (typeof window !== 'undefined') {
-  const binary = atob(__MDREAM_WASM_BASE64__)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++)
-    bytes[i] = binary.charCodeAt(i)
   // If the WASM fails to instantiate, this throws and `window.mdream` stays unset.
-  initSync({ module: bytes })
+  initSync({ module: decodeWasm(__MDREAM_WASM__) })
   window.mdream = { htmlToMarkdown }
 }
