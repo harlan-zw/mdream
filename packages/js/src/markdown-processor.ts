@@ -64,8 +64,9 @@ import {
   TAG_VAR,
   TEXT_NODE,
 } from './const'
+import { isOpenVoidTag, parserTagHandlers } from './parser-tags'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, dropSourceLead, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, outputLeadLength, pendingMarkerIndent, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, dropSourceLead, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isBlockChildOfOpenVoid, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, outputLeadLength, pendingMarkerIndent, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -1352,7 +1353,7 @@ function shouldAddSpacingBeforeText(lastChar: string, lastNode: ElementNode | Te
   }
   // Unknown tags are inline, as in the Rust engine; an end tag that closed
   // nothing is no boundary.
-  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline : (lastNode as ElementNode).tagId === -1))) {
+  if (textNode.joinsPrevious || (lastNode && (lastNode.tagHandler ? lastNode.tagHandler.isInline || isOpenVoidTag(lastNode.tagHandler, (lastNode as ElementNode).tagId) : (lastNode as ElementNode).tagId === -1))) {
     return false
   }
   const firstChar = textNode.value[0]
@@ -2036,7 +2037,8 @@ function collapsedByAncestor(node: ElementNode, state: MarkdownState, eventType:
         currParent = currParent.parent
         continue
       }
-      return true
+      // A block child of an open br or img override keeps its block spacing.
+      return !isBlockChildOfOpenVoid(node)
     }
     currParent = currParent.parent
   }
@@ -2047,13 +2049,20 @@ function collapsedByAncestor(node: ElementNode, state: MarkdownState, eventType:
 // writes delimiters that pair across its content, which a block break would
 // split. A raw tag (`<u>`, `<sup>`) or a wrapper that writes nothing
 // (`<label>`, `<small>`) reads the same either side of it. The caller checks
-// the caption, whose emphasis wraps the heading too. Parity with the Rust
-// engine's `heading_kept_inline_in_item`.
+// the caption, whose emphasis wraps the heading too. The search stops at an
+// open void with a block below it, between it and the heading, that kept its
+// block spacing: the void's output, and that of any wrapper the block's
+// spacing passed, sits outside that block. Parity with the Rust engine's
+// `heading_kept_inline_in_item`.
 function headingKeptInlineInItem(heading: ElementNode): boolean {
+  let blockKept = false
   let parent = heading.parent
   while (parent) {
+    if (blockKept && parent.tagId !== undefined && parserTagHandlers[parent.tagId]?.isSelfClosing)
+      return false
     if (parent.tagId !== TAG_SPAN && parent.tagHandler?.collapsesInnerWhiteSpace && wrapperWritesDelimiters(parent))
       return true
+    blockKept ||= isBlockChildOfOpenVoid(parent)
     parent = parent.parent
   }
   return false
@@ -3878,10 +3887,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (siblingListMarker !== 0 && !inGapEvent)
       return processGapEvent(event)
     const { type: eventType, node } = event
-    if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
-      && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
-      pendingRawHtmlBoundary = false
-    }
     // Update depth for plugin access
     state.depth = node.depth
     if (blankCaptionFrames !== 0)
@@ -3895,6 +3900,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : node.parent?.excludedFromMarkdown
     if (inTemplate)
       return
+    if (pendingRawHtmlBoundary && eventType === NodeEventEnter && node.type === ELEMENT_NODE
+      && (node as ElementNode).tagId === TAG_PRE && !node.tagHandler?.literalEnter) {
+      pendingRawHtmlBoundary = false
+    }
 
     // A blank kept at the start of an inline element is placed as a word
     // separator, never written as text. A plugin that removed it leaves
@@ -4254,10 +4263,11 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // unknown elements only affect spacing, so allocating an empty array for
     // every enter/exit event adds pure GC pressure.
     let output: string[] | undefined
-    const hasPluginOutput = !!element.pluginOutput?.length
-    if (hasPluginOutput) {
-      notePluginFences(state, element.pluginOutput)
-      output = element.pluginOutput
+    const pluginOutput = element.pluginOutput
+    const hasPluginOutput = !!pluginOutput?.length
+    if (pluginOutput?.length) {
+      notePluginFences(state, pluginOutput)
+      output = pluginOutput
       element.pluginOutput = undefined
     }
 
@@ -4658,17 +4668,49 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     if (eventType === NodeEventExit && (tagId === TAG_LI || tagId === TAG_BLOCKQUOTE))
       pendingRawHtmlBoundary = false
 
+    // An open void tag (override `isSelfClosing: false`) has no exit before its
+    // children, so the block spacing its exit would write follows its start tag.
+    // A custom exit or a visible plugin exit has output of its own, so the
+    // spacing stays after that exit.
+    const voidSpacingAtEnter = isOpenVoidTag(handler, tagId)
+      && !handler?.literalExitHasOutput
+      && !(eventType === NodeEventExit && pluginOutput?.some(hasNonWhitespace))
+    let openVoidLines = 0
+    if (eventType === NodeEventEnter && voidSpacingAtEnter) {
+      const exitLines = suppressedInPre ? 0 : calculateNewLineConfig(element, state, NodeEventExit)[1]
+      let enterNewlines = 0
+      let visible = false
+      for (let i = (output?.length || 0) - 1; i >= 0 && !visible; i--) {
+        const fragment = output![i]!
+        let end = fragment.length
+        while (end > 0 && fragment.charCodeAt(end - 1) === 10) {
+          end--
+          enterNewlines++
+        }
+        visible = end > 0
+      }
+      // Same cap as the exit path: a thematic break in a blockquote takes one line.
+      const cappedLines = tagId === TAG_HR && state.blockquotes.length > 0 ? Math.min(1, exitLines) : exitLines
+      const owedLines = Math.max(0, cappedLines - enterNewlines)
+      // Without visible enter text these newlines join the run before the enter,
+      // so they merge with what the buffer ends on.
+      if (!visible)
+        openVoidLines = owedLines
+      else if (owedLines > 0)
+        output = [...output!, '\n'.repeat(owedLines)]
+    }
+
     // Handle newlines
     const newLineConfig = suppressedInPre
       ? NO_SPACING
       : calculateNewLineConfig(node as ElementNode, state, eventType)
     const quoteAtStart = eventType === NodeEventEnter
       && state.blockquotes.at(-1)?.fragment === state.buffer.length
-    const configuredNewLines = quoteAtStart || captionEvent || captionTransition
+    const configuredNewLines = quoteAtStart || captionEvent || captionTransition || (eventType === NodeEventExit && voidSpacingAtEnter)
       ? 0
       : eventType === NodeEventExit && tagId === TAG_HR && state.blockquotes.length > 0
         ? Math.min(1, newLineConfig[eventType] || 0)
-        : newLineConfig[eventType] || 0
+        : openVoidLines ? Math.max(newLineConfig[eventType] || 0, openVoidLines) : newLineConfig[eventType] || 0
     // A closing code fence's block-spacing newlines are appended AFTER the
     // backtick or tilde delimiter, so
     // any trailing newlines already in the buffer (blank lines inside <pre>)
