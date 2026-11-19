@@ -356,6 +356,9 @@ struct LinkOutputState {
   hold_released: bool,
   /// Set in one-shot conversion too, like `pins_output`.
   empty_text_pending: bool,
+  /// The close may still rewrite or drop an emitted `[`. Set in one-shot
+  /// conversion too, unlike the streamed `hold_released` it starts from.
+  rewrites_bracket: bool,
   /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
   /// past the link into the text and rewrites whatever bracket it finds there.
   bracket_emitted: bool,
@@ -388,6 +391,8 @@ struct FragmentLink {
 #[derive(Clone)]
 struct BlockquoteFrame {
   content_start: usize,
+  /// Opening bytes after a bare item marker, removable with an empty quote.
+  item_separator_len: usize,
   list_indent: String,
 }
 
@@ -649,6 +654,16 @@ const MAX_CELL_SPAN: u8 = 64;
 /// Largest `<ol start>` CommonMark can express: an ordered marker is at most
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;
+
+/// The marker characters of an open `<ul>`/`<ol>`.
+#[derive(Clone, Copy)]
+struct ListMarker {
+  /// Character the built-in enter of its items writes.
+  selected: u8,
+  /// Character the latest marker in the list actually used, which an override
+  /// can make any other one, or 0 before an item wrote a marker.
+  written: u8,
+}
 
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
@@ -1218,6 +1233,24 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
+  /// Marker characters of each open `<ul>`/`<ol>`, innermost last.
+  list_markers: Vec<ListMarker>,
+  /// Last marker character of the list that last closed with items, or 0 once
+  /// visible output leaving the buffer, or the close of a quote around it, ends
+  /// its run. CommonMark joins the next list of the same type into it, blank
+  /// line or not, so that list takes the other character.
+  sibling_list_marker: u8,
+  /// `<li>` depth that list closed at: a list opening at another one is no sibling.
+  sibling_list_depth: u16,
+  /// Quote frames open around that list. A list under other `>` prefixes is no
+  /// sibling, while a quote that writes nothing leaves the run to its output.
+  sibling_list_quotes: usize,
+  /// Buffer offset where output after that list may turn visible, past the
+  /// whitespace already scanned. Lowered by rewrites and shifted by drains.
+  /// Read only while `sibling_list_marker` is set.
+  list_gap_from: usize,
+  /// The latest item marker is `*`, where a rule on its line reads `* ***`.
+  last_item_star: bool,
   /// `<li>` children opened so far in each open `<ol>` or `<ul>`, innermost
   /// last. An item's position among them numbers it and marks the list's first.
   list_item_counts: Vec<u32>,
@@ -1314,6 +1347,9 @@ pub struct ConvertState {
   code_span_closed_bytes: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
+  /// Bytes read to decide whether output since a closed list ended its run.
+  #[cfg(test)]
+  list_gap_scanned: usize,
   /// Bytes `opens_block_line` reads through the space run before its end.
   #[cfg(test)]
   block_line_bytes_read: std::cell::Cell<usize>,
@@ -1556,6 +1592,12 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       ordered_starts: Vec::new(),
+      list_markers: Vec::new(),
+      sibling_list_marker: 0,
+      sibling_list_depth: 0,
+      sibling_list_quotes: 0,
+      list_gap_from: 0,
+      last_item_star: false,
       list_item_counts: Vec::new(),
 
       pre_fence_pending: false,
@@ -1597,6 +1639,8 @@ impl ConvertState {
       code_span_closed_bytes: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
+      #[cfg(test)]
+      list_gap_scanned: 0,
       #[cfg(test)]
       block_line_bytes_read: std::cell::Cell::new(0),
       #[cfg(test)]
@@ -1968,7 +2012,11 @@ impl ConvertState {
     };
     self.process_text_buffer_piece(text_buffer, false);
     self.entity_seals = tail_seals;
-    // A blank link's text can outgrow the cap within a single run.
+    // Piece boundaries depend on content, so settle the marker here as well
+    // as at token boundaries before charging output that still cannot stream.
+    if self.empty_item_hazard {
+      self.settle_item_marker();
+    }
     self.check_held_output();
     self.last_node_is_inline = true;
     text_buffer.push_str(&tail);
@@ -3146,6 +3194,7 @@ impl ConvertState {
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
+    self.list_gap_from = self.list_gap_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_emphasis_blank.note_rewrite(offset);
     self.held_emphasis_whitespace.note_rewrite(offset);
@@ -3185,6 +3234,7 @@ impl ConvertState {
     self.charged_vertical_tabs.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
+    self.list_gap_from = self.list_gap_from.saturating_sub(removed);
     self.caption_line.note_drain(removed);
     self.marker_line.note_drain(removed);
     self.leading_whitespace = 0;
@@ -3212,6 +3262,23 @@ impl ConvertState {
     // every break since the last text also adds up runs split by other markup.
     if self.held_break_bytes > cap {
       return true;
+    }
+    // An unresolved item marker pins its line even when no quote or link does.
+    // Settlement may still be blocked by an open inline construct or whitespace.
+    // Fragment cleaning retains the whole document anyway, as for a quote.
+    if !self.retains_whole_document() && self.item_marker_line_held() {
+      let start = self.empty_item_line_start;
+      // Code bounds and drops its own held content. Charge only the prefix
+      // before it, so that exhausting code can still retain following nodes.
+      let end = self
+        .code_spans
+        .first()
+        .map(|span| span.output_start)
+        .or_else(|| self.code_fence.as_ref().map(|fence| fence.output_start))
+        .unwrap_or(self.buffer.len());
+      if end.saturating_sub(start) > cap {
+        return true;
+      }
     }
     let len = self.buffer.len();
     if len <= cap {
@@ -3522,6 +3589,29 @@ impl ConvertState {
       .min()
   }
 
+  /// The holds of `link_hold_required` that one-shot conversion shares. The item
+  /// marker settles on these, so a capped stream charges its line as one-shot does.
+  #[inline]
+  /// `content_end` is where the buffer's trailing whitespace starts, which the
+  /// callers track incrementally: rescanning it here grows with a run of breaks.
+  fn open_link_drop_floor(&self, content_end: usize) -> Option<usize> {
+    std::iter::once(&self.link)
+      .chain(&self.parent_links)
+      // A streamed-out bracket can no longer be dropped, and its rebased offset
+      // is stale. Its marker line was drained, so the marker was answered.
+      .filter(|link| {
+        link.open
+          && link.rewrites_bracket
+          && !link.hold_released
+          && (link.empty_text_pending
+            || !self.open_markers.is_empty()
+            || !self.code_spans.is_empty()
+            || content_end <= link.bracket_pos + 1)
+      })
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
+      .min()
+  }
+
   /// Free already-yielded output so streaming memory stays O(window), not
   /// O(document). Fragment cleaning still needs the full output buffer.
   /// Frontmatter and extraction keep their metadata separately.
@@ -3625,6 +3715,7 @@ impl ConvertState {
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
     self.drained_content = self.drained_content || !self.buffer[..drain_end].trim_end().is_empty();
+    self.note_list_gap_drain(drain_end);
     #[cfg(debug_assertions)]
     {
       let tail = &self.buffer.as_bytes()[drain_end.saturating_sub(64)..drain_end];
@@ -4065,6 +4156,57 @@ mod tests {
     }
   }
 
+  // A gap that only grows must not be read again at every empty list opening
+  // or block boundary, whether or not visible output ended it.
+  #[test]
+  fn a_growing_list_gap_is_read_once() {
+    let list = "<ul><li>a</li></ul>";
+    let breaks = "<br>".repeat(20_000);
+    for (name, html) in [
+      (
+        "empty lists",
+        format!("{list}{}", "<br><ul></ul>".repeat(20_000)),
+      ),
+      (
+        "after visible output",
+        format!("{list}{breaks}x{}", "<ul></ul>".repeat(20_000)),
+      ),
+      (
+        "block boundaries",
+        format!("{list}{breaks}x{}", "<em><div></div></em>".repeat(5_000)),
+      ),
+    ] {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      processor.process_chunk(&html);
+      let read = processor.state.list_gap_scanned;
+      assert!(
+        read <= 2 * html.len(),
+        "{name}: read {read} bytes of a {}-byte input",
+        html.len()
+      );
+    }
+  }
+
+  // The scanned position skips whitespace, so bytes written over it count again.
+  #[test]
+  fn list_gap_scan_reads_bytes_that_replace_scanned_ones() {
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let state = &mut processor.state;
+    state.buffer.push_str("  \n    ");
+    assert!(!state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 7);
+
+    state.truncate_buffer(3);
+    state.buffer.push('x');
+    assert!(state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 3);
+
+    // Visible output stays where the scan stopped, past any later whitespace.
+    state.buffer.push_str("  ");
+    assert!(state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 3);
+  }
+
   // A held tail that only grows must not be read again on every chunk.
   #[test]
   fn a_growing_held_tail_is_read_once() {
@@ -4224,6 +4366,7 @@ mod tests {
     state.buffer = format!("{}\n{}", "a".repeat(8192), "#".repeat(64));
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
+      item_separator_len: 0,
       list_indent: "  ".to_string(),
     });
     assert_eq!(state.trailing_heading_run(1 << 20), 64);
