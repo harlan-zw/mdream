@@ -322,6 +322,26 @@ INLINE_MARKER_TYPE[TAG_SAMP] = 5 // `
 INLINE_MARKER_TYPE[TAG_VAR] = 5 // `
 INLINE_MARKER_TYPE[TAG_Q] = 6 // "
 
+function isAsciiPunctuation(code: number): boolean {
+  return code >= 33 && code <= 126 && !isAsciiAlphanumeric(code)
+}
+
+function isAsciiAlphanumeric(code: number): boolean {
+  return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+
+// Output other than contiguous closing delimiters ends a pending closer. A
+// module function rather than a closure over the event type, which would make
+// every event allocate a context.
+function breaksPendingCloser(output: string[], entering: boolean, closer: number): boolean {
+  for (let index = 0; index < output.length; index++) {
+    const fragment = output[index]
+    if (fragment && (entering || fragment.charCodeAt(0) !== closer || fragment.charCodeAt(fragment.length - 1) !== closer))
+      return true
+  }
+  return false
+}
+
 /**
  * Length of the newline run ending just before fragment `index`.
  */
@@ -1309,6 +1329,18 @@ function updateListIndent(state: MarkdownState, element: ElementNode, eventType:
     const width = state.listIndentWidths.pop() ?? 0
     state.listIndent = state.listIndent.slice(0, state.listIndent.length - width)
   }
+}
+
+/**
+ * Determines if spacing is needed between two characters
+ */
+function needsMarkdownSpacing(lastChar: string, firstChar: string, openMarkerCount: number): boolean {
+  // A strikethrough opener touches its content; a closer or a literal tilde
+  // keeps the separator.
+  if (lastChar === '~' && openMarkerCount)
+    return firstChar === '~'
+
+  return needsSpacing(lastChar, firstChar)
 }
 
 /**
@@ -2832,6 +2864,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
   // The latest hard break's item depth as each of those markers opened.
   const openMarkerBreakDepths: Array<number | undefined> = []
   let openMarkerCount = 0
+  let pendingCloser = 0
+  // The pending closer each open marker's enter cleared.
+  const openMarkerClosers: number[] = []
   // Per open marker: the opener follows the space a pending separator wrote.
   const openMarkerFollowsSpace: boolean[] = []
   // Per open marker: that separator was trimmed from a closed inline element.
@@ -3588,6 +3623,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         textNode.value = `${textNode.generatedMarkdown.prefix}${textNode.value}${textNode.generatedMarkdown.suffix}`
       }
 
+      if (pendingCloser && textNode.value) {
+        const code = textNode.value.charCodeAt(0)
+        // A caption or quote boundary prepared above may have written its
+        // separator after `lastChar` was read.
+        const written = ownsCaptionSpace ? lastOutputChar(state.buffer) : -1
+        if ((written === -1 ? lastChar.charCodeAt(0) : written) === pendingCloser && isAsciiAlphanumeric(code))
+          textNode.value = `&#${code};${textNode.value.slice(1)}`
+        pendingCloser = 0
+      }
       // The run written below follows the separator the pending flag recorded.
       state.cacheFollowsSeparator = state.separatorPending === true
       state.separatorPending = false
@@ -3944,6 +3988,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const lastNode = state.lastNode
     state.lastNode = event.node as ElementNode | TextNode
     const buff = state.buffer
+    const closerBefore = pendingCloser
 
     // Deferred <pre> code fence (issue #97). A bare <pre> opens its fence right
     // before its first non-whitespace child so empty/whitespace-only blocks emit
@@ -4538,6 +4583,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           // The breaks inside the pair go with it, as in Rust.
           state.hardBreakDepth = openMarkerBreakDepths[openMarkerCount]
           noteListTailRewrite(state, idx)
+          pendingCloser = openMarkerClosers[openMarkerCount]!
           noteBufferRewrite(state)
           if (hoisted) {
             state.pendingInlineWhitespace = true
@@ -4674,6 +4720,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           if (lastChar && !' \n\t\r'.includes(lastChar) && !' \n\t\r'.includes(firstOutput)
             && !(literalOpeners.length && followsLiteralOpener(state.buffer.length))
             && !(openMarkerCount && hoistOpenerSpace())) {
+            pendingCloser = 0
             state.buffer.push(' ')
             state.lastContentCache = ' '
             lastChar = ' '
@@ -4697,6 +4744,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
 
     if (newLines > 0) {
+      pendingCloser = 0
       if (!buff.length && !captionEvent && !captionTransition) {
         if (output) {
           for (const fragment of output) {
@@ -4881,10 +4929,25 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
     // Add spacing between inline elements if needed. A pending raw HTML
     // boundary is written first, as in Rust, so the output starts its line.
-    if (!captionTransition && output?.[0]?.[0] && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsSpacing(lastChar, output[0][0])
+    if (!captionTransition && output?.[0]?.[0] && (tagId !== TAG_BR || output[0][0] === '<') && eventType === NodeEventEnter && !handler?.literalEnter && lastChar && needsMarkdownSpacing(lastChar, output[0][0], openMarkerCount)
       && !(pendingRawHtmlBoundary && newLines < 2 && !isInsideRawHtmlBlock(state.depthMap))) {
+      pendingCloser = 0
       state.buffer.push(' ')
       state.lastContentCache = ' '
+    }
+
+    if (eventType === NodeEventExit && handlerOutput) {
+      const markerType = INLINE_MARKER_TYPE[tagId]!
+      if (markerType && markerType <= 4) {
+        const mark = handlerOutput.charCodeAt(0)
+        const previous = lastOutputChar(buff)
+        if (previous !== mark && isAsciiPunctuation(previous)
+          && !handler?.literalExit && !options.tagOverrides && !captionFrameCount && !insideRawHtmlRegion
+          && !state.depthMap[TAG_PRE] && !state.depthMap[TAG_CODE]
+          && !state.depthMap[TAG_KBD] && !state.depthMap[TAG_SAMP] && !state.depthMap[TAG_VAR]) {
+          pendingCloser = mark
+        }
+      }
     }
 
     // Renderers such as micromark treat vertical tabs as whitespace at delimiters.
@@ -4929,6 +4992,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         }
       }
     }
+
+    // Only contiguous closing delimiters may extend a pending closer.
+    if (pendingCloser && output && breaksPendingCloser(output, eventType === NodeEventEnter, pendingCloser))
+      pendingCloser = 0
 
     // Only an ATX prefix can take in the text after it. Inside `<pre>` that
     // text is code, and inside a caption the emphasis wrapping it, either of
@@ -5015,10 +5082,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (cleanPass) {
       if (eventType === NodeEventEnter) {
-        cleanPass.enter(element, outputStart)
+        cleanPass.enter(element, outputStart, closerBefore)
       }
       else if (handlerOutput) {
-        cleanPass.closed(element, outputStart, handlerOutput)
+        cleanPass.closed(element, outputStart, handlerOutput, closerBefore)
         // Only a link's close rewrites its brackets in place.
         if (tagId === TAG_A)
           noteBufferRewrite(state)
@@ -5035,6 +5102,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           || (!state.depthMap[TAG_PRE] && !isInsideRawHtmlBlock(state.depthMap)))
         && buff[buff.length - 1] === handlerOutput) {
         openMarkerBreakDepths[openMarkerCount] = state.hardBreakDepth
+        openMarkerClosers[openMarkerCount] = closerBefore
         const previous = openMarkers[openMarkerCount - 1]
         openMarkerRunLength[openMarkerCount] = openMarkerCount > 0 && markerType <= 4
           && (previous! & MARKER_TYPE_MASK) <= 4 && previous! >> 3 === buff.length - 2

@@ -82,7 +82,7 @@ describe('inline whitespace', () => {
   it.each([
     ['<ul><li><em>e</em><ul><li>a</li></ul>t</li></ul>', '- *e*\n  - a\n\n  t'],
     ['<p><em>x</p><ul><li>y<ul><li>a</li></ul>t</li></ul>', '*x*\n\n- y\n  - a\n\n  t'],
-    ['<ul><li><em>x<ul><li>a</li></ul></em>t</li></ul><ul><li>y<ul><li>b</li></ul>u</li></ul>', '- *x  - a*t\n\n- y\n  - b\n\n  u'],
+    ['<ul><li><em>x<ul><li>a</li></ul></em>t</li></ul><ul><li>y<ul><li>b</li></ul>u</li></ul>', '- *x  - a*t\n\n* y\n  - b\n\n  u'],
     ['<template><em></template><ul><li>y<ul><li>a</li></ul>t</li></ul>', '- y\n  - a\n\n  t'],
     ['<ul><li><em><ul><li>a</li></ul>t', '- *  - a t*'],
   ])('only lets an open inline wrapper hold back the separator: %s', async (html, expected) => {
@@ -110,9 +110,9 @@ describe('inline whitespace', () => {
   const nested = '<ul><li>y<ul><li>a</li></ul>t</li></ul>'
   it.each([
     [`<p><em>x</em></p>${nested}`, dropFlag, '_x_\n\n- y\n  - a\n\n  t'],
-    [`<ul><li><em>x<ul><li>a</li></ul></em>t</li></ul>${nested}`, dropFlag, '- _x\n  - a_\n\n  t\n\n- y\n  - a\n\n  t'],
+    [`<ul><li><em>x<ul><li>a</li></ul></em>t</li></ul>${nested}`, dropFlag, '- _x\n  - a_\n\n  t\n\n* y\n  - a\n\n  t'],
     [`<p><x-em>x</x-em></p>${nested}`, addFlag, '*x*\n\n- y\n  - a\n\n  t'],
-    [`<ul><li><x-em>x<ul><li>a</li></ul></x-em>t</li></ul>${nested}`, addFlag, '- *x  - a*t\n\n- y\n  - a\n\n  t'],
+    [`<ul><li><x-em>x<ul><li>a</li></ul></x-em>t</li></ul>${nested}`, addFlag, '- *x  - a*t\n\n* y\n  - a\n\n  t'],
   ])('counts the wrapper handler a plugin kept: %s', async (html, plugin, expected) => {
     const options = { plugins: [plugin] }
     expect(htmlToMarkdown(html, options)).toBe(expected)
@@ -1175,7 +1175,7 @@ it.each([
   ['<p>h<q>&#32;<svg></svg></q>B</p>', 'h " "B'],
   ['<p><code><script>x</script>&#32;</code></p>', '` `'],
   ['<ul><li><kbd>&#32;<svg></svg></kbd>B</li></ul>', '- ` `B'],
-  ['<p><b><kbd><svg></svg>&#32;</kbd></b>B</p>', '**` `**B'],
+  ['<p><b><kbd><svg></svg>&#32;</kbd></b>B</p>', '**` `**&#66;'],
   ['<p>h<kbd>&#32;<b><svg></svg></b></kbd>B</p>', 'h` `B'],
   // No text, literal whitespace, or an emphasis pair still leave it empty.
   ['<p>a<code><svg></svg></code>b</p>', 'ab'],
