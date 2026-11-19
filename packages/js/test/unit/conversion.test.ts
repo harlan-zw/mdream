@@ -1,6 +1,6 @@
 import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
+import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
@@ -9,6 +9,35 @@ import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
 describe('adjacent emphasis and empty list code', () => {
+  it('keeps later emphasis when a plugin replaces the code closer', async () => {
+    const html = '<code>a</code><span></span><p><strong>after</strong></p>'
+    const expected = '`a`\n\n**after**'
+    const plugin = createPlugin({
+      beforeNodeProcess(event) {
+        if (event.type === NodeEventExit && event.node.type === ELEMENT_NODE && (event.node as ElementNode).name === 'code')
+          return { skip: true }
+      },
+      onNodeEnter(node) {
+        if (node.name === 'span')
+          return '`'
+      },
+    })
+    const options = { plugins: [plugin] }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+
+    const input = new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue('<code>a</code>')
+        controller.enqueue('<span></span><p><strong>after</strong></p>')
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of streamHtmlToMarkdown(input, options))
+      output += chunk
+    expect(output).toBe(expected)
+  })
+
   it.each([
     ['<strong>Aa</strong><strong>Bb</strong>', '**AaBb**'],
     ['<strong><em>Aa</em></strong><strong><em>Bb</em></strong>', '***AaBb***'],

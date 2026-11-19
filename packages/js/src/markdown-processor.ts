@@ -3348,8 +3348,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const suppressedInPre = !literalHandler && !!state.depthMap[TAG_PRE] && suppressesFormattingInPre(tagId)
     // A code span renders delimiters as literal text.
     const codeSpanMarker = gfmLifecycle.openCodeSpans.length && INLINE_MARKER_TYPE[tagId]
-    const suppressedInCodeSpan = !literalHandler
-      && (codeSpanMarker === 1 || codeSpanMarker === 2 || codeSpanMarker === 4)
+    let suppressedInCodeSpan = false
+    if (!literalHandler && (codeSpanMarker === 1 || codeSpanMarker === 2 || codeSpanMarker === 4)) {
+      // A plugin can skip the code exit, so check the owner still contains this tag.
+      const owner = gfmLifecycle.openCodeSpans.at(-1)!.owner
+      let parent = element.parent
+      while (parent && parent.depth > owner.depth)
+        parent = parent.parent
+      suppressedInCodeSpan = parent === owner
+    }
     const emptyTableRow = eventType === NodeEventExit && tagId === TAG_TR
       && state.tableRowOpenerPending && !output && !handler?.literalExit
     if (eventType === NodeEventExit && (handler?.literalExit || output)
