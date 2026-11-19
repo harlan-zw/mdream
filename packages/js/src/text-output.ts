@@ -3,26 +3,45 @@ import type { ElementNode, EngineOptions, MdreamRuntimeState, NodeEvent, TextNod
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
+  isInsideRawHtmlBlock,
   MAX_TAG_ID,
   NO_SPACING,
   NodeEventEnter,
   NodeEventExit,
+  TAG_A,
+  TAG_B,
   TAG_BLOCKQUOTE,
   TAG_BR,
+  TAG_CITE,
   TAG_CODE,
+  TAG_DEL,
+  TAG_DFN,
   TAG_DIV,
+  TAG_EM,
   TAG_FIGCAPTION,
   TAG_H1,
   TAG_H6,
+  TAG_I,
   TAG_IMG,
+  TAG_INS,
+  TAG_KBD,
   TAG_LI,
+  TAG_MARK,
   TAG_P,
   TAG_PRE,
   TAG_Q,
+  TAG_S,
+  TAG_SAMP,
   TAG_SPAN,
+  TAG_STRIKE,
+  TAG_STRONG,
+  TAG_SUB,
+  TAG_SUP,
   TAG_TABLE,
   TAG_TD,
   TAG_TH,
+  TAG_U,
+  TAG_VAR,
   TEXT_NODE,
 } from './const'
 import { isOpenVoidTag } from './parser-tags'
@@ -191,7 +210,26 @@ function canWrapHere(depthMap: Uint16Array): boolean {
   return !isInsideHeading(depthMap)
 }
 
-function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [number, number] {
+// Tags whose Markdown output wraps their content in inline markers. A heading
+// inside one stays on its line in both engines, in Markdown and in text.
+const WRITES_INLINE_MARKERS = new Uint8Array(MAX_TAG_ID + 1)
+for (const tagId of [TAG_STRONG, TAG_B, TAG_EM, TAG_I, TAG_DEL, TAG_S, TAG_STRIKE, TAG_INS, TAG_SUB, TAG_SUP, TAG_CODE, TAG_KBD, TAG_SAMP, TAG_VAR, TAG_MARK, TAG_U, TAG_CITE, TAG_DFN, TAG_Q])
+  WRITES_INLINE_MARKERS[tagId] = 1
+
+// Parity with the Rust engine's `wrapper_emits_inline_markdown`. An anchor
+// writes `[` for an href, and inside a raw HTML block it keeps the raw tag, so
+// it counts as a marker writer there too.
+function wrapperWritesInlineMarkers(node: ElementNode, options: EngineOptions, depthMap: Uint16Array): boolean {
+  const override = options.tagOverrides?.[node.name]
+  if (override && typeof override !== 'string' && (override.enter || override.exit))
+    return true
+  const tagId = node.tagId
+  if (tagId === TAG_A)
+    return node.attributes?.href !== undefined || isInsideRawHtmlBlock(depthMap)
+  return tagId !== undefined && tagId >= 0 && WRITES_INLINE_MARKERS[tagId] === 1
+}
+
+function newlineConfig(node: ElementNode, depthMap: Uint16Array, options: EngineOptions): readonly [number, number] {
   const tagId = node.tagId
   // A caption's boundary is deferred until it emits content, so its own
   // enter and exit spacing stay at zero.
@@ -204,6 +242,8 @@ function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [numb
 
   const block = tagId !== undefined
     && ((tagId >= TAG_H1 && tagId <= TAG_H6) || tagId === TAG_P || tagId === TAG_DIV || tagId === TAG_LI)
+  const heading = tagId !== undefined && tagId >= TAG_H1 && tagId <= TAG_H6
+  let closesBlock = false
   let parent = node.parent
   while (parent) {
     if (parent.tagHandler?.collapsesInnerWhiteSpace) {
@@ -212,12 +252,22 @@ function newlineConfig(node: ElementNode, depthMap: Uint16Array): readonly [numb
         continue
       }
       // A block child of an open void override keeps its block spacing.
-      if (!isBlockChildOfOpenVoid(node))
-        return NO_SPACING
-      break
+      if (isBlockChildOfOpenVoid(node))
+        break
+      // Under one wrapper that writes no markers a heading still closes its
+      // block, as in Rust. In a table cell the newline would end the row.
+      if (heading && !closesBlock && !depthMap[TAG_TD] && !depthMap[TAG_TH]
+        && !wrapperWritesInlineMarkers(parent, options, depthMap)) {
+        closesBlock = true
+        parent = parent.parent
+        continue
+      }
+      return NO_SPACING
     }
     parent = parent.parent
   }
+  if (closesBlock)
+    return [0, (node.tagHandler?.spacing ?? DEFAULT_BLOCK_SPACING)[1]]
   if (node.tagHandler?.spacing)
     return node.tagHandler.spacing
   return tagId === -1 ? NO_SPACING : DEFAULT_BLOCK_SPACING
@@ -290,7 +340,7 @@ function isInlineElement(element: ElementNode): boolean {
 
 function appendOutput(state: TextState, element: ElementNode, eventType: number, output: string | undefined, hasVisiblePluginOutput = false, afterLiteralOpener = false): void {
   const buffer = state.buffer
-  const config = newlineConfig(element, state.depthMap)
+  const config = newlineConfig(element, state.depthMap, state.options)
   // An open void writes its block boundary after its enter, as the void it
   // replaces would. A custom exit or a visible plugin exit has output of its
   // own, so the boundary stays after that exit.
@@ -430,6 +480,8 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
   // `tagOverrides` opener, in pairs. A length of -1 marks one that output
   // has already followed.
   const literalOpeners: number[] = []
+  // The last output was an image's text, so the next text owes it a separator.
+  let imageTextPending = false
 
   // A separator written while nothing follows the innermost open literal
   // opener would split it from the content after it.
@@ -521,8 +573,10 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       if (last === '\n' && !state.depthMap[TAG_PRE])
         node.value = trimAsciiWhitespaceStart(node.value)
     }
-    if (!state.depthMap[TAG_PRE] && shouldAddSpacingBeforeText(last, lastNode, node))
+    // Image text ends a word, as a block boundary does.
+    if (!state.depthMap[TAG_PRE] && shouldAddSpacingBeforeText(last, imageTextPending ? undefined : lastNode, node))
       node.value = ` ${node.value}`
+    imageTextPending = false
 
     const width = state.options.wrapWidth
     if (hasPlugins) {
@@ -566,6 +620,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
     let output: string | undefined
     let hasVisiblePluginOutput = false
     let literalEnter = false
+    let imageText = false
     // A quotation with only whitespace since its opener emits nothing, but
     // keeps the space its opener added. Openers above this one belong to
     // quotations inside it whose exit never came.
@@ -609,8 +664,9 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       output = elementOutput(element, event.type, state)
       if (event.type === NodeEventEnter && output) {
         const override = state.options.tagOverrides?.[element.name]
-        literalEnter = typeof override === 'object' && override.enter !== undefined
-          && (element.tagHandler?.isInline ?? element.tagId === -1)
+        const overridden = typeof override === 'object' && override.enter !== undefined
+        literalEnter = overridden && (element.tagHandler?.isInline ?? element.tagId === -1)
+        imageText = !overridden && element.tagId === TAG_IMG && !isOpenVoidTag(element.tagHandler, TAG_IMG)
       }
     }
 
@@ -653,6 +709,8 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
 
     const outputStart = state.buffer.length
     appendOutput(state, element, event.type, output, hasVisiblePluginOutput, literalOpeners.length !== 0 && followsLiteralOpener())
+    if (output)
+      imageTextPending = imageText
     if (literalEnter && state.buffer.length > outputStart)
       literalOpeners.push(element.depth, state.buffer.length)
     if (element.tagId === TAG_Q && event.type === NodeEventEnter && (output === '"' || output === ' "') && state.buffer.at(-1) === output) {
@@ -664,7 +722,7 @@ export function createTextOutputProcessor(options: EngineOptions, hasPlugins = f
       // An element that writes nothing, like a dropped <svg>, is no boundary.
       const isInline = isInlineElement(element)
       const blockWrites = element.tagId !== -1 && !isInline
-        && ((output !== undefined && output.length > 0) || newlineConfig(element, state.depthMap)[event.type] > 0)
+        && ((output !== undefined && output.length > 0) || newlineConfig(element, state.depthMap, state.options)[event.type] > 0)
       if ((output && hasNonWhitespace(output)) || blockWrites) {
         openQuotes.length = 0
         openQuoteNodes.length = 0

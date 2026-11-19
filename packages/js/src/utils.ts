@@ -322,10 +322,11 @@ export function parseUnsignedInteger(raw: string | undefined): number | undefine
 }
 
 /**
- * Drop leading whitespace as the Rust engine's `str::trim_start` does: Unicode
- * White_Space, which counts U+0085 but not the U+FEFF that `trimStart` strips.
+ * Length of the leading whitespace the Rust engine's `str::trim_start` drops:
+ * Unicode White_Space, which counts U+0085 but not the U+FEFF that `trimStart`
+ * strips.
  */
-export function trimOutputStart(value: string): string {
+export function outputLeadLength(value: string): number {
   let start = 0
   while (start < value.length) {
     const code = value.charCodeAt(start)
@@ -339,7 +340,36 @@ export function trimOutputStart(value: string): string {
     }
     start++
   }
+  return start
+}
+
+export function trimOutputStart(value: string): string {
+  const start = outputLeadLength(value)
   return start === 0 ? value : value.slice(start)
+}
+
+/** Length of the run of HTML whitespace that leads `value`. */
+export function leadingWhitespaceLength(value: string): number {
+  let start = 0
+  while (start < value.length) {
+    const code = value.charCodeAt(start)
+    if (code !== 32 && code !== 10 && code !== 9 && code !== 13 && code !== 12)
+      break
+    start++
+  }
+  return start
+}
+
+/**
+ * Drop the whitespace that led the text in the source. The Rust engine trims
+ * before it decodes character references, so whitespace that came from one
+ * stays, and a plugin may have rewritten the text since it was parsed.
+ */
+export function dropSourceLead(node: TextNode): void {
+  const start = Math.min(node.sourceLead!, leadingWhitespaceLength(node.value))
+  node.sourceLead = 0
+  if (start !== 0)
+    node.value = node.value.slice(start)
 }
 
 /**
@@ -348,19 +378,11 @@ export function trimOutputStart(value: string): string {
  * first text of a block that way when the text has no block ancestor.
  */
 export function trimTextAtLineStart(node: TextNode, buffer: readonly string[]): void {
-  const last = lastOutputChar(buffer)
-  if (last !== -1 && last !== 10)
+  if (!node.sourceLead)
     return
-  const value = node.value
-  let start = 0
-  while (start < value.length) {
-    const code = value.charCodeAt(start)
-    if (code !== 32 && code !== 10 && code !== 9 && code !== 13 && code !== 12)
-      break
-    start++
-  }
-  if (start !== 0)
-    node.value = value.slice(start)
+  const last = lastOutputChar(buffer)
+  if (last === -1 || last === 10)
+    dropSourceLead(node)
 }
 
 /**

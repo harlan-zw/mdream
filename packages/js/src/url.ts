@@ -80,7 +80,20 @@ function resolveAgainstBase(origin: string, url: string): string {
   return `${baseRoot}${dot ? mergeDotSegments(baseDirectory, path) : baseDirectory + path}${suffix}`
 }
 
+/** `url` without the leading and trailing C0 controls and spaces the URL parser strips. */
+export function trimUrl(url: string): string {
+  let start = 0
+  let end = url.length
+  while (start < end && url.charCodeAt(start) <= 32)
+    start++
+  while (end > start && url.charCodeAt(end - 1) <= 32)
+    end--
+  return start === 0 && end === url.length ? url : url.slice(start, end)
+}
+
 export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['clean']): string {
+  // Read it as the URL parser and `isSafeHtmlUrl` do: padding never makes it relative.
+  url = trimUrl(url)
   if (!url || url[0] === '#')
     return url
 

@@ -120,14 +120,20 @@ export interface CleanTarget {
 export interface CleanPass {
   /** Output waits for the whole document, because `fragments` needs every heading. */
   holdsOutput: boolean
-  /** An element's enter output starts at `outputStart` in the buffer. */
-  enter: (element: ElementNode, outputStart: number) => void
+  /**
+   * An element's enter output starts at `outputStart` in the buffer.
+   * `closer` is the emphasis closer pending before the event, or 0.
+   */
+  enter: (element: ElementNode, outputStart: number, closer?: number) => void
   /** An element exits; called before its exit output. */
   exit: (element: ElementNode) => void
   /** Rewrite the closing anchor to its text and skip its close. Returns true when it did. */
   unwrap: (element: ElementNode) => boolean
-  /** An element wrote its exit output `close` at `outputStart`. */
-  closed: (element: ElementNode, outputStart: number, close: string) => void
+  /**
+   * An element wrote its exit output `close` at `outputStart`.
+   * `closer` is the emphasis closer pending before the event, or 0.
+   */
+  closed: (element: ElementNode, outputStart: number, close: string, closer?: number) => void
   /** The earliest buffer index a later hook may rewrite, or Infinity. */
   held: () => number
   /** Apply the rules that need the whole document to the trimmed Markdown so far. */
@@ -226,6 +232,11 @@ export interface TextNode extends Node {
    * the output is at the start of a line.
    */
   trimsAtLineStart?: boolean
+  /**
+   * How many whitespace characters lead the text in the source. Whitespace
+   * decoded from a character reference is content and is not counted.
+   */
+  sourceLead?: number
 }
 
 /**
@@ -392,6 +403,13 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   blockquotes?: ReadonlyArray<{ readonly fragment: number }>
   /** Content-column prefix deferred after a list item rule. */
   listRulePending?: string
+  /**
+   * Marker character codes of each open `<ul>`/`<ol>`, innermost last, packed
+   * as `LIST_SELECTED_MASK` and `LIST_WRITTEN_SHIFT` describe.
+   */
+  listMarkers?: number[]
+  /** The latest item marker is `*`, where a rule on its line reads `* ***`. */
+  lastItemStar?: boolean
   /** Whether output should omit Markdown/HTML markup */
   plainText?: boolean
   /**

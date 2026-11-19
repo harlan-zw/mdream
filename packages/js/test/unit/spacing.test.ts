@@ -1079,7 +1079,7 @@ it.each([
   ['<p>h<q>&#32;<svg></svg></q>B</p>', 'h " "B'],
   ['<p><code><script>x</script>&#32;</code></p>', '` `'],
   ['<ul><li><kbd>&#32;<svg></svg></kbd>B</li></ul>', '- ` `B'],
-  ['<p><b><kbd><svg></svg>&#32;</kbd></b>B</p>', '**` `**B'],
+  ['<p><b><kbd><svg></svg>&#32;</kbd></b>B</p>', '**` `**&#66;'],
   ['<p>h<kbd>&#32;<b><svg></svg></b></kbd>B</p>', 'h` `B'],
   // No text, literal whitespace, or an emphasis pair still leave it empty.
   ['<p>a<code><svg></svg></code>b</p>', 'ab'],

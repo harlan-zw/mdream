@@ -20,6 +20,9 @@ describe('html attribute browser parity', () => {
     `alt=Bob's src=/i.png`,
     `href=/a/b/ title=t`,
     `href=/first HREF=/second`,
+    `href=/`,
+    `src="/i.svg" /alt="tiktok"`,
+    `title/href=/x`,
   ])('matches Chromium for %s', (source) => {
     expect(parseAttributes(source)).toEqual(browserAttributes(source))
   })

@@ -13,7 +13,7 @@
 
 import type { Cleaner, CleanOptions, CleanPass, CleanTarget, CleanView, ElementNode } from './types'
 import { FRAGMENT_LINK_CLOSE, FRAGMENT_LINK_OPEN, TAG_A, TAG_CODE, TAG_H1, TAG_H6 } from './const'
-import { resolveUrl } from './url'
+import { resolveUrl, trimUrl } from './url'
 import { isInsideHeading } from './utils'
 
 const ALL_RULES: CleanOptions = {
@@ -78,6 +78,11 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
   // Open anchors and the buffer index of the `[` each wrote, or -1.
   const links: ElementNode[] = []
   const brackets: number[] = []
+  // The emphasis closer a `[` cancelled, at its index in `brackets`. Written
+  // only when there is one, so most conversions never create the array: an
+  // array that empties with every root link reallocates its storage on the
+  // next push.
+  let bracketClosers: number[] | undefined
   // The exact Markdown each marked link produced, in the order the links
   // closed, which is the order of their close markers in the output. When
   // the source carries marker characters too, `finish` drops only markers
@@ -85,8 +90,11 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
   const spans: string[] = []
   // The `#fragment` each span links to, parallel to `spans`.
   const spanFragments: string[] = []
+  // The closers cancelled by each span's `[` (high byte) and close (low byte).
+  const spanClosers: number[] = []
   // The `[` of the anchor now closing, set by `exit` for `unwrap` and `closed`.
   let closing = -1
+  let closingCloser = 0
   // Raw Markdown of each heading, for `fragments` to resolve slugs against.
   const headings: string[] = []
   let headingStart = -1
@@ -94,12 +102,14 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
   return {
     holdsOutput: fragments,
 
-    enter(element, outputStart) {
+    enter(element, outputStart, closer = 0) {
       closing = -1
       const tagId = element.tagId!
       if (tagId === TAG_A) {
         links.push(element)
         brackets.push(outputStart < buffer.length && buffer[buffer.length - 1] === '[' ? buffer.length - 1 : -1)
+        if (closer)
+          (bracketClosers ??= [])[links.length - 1] = closer
       }
       // Rust takes a heading's slug from the Markdown after its `## ` prefix.
       else if (fragments && headingStart < 0 && tagId >= TAG_H1 && tagId <= TAG_H6 && !depthMap[TAG_A]) {
@@ -114,8 +124,11 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
         for (let index = links.length - 1; index >= 0; index--) {
           if (links[index] === element) {
             closing = brackets[index]!
+            closingCloser = bracketClosers?.[index] ?? 0
             links.length = index
             brackets.length = index
+            if (bracketClosers && bracketClosers.length > index)
+              bracketClosers.length = index
             break
           }
         }
@@ -140,13 +153,20 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
       if (textLength === 0)
         return false
       // Like Rust, the title takes no part: `[url](url "t")` is redundant too.
-      const selfLink = selfLinkHeadings && href.charCodeAt(0) === 35 /* # */ && isInsideHeading(depthMap)
+      const selfLink = selfLinkHeadings && trimUrl(href).charCodeAt(0) === 35 /* # */ && isInsideHeading(depthMap)
       if (!selfLink && !(redundantLinks && spells(buffer, bracket + 1, textLength, resolveUrl(href, target.options?.origin, rules))))
         return false
       // Everything past the `[` belongs to this link and is closed, so folding
       // it into one entry moves no index another open element holds.
-      const unwrapped = opener.slice(0, -1) + buffer.slice(bracket + 1).join('')
-      target.outputPositions?.replace(bracket, buffer.length, [unwrapped], offset => offset > opener.length - 1 ? offset - 1 : offset)
+      const prefix = opener.slice(0, -1)
+      const text = buffer.slice(bracket + 1).join('')
+      const reference = closingCloser
+        ? closerReference(prefix || buffer[bracket - 1] || '', text.charCodeAt(0), closingCloser)
+        : ''
+      const unwrapped = prefix + (reference ? reference + text.slice(1) : text)
+      target.outputPositions?.replace(bracket, buffer.length, [unwrapped], offset =>
+        (offset > prefix.length ? offset - 1 : offset)
+        + (reference && offset > opener.length ? reference.length - 1 : 0))
       buffer.length = bracket
       buffer.push(unwrapped)
       target.lastContentCache = unwrapped
@@ -154,7 +174,7 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
       return true
     },
 
-    closed(element, outputStart, close) {
+    closed(element, outputStart, close, closer = 0) {
       const bracket = closing
       closing = -1
       // Only a bare `](#fragment)` destination qualifies, as in Rust: an
@@ -183,6 +203,7 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
         target.lastContentCache = marked
       spans.push(`${FRAGMENT_LINK_OPEN}[${buffer.slice(bracket + 1, index).join('')}${marked}`)
       spanFragments.push(close.slice(3, destinationEnd(close, 3)))
+      spanClosers.push(closingCloser << 8 | closer)
     },
 
     held() {
@@ -194,7 +215,7 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
     },
 
     finish(markdown) {
-      return fragments ? applyFragments(markdown, headings, spans, spanFragments) : { markdown }
+      return fragments ? applyFragments(markdown, headings, spans, spanFragments, spanClosers) : { markdown }
     },
   }
 }
@@ -294,8 +315,79 @@ function slugify(text: string): string {
 
 export { slugify }
 
+/**
+ * The ASCII letter or digit a closer reference the converter wrote at `at`
+ * spells, as a char code, or 0; `end` bounds the scan. The converter writes
+ * `&#N;` in plain decimal right after an emphasis or strikethrough closer;
+ * source text never leaves that unescaped, since its `&` is written as `\&`.
+ */
+function closerReferenceAt(text: string, at: number, end: number): number {
+  const before = text.charCodeAt(at - 1)
+  if ((before !== 42 /* * */ && before !== 126 /* ~ */) || isEscaped(text, at - 1) || text.charCodeAt(at + 1) !== 35 /* # */)
+    return 0
+  let code = text.charCodeAt(at + 2)
+  if (!(code >= 49 && code <= 57))
+    return 0
+  let value = 0
+  let index = at + 2
+  while (index < at + 5 && index < end && code >= 48 && code <= 57) {
+    value = value * 10 + code - 48
+    code = text.charCodeAt(++index)
+  }
+  if (index >= end || code !== 59 /* ; */)
+    return 0
+  const folded = value | 32
+  return (value >= 48 && value <= 57) || (folded >= 97 && folded <= 122) ? value : 0
+}
+
+/**
+ * Link text as written, with its closer references outside code read as their
+ * character. An unmatched backtick run counts as open code, so no reference
+ * after it is read. Outside code a backslash escapes the next character, a
+ * backtick included; inside code it is literal.
+ */
+function linkTextWithCloserReferences(text: string, start: number, end: number): string {
+  let result = ''
+  let copied = start
+  let codeTicks = 0
+  let index = start
+  while (index < end) {
+    const code = text.charCodeAt(index)
+    if (code === 92 /* \ */ && codeTicks === 0) {
+      index += 2
+      continue
+    }
+    if (code === 96 /* ` */) {
+      const runStart = index
+      while (index < end && text.charCodeAt(index) === 96)
+        index++
+      const ticks = index - runStart
+      if (codeTicks === 0)
+        codeTicks = ticks
+      else if (codeTicks === ticks)
+        codeTicks = 0
+      continue
+    }
+    if (code === 38 /* & */ && codeTicks === 0) {
+      const decoded = closerReferenceAt(text, index, end)
+      if (decoded) {
+        result += text.slice(copied, index) + String.fromCharCode(decoded)
+        index = text.indexOf(';', index) + 1
+        copied = index
+        continue
+      }
+    }
+    index++
+  }
+  return result + text.slice(copied, end)
+}
+
 /** Strip inline markdown formatting from heading text for slug generation */
 export function stripHeadingFormatting(text: string): string {
+  return stripFormatting(text, false)
+}
+
+function stripFormatting(text: string, closerReferences: boolean): string {
   let result = ''
   const len = text.length
   const lastGt = text.lastIndexOf('>')
@@ -376,7 +468,7 @@ export function stripHeadingFormatting(text: string): string {
       if (close !== -1 && text.charCodeAt(close + 1) === 40 /* ( */) {
         const parenClose = text.indexOf(')', close + 2)
         if (parenClose !== -1) {
-          result += text.slice(i + 1, close)
+          result += closerReferences ? linkTextWithCloserReferences(text, i + 1, close) : text.slice(i + 1, close)
           i = parenClose + 1
           continue
         }
@@ -388,17 +480,28 @@ export function stripHeadingFormatting(text: string): string {
       i++
       continue
     }
+    if (c === 38 /* & */ && closerReferences) {
+      const decoded = closerReferenceAt(text, i, len)
+      if (decoded) {
+        result += String.fromCharCode(decoded)
+        i = text.indexOf(';', i) + 1
+        continue
+      }
+    }
     result += text[i]
     i++
   }
   return result.trim()
 }
 
-/** Slug for a heading's Markdown text, as Rust computes it. */
+/**
+ * Slug for a heading's Markdown text, as Rust computes it. A closer reference
+ * the converter wrote (`**b!**&#99;`) reads as its character, as it renders.
+ */
 function headingSlug(text: string): string {
   if (text.includes(FRAGMENT_LINK_OPEN) || text.includes(FRAGMENT_LINK_CLOSE))
     text = text.replaceAll(FRAGMENT_LINK_OPEN, '').replaceAll(FRAGMENT_LINK_CLOSE, '')
-  return slugify(stripHeadingFormatting(text))
+  return slugify(stripFormatting(text, true))
 }
 
 // ── Fragments ──
@@ -652,7 +755,7 @@ function stripQuotePrefixes(value: string): string {
  * internal use, but the source may still carry one; only markers paired with
  * a span the pass wrote are dropped, and any other one is copied verbatim.
  */
-function applyFragments(markdown: string, headings: readonly string[], spans: readonly string[], spanFragments: readonly string[]): CleanView {
+function applyFragments(markdown: string, headings: readonly string[], spans: readonly string[], spanFragments: readonly string[], spanClosers: readonly number[]): CleanView {
   const count = spans.length
   if (count === 0)
     return { markdown, mapPosition: position => position }
@@ -679,8 +782,11 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   }
 
   // Each pair drops its markers, and a broken link also drops its `[` and
-  // its `](#slug)`.
-  const dropAt = new Map<number, number>()
+  // its `](#slug)`. A wrapper that cancelled an emphasis closer hands it to
+  // the first character the removal leaves next to it.
+  // Positive lengths drop a run. Negative lengths expand one character.
+  const edits = new Map<number, number>()
+  let closerAt: Map<number, number> | undefined
   for (let span = 0; span < count; span++) {
     const open = opens[span]!
     if (open === -1)
@@ -688,13 +794,22 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
     const close = closes[span]!
     const closeEnd = linkCloseEnd(markdown, close + 1)
     const broken = closeEnd !== -1 && !slugs.has(spanFragments[span]!)
-    dropAt.set(open, broken ? 2 : 1)
-    dropAt.set(close, broken ? closeEnd - close : 1)
+    edits.set(open, broken ? 2 : 1)
+    edits.set(close, broken ? closeEnd - close : 1)
+    const closers = broken ? spanClosers[span]! : 0
+    if (closers) {
+      closerAt ??= new Map()
+      if (closers >> 8)
+        closerAt.set(open, closers >> 8)
+      if (closers & 255)
+        closerAt.set(close, closers & 255)
+    }
   }
 
   // Copy everything between the dropped runs, walking the markers in order.
   let result = ''
   let copied = 0
+  let closer = 0
   let nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN)
   let nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE)
   while (nextOpen !== -1 || nextClose !== -1) {
@@ -709,35 +824,63 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
     }
     // A marker inside a dropped run was never paired: the run already
     // removed it, so it must not move `copied` backwards.
-    const drop = dropAt.get(next)
+    const drop = edits.get(next)
     if (drop === undefined || next < copied)
       continue
+    if (closer && next > copied) {
+      const reference = closerReference(result, markdown.charCodeAt(copied), closer)
+      if (reference) {
+        edits.set(copied, 1 - reference.length)
+        result += reference
+        copied++
+      }
+      closer = 0
+    }
     result += markdown.slice(copied, next)
     copied = next + drop
+    closer = closerAt?.get(next) || closer
+  }
+  const reference = closer && copied < markdown.length ? closerReference(result, markdown.charCodeAt(copied), closer) : ''
+  if (reference) {
+    edits.set(copied, 1 - reference.length)
+    result += reference
+    copied++
   }
   result += markdown.slice(copied)
   let positionMap: ((position: number) => number) | undefined
   return {
     markdown: result,
     mapPosition(position) {
-      positionMap ??= createPositionMap(dropAt)
+      positionMap ??= createPositionMap(edits)
       return positionMap(position)
     },
   }
 }
 
+/**
+ * `&#N;` for an ASCII letter or digit `code` that follows the emphasis closer
+ * ending `result` once a link between them is gone, or ''. Without it the
+ * closer no longer flanks, as in the converter.
+ */
+function closerReference(result: string, code: number, closer: number): string {
+  const folded = code | 32
+  return result.charCodeAt(result.length - 1) === closer && ((code >= 48 && code <= 57) || (folded >= 97 && folded <= 122))
+    ? `&#${code};`
+    : ''
+}
+
 /** Build only when a reader needs offsets; ordinary conversion uses no map. */
-function createPositionMap(drops: ReadonlyMap<number, number>): (position: number) => number {
+function createPositionMap(edits: ReadonlyMap<number, number>): (position: number) => number {
   const starts: number[] = []
   const ends: number[] = []
   const totals: number[] = []
   let removed = 0
   let copied = 0
-  for (const start of [...drops.keys()].sort((a, b) => a - b)) {
+  for (const start of [...edits.keys()].sort((a, b) => a - b)) {
     if (start < copied)
       continue
-    const length = drops.get(start)!
-    copied = start + length
+    const length = edits.get(start)!
+    copied = start + (length < 0 ? 1 : length)
     removed += length
     starts.push(start)
     ends.push(copied)

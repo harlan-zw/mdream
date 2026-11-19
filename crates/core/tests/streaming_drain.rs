@@ -264,6 +264,24 @@ fn a_rule_around_a_deferred_fence_streams_like_one_shot() {
 }
 
 #[test]
+fn a_dropped_empty_link_in_a_nested_item_streams_like_one_shot() {
+  let empty_link_text = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for html in [
+    "<p>x</p><ul><li><ul><li><a href=\"\">&nbsp;</a></li></ul></li></ul>",
+    "<ul><li><ul><li><ul><li><ul><li><a href=\"\">&nbsp;",
+  ] {
+    assert_stream_matches(html, empty_link_text.clone());
+    assert_stream_matches_every_split(html, empty_link_text.clone());
+  }
+}
+
+#[test]
 fn a_fence_inside_a_quote_boundary_streams_like_one_shot() {
   for html in [
     "<li><blockquote/><em><pre><blockquote>",
@@ -374,6 +392,46 @@ fn figcaption_streaming_matches_one_shot() {
     (
       "<figcaption><a href=\"/x\">a</a> x</figcaption>",
       "*[a](/x) x*",
+    ),
+    // Inline HTML that opens a caption leaves the next source space to the
+    // caption, as an empty link does, with or without spacing before it.
+    (
+      "<figcaption><mark></mark> x</figcaption>",
+      "*<mark></mark>x*",
+    ),
+    (
+      "<figure><img src=\"/i.png\" alt=\"i\"><figcaption><sub></sub> x</figcaption></figure>",
+      "![i](/i.png)\n\n*<sub></sub>x*",
+    ),
+    (
+      "<p>a</p><figcaption><u></u> x</figcaption>",
+      "a\n\n*<u></u>x*",
+    ),
+    (
+      "<strong><figcaption><mark></mark> x</figcaption>y</strong>",
+      "***<mark></mark>x*y**",
+    ),
+    (
+      "<figcaption><b><mark></mark></b> x</figcaption>",
+      "***<mark></mark>**x*",
+    ),
+    (
+      "<figcaption><mark>m</mark> x</figcaption>",
+      "*<mark>m</mark> x*",
+    ),
+    // A text node of only whitespace goes whole, decoded whitespace included.
+    (
+      "<figcaption><sub>&#9;<br>z</sub></figcaption>",
+      "*<sub>  \nz</sub>*",
+    ),
+    (
+      "<figcaption><mark></mark>&#9;x</figcaption>",
+      "*<mark></mark>\tx*",
+    ),
+    // The space after the caption is not the caption's.
+    (
+      "<strong><figcaption><mark></mark> </figcaption> y</strong>",
+      "***<mark></mark>* y**",
     ),
     (
       "<figcaption><a href=\"x\"><br></a>x</figcaption>",
@@ -2431,6 +2489,52 @@ fn streaming_block_markers_at_a_deep_list_content_column_are_escaped() {
   }
 }
 
+// The output trim removes the whitespace that leads the document, so a block
+// marker behind any amount of it starts the document and is escaped, at every
+// cut. The same whitespace is kept anywhere else, where four spaces of it make
+// the marker inert.
+#[test]
+fn streaming_block_markers_behind_trimmed_leading_whitespace_are_escaped() {
+  let deep = format!("<p>{}1<b></b>. x</p>", "&#32;".repeat(40));
+  // The drain takes `abc` with it, so what stays buffered is not the document's start.
+  let drained = format!("<p>abc{}1<b></b>. x</p>", "&#32;".repeat(40));
+  let drained_expected = format!("abc{}1. x", " ".repeat(40));
+  for (html, expected) in [
+    ("<p>&#32;&#32;&#32;&#32;# x</p>", "\\# x"),
+    ("&#32;&#32;&#32;&#32;# x", "\\# x"),
+    ("<p>&#9;- x</p>", "\\- x"),
+    ("<p>&nbsp;&gt; x</p>", "\\> x"),
+    ("<p>&nbsp;# x</p>", "\\# x"),
+    ("<p>&nbsp;1. x</p>", "1\\. x"),
+    ("<p>&#10;&#32;&#32;&#32;&#32;1. x</p>", "1\\. x"),
+    ("<p>&#32;&#32;&#32;&#32;---</p>", "\\---"),
+    ("<p>&#32;&#32;&#32;&#32;<b></b># x</p>", "\\# x"),
+    ("<p>&#32;&#32;&#32;&#32;1<b></b>. x</p>", "1\\. x"),
+    (deep.as_str(), "1\\. x"),
+    ("<p>&#13;&#10;5<b></b>. x</p>", "5\\. x"),
+    (drained.as_str(), drained_expected.as_str()),
+    ("<p>&#32;&#32;&#32;&#32;x # y</p>", "x # y"),
+    ("<p>a</p><p>&#32;&#32;&#32;&#32;# x</p>", "a\n\n    # x"),
+    (
+      "<blockquote>&#32;&#32;&#32;&#32;# x</blockquote>",
+      ">     # x",
+    ),
+    ("<ul><li>&#32;&#32;&#32;&#32;# x</li></ul>", "-     # x"),
+    (
+      "<table><caption>&#10;# x</caption><tr><td>c</td></tr></table>",
+      "&#10;\\# x\n\n| c |\n| --- |",
+    ),
+  ] {
+    assert_eq!(
+      html_to_markdown(html, HtmlToMarkdownOptions::default()),
+      expected,
+      "{html}"
+    );
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
 // A `<p>` or `<div>` that opens a `<pre>` fence in a list item leaves its
 // separator to the fence, at every cut.
 #[test]
@@ -3888,6 +3992,89 @@ fn metadata_pending_output_cap_matches_one_shot() {
 }
 
 #[test]
+fn adjacent_list_markers_match_one_shot_at_every_chunk() {
+  assert_eq!(
+    html_to_markdown(
+      "<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>",
+      HtmlToMarkdownOptions::default()
+    ),
+    "- a\n\n* b\n\n- c"
+  );
+  for html in [
+    "<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>",
+    "<ol><li>a</li></ol>\n<ol start=\"3\"><li>b</li></ol>",
+    "<ul><li>a<ul><li>b</li></ul><ul><li>c</li></ul></li></ul><ul><li>d</li></ul>",
+    "<blockquote><ul><li>a</li></ul><ul><li>b</li></ul></blockquote><ul><li>c</li></ul>",
+    "<ul><li>a</li></ul><div><!-- c --><ul></ul><ul><li><hr></li></ul></div>",
+    "<ul><li>a</li></ul><p>x</p><ul><li>b</li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn empty_quotes_keep_adjacent_list_markers_at_every_split() {
+  for html in [
+    "<ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul>",
+    "<ol><li>a</li></ol><blockquote> <p></p> </blockquote><ol><li>b</li></ol>",
+    "<ul><li>a</li></ul><blockquote><blockquote></blockquote></blockquote><ul><li>b</li></ul>",
+    "<blockquote><ul><li>a</li></ul><blockquote></blockquote><ul><li>b</li></ul></blockquote>",
+    "<ul><li>a</li></ul><blockquote>x</blockquote><ul><li>b</li></ul>",
+    "<ul><li>a</li></ul><blockquote><ul><li>b</li></ul></blockquote><ul><li>c</li></ul>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// Whether a bullet starts its line reads the output tail, which a drain can move
+// behind `buffer[0]` right before the list opens.
+#[test]
+fn bullets_beside_a_delimiter_match_one_shot_at_every_split() {
+  for html in [
+    "<ul><li>a</li></ul><em><ul><li>b</li></ul></em>",
+    "<ul><li>a</li></ul><strong><ul><li>b</li></ul></strong><ul><li>c</li></ul>",
+    "<em><ul><li>a</li></ul><ul><li>b</li></ul></em>",
+    "<ul><li>a</li></ul><small><ul><li>b</li></ul><ul><li>c</li></ul></small>",
+    "<ul><li>a</li></ul>\n<small>\n<ul><li>b</li></ul>\n</small>",
+    "<span><ul><li>a</li></ul><ul><li>b</li></ul></span>",
+    "<blockquote><ul><li>a</li></ul><small><ul><li>b</li></ul></small></blockquote>",
+    "<blockquote><ul><li>a</li></ul><em><ul><li>b</li></ul></em></blockquote>",
+    "<ul><li>a</li></ul><figcaption><ul><li>b</li></ul></figcaption>",
+    "<ul><li>a</li></ul><figure><figcaption><small><ul><li>b</li></ul></small></figcaption></figure>",
+    "<ol><li>a</li></ol><em><ol><li>b</li></ol></em>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+#[test]
+fn overridden_item_markers_match_one_shot_at_every_split() {
+  for enter in ["", " ", "+ ", "* ", "- ", "1) "] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(
+        PluginConfig::default()
+          .with_tag_override(
+            "li",
+            TagOverrideConfig {
+              enter: Some(enter.to_string()),
+              ..Default::default()
+            },
+          )
+          .with_tag_override("x-li", TagOverrideConfig::alias("li")),
+      ),
+      ..Default::default()
+    };
+    let html = "<ul><li>a</li></ul><ul><x-li>b</x-li></ul><ol><li>c</li></ol><ol><x-li>d</x-li></ol>\
+      <ul><x-li>e</x-li></ul><ul><li><hr></li></ul>";
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options);
+  }
+}
+
+#[test]
 fn quote_long_line_waits_for_a_completed_line() {
   let span = format!("<span>{}</span>", "x".repeat(1024));
   let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
@@ -3936,6 +4123,145 @@ fn quote_long_line_scan_survives_tail_rewrites_and_new_lines() {
       output.push_str(&processor.finish());
       assert_eq!(output, expected, "tail={tail}");
     }
+  }
+}
+
+#[test]
+fn removable_output_adjacent_lists_streaming() {
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><b></b><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><code></code><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><b><code></code></b><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><template><blockquote>x</blockquote></template><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><b></b><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><code></code><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><b><code></code></b><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><template><blockquote>x</blockquote></template><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ul><li>a</li></ul><b>x</b><ul><li>b</li></ul>",
+    HtmlToMarkdownOptions::default(),
+  );
+  assert_stream_matches_every_split(
+    "<ol><li>a</li></ol><code>x</code><ol><li>b</li></ol>",
+    HtmlToMarkdownOptions::default(),
+  );
+}
+
+#[test]
+fn block_committed_inline_opener_lists_match_one_shot_at_every_split() {
+  for html in [
+    "<ol><li>a</li></ol><em><div></div><ol><li>b</li></ol></em>",
+    "<ol><li>a</li></ol><strong><p></p><ol><li>b</li></ol></strong><ol><li>c</li></ol>",
+  ] {
+    assert_stream_matches(html, HtmlToMarkdownOptions::default());
+    assert_stream_matches_every_split(html, HtmlToMarkdownOptions::default());
+  }
+}
+
+// Quoting settled lines between chunks rewrites the bytes after a closed list.
+// The `>` it adds does not separate the next list from that one.
+#[test]
+fn quoted_lines_between_chunks_keep_adjacent_list_markers() {
+  let text = "word ".repeat(2000);
+  for (html, alternated) in [
+    (
+      format!(
+        "<blockquote><blockquote><p>{text}</p><ul><li>a</li></ul>\n<ul><li>b</li></ul><p>{text}</p><ol><li>c</li></ol><ol><li>d</li></ol></blockquote></blockquote>"
+      ),
+      &["> > * b", "> > 1. c\n> >\n> > 1) d"][..],
+    ),
+    (
+      format!(
+        "<ul><li><blockquote><p>{text}</p><ul><li>a</li></ul><ul><li>b</li></ul></blockquote></li></ul>"
+      ),
+      &["  > * b"][..],
+    ),
+  ] {
+    let expected = html_to_markdown(&html, HtmlToMarkdownOptions::default());
+    for marker in alternated {
+      assert!(expected.contains(marker), "{marker:?} in {expected:?}");
+    }
+    for chunk in [1, 7, 64, 1000, 4096] {
+      assert_eq!(
+        stream_chunks(&html, chunk, HtmlToMarkdownOptions::default()),
+        expected,
+        "chunk={chunk}"
+      );
+    }
+  }
+}
+
+#[test]
+fn inline_overridden_lists_match_one_shot_at_every_split() {
+  let inline = TagOverrideConfig {
+    is_inline: Some(true),
+    ..Default::default()
+  };
+  let options = HtmlToMarkdownOptions {
+    plugins: Some(
+      PluginConfig::default()
+        .with_tag_override("ul", inline.clone())
+        .with_tag_override("blockquote", inline)
+        .with_tag_override("x-list", TagOverrideConfig::alias("ol")),
+    ),
+    ..Default::default()
+  };
+  for html in [
+    "<ul><li>a</li></ul><ul><li>b</li></ul><ul><li>c</li></ul>",
+    "<ul><li>a<ul><li>b</li></ul></li></ul><ul><li>c</li></ul>",
+    "<ol><li>a</li></ol><x-list><li>b</li></x-list>",
+    "<ul><li>a</li></ul><blockquote>q</blockquote><ul><li>b</li></ul>",
+  ] {
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options.clone());
+  }
+}
+
+#[test]
+fn cleaned_empty_links_preserve_adjacent_lists_at_every_split() {
+  let options = HtmlToMarkdownOptions {
+    clean: Some(CleanConfig {
+      empty_link_text: true,
+      ..Default::default()
+    }),
+    ..Default::default()
+  };
+  for (html, expected) in [
+    (
+      "<ul><li>a</li></ul><a href=\"x\"></a><ul><li>b</li></ul>",
+      "- a\n\n* b",
+    ),
+    (
+      "<ol><li>a</li></ol><a href=\"x\"></a><ol><li>b</li></ol>",
+      "1. a\n\n1) b",
+    ),
+  ] {
+    assert_eq!(html_to_markdown(html, options.clone()), expected);
+    assert_stream_matches(html, options.clone());
+    assert_stream_matches_every_split(html, options.clone());
   }
 }
 

@@ -12,8 +12,11 @@ use crate::types::{
   ElementNode, ExtractedElement, HtmlToMarkdownOptions, NodeExtras, OutputFormat, TagHandler,
   TagOverrideConfig, TailwindData,
 };
+#[cfg(feature = "html")]
+use crate::url::slugify_heading;
 use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url, slugify_heading,
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url,
+  slugify_markdown_heading, trim_url,
 };
 use std::borrow::Cow;
 
@@ -93,6 +96,42 @@ const TYPICAL_NESTING_DEPTH: usize = 32;
 /// A text run this long is emitted in pieces of the same source node, so one
 /// enormous run streams in a window instead of being held whole.
 const TEXT_RUN_FLUSH_THRESHOLD: usize = 64 * 1024;
+
+/// Initial output and input capacity of a streaming converter.
+pub(crate) const STREAM_START_CAPACITY: usize = 4096;
+
+/// A drained stream buffer is shrunk once its capacity passes `SLACK_TRIGGER`
+/// times the live bytes, down to `SLACK_KEEP` times. `SLACK_FLOOR` stands in
+/// for fewer live bytes: a drain usually empties the buffer, and shrinking
+/// near the size the next chunks grow it back to only reallocates.
+pub(crate) const SLACK_TRIGGER: usize = 4;
+const SLACK_KEEP: usize = 2;
+pub(crate) const SLACK_FLOOR: usize = 64 * 1024;
+
+/// Offset of the `]]>` closing a CDATA section. WASM uses the byte search so
+/// that no `str::find(&str)` searcher is linked in. Native keeps `str::find`:
+/// without it, the codegen of the whole `process_html` loop changed and every
+/// fixture took 0.3-1% more instructions, even with this call out of line.
+#[inline]
+fn cdata_end(after_open: &str) -> Option<usize> {
+  #[cfg(target_arch = "wasm32")]
+  {
+    crate::scan::find_bytes(after_open.as_bytes(), b"]]>")
+  }
+  #[cfg(not(target_arch = "wasm32"))]
+  {
+    after_open.find("]]>")
+  }
+}
+
+#[inline]
+pub(crate) fn release_stream_slack(buffer: &mut String) {
+  let len = buffer.len();
+  let capacity = buffer.capacity();
+  if capacity / SLACK_TRIGGER > len.max(SLACK_FLOOR) {
+    buffer.shrink_to(SLACK_FLOOR.max(SLACK_KEEP * len));
+  }
+}
 
 /// How much a run grows between scans for a usable word boundary. Prose offers
 /// one within a word or two; giving up keeps the scan off the hot path for
@@ -182,6 +221,8 @@ struct OpenMarker {
   /// pair replaces that one as the latest, so dropping the empty pair has to
   /// make the outer break the latest again.
   starts_at_hard_break: bool,
+  /// The pending closer this opener cleared, back in force if the pair drops.
+  pending: u8,
   /// A word separator sits right before the opener, moved there or written for
   /// a pending one. When the pair turns out empty it goes with the opener and
   /// is owed to the content after it.
@@ -319,6 +360,9 @@ struct LinkOutputState {
   hold_released: bool,
   /// Set in one-shot conversion too, like `pins_output`.
   empty_text_pending: bool,
+  /// The close may still rewrite or drop an emitted `[`. Set in one-shot
+  /// conversion too, unlike the streamed `hold_released` it starts from.
+  rewrites_bracket: bool,
   /// This anchor wrote its own `[`. Without it the exit's forward scan reaches
   /// past the link into the text and rewrites whatever bracket it finds there.
   bracket_emitted: bool,
@@ -334,6 +378,11 @@ struct LinkOutputState {
   /// The `[` starts where the latest hard break ends; see
   /// `OpenMarker::starts_at_hard_break`.
   starts_at_hard_break: bool,
+  /// The pending emphasis closers this link's `[` and its close cancelled.
+  /// The opener is recorded for cleaners that unwrap links; the close only
+  /// for `clean.fragments`, which may remove both again.
+  closer_before: u8,
+  closer_after: u8,
   /// Bytes before the link bracket owned by a pending heading break.
   heading_break_prefix_len: usize,
 }
@@ -346,11 +395,18 @@ struct FragmentLink {
   /// The close was written as `](#frag "title")` instead of `](#frag)`, so the
   /// drift check must accept a quoted title between the fragment and `)`.
   has_title: bool,
+  /// Pending emphasis closers cancelled by the `[` and by the `](` close. When
+  /// a broken link loses its wrappers, the closer is adjacent to the next
+  /// byte again and needs the same numeric reference as without the link.
+  bracket_closer: u8,
+  text_closer: u8,
 }
 
 #[derive(Clone)]
 struct BlockquoteFrame {
   content_start: usize,
+  /// Opening bytes after a bare item marker, removable with an empty quote.
+  item_separator_len: usize,
   list_indent: String,
 }
 
@@ -613,6 +669,16 @@ const MAX_CELL_SPAN: u8 = 64;
 /// nine digits, so anything wider stops being a list marker at all.
 const MAX_ORDERED_START: u32 = 999_999_999;
 
+/// The marker characters of an open `<ul>`/`<ol>`.
+#[derive(Clone, Copy)]
+struct ListMarker {
+  /// Character the built-in enter of its items writes.
+  selected: u8,
+  /// Character the latest marker in the list actually used, which an override
+  /// can make any other one, or 0 before an item wrote a marker.
+  written: u8,
+}
+
 // Clean mode bitmask flags
 const CLEAN_EMPTY_LINKS: u8 = 1;
 const CLEAN_FRAGMENTS: u8 = 2;
@@ -691,7 +757,7 @@ fn find_script_end_tag(bytes: &[u8], start: usize, initial_state: u8) -> ScriptS
 
   while i < bytes.len() {
     if state == SCRIPT_DATA {
-      i = crate::scan::find_byte(&bytes[i..], LT_CHAR).map_or(bytes.len(), |p| i + p);
+      i = crate::scan::find_byte_far(&bytes[i..], LT_CHAR).map_or(bytes.len(), |p| i + p);
     } else if state == SCRIPT_DATA_ESCAPED || state == SCRIPT_DATA_DOUBLE_ESCAPED {
       i = bytes[i..]
         .iter()
@@ -912,11 +978,28 @@ pub struct ConvertState {
   has_isolate_main: bool,
   pub has_frontmatter: bool,
   has_filter: bool,
+  /// Attribute bits the filter reads (`style`, `hidden`, and `class` for class
+  /// selectors); merged into every element's attribute mask.
+  filter_attr_bits: u16,
   pub has_extraction: bool,
+  /// Isolate-main, frontmatter or extraction is on: close_node runs its plugin tail.
+  close_plugin_work: bool,
   has_tag_overrides: bool,
+  /// The `override_idx` table is built and no override is an alias. Then a
+  /// built-in tag whose slot is `NO_OVERRIDE` has no override, so its fast path
+  /// can stay on while other tags are overridden. An alias breaks this: the node
+  /// carries the target's id, so the table cannot see the alias's override.
+  override_fast_ok: bool,
+  /// No override names `li`, or the override table cannot tell. Set once at
+  /// setup so each item's gate reads one bool instead of the table.
+  li_slot_free: bool,
   /// Some plugin reads arbitrary attributes, so every tag captures all of them.
   /// `frontmatter` is absent deliberately: TAG_META's mask covers what it reads.
   attrs_force_all: bool,
+  /// Attribute bits every element captures on top of its handler's: the filter
+  /// and Tailwind bits, or `ATTR_ALL` when `attrs_force_all`. Set once at setup
+  /// so the per-tag mask is one OR.
+  attr_extra_mask: u16,
 
   // Plugin tracking
   isolate_main_found: bool,
@@ -1008,11 +1091,13 @@ pub struct ConvertState {
   last_text_node_depth: usize,
   last_text_node_index: usize,
   has_last_text_node: bool,
-  /// A block boundary wrote newlines after the last text node. The trim's
-  /// cached run is then measured from behind those newlines, so a reach-back
-  /// would cross the break into the text, where JS only trims the break.
+  /// A block boundary wrote newlines after the last text node, so the text no
+  /// longer ends the output. A reach-back from a later boundary that writes
+  /// nothing would trim that break as if the text had ended with it.
   break_after_last_text: bool,
   last_node_is_inline: bool,
+  /// Text output: the last output was an image's text, so the next text owes it a separator.
+  image_text_pending: bool,
   /// A collapsed trailing space trimmed from the end of an inline element.
   /// It stays deferred until later visible inline content appears so Markdown
   /// delimiters close before the separator and streaming output has no
@@ -1035,6 +1120,9 @@ pub struct ConvertState {
   /// enter wrote for a pending separator, so an opener written right after it
   /// can take it along.
   pending_space_end: usize,
+  /// The current element's enter wrote no space for a pending separator
+  /// because its own output starts with one.
+  pending_space_owned: bool,
   /// Stream position after the last separator written on its own, which is
   /// not part of the text after it.
   separator_end: usize,
@@ -1050,6 +1138,10 @@ pub struct ConvertState {
   /// Once streaming starts, whitespace at the front of a drained buffer is
   /// content, not document-leading whitespace.
   has_streamed_output: bool,
+  /// Whether a drain has removed output. One that cut only document-leading
+  /// whitespace, which the start trim never yields, leaves the buffer at the
+  /// output start still.
+  drained_content: bool,
   /// Two bytes immediately before the retained buffer, initialized as virtual
   /// newlines at the document start. When a later rewrite trims the buffer
   /// empty, spacing and newline counts still see the one-shot context. An
@@ -1068,6 +1160,8 @@ pub struct ConvertState {
   /// Hard-wrap width in characters; 0 disables wrapping (zero-cost in the text
   /// hot path — a single integer compare). Code/tables/headings are exempt.
   wrap_width: usize,
+  /// Markdown, no node cap, no wrap: the fixed part of the text fast-path gate.
+  pub(crate) text_static_ok: bool,
   // A single-format build folds every format check to a constant.
   #[cfg_attr(
     not(any(
@@ -1097,6 +1191,7 @@ pub struct ConvertState {
   pub(crate) streaming: bool,
   /// Open inline markers retained until visible content makes them permanent.
   open_markers: Vec<OpenMarker>,
+  pending_emphasis: u8,
   /// Open markers, counted from the outermost, that a block writing nothing
   /// closed inside. A count above the open ones covers them all.
   silent_markers: usize,
@@ -1153,6 +1248,24 @@ pub struct ConvertState {
   /// Parsed `start` of each open `<ol>`, innermost last. Every item numbers
   /// itself from it, so the attribute is read once rather than once per item.
   ordered_starts: Vec<Option<u32>>,
+  /// Marker characters of each open `<ul>`/`<ol>`, innermost last.
+  list_markers: Vec<ListMarker>,
+  /// Last marker character of the list that last closed with items, or 0 once
+  /// visible output leaving the buffer, or the close of a quote around it, ends
+  /// its run. CommonMark joins the next list of the same type into it, blank
+  /// line or not, so that list takes the other character.
+  sibling_list_marker: u8,
+  /// `<li>` depth that list closed at: a list opening at another one is no sibling.
+  sibling_list_depth: u16,
+  /// Quote frames open around that list. A list under other `>` prefixes is no
+  /// sibling, while a quote that writes nothing leaves the run to its output.
+  sibling_list_quotes: usize,
+  /// Buffer offset where output after that list may turn visible, past the
+  /// whitespace already scanned. Lowered by rewrites and shifted by drains.
+  /// Read only while `sibling_list_marker` is set.
+  list_gap_from: usize,
+  /// The latest item marker is `*`, where a rule on its line reads `* ***`.
+  last_item_star: bool,
   /// `<li>` children opened so far in each open `<ol>` or `<ul>`, innermost
   /// last. An item's position among them numbers it and marks the list's first.
   list_item_counts: Vec<u32>,
@@ -1212,6 +1325,21 @@ pub struct ConvertState {
   cut_line_lead: CutLineLead,
   #[cfg(test)]
   gfm_escape_slow_path_calls: usize,
+  /// Test-only count of alias lookups, open and close tags alike.
+  #[cfg(test)]
+  pub(crate) alias_lookups: std::cell::Cell<usize>,
+  /// Test-only count of `<li>` enters taken by the simple emitter.
+  #[cfg(test)]
+  pub(crate) li_simple_enters: usize,
+  /// Test-only count of `<li>` exits taken by the simple emitter.
+  #[cfg(test)]
+  pub(crate) li_simple_exits: usize,
+  /// Test-only count of non-link enters taken by the simple emitter, `<li>` included.
+  #[cfg(test)]
+  pub(crate) simple_enters: usize,
+  /// Test-only count of non-link exits taken by the simple emitter, `<li>` included.
+  #[cfg(test)]
+  pub(crate) simple_exits: usize,
   /// Test/fuzz switch: `false` routes everything through the general path.
   #[cfg(any(test, fuzzing))]
   pub(crate) fast_paths: bool,
@@ -1234,6 +1362,9 @@ pub struct ConvertState {
   code_span_closed_bytes: usize,
   #[cfg(test)]
   heading_run_bytes_read: usize,
+  /// Bytes read to decide whether output since a closed list ended its run.
+  #[cfg(test)]
+  list_gap_scanned: usize,
   /// Bytes `opens_block_line` reads through the space run before its end.
   #[cfg(test)]
   block_line_bytes_read: std::cell::Cell<usize>,
@@ -1348,9 +1479,14 @@ impl ConvertState {
       has_frontmatter: false,
       has_filter: false,
       has_extraction: false,
+      close_plugin_work: false,
+      filter_attr_bits: ATTR_NONE,
       has_tag_overrides: false,
+      override_fast_ok: false,
+      li_slot_free: true,
       override_idx: None,
       attrs_force_all: false,
+      attr_extra_mask: ATTR_NONE,
 
       isolate_main_found: false,
       isolate_main_closed: false,
@@ -1411,17 +1547,20 @@ impl ConvertState {
       has_last_text_node: false,
       break_after_last_text: false,
       last_node_is_inline: false,
+      image_text_pending: false,
       pending_inline_whitespace: false,
       pending_leading_blank: false,
       pending_pair_separator: false,
       pending_decoded_blank: false,
       pending_space_trimmed: false,
       pending_space_end: usize::MAX,
+      pending_space_owned: false,
       separator_end: usize::MAX,
       cache_follows_separator: false,
       caption_boundary: CaptionBoundary::None,
       last_yielded_length: 0,
       has_streamed_output: false,
+      drained_content: false,
       flushed_tail: [b'\n'; 2],
       cut_line_lead: CutLineLead::Uncut,
       buffer_start_column: 0,
@@ -1431,6 +1570,7 @@ impl ConvertState {
       keep_dropped_raw_text: false,
 
       wrap_width: options_wrap_width,
+      text_static_ok: false,
       #[cfg(all(feature = "text", any(feature = "markdown", feature = "html")))]
       plain_text: format == OutputFormat::Text,
       format,
@@ -1443,6 +1583,7 @@ impl ConvertState {
       link_caption_break_snapshot_active: false,
       streaming: false,
       open_markers: Vec::new(),
+      pending_emphasis: 0,
       silent_markers: 0,
       literal_opener_ends: Vec::new(),
       drained: 0,
@@ -1467,6 +1608,12 @@ impl ConvertState {
       list_indent: String::new(),
       list_indent_widths: Vec::with_capacity(8),
       ordered_starts: Vec::new(),
+      list_markers: Vec::new(),
+      sibling_list_marker: 0,
+      sibling_list_depth: 0,
+      sibling_list_quotes: 0,
+      list_gap_from: 0,
+      last_item_star: false,
       list_item_counts: Vec::new(),
 
       pre_fence_pending: false,
@@ -1484,6 +1631,16 @@ impl ConvertState {
       hard_break_end: usize::MAX,
       #[cfg(test)]
       gfm_escape_slow_path_calls: 0,
+      #[cfg(test)]
+      alias_lookups: std::cell::Cell::new(0),
+      #[cfg(test)]
+      li_simple_enters: 0,
+      #[cfg(test)]
+      li_simple_exits: 0,
+      #[cfg(test)]
+      simple_enters: 0,
+      #[cfg(test)]
+      simple_exits: 0,
       #[cfg(any(test, fuzzing))]
       fast_paths: true,
       #[cfg(test)]
@@ -1498,6 +1655,8 @@ impl ConvertState {
       code_span_closed_bytes: 0,
       #[cfg(test)]
       heading_run_bytes_read: 0,
+      #[cfg(test)]
+      list_gap_scanned: 0,
       #[cfg(test)]
       block_line_bytes_read: std::cell::Cell::new(0),
       #[cfg(test)]
@@ -1528,6 +1687,7 @@ impl ConvertState {
       s.clean_flags = flags;
     }
 
+    s.text_static_ok = s.is_markdown() && options_max_node_bytes == 0 && options_wrap_width == 0;
     if let Some(plugins) = &s.options.plugins {
       s.has_plugins = true;
       s.has_tailwind = plugins.tailwind.is_some();
@@ -1535,6 +1695,8 @@ impl ConvertState {
       s.has_frontmatter = plugins.frontmatter.is_some();
       if let Some(ovs) = &plugins.tag_overrides {
         s.has_tag_overrides = true;
+        // Stays false when the table is not built below.
+        s.li_slot_free = false;
         s.fences_unreliable = ovs
           .iter()
           .any(|(_, ov)| ov.enter.is_some() || ov.exit.is_some());
@@ -1551,7 +1713,17 @@ impl ConvertState {
               idx[id as usize] = i;
             }
           }
+          // An `li` override that sets only `is_inline` emits what no override
+          // does: the open tag already copied `is_inline` onto the node. Spacing
+          // and enter/exit strings change the output, so those keep the general path.
+          let li_slot = idx[TAG_LI as usize];
+          s.li_slot_free = li_slot == NO_OVERRIDE
+            || ovs.get(li_slot as usize).is_some_and(|(_, ov)| {
+              ov.enter.is_none() && ov.exit.is_none() && ov.spacing.is_none()
+            });
           s.override_idx = Some(idx);
+          s.override_fast_ok = ovs.iter().all(|(_, ov)| ov.alias_tag_id.is_none());
+          s.li_slot_free &= s.override_fast_ok;
         }
       }
       if let Some(extraction) = &plugins.extraction {
@@ -1562,6 +1734,7 @@ impl ConvertState {
           .map(|sel| (sel.clone(), parse_css_selector_list(sel)))
           .collect();
       }
+      s.close_plugin_work = s.has_isolate_main || s.has_frontmatter || s.has_extraction;
       if let Some(filter) = &plugins.filter {
         s.has_filter = true;
         if let Some(incl) = &filter.include {
@@ -1579,10 +1752,34 @@ impl ConvertState {
         }
         s.filter_process_children = filter.process_children.unwrap_or(true);
       }
-      // Capped parsing keeps its existing attribute budget, including names
-      // that Tailwind does not read.
+      // Filter selectors without id or attribute parts read only the bits the
+      // filter needs. HTML and text output read other attributes, so they keep
+      // every attribute. Capped parsing keeps its existing attribute budget,
+      // including names that the filter and Tailwind do not read.
+      let filter_selector_bits = s
+        .filter_exclude_parsed
+        .iter()
+        .chain(&s.filter_include_parsed)
+        .fold(ATTR_NONE, |bits, (_, parsed)| {
+          bits | crate::selector::selector_list_attr_bits(parsed)
+        });
+      let filter_needs_all = s.has_filter
+        && (s.options.max_node_bytes != 0 || !s.is_markdown() || filter_selector_bits == ATTR_ALL);
+      if s.has_filter {
+        s.filter_attr_bits = ATTR_STYLE | ATTR_HIDDEN | (filter_selector_bits & ATTR_CLASS);
+      }
       s.attrs_force_all =
-        s.has_filter || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
+        filter_needs_all || s.has_extraction || (s.has_tailwind && s.options.max_node_bytes != 0);
+      s.attr_extra_mask = if s.attrs_force_all {
+        ATTR_ALL
+      } else {
+        s.filter_attr_bits
+          | if s.has_tailwind {
+            ATTR_CLASS
+          } else {
+            ATTR_NONE
+          }
+      };
     }
     s
   }
@@ -1831,7 +2028,11 @@ impl ConvertState {
     };
     self.process_text_buffer_piece(text_buffer, false);
     self.entity_seals = tail_seals;
-    // A blank link's text can outgrow the cap within a single run.
+    // Piece boundaries depend on content, so settle the marker here as well
+    // as at token boundaries before charging output that still cannot stream.
+    if self.empty_item_hazard {
+      self.settle_item_marker();
+    }
     self.check_held_output();
     self.last_node_is_inline = true;
     text_buffer.push_str(&tail);
@@ -1924,6 +2125,7 @@ impl ConvertState {
       let result = self.apply_opening_tag(
         pending.name(),
         pending.tag_id,
+        tag_handler,
         pending.is_builtin,
         i,
         resume.self_closing,
@@ -1985,13 +2187,16 @@ impl ConvertState {
           let limit = chunk_length.min(i + self.text_run_room(&text_buffer));
           i += 1;
           let mut had_space = false;
+          // Opaque, so the table address is computed once per run. Otherwise
+          // LLVM may rebuild it per byte (aarch64: +1 instruction per byte).
+          let table: &[bool; 256] = std::hint::black_box(&BATCHABLE_TEXT);
           loop {
-            while i < limit && BATCHABLE_TEXT[bytes[i] as usize] {
+            while i < limit && table[bytes[i] as usize] {
               i += 1;
             }
             // Doubled, trailing, and pre-tag spaces leave the run to the
             // general path, which keeps its collapsing semantics.
-            if i + 1 < limit && bytes[i] == SPACE_CHAR && BATCHABLE_TEXT[bytes[i + 1] as usize] {
+            if i + 1 < limit && bytes[i] == SPACE_CHAR && table[bytes[i + 1] as usize] {
               had_space = true;
               i += 2;
               continue;
@@ -2067,7 +2272,13 @@ impl ConvertState {
             self.last_char_was_whitespace = false;
           }
           if !self.in_pre && self.last_char_was_whitespace {
-            i += 1;
+            // The rest of a collapsed run changes no state. Skip it here: the
+            // indentation between tags would otherwise take every byte through
+            // all the checks above.
+            i = crate::scan::whitespace_run_end(bytes, i + 1);
+            if text_buffer.is_empty() {
+              run_start = i - 1;
+            }
             continue;
           }
           if self.in_pre {
@@ -2278,7 +2489,7 @@ impl ConvertState {
         // doctype cases.
         let cdata = chunk[i + 2..].strip_prefix("[CDATA[");
         if let Some(after_open) = cdata {
-          if let Some(rel) = after_open.find("]]>") {
+          if let Some(rel) = cdata_end(after_open) {
             let token_len = "<![CDATA[".len() + rel + 3;
             self.complete_text_node(&mut text_buffer);
             if self.held_output_exceeded {
@@ -2432,7 +2643,9 @@ impl ConvertState {
         let mut is_builtin = builtin_tag_id.is_some();
         // An aliased tag renders as its target but keeps its source name for
         // its end tag; a built-in one takes the lowercase name from TAG_NAMES.
+        // With no alias in any override, the lookup can only return `None`.
         if self.has_tag_overrides
+          && !self.override_fast_ok
           && let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id)
         {
           if let Some(id) = builtin_tag_id {
@@ -2706,6 +2919,7 @@ impl ConvertState {
       };
 
       let mut removals = Vec::with_capacity(self.fragment_links.len());
+      let mut has_closer = false;
       for link in &self.fragment_links {
         if has_aliased_bracket(link.bracket_start) {
           continue;
@@ -2752,8 +2966,9 @@ impl ConvertState {
         if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
           continue; // resolves to a heading, keep the link whole
         }
-        removals.push((bracket_start, bracket_start + 1));
-        removals.push((text_end, link_end));
+        removals.push((bracket_start, bracket_start + 1, link.bracket_closer));
+        removals.push((text_end, link_end, link.text_closer));
+        has_closer |= link.bracket_closer != 0 || link.text_closer != 0;
       }
 
       // Links are recorded at their close, so a link lands after the ones
@@ -2771,36 +2986,40 @@ impl ConvertState {
         removals[slot] = entry;
       }
 
-      // Only deletes, so it compacts in place: `write` trails `read` by bytes
-      // dropped so far. A clean document never writes a byte; rebuilding into
-      // a second String cost 7.2 MB on the spec page.
-      let buf_len = self.buffer.len();
-      let mut read = 0usize;
-      let mut write = 0usize;
-      let mut bytes = std::mem::take(&mut self.buffer).into_bytes();
-      for (remove_start, remove_end) in &removals {
-        // A duplicate range (an aliased bracket shared with a nested anchor)
-        // is already dropped; skip it without copying.
-        if *remove_end <= read {
-          continue;
+      if !has_closer {
+        // Only deletes, so it compacts in place: `write` trails `read` by bytes
+        // dropped so far. A clean document never writes a byte; rebuilding into
+        // a second String cost 7.2 MB on the spec page.
+        let buf_len = self.buffer.len();
+        let mut read = 0usize;
+        let mut write = 0usize;
+        let mut bytes = std::mem::take(&mut self.buffer).into_bytes();
+        for (remove_start, remove_end, _) in &removals {
+          // A duplicate range (an aliased bracket shared with a nested anchor)
+          // is already dropped; skip it without copying.
+          if *remove_end <= read {
+            continue;
+          }
+          if *remove_start > read {
+            bytes.copy_within(read..*remove_start, write);
+            write += *remove_start - read;
+          }
+          read = *remove_end;
         }
-        if *remove_start > read {
-          bytes.copy_within(read..*remove_start, write);
-          write += *remove_start - read;
+        // `read` only advances past a dropped run, so zero means nothing changed.
+        if read > 0 {
+          if read < buf_len {
+            bytes.copy_within(read..buf_len, write);
+            write += buf_len - read;
+          }
+          bytes.truncate(write);
         }
-        read = *remove_end;
+        // Removals end on validated ASCII delimiters, so this cannot fail.
+        self.buffer = String::from_utf8(bytes)
+          .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+      } else {
+        self.buffer = Self::remove_fragment_wrappers(&self.buffer, &removals);
       }
-      // `read` only advances past a dropped run, so zero means nothing changed.
-      if read > 0 {
-        if read < buf_len {
-          bytes.copy_within(read..buf_len, write);
-          write += buf_len - read;
-        }
-        bytes.truncate(write);
-      }
-      // Removals end on validated ASCII delimiters, so this cannot fail.
-      self.buffer = String::from_utf8(bytes)
-        .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
     }
     if !self.streaming_break_runs.is_empty() {
       let extra_len = self.streaming_break_runs.iter().fold(0usize, |total, run| {
@@ -2997,6 +3216,7 @@ impl ConvertState {
   pub(super) fn note_buffer_rewrite(&mut self, offset: usize) {
     self.line_start_dirty_from = self.line_start_dirty_from.min(offset);
     self.heading_run_dirty_from = self.heading_run_dirty_from.min(offset);
+    self.list_gap_from = self.list_gap_from.min(offset);
     self.held_whitespace.note_rewrite(offset);
     self.held_emphasis_blank.note_rewrite(offset);
     self.held_emphasis_whitespace.note_rewrite(offset);
@@ -3036,6 +3256,7 @@ impl ConvertState {
     self.charged_vertical_tabs.note_drain(removed);
     self.held_spaces.note_drain(removed);
     self.held_heading_run.note_drain(removed);
+    self.list_gap_from = self.list_gap_from.saturating_sub(removed);
     self.caption_line.note_drain(removed);
     self.marker_line.note_drain(removed);
     self.leading_whitespace = 0;
@@ -3063,6 +3284,23 @@ impl ConvertState {
     // every break since the last text also adds up runs split by other markup.
     if self.held_break_bytes > cap {
       return true;
+    }
+    // An unresolved item marker pins its line even when no quote or link does.
+    // Settlement may still be blocked by an open inline construct or whitespace.
+    // Fragment cleaning retains the whole document anyway, as for a quote.
+    if !self.retains_whole_document() && self.item_marker_line_held() {
+      let start = self.empty_item_line_start;
+      // Code bounds and drops its own held content. Charge only the prefix
+      // before it, so that exhausting code can still retain following nodes.
+      let end = self
+        .code_spans
+        .first()
+        .map(|span| span.output_start)
+        .or_else(|| self.code_fence.as_ref().map(|fence| fence.output_start))
+        .unwrap_or(self.buffer.len());
+      if end.saturating_sub(start) > cap {
+        return true;
+      }
     }
     let len = self.buffer.len();
     if len <= cap {
@@ -3357,11 +3595,41 @@ impl ConvertState {
     }
   }
 
+  /// Whether the open link's `[` ends the output, so text written now leads
+  /// its label.
+  #[inline]
+  pub(crate) fn leads_link_label(&self) -> bool {
+    self.link.open && self.link.bracket_emitted && self.link.bracket_pos + 1 == self.buffer.len()
+  }
+
   #[inline]
   fn open_link_hold_floor(&self) -> Option<usize> {
     std::iter::once(&self.link)
       .chain(&self.parent_links)
       .filter(|link| self.link_hold_required(link))
+      .map(|link| link.bracket_pos - link.heading_break_prefix_len)
+      .min()
+  }
+
+  /// The holds of `link_hold_required` that one-shot conversion shares. The item
+  /// marker settles on these, so a capped stream charges its line as one-shot does.
+  #[inline]
+  /// `content_end` is where the buffer's trailing whitespace starts, which the
+  /// callers track incrementally: rescanning it here grows with a run of breaks.
+  fn open_link_drop_floor(&self, content_end: usize) -> Option<usize> {
+    std::iter::once(&self.link)
+      .chain(&self.parent_links)
+      // A streamed-out bracket can no longer be dropped, and its rebased offset
+      // is stale. Its marker line was drained, so the marker was answered.
+      .filter(|link| {
+        link.open
+          && link.rewrites_bracket
+          && !link.hold_released
+          && (link.empty_text_pending
+            || !self.open_markers.is_empty()
+            || !self.code_spans.is_empty()
+            || content_end <= link.bracket_pos + 1)
+      })
       .map(|link| link.bracket_pos - link.heading_break_prefix_len)
       .min()
   }
@@ -3468,6 +3736,8 @@ impl ConvertState {
     // earlier drain keeps that answer across successive cuts.
     self.cut_line_lead = Self::classify_cut_line(bytes, drain_end, self.cut_line_lead);
     self.note_link_release(drain_end);
+    self.drained_content = self.drained_content || !self.buffer[..drain_end].trim_end().is_empty();
+    self.note_list_gap_drain(drain_end);
     #[cfg(debug_assertions)]
     {
       let tail = &self.buffer.as_bytes()[drain_end.saturating_sub(64)..drain_end];
@@ -3477,6 +3747,7 @@ impl ConvertState {
     }
     self.drained += drain_end;
     self.buffer.drain(..drain_end);
+    release_stream_slack(&mut self.buffer);
     self.note_buffer_drain(drain_end);
     self.last_yielded_length -= drain_end;
     self.link.bracket_pos = self.link.bracket_pos.saturating_sub(drain_end);
@@ -3794,6 +4065,9 @@ fn push_ended_reference(out: &mut String, reference: &str, scratch: &mut String)
   }
 }
 
+// Without a cap this is one `push_str`. Inlined on native, where the call
+// saved seven registers for it; WASM keeps the single copy for size.
+#[cfg_attr(not(target_arch = "wasm32"), inline(always))]
 fn push_capped_text_node(
   buffer: &mut String,
   text: &str,
@@ -3804,6 +4078,11 @@ fn push_capped_text_node(
     buffer.push_str(text);
     return false;
   }
+  push_text_under_cap(buffer, text, cap, exhausted)
+}
+
+#[inline(never)]
+fn push_text_under_cap(buffer: &mut String, text: &str, cap: usize, exhausted: &mut bool) -> bool {
   if text.is_empty() {
     return false;
   }
@@ -3899,6 +4178,57 @@ mod tests {
         html.len()
       );
     }
+  }
+
+  // A gap that only grows must not be read again at every empty list opening
+  // or block boundary, whether or not visible output ended it.
+  #[test]
+  fn a_growing_list_gap_is_read_once() {
+    let list = "<ul><li>a</li></ul>";
+    let breaks = "<br>".repeat(20_000);
+    for (name, html) in [
+      (
+        "empty lists",
+        format!("{list}{}", "<br><ul></ul>".repeat(20_000)),
+      ),
+      (
+        "after visible output",
+        format!("{list}{breaks}x{}", "<ul></ul>".repeat(20_000)),
+      ),
+      (
+        "block boundaries",
+        format!("{list}{breaks}x{}", "<em><div></div></em>".repeat(5_000)),
+      ),
+    ] {
+      let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+      processor.process_chunk(&html);
+      let read = processor.state.list_gap_scanned;
+      assert!(
+        read <= 2 * html.len(),
+        "{name}: read {read} bytes of a {}-byte input",
+        html.len()
+      );
+    }
+  }
+
+  // The scanned position skips whitespace, so bytes written over it count again.
+  #[test]
+  fn list_gap_scan_reads_bytes_that_replace_scanned_ones() {
+    let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+    let state = &mut processor.state;
+    state.buffer.push_str("  \n    ");
+    assert!(!state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 7);
+
+    state.truncate_buffer(3);
+    state.buffer.push('x');
+    assert!(state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 3);
+
+    // Visible output stays where the scan stopped, past any later whitespace.
+    state.buffer.push_str("  ");
+    assert!(state.scan_list_gap(state.buffer.len()));
+    assert_eq!(state.list_gap_from, 3);
   }
 
   // A held tail that only grows must not be read again on every chunk.
@@ -4060,6 +4390,7 @@ mod tests {
     state.buffer = format!("{}\n{}", "a".repeat(8192), "#".repeat(64));
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
+      item_separator_len: 0,
       list_indent: "  ".to_string(),
     });
     assert_eq!(state.trailing_heading_run(1 << 20), 64);
@@ -4088,6 +4419,228 @@ mod tests {
 
     check(&["<p><b></b> 😀"]);
     check(&["<p><b></b> ", "😀"]);
+  }
+}
+
+#[cfg(test)]
+mod override_fast_gate_tests {
+  use super::*;
+  use crate::types::{PluginConfig, TagOverrideConfig};
+
+  fn state_with(overrides: Vec<(String, TagOverrideConfig)>) -> ConvertState {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    ConvertState::new(options, 4096, OutputFormat::Markdown)
+  }
+
+  /// Enter and exit overrides keep the per-tag gate; an alias turns it off.
+  #[test]
+  fn override_fast_ok_is_false_only_when_an_alias_is_present() {
+    let plain = state_with(vec![("em".into(), TagOverrideConfig::wrap("_", "_"))]);
+    assert!(plain.override_fast_ok);
+
+    let aliased = state_with(vec![("b".into(), TagOverrideConfig::alias("strong"))]);
+    assert!(!aliased.override_fast_ok);
+
+    let mixed = state_with(vec![
+      ("em".into(), TagOverrideConfig::wrap("_", "_")),
+      ("x-alias".into(), TagOverrideConfig::alias("em")),
+    ]);
+    assert!(!mixed.override_fast_ok);
+
+    let none = ConvertState::new(
+      HtmlToMarkdownOptions::default(),
+      4096,
+      OutputFormat::Markdown,
+    );
+    assert!(!none.override_fast_ok);
+  }
+
+  /// Only the overridden tag leaves the fast path; its neighbours keep it.
+  #[test]
+  fn only_the_overridden_tag_leaves_the_fast_path() {
+    let state = state_with(vec![("em".into(), TagOverrideConfig::wrap("_", "_"))]);
+    assert!(!state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(state.element_fast_path_ok(Some(TAG_STRONG)));
+    assert!(state.link_fast_path_ok(Some(TAG_A)));
+    assert!(!state.element_fast_path_ok(None));
+  }
+
+  /// An override for a tag the document never uses still leaves every
+  /// element on its fast path.
+  #[test]
+  fn override_for_an_absent_tag_keeps_fast_paths() {
+    let state = state_with(vec![(
+      "video".into(),
+      TagOverrideConfig::wrap("[v]", "[/v]"),
+    )]);
+    assert!(state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(!state.element_fast_path_ok(Some(TAG_VIDEO)));
+  }
+
+  /// An alias makes the id table unable to see the alias node, so no
+  /// element may take a fast path.
+  #[test]
+  fn alias_override_turns_every_fast_path_off() {
+    let state = state_with(vec![("b".into(), TagOverrideConfig::alias("strong"))]);
+    assert!(!state.element_fast_path_ok(Some(TAG_STRONG)));
+    assert!(!state.element_fast_path_ok(Some(TAG_EM)));
+    assert!(!state.link_fast_path_ok(Some(TAG_A)));
+  }
+
+  /// Counts of `<li>` enters and exits the simple emitter took for
+  /// `<ul><li>a</li></ul>` under the given overrides and format.
+  fn li_simple_paths(
+    overrides: Vec<(String, TagOverrideConfig)>,
+    format: OutputFormat,
+  ) -> (usize, usize) {
+    let html = "<ul><li>a</li></ul>";
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(crate::types::PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let mut state = ConvertState::new(options, 4096, format);
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    (state.li_simple_enters, state.li_simple_exits)
+  }
+
+  /// A plain `<li>` takes the item fast path on both enter and exit, in
+  /// Markdown and Text. An override on `ul` leaves it there, and an override on
+  /// `li` itself sends it to the general path.
+  #[test]
+  fn plain_li_takes_the_item_fast_path() {
+    let ul = || vec![("ul".into(), TagOverrideConfig::wrap("[", "]"))];
+    let li = || vec![("li".into(), TagOverrideConfig::wrap("(", ")"))];
+    assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Markdown), (1, 1));
+    assert_eq!(li_simple_paths(ul(), OutputFormat::Markdown), (1, 1));
+    assert_eq!(li_simple_paths(li(), OutputFormat::Markdown), (0, 0));
+    assert_eq!(li_simple_paths(Vec::new(), OutputFormat::Text), (1, 1));
+    assert_eq!(li_simple_paths(ul(), OutputFormat::Text), (1, 1));
+    assert_eq!(li_simple_paths(li(), OutputFormat::Text), (0, 0));
+  }
+
+  /// An `li` override that sets only `is_inline` changes no output (the open
+  /// tag already copies it onto the node), so the item keeps its fast path.
+  /// Spacing, enter and exit change output, so they send it to the general path.
+  #[test]
+  fn li_override_fast_path_depends_on_what_it_sets() {
+    let li_with = |config: TagOverrideConfig| vec![("li".into(), config)];
+    let inline = || {
+      li_with(TagOverrideConfig {
+        is_inline: Some(true),
+        ..Default::default()
+      })
+    };
+    let spacing = || {
+      li_with(TagOverrideConfig {
+        spacing: Some([1, 1]),
+        ..Default::default()
+      })
+    };
+    let enter = || {
+      li_with(TagOverrideConfig {
+        enter: Some("(".into()),
+        ..Default::default()
+      })
+    };
+    let exit = || {
+      li_with(TagOverrideConfig {
+        exit: Some(")".into()),
+        ..Default::default()
+      })
+    };
+    for format in [OutputFormat::Markdown, OutputFormat::Text] {
+      assert_eq!(li_simple_paths(inline(), format), (1, 1), "{format:?}");
+      assert_eq!(li_simple_paths(spacing(), format), (0, 0), "{format:?}");
+      assert_eq!(li_simple_paths(enter(), format), (0, 0), "{format:?}");
+      assert_eq!(li_simple_paths(exit(), format), (0, 0), "{format:?}");
+    }
+    // Duplicate keys: the first one decides, as in `override_for_node`.
+    let mut enter_then_inline = enter();
+    enter_then_inline.extend(inline());
+    let mut inline_then_enter = inline();
+    inline_then_enter.extend(enter());
+    assert_eq!(
+      li_simple_paths(enter_then_inline, OutputFormat::Markdown),
+      (0, 0)
+    );
+    assert_eq!(
+      li_simple_paths(inline_then_enter, OutputFormat::Markdown),
+      (1, 1)
+    );
+    // An alias elsewhere turns the override fast gate off for every tag.
+    let mut aliased = inline();
+    aliased.push(("x-alias".into(), TagOverrideConfig::alias("em")));
+    assert_eq!(li_simple_paths(aliased, OutputFormat::Markdown), (0, 0));
+  }
+
+  /// Alias lookups made while converting `<ul><li>a</li></ul>`.
+  fn alias_lookups(overrides: Vec<(String, TagOverrideConfig)>) -> usize {
+    let html = "<ul><li>a</li></ul>";
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(crate::types::PluginConfig {
+        tag_overrides: Some(overrides),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let mut state = ConvertState::new(options, 4096, OutputFormat::Markdown);
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    state.alias_lookups.get()
+  }
+
+  /// With no alias in any override, open and close tags skip the alias lookup;
+  /// an alias anywhere keeps it on every tag.
+  #[test]
+  fn alias_lookup_is_skipped_when_no_override_aliases() {
+    let plain = vec![("em".into(), TagOverrideConfig::wrap("_", "_"))];
+    assert_eq!(alias_lookups(plain), 0);
+    let aliased = vec![("b".into(), TagOverrideConfig::alias("strong"))];
+    assert!(alias_lookups(aliased) > 0);
+  }
+
+  /// Simple-emitter enters and exits for `html`, with the fast paths on or off.
+  fn simple_takes(html: &str, format: OutputFormat, fast: bool) -> (usize, usize) {
+    let mut state = ConvertState::new(HtmlToMarkdownOptions::default(), 4096, format);
+    state.fast_paths = fast;
+    let consumed = state.process_html(html);
+    state.finalize(&html[consumed..]);
+    (state.simple_enters, state.simple_exits)
+  }
+
+  /// Plain inline and block tags take the simple emitter in Text as well as
+  /// Markdown. With the fast paths off nothing does. `<ul>` is a simple tag,
+  /// so the two-element list counts twice.
+  #[test]
+  fn text_takes_the_simple_path_for_plain_tags() {
+    for format in [OutputFormat::Markdown, OutputFormat::Text] {
+      assert_eq!(simple_takes("<p>a</p>", format, true), (1, 1), "{format:?}");
+      assert_eq!(
+        simple_takes("<span>a</span>", format, true),
+        (1, 1),
+        "{format:?}"
+      );
+      assert_eq!(
+        simple_takes("<ul><li>a</li></ul>", format, true),
+        (2, 2),
+        "{format:?}"
+      );
+      assert_eq!(
+        simple_takes("<p>a</p>", format, false),
+        (0, 0),
+        "{format:?}"
+      );
+    }
   }
 }
 
