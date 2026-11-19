@@ -2176,6 +2176,7 @@ impl ConvertState {
         if owes_separator {
           end -= 1;
         }
+        self.drop_held_break_runs(end);
         self.truncate_buffer(end);
         self.last_content_cache_len = self.push_code_span_content(emitted, true);
         self.last_node_is_inline = is_inline;
@@ -2210,6 +2211,7 @@ impl ConvertState {
             self.pending_decoded_blank = false;
           }
         }
+        self.drop_held_break_runs(end);
         self.truncate_buffer(end);
         if open_marker.starts_at_hard_break {
           self.hard_break_end = open_marker.output_start;
@@ -2234,6 +2236,21 @@ impl ConvertState {
     // output makes every enclosing marker non-empty, so release them all.
     self.open_markers.clear();
     false
+  }
+
+  /// Take back the held runs of breaks that start at or after `len`, which a
+  /// retraction to `len` removes whole. `truncate_buffer` takes back one copy
+  /// of a run starting at `len` and writes the rest back, which is right for a
+  /// trim that eats a single break and wrong for a dropped pair whose content
+  /// was a run of them.
+  fn drop_held_break_runs(&mut self, len: usize) {
+    while self
+      .streaming_break_runs
+      .last()
+      .is_some_and(|run| run.output_start >= len)
+    {
+      self.streaming_break_runs.pop();
+    }
   }
 
   /// The closer would move this run of whitespace and vertical tabs after
