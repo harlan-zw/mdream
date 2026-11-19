@@ -65,7 +65,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
-import { blockOpenPrefix, dropSourceLead, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
+import { blockOpenPrefix, dropSourceLead, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, pendingMarkerIndent, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
   /** Configuration options for conversion */
@@ -200,6 +200,8 @@ interface CodeFence {
 
 export interface BlockquoteFrame {
   fragment: number
+  /** Opening fragments after a bare item marker, removable with an empty quote. */
+  itemSeparatorFragments: number
   listIndent: string
   /**
    * Whether the output before the quote ended in whitespace, recorded at enter.
@@ -1464,6 +1466,19 @@ function quotedOffset(content: string, listIndent: string, offset: number): numb
   }
 }
 
+function onItemMarkerLine(state: MarkdownState, end = state.buffer.length): boolean {
+  if (!state.listIndent)
+    return false
+  for (let fragment = end - 1; fragment >= 0; fragment--) {
+    const value = state.buffer[fragment]!
+    for (let index = value.length - 1; index >= 0; index--) {
+      if (value.charCodeAt(index) !== 32)
+        return listMarkerLineStart(state.buffer, fragment, index, pendingMarkerIndent(state))
+    }
+  }
+  return false
+}
+
 /** Prefix the closing quote's content, returning whether anything was written. */
 function finalizeBlockquote(state: MarkdownState): boolean {
   const frame = state.blockquotes.pop()
@@ -1476,8 +1491,18 @@ function finalizeBlockquote(state: MarkdownState): boolean {
   // An empty quote whose start followed terminated output writes nothing.
   // The context is the enter-time snapshot: streaming may have already
   // yielded and compacted the characters this decision used to read back.
-  if (!content && frame.followsWhitespace)
+  if (!content && frame.followsWhitespace) {
+    // A hard break is structural even when the quote has no visible text.
+    if (frame.itemSeparatorFragments && !endsAtHardBreak(state.buffer)) {
+      const start = frame.fragment - frame.itemSeparatorFragments
+      state.outputPositions?.replace(start, buffer.length, [])
+      buffer.length = start
+      state.lastContentCache = buffer.at(-1)
+      state.lastTextNode = undefined
+      noteBufferRewrite(state)
+    }
     return false
+  }
   const prefix = `${frame.listIndent}>`
   const quoted = content
     .split('\n')
@@ -1688,11 +1713,16 @@ function commitGfmAction(
         // can share a fragment, so this is not only the innermost.
         for (const frame of state.blockquotes)
           frame.fragment = Math.min(frame.fragment, state.buffer.length)
+        // Collapsing a separator can also remove this event's output anchor.
+        outputStart = Math.min(outputStart, state.buffer.length)
         noteBufferRewrite(state)
       }
       const before = lastOutputChar(state.buffer)
       state.blockquotes.push({
         fragment: state.buffer.length,
+        itemSeparatorFragments: onItemMarkerLine(state, outputStart)
+          ? state.buffer.length - outputStart
+          : 0,
         // A quote in a table cell starts mid-row, past any list indent.
         listIndent: isInsideTableCell(state) ? '' : state.listIndent,
         // Snapshot the pre-quote context now: streaming can flush these
@@ -2944,8 +2974,23 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
         literalOpeners.length -= 2
     }
     const insideRawHtmlRegion = isInsideRawHtmlBlock(state.depthMap)
+    // A dropped leading quote leaves the marker available to a new quote.
+    // Let that quote open normally instead of consuming a parent separator.
+    if (captionBoundary === 3 && tagId === TAG_BLOCKQUOTE
+      && eventType === NodeEventEnter && onItemMarkerLine(state)) {
+      captionBoundary = 0
+    }
+    let emptyQuoteItemExit = false
     if (captionBoundary >= 3 && tagId === TAG_LI) {
       restoreQuoteParentBoundary()
+      // A discarded quote reopened this marker line. If its item closes
+      // empty, end the line before any parent continuation can arrive.
+      if (eventType === NodeEventExit && onItemMarkerLine(state)) {
+        buff.push('\n')
+        state.lastContentCache = '\n'
+        lastChar = '\n'
+        emptyQuoteItemExit = true
+      }
       captionBoundary = 0
     }
     // A hard break ends a line, while a following block also ends the
@@ -3965,6 +4010,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       closeListMarker(element, hasPluginOutput || handler?.literalExit ? output?.join('') : undefined)
     if (tagId === TAG_LI)
       updateListIndent(state, element, eventType, output, hasPluginOutput)
+    if (emptyQuoteItemExit) {
+      captionBoundary = 3
+      captionBoundarySpacing = 2
+    }
 
     if (!insideRawHtmlRegion && inRawHtmlRegion) {
       bufferScan[0] = false
@@ -4029,7 +4078,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // frame left open at the final call lost its exit to a plugin.
     const quoteHoldCount = final ? 0 : state.blockquotes.length
     for (let index = 0; index < quoteHoldCount; index++) {
-      const fragment = state.blockquotes[index]!.fragment
+      const frame = state.blockquotes[index]!
+      // Keep a removable opening separator out of prefix compaction too.
+      const fragment = frame.fragment - frame.itemSeparatorFragments
       if (fragment < heldFragment)
         heldFragment = fragment
     }

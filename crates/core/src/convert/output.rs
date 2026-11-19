@@ -964,6 +964,15 @@ impl ConvertState {
     if content_end < frame.content_start
       || (content_end == frame.content_start && content_left_buffer)
     {
+      // A hard break is structural even when the quote has no visible text.
+      if frame.item_separator_len > 0
+        && (self.hard_break_end <= frame.content_start || self.hard_break_end == usize::MAX)
+      {
+        self.truncate_buffer(frame.content_start - frame.item_separator_len);
+        self.last_content_cache_len = 0;
+        self.has_last_text_node = false;
+        self.last_text_node_contains_whitespace = false;
+      }
       return;
     }
     let content = &self.buffer[frame.content_start..content_end];
@@ -1272,6 +1281,7 @@ impl ConvertState {
       self.blockquote_scratch = quoted;
       for frame in &mut self.blockquotes {
         frame.content_start = flush_end;
+        frame.item_separator_len = 0;
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
       self.invalidate_line_start();
@@ -1326,6 +1336,7 @@ impl ConvertState {
 
     for frame in &mut self.blockquotes {
       frame.content_start = flush_end;
+      frame.item_separator_len = 0;
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
     self.invalidate_line_start();
@@ -2544,6 +2555,10 @@ impl ConvertState {
 
     let raw_html_quote_boundary =
       self.pending_raw_html_boundary && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE);
+    let quote_on_item_marker = !plain_text!(self)
+      && !enter_is_literal
+      && tag_id == Some(TAG_BLOCKQUOTE)
+      && self.on_item_marker_line();
     let output_start = self.buffer.len();
     self.write_output(
       true,
@@ -2634,6 +2649,11 @@ impl ConvertState {
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
+        item_separator_len: if quote_on_item_marker {
+          self.buffer.len() - output_start
+        } else {
+          0
+        },
         // A quote in a table cell starts mid-row, past any list indent.
         list_indent: if self.in_table_cell() {
           String::new()
@@ -3050,6 +3070,7 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
+    let mut empty_quote_item_exit = false;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
       if matches!(
@@ -3057,6 +3078,13 @@ impl ConvertState {
         CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
       ) {
         self.restore_quote_parent_boundary();
+        // A discarded quote reopened this marker line. Close the empty item
+        // before any parent continuation can arrive.
+        if self.on_item_marker_line() {
+          self.buffer.push('\n');
+          self.last_content_cache_len = 1;
+          empty_quote_item_exit = true;
+        }
         self.caption_boundary = CaptionBoundary::None;
       }
       self.heading_break_pending = false;
@@ -3542,6 +3570,9 @@ impl ConvertState {
 
     if tag_id == Some(TAG_A) {
       self.end_link();
+    }
+    if empty_quote_item_exit {
+      self.caption_boundary = CaptionBoundary::QuoteParent;
     }
   }
 
@@ -4642,6 +4673,16 @@ impl ConvertState {
     })
   }
 
+  #[cold]
+  fn on_item_marker_line(&self) -> bool {
+    if self.list_indent.is_empty() {
+      return false;
+    }
+    let bytes = self.buffer.as_bytes();
+    let end = bytes.len() - trailing_spaces(bytes);
+    end > 0 && self.list_marker_line_start(bytes, end, self.pending_marker_indent())
+  }
+
   /// Whether `end` sits just past a list marker that is all its line holds: up
   /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
   fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
@@ -5647,7 +5688,12 @@ impl ConvertState {
       if matches!(self.caption_boundary, CaptionBoundary::QuoteTentative(_)) {
         self.caption_boundary = CaptionBoundary::None;
       } else if tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal {
-        *output = None;
+        if self.on_item_marker_line() {
+          self.caption_boundary = CaptionBoundary::None;
+          *output = Some(Cow::Borrowed("\n"));
+        } else {
+          *output = None;
+        }
       }
     } else if tag_id == Some(TAG_BR) && self.caption_boundary != CaptionBoundary::QuoteParent {
       // The break's whitespace would pass for the spacing at the buffer tail.
@@ -8244,6 +8290,7 @@ mod tests {
     state.flushed_tail = *b"y\n";
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
+      item_separator_len: 0,
       list_indent: "  ".to_string(),
     });
     state.stack.push(entering_node(TAG_H2, false));

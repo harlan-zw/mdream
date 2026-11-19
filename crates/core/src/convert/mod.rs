@@ -391,6 +391,8 @@ struct FragmentLink {
 #[derive(Clone)]
 struct BlockquoteFrame {
   content_start: usize,
+  /// Opening bytes after a bare item marker, removable with an empty quote.
+  item_separator_len: usize,
   list_indent: String,
 }
 
@@ -4358,6 +4360,7 @@ mod tests {
     state.buffer = format!("{}\n{}", "a".repeat(8192), "#".repeat(64));
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
+      item_separator_len: 0,
       list_indent: "  ".to_string(),
     });
     assert_eq!(state.trailing_heading_run(1 << 20), 64);
