@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process'
+import process from 'node:process'
 import { describe, expect, it } from 'vitest'
 import { parseAttributes } from '../../src/parse'
 import { decodeHTMLEntities } from '../../src/utils'
@@ -31,6 +33,15 @@ describe('html character references', () => {
   it('decodes Greek names on both sides of the final sigma slot', () => {
     expect(decodeHTMLEntities('&Rho; &rho; &Sigma; &sigma; &sigmaf; &rho &Sigma'))
       .toBe('Ρ ρ Σ σ ς &rho &Sigma')
+  })
+
+  it('loads the converter with a read-only entity name on Object.prototype', () => {
+    const output = execFileSync(process.execPath, ['--input-type=module', '--eval', `
+      Object.defineProperty(Object.prototype, 'times', { value: 'unrelated' })
+      const { htmlToMarkdown } = await import('@mdream/js')
+      process.stdout.write(htmlToMarkdown('<p>&times; &Sigma;</p>'))
+    `], { cwd: new URL('../..', import.meta.url), encoding: 'utf8' })
+    expect(output).toBe('× Σ')
   })
 
   it('uses the attribute ambiguous-ampersand rule for legacy names', () => {

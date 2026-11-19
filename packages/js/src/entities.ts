@@ -3,7 +3,7 @@
 // reference without shipping the full HTML entity table in each JS bundle.
 // A $ prefix marks canonical-only names; unprefixed names may omit semicolons.
 export const HTML_ENTITIES: Readonly<Record<string, string>> = /* @__PURE__ */ (() => {
-  const entities: Record<string, string> = {
+  const entities: Record<string, string> = Object.setPrototypeOf({
     AMP: '&',
     $Dagger: '‡',
     GT: '>',
@@ -112,7 +112,7 @@ export const HTML_ENTITIES: Readonly<Record<string, string>> = /* @__PURE__ */ (
     $uarr: '↑',
     $upsih: 'ϒ',
     $weierp: '℘',
-  }
+  }, null)
 
   const latin1Names = 'nbsp iexcl cent pound curren yen brvbar sect uml COPY ordf laquo not shy REG macr deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml'.split(' ')
   for (const [index, name] of latin1Names.entries()) {
