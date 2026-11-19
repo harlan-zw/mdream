@@ -170,7 +170,7 @@ describe('inline whitespace', () => {
       ['<p><i>a<i> <svg></svg> x</i></i></p>', '*a x*'],
       ['<p>x<b>y<b> <strong></strong><br>z</b></b></p>', 'x**y  \nz**'],
       ['<p><code>a<del> </del></code>z</p>', '`a `z'],
-      ['<p><code>a<strong> <svg></svg> b</strong></code></p>', '`a** b**`'],
+      ['<p><code>a<strong> <svg></svg> b</strong></code></p>', '`a b`'],
     ]
     for (const [html, expected] of cases) {
       expect(htmlToMarkdown(html)).toBe(expected)
@@ -344,7 +344,7 @@ describe('inline whitespace', () => {
     expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>')).toBe('`a** x**`')
     expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>')).toBe('`a* x*`')
     expect(htmlToMarkdown('<p><var>a<b><svg></svg> x</b></var></p>')).toBe('`a** x**`')
-    expect(htmlToMarkdown('<p><code>a<strong> x</strong></code></p>')).toBe('`a** x**`')
+    expect(htmlToMarkdown('<p><code>a** x**</code></p>')).toBe('`a** x**`')
   })
 })
 
@@ -1002,11 +1002,11 @@ it('does not count a split empty raw-text closer as body text', async () => {
 it.each([
   [
     '<code>A<br><figcaption><em><br>B</em></figcaption></code>',
-    '`A\n**\nB**`',
+    '`A\n\n*B*`',
   ],
   [
     '<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>',
-    '`**\nB**C`',
+    '`\n\n*B*C`',
   ],
   [
     '<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>',

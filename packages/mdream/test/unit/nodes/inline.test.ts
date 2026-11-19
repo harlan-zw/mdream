@@ -375,7 +375,7 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
       ['<p><i>a<i> <svg></svg> x</i></i></p>', '*a x*'],
       ['<p>x<b>y<b> <strong></strong><br>z</b></b></p>', 'x**y  \nz**'],
       ['<p><code>a<del> </del></code>z</p>', '`a `z'],
-      ['<p><code>a<strong> <svg></svg> b</strong></code></p>', '`a** b**`'],
+      ['<p><code>a<strong> <svg></svg> b</strong></code></p>', '`a b`'],
       ['<p>a<strong> <svg></svg> b</strong></p>', 'a b', noStrongDelimiters],
       ['a<strong> <svg></svg> b</strong>', 'a b', noStrongDelimiters],
       ['<p>a<b>x<b> <a href="#"></a></b></b></p>', 'a**x**', { clean: true }],

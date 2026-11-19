@@ -3344,9 +3344,12 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     let keepsQuoteSeparator = false
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
-    const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
-      && suppressesFormattingInPre(tagId)
-      && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
+    const literalHandler = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
+    const suppressedInPre = !literalHandler && !!state.depthMap[TAG_PRE] && suppressesFormattingInPre(tagId)
+    // A code span renders delimiters as literal text.
+    const codeSpanMarker = gfmLifecycle.openCodeSpans.length && INLINE_MARKER_TYPE[tagId]
+    const suppressedInCodeSpan = !literalHandler
+      && (codeSpanMarker === 1 || codeSpanMarker === 2 || codeSpanMarker === 4)
     const emptyTableRow = eventType === NodeEventExit && tagId === TAG_TR
       && state.tableRowOpenerPending && !output && !handler?.literalExit
     if (eventType === NodeEventExit && (handler?.literalExit || output)
@@ -3355,7 +3358,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (cleanPass && eventType === NodeEventExit)
       cleanPass.exit(element)
-    if (!output && !suppressedInPre && handler?.[eventFn]
+    if (!output && !suppressedInPre && !suppressedInCodeSpan && handler?.[eventFn]
       && (tagId !== TAG_DIV || state.depthMap[TAG_LI] || handler[eventFn] !== tagHandlers[TAG_DIV]!.enter)) {
       if (openLinkFragment >= 0
         && eventType === NodeEventExit

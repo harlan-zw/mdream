@@ -19,7 +19,7 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r##"<p><strong><a href="/x">b</a> </strong><code><em>c</em></code></p>"##,
-    "**[b](/x)** `*c*`",
+    "**[b](/x)** `c`",
   ),
   (r##"<li>a<strong>(b)</strong><b>c</b></li>"##, "- a**(b)c**"),
   (
@@ -48,7 +48,7 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r##"<strong>b!</strong><code><em>c</em></code>"##,
-    "**b!**`*c*`",
+    "**b!**`c`",
   ),
   (r##"<p>a<strong>(b)</strong><b>c</b></p>"##, "a**(b)c**"),
   (
@@ -58,11 +58,11 @@ const CASES: &[(&str, &str)] = &[
   (r##"<strong>b! </strong><em>c</em>"##, "**b!** *c*"),
   (
     r##"<p><em><a href="/x">a</a></em><code><em>x</em></code></p>"##,
-    "*[a](/x)*`*x*`",
+    "*[a](/x)*`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em></p><p><code><em>x</em></code></p>"##,
-    "*[a](/x)*\n\n`*x*`",
+    "*[a](/x)*\n\n`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em><samp><em>x</em></samp></p>"##,
@@ -890,7 +890,7 @@ fn keeps_delimiters_where_a_fix_cannot_help() {
   );
   assert_eq!(
     html_to_markdown(
-      "<p><code>a<strong>[b]</strong>c</code></p>",
+      "<p><code>a**[b]**c</code></p>",
       HtmlToMarkdownOptions::default()
     ),
     "`a**[b]**c`"

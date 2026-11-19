@@ -764,9 +764,9 @@ fn generated_inline_code_content_consumes_the_cap() {
 #[test]
 fn inline_markers_and_spacing_consume_the_code_span_cap() {
   assert_capped_inline_code(
-    "<code><em>abcde</em><span>x</span><span>y</span></code>",
-    8,
-    "`*abcde*x`",
+    "<code><del>abcde</del><span>x</span><span>y</span></code>",
+    10,
+    "`~~abcde~~x`",
     true,
   );
 }
@@ -774,7 +774,7 @@ fn inline_markers_and_spacing_consume_the_code_span_cap() {
 #[test]
 fn a_rejected_inline_marker_cannot_remove_retained_code_content() {
   assert_capped_inline_code(
-    "<code><span>abcdefgh</span><em>x</em></code>",
+    "<code><span>abcdefgh</span><del>x</del></code>",
     8,
     "`abcdefgh`",
     true,
@@ -888,7 +888,12 @@ fn frontmatter_output_cannot_escape_an_inline_code_span_cap() {
 
 #[test]
 fn generated_spacing_consumes_the_inline_code_span_cap() {
-  assert_capped_inline_code("<code><em>a </em>bcdefgh</code>", 8, "`*a* bcde`", true);
+  assert_capped_inline_code(
+    "<code><del>a </del>bcdefgh</code>",
+    10,
+    "`~~a~~ bcde`",
+    true,
+  );
 }
 
 #[test]
@@ -1617,7 +1622,7 @@ fn list_indentation_counts_against_a_code_fence_cap() {
 #[test]
 fn a_caption_in_an_exhausted_code_span_closes() {
   let tail = "<br>&#32;<br><figcaption></span>&nbsp;</figcaption><td><img src=/i alt=a>&#32;</td><figcaption><em><br></figcaption>";
-  for (cap, fill) in [(16, 0), (16, 7), (4096, 4078), (4096, 4087)] {
+  for (cap, fill) in [(16, 0), (16, 7), (4096, 4080), (4096, 4087)] {
     let html = format!("<code>{}{tail}", "a".repeat(fill));
     for chunk in [1, 7, 4096, html.len()] {
       let mut p = MarkdownStreamProcessor::new(options(cap));

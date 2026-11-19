@@ -1092,7 +1092,7 @@ fn blank_that_follows_no_opener_is_owed_to_later_text() {
     ("<p><code>a<del> </del></code>z</p>", "`a `z"),
     (
       "<p><code>a<strong> <svg></svg> b</strong></code></p>",
-      "`a** b**`",
+      "`a b`",
     ),
   ] {
     assert_every_chunking(html, &options, expected);
@@ -1338,7 +1338,7 @@ fn code_like_content_is_left_as_written() {
   assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a** x**`");
   assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a* x*`");
   assert_eq!(md("<p><var>a<b><svg></svg> x</b></var></p>"), "`a** x**`");
-  assert_eq!(md("<p><code>a<strong> x</strong></code></p>"), "`a** x**`");
+  assert_eq!(md("<p><code>a** x**</code></p>"), "`a** x**`");
 }
 
 #[test]
@@ -1697,6 +1697,9 @@ fn touching_emphasis_pairs_of_one_delimiter_are_reopened() {
     ("<b>Aa</b><strong>Bb</strong>", "**AaBb**"),
     ("<em>Aa</em><i>Bb</i>", "*AaBb*"),
     ("<em>Aa</em><cite>Bb</cite>", "*AaBb*"),
+    ("<code><b>a</b><b>b</b></code>", "`ab`"),
+    ("<code><b>a </b><b>b</b></code>", "`a b`"),
+    ("<code><em>a*</em><cite>`b</cite></code>", "``a*`b``"),
     (
       "<strong>Aa</strong><strong>Bb</strong><strong>Cc</strong>",
       "**AaBbCc**",
@@ -2551,36 +2554,13 @@ fn an_emphasis_pair_with_an_overridden_delimiter_is_not_reopened() {
   }
 }
 
-// The delimiters a pair gets back count against a code span's budget, as
-// they did when first written.
 #[test]
-fn an_emphasis_pair_written_out_again_stays_within_the_node_cap() {
-  for (html, cap, expected) in [
-    (
-      "<code><em>abcde</em><em><cite>x</cite></em></code>",
-      8,
-      "`*abcde**`",
-    ),
-    (
-      "<code><em>abcde</em><em><cite>x</cite></em></code>",
-      9,
-      "`*abcde***`",
-    ),
-    (
-      "<code><strong>abc</strong><strong><b>x</b></strong></code>",
-      9,
-      "`**abc****`",
-    ),
-    ("<code><em>abcde</em><em>x</em></code>", 8, "`*abcdex*`"),
-  ] {
-    let options = HtmlToMarkdownOptions::default().with_max_node_bytes(cap);
-    assert_eq!(
-      html_to_markdown(html, options.clone()),
-      expected,
-      "{html} cap={cap}"
-    );
-    assert_every_split(html, &options, expected);
-  }
+fn emphasis_tags_do_not_use_the_code_span_content_budget() {
+  let html = "<code><em>abcde</em><em><cite>wxyz</cite></em></code>";
+  let options = HtmlToMarkdownOptions::default().with_max_node_bytes(8);
+  let expected = "`abcdewxy`";
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  assert_every_split(html, &options, expected);
 }
 
 #[test]
@@ -2788,11 +2768,11 @@ fn caption_delimiter_context() {
   for (html, expected) in [
     (
       r#"<code>A<br><figcaption><em><br>B</em></figcaption></code>"#,
-      "`A\n**\nB**`",
+      "`A\n\n*B*`",
     ),
     (
       r#"<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>"#,
-      "`**\nB**C`",
+      "`\n\n*B*C`",
     ),
     (
       r#"<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>"#,

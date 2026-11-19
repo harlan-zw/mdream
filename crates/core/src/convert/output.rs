@@ -7151,6 +7151,10 @@ impl ConvertState {
           },
         )
       }
+      // A code span renders delimiters as literal text.
+      TAG_STRONG | TAG_B | TAG_EM | TAG_I | TAG_CITE | TAG_DFN if !self.code_spans.is_empty() => {
+        None
+      }
       TAG_STRONG | TAG_B => {
         if self.depth_map[TAG_B as usize] > 1 {
           Some(Cow::Borrowed(""))
@@ -7485,6 +7489,9 @@ impl ConvertState {
         } else {
           None
         }
+      }
+      TAG_STRONG | TAG_B | TAG_EM | TAG_I | TAG_CITE | TAG_DFN if !self.code_spans.is_empty() => {
+        None
       }
       TAG_STRONG | TAG_B => {
         if self.depth_map[TAG_B as usize] > 1 {
