@@ -28,6 +28,12 @@ function argValue(name, fallback) {
   return args[i + 1]
 }
 
+function withMarkdownFeature(cargoArgs) {
+  if (!args.includes('--markdown-only'))
+    return cargoArgs
+  return [...(cargoArgs.length ? cargoArgs : ['--']), '--no-default-features', '--features', 'markdown-only']
+}
+
 const target = argValue('--target')
 const outDir = resolve(argValue('--out-dir'))
 const outName = argValue('--out-name', 'mdream_edge')
@@ -37,7 +43,7 @@ const edgeDir = resolve(import.meta.dirname, '../crates/edge')
 
 const cargoArgs = features ? ['--', '--features', features] : []
 
-execFileSync('wasm-pack', ['build', '--target', target, '--out-dir', outDir, '--out-name', outName, ...cargoArgs], {
+execFileSync('wasm-pack', ['build', '--target', target, '--out-dir', outDir, '--out-name', outName, ...withMarkdownFeature(cargoArgs)], {
   cwd: edgeDir,
   stdio: 'inherit',
   env: { ...process.env, CARGO_PROFILE_RELEASE_OPT_LEVEL: 's' },

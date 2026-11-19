@@ -421,7 +421,7 @@ impl ConvertState {
     attributes: &crate::types::Attributes,
     tag_handler: Option<&TagHandler>,
   ) -> u8 {
-    if !self.has_filter && !self.has_tailwind {
+    if !self.has_filter() && !self.has_tailwind() {
       return 0;
     }
     if self.hidden_since_depth.is_some()
@@ -460,7 +460,7 @@ impl ConvertState {
       collapses_inner_white_space: handler.collapses_inner_white_space,
       spacing: handler.spacing,
     };
-    if self.has_tailwind
+    if self.has_tailwind()
       && node
         .attributes
         .get_bit(ATTR_CLASS)
@@ -468,7 +468,7 @@ impl ConvertState {
     {
       return 1;
     }
-    if !self.has_filter {
+    if !self.has_filter() {
       return 0;
     }
     if is_hidden(&node)
@@ -511,7 +511,7 @@ impl ConvertState {
       && self.extraction_tracked.is_empty()
       // Tailwind-wrapped text takes the general path.
       && self.stack.last().is_none_or(|parent| {
-        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind() || parent.tailwind().is_none())
       })
   }
 
@@ -539,7 +539,7 @@ impl ConvertState {
       && !self.overflow_raw_excludes_text
       && self.extraction_tracked.is_empty()
       && self.stack.last().is_none_or(|parent| {
-        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind() || parent.tailwind().is_none())
       })
   }
 
@@ -637,7 +637,7 @@ impl ConvertState {
       None => (false, 0),
     };
 
-    if self.has_isolate_main && self.isolate_main_excludes() {
+    if self.has_isolate_main() && self.isolate_main_excludes() {
       excludes_text_nodes = true;
     }
 
@@ -761,7 +761,7 @@ impl ConvertState {
         parent.excludes_text_nodes || (!self.overflow_included && parent.excluded_from_markdown)
       });
 
-    if self.has_isolate_main && self.isolate_main_excludes() {
+    if self.has_isolate_main() && self.isolate_main_excludes() {
       excludes_text_nodes = true;
     }
 
@@ -770,7 +770,7 @@ impl ConvertState {
       .last()
       .is_some_and(|p| p.tag_id == Some(TAG_TITLE));
     let capture_title =
-      in_title && self.has_frontmatter && self.frontmatter_in_head && !excludes_text_nodes;
+      in_title && self.has_frontmatter() && self.frontmatter_in_head && !excludes_text_nodes;
     // `<title>` is document metadata that browsers never render. Its text
     // still reaches frontmatter and extraction, but never the output.
     if in_title {
@@ -868,7 +868,7 @@ impl ConvertState {
       }
     }
 
-    if self.has_tailwind
+    if self.has_tailwind()
       && let Some(parent) = self.stack.last()
       && let Some(tw) = parent.tailwind()
     {
@@ -1122,7 +1122,7 @@ impl ConvertState {
     tag_handler: Option<&crate::types::TagHandler>,
   ) -> bool {
     let self_closing = tag_handler.is_some_and(|handler| handler.is_self_closing);
-    if self.has_tag_overrides {
+    if self.has_tag_overrides() {
       self.overridden_self_closing(tag_name, tag_id, is_builtin, self_closing)
     } else {
       self_closing
@@ -1177,7 +1177,7 @@ impl ConvertState {
   pub(crate) fn attr_mask(&self, tag_handler: Option<&crate::types::TagHandler>) -> u16 {
     // `attr_extra_mask` is `ATTR_ALL` when every attribute is wanted, and that
     // absorbs the handler's bits, so no branch is needed here.
-    tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs) | self.attr_extra_mask
+    tag_handler.map_or(ATTR_NONE, |h| h.wanted_attrs) | self.attr_extra_mask()
   }
 
   /// The first `<base href>` replaces `origin` when it resolves to an HTTP(S)
@@ -1492,7 +1492,7 @@ impl ConvertState {
         // keep previous block-default behaviour.
         (false, false, false, false, None)
       };
-    if self.has_tag_overrides
+    if self.has_tag_overrides()
       && let Some(is_inline) = self
         .options
         .plugins
@@ -1511,8 +1511,8 @@ impl ConvertState {
 
     // Filled in place: a built-then-moved node stalls store forwarding.
     let idx = self.stack.len();
-    let parent_hidden = self.has_plugins
-      && self.has_tailwind
+    let parent_hidden = self.has_plugins()
+      && self.has_tailwind()
       && parent
         .and_then(|p| self.stack[p].tailwind())
         .is_some_and(|tw| tw.hidden);
@@ -1537,7 +1537,7 @@ impl ConvertState {
     let mut filter_excluded = false;
     let in_template = self.depth_map[TAG_TEMPLATE as usize] > 0;
 
-    if self.has_plugins {
+    if !super::MARKDOWN_ONLY_EDGE && self.has_plugins {
       if self.has_tailwind {
         if let Some(class_attr) = tag.attributes.get_bit(ATTR_CLASS) {
           let (mut prefix, mut suffix, hidden) = process_tailwind_classes(class_attr);
@@ -1686,7 +1686,8 @@ impl ConvertState {
 
     let excluded_from_markdown = in_template
       || filter_excluded
-      || (skip_node && (!self.has_isolate_main || self.isolate_main_found));
+      || (skip_node
+        && (super::MARKDOWN_ONLY_EDGE || !self.has_isolate_main || self.isolate_main_found));
     tag.excluded_from_markdown = excluded_from_markdown;
     tag.enter_skipped = skip_node;
 
@@ -1719,7 +1720,7 @@ impl ConvertState {
         // A skipped node writes nothing and takes no part, as its events take
         // none in the JS engine. Lists are blocks unless an override makes one
         // inline, and the close takes the same test, so push and pop pair up.
-        if !self.stack[idx].is_inline || self.has_tag_overrides {
+        if !self.stack[idx].is_inline || self.has_tag_overrides() {
           self.push_list_marker(ordered, skip_node);
         }
       }
@@ -1829,7 +1830,7 @@ impl ConvertState {
         self.list_indent.push(' ');
       }
       if width != 0 && !excluded {
-        if self.has_tag_overrides {
+        if self.has_tag_overrides() {
           self.note_item_with_overrides();
         } else if let Some(marker) = self.list_markers.last_mut() {
           marker.written = marker.selected;
@@ -1925,9 +1926,9 @@ impl ConvertState {
     }
 
     // One flag for the plugin-only tail: a page without these plugins pays one test.
-    if self.close_plugin_work {
+    if self.close_plugin_work() {
       // Extraction finalize. Runs after `retire`, so the depth is one above the stack.
-      if self.has_extraction && !self.extraction_tracked.is_empty() {
+      if self.has_extraction() && !self.extraction_tracked.is_empty() {
         let current_depth = self.stack.len() + 1;
         if let Some(first) = self
           .extraction_tracked
@@ -1946,7 +1947,7 @@ impl ConvertState {
         }
       }
 
-      if self.has_isolate_main
+      if self.has_isolate_main()
         && node_tag_id == Some(TAG_MAIN)
         && !node_excluded
         && self.isolate_main_found
@@ -1956,7 +1957,7 @@ impl ConvertState {
       }
 
       // Frontmatter generation on HEAD close
-      if self.has_frontmatter
+      if self.has_frontmatter()
         && node_tag_id == Some(TAG_HEAD)
         && !node_excluded
         && self.frontmatter_in_head
@@ -2100,13 +2101,13 @@ impl ConvertState {
       CLOSE_OL => {
         self.ordered_starts.pop();
         self.list_item_counts.pop();
-        if !node_is_inline || self.has_tag_overrides {
+        if !node_is_inline || self.has_tag_overrides() {
           self.pop_list_marker(id);
         }
       }
       CLOSE_UL => {
         self.list_item_counts.pop();
-        if !node_is_inline || self.has_tag_overrides {
+        if !node_is_inline || self.has_tag_overrides() {
           self.pop_list_marker(id);
         }
       }
@@ -2122,7 +2123,7 @@ impl ConvertState {
       // would. A quote inside a list item is re-quoted frame by frame by the
       // flush too, so there it would only add work.
       CLOSE_BLOCKQUOTE => {
-        if !node_is_inline || self.has_tag_overrides {
+        if !node_is_inline || self.has_tag_overrides() {
           self.pop_list_marker(id);
         }
         if self
@@ -2231,12 +2232,12 @@ impl ConvertState {
     // Closing tag may target an aliased tag (e.g. </ex> where tagOverrides:
     // { ex: 'em' } opened a TAG_EM node). Resolve the alias here so the close
     // matches the open; an aliased built-in matches by its lowercase name.
-    if self.has_tag_overrides {
+    if self.has_tag_overrides() {
       // A built-in end tag must also find a node without a custom name, so
       // `</div>` cannot close an aliased `<blockquote>`.
       needs_name_match = true;
       // With no alias in any override, the lookup can only return `None`.
-      if !self.override_fast_ok
+      if !self.override_fast_ok()
         && let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id)
       {
         if let Some(id) = builtin_tag_id {
@@ -2368,7 +2369,7 @@ impl ConvertState {
   /// element whose rendering follows the override (alias tag and/or
   /// enter/exit strings).
   pub(crate) fn process_cdata_section(&mut self, content: &str) {
-    if !self.has_tag_overrides {
+    if !self.has_tag_overrides() {
       return;
     }
     let Some(tag_id) = self

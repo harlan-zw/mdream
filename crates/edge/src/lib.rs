@@ -46,10 +46,12 @@ fn as_string(v: &JsValue) -> Option<String> {
   v.as_string()
 }
 
+#[cfg(feature = "full")]
 fn as_bool(v: &JsValue) -> Option<bool> {
   v.as_bool()
 }
 
+#[cfg(feature = "full")]
 fn as_string_vec(v: &JsValue) -> Option<Vec<String>> {
   if v.is_undefined() || v.is_null() || !js_sys::Array::is_array(v) {
     return None;
@@ -64,6 +66,7 @@ fn as_string_vec(v: &JsValue) -> Option<Vec<String>> {
   Some(out)
 }
 
+#[cfg(feature = "full")]
 fn as_u8_vec(v: &JsValue) -> Option<Vec<u8>> {
   if v.is_undefined() || v.is_null() || !js_sys::Array::is_array(v) {
     return None;
@@ -78,6 +81,7 @@ fn as_u8_vec(v: &JsValue) -> Option<Vec<u8>> {
   Some(out)
 }
 
+#[cfg(feature = "full")]
 fn js_object_entries(v: &JsValue) -> Option<Vec<(String, JsValue)>> {
   if v.is_undefined() || v.is_null() {
     return None;
@@ -93,6 +97,7 @@ fn js_object_entries(v: &JsValue) -> Option<Vec<(String, JsValue)>> {
   Some(out)
 }
 
+#[cfg(feature = "full")]
 fn js_string_vec(v: &JsValue) -> Option<Vec<(String, String)>> {
   let entries = js_object_entries(v)?;
   let mut out = Vec::with_capacity(entries.len());
@@ -104,6 +109,7 @@ fn js_string_vec(v: &JsValue) -> Option<Vec<(String, String)>> {
   Some(out)
 }
 
+#[cfg(feature = "full")]
 fn parse_clean(v: &JsValue) -> Option<mdream::types::CleanConfig> {
   if v.is_undefined() || v.is_null() {
     return None;
@@ -149,6 +155,34 @@ fn parse_options(
     panic!("panic probe: intentional panic");
   }
 
+  parse_conversion_options(origin, options)
+}
+
+#[cfg(not(feature = "full"))]
+fn parse_conversion_options(
+  origin: Option<String>,
+  _: &JsValue,
+) -> (
+  mdream::types::HtmlToMarkdownOptions,
+  mdream::types::OutputFormat,
+) {
+  (
+    mdream::types::HtmlToMarkdownOptions {
+      origin,
+      ..Default::default()
+    },
+    mdream::types::OutputFormat::Markdown,
+  )
+}
+
+#[cfg(feature = "full")]
+fn parse_conversion_options(
+  origin: Option<String>,
+  options: &JsValue,
+) -> (
+  mdream::types::HtmlToMarkdownOptions,
+  mdream::types::OutputFormat,
+) {
   let clean = parse_clean(&get_prop(options, "clean"));
 
   let plugins_val = get_prop(options, "plugins");
@@ -179,6 +213,7 @@ fn parse_options(
   (core_options, format)
 }
 
+#[cfg(feature = "full")]
 fn parse_plugins(p: &JsValue) -> mdream::types::PluginConfig {
   let filter_val = get_prop(p, "filter");
   let filter = if filter_val.is_undefined() || filter_val.is_null() {
@@ -299,7 +334,9 @@ pub fn html_to_markdown_result(html: &str, options: JsValue) -> JsValue {
 
   let obj = js_sys::Object::new();
   js_sys::Reflect::set(&obj, &"markdown".into(), &result.markdown.into()).unwrap_or_default();
-  set_plugin_data(&obj, result.extracted, result.frontmatter);
+  if cfg!(feature = "full") {
+    set_plugin_data(&obj, result.extracted, result.frontmatter);
+  }
   obj.into()
 }
 
@@ -387,7 +424,9 @@ impl MarkdownStream {
   #[wasm_bindgen(js_name = "takeData")]
   pub fn take_data(&mut self) -> JsValue {
     let obj = js_sys::Object::new();
-    set_plugin_data(&obj, self.inner.take_extracted(), self.inner.frontmatter());
+    if cfg!(feature = "full") {
+      set_plugin_data(&obj, self.inner.take_extracted(), self.inner.frontmatter());
+    }
     obj.into()
   }
 

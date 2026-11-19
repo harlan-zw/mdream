@@ -25,15 +25,24 @@
     "directory": "packages/mdream"
   },
   "sideEffects": [
-    "./wasm-bundler/mdream_edge.js"
+    "./wasm-bundler/mdream_edge.js",
+    "./wasm-bundler/mdream_markdown.js"
   ],
   "exports": {
     ".": {
       "workerd": {
+        "mdream-markdown": {
+          "types": "./dist/edge-markdown.d.mts",
+          "default": "./dist/edge-markdown.mjs"
+        },
         "types": "./dist/edge.d.mts",
         "default": "./dist/edge.mjs"
       },
       "edge-light": {
+        "mdream-markdown": {
+          "types": "./dist/edge-markdown.d.mts",
+          "default": "./dist/edge-markdown.mjs"
+        },
         "types": "./dist/edge.d.mts",
         "default": "./dist/edge.mjs"
       },
@@ -46,6 +55,10 @@
       "default": "./dist/index.mjs"
     },
     "./browser": {
+      "mdream-markdown": {
+        "types": "./dist/browser-markdown.d.mts",
+        "default": "./dist/browser-markdown.mjs"
+      },
       "types": "./dist/browser.d.mts",
       "default": "./dist/browser.mjs"
     },
@@ -83,6 +96,7 @@
     "build:edge": "node ../../scripts/build-wasm-edge.mjs --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && node ../../scripts/build-wasm-edge.mjs --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
+    "postbuild:edge": "node ../../scripts/build-wasm-markdown.ts",
     "test": "vitest test",
     "test:attw": "attw --pack",
     "prepack": "pnpm run build"

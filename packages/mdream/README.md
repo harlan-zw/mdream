@@ -96,6 +96,7 @@ externals: ['mdream']
 - [CLI Usage](#cli-usage)
 - [Browser and Edge Usage](#browser-and-edge-usage)
   - [Edge / Cloudflare Workers](#edge--cloudflare-workers)
+  - [Smaller Markdown WASM build](#smaller-markdown-wasm-build)
   - [Browser CDN (IIFE)](#browser-cdn-iife)
 - [llms.txt Generation](#llmstxt-generation)
 - [Related Packages](#related-packages)
@@ -1140,7 +1141,7 @@ If you pass an unknown flag, a flag without a value, or an unknown preset, the C
 
 ## Browser and Edge Usage
 
-Every entry takes the same `MdreamOptions` and produces the same Markdown string.
+By default, every entry takes the same `MdreamOptions` and produces the same Markdown string.
 In Node and edge runtimes, `htmlToMarkdown` from `mdream` is synchronous.
 In a browser bundle, import from `mdream/browser`.
 Its `htmlToMarkdown` returns `Promise<string>`, because the WASM binary loads first.
@@ -1206,6 +1207,30 @@ import wasmModule from 'mdream/wasm/mdream_edge_bg.wasm'
 await init({ module_or_path: wasmModule })
 const markdown = htmlToMarkdown('<h1>Hello</h1>', { minimal: true })
 ```
+
+### Smaller Markdown WASM build
+
+Enable the `mdream-markdown` export condition to bundle a smaller WASM engine.
+Keep importing from `mdream/browser` in browsers or `mdream` on the edge.
+One-shot conversion, `MarkdownStream`, and `streamHtmlToMarkdown` all work.
+
+In Vite, add the condition to your client config.
+
+```ts
+import { defaultClientConditions, defineConfig } from 'vite'
+
+export default defineConfig({
+  resolve: { conditions: [...defaultClientConditions, 'mdream-markdown'] },
+})
+```
+
+In Wrangler, set `WRANGLER_BUILD_CONDITIONS=workerd,worker,browser,mdream-markdown` in the environment that builds the Worker.
+For matching TypeScript types, add `mdream-markdown` to `compilerOptions.customConditions`.
+For an edge import, also include your runtime's condition, such as `workerd`.
+
+This build accepts `origin` and `format: 'markdown'`.
+It throws on other options, including plugins, cleanup, and `wrapWidth`.
+Remove the condition if your app needs those options or text or safe HTML output.
 
 ### Browser CDN (IIFE)
 

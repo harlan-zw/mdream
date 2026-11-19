@@ -1139,7 +1139,7 @@ impl ConvertState {
   /// These options rewrite across the whole document, so nothing streams early.
   #[inline]
   pub(super) fn retains_whole_document(&self) -> bool {
-    self.clean_flags & CLEAN_FRAGMENTS != 0
+    self.clean_flags() & CLEAN_FRAGMENTS != 0
   }
 
   /// Where the earliest construct keeping quoted lines from being flushed began:
@@ -1442,7 +1442,7 @@ impl ConvertState {
   #[inline(always)]
   fn common_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
     self.is_markdown()
-      && (!self.has_tag_overrides || self.override_slot_empty(tag_id))
+      && (!self.has_tag_overrides() || self.override_slot_empty(tag_id))
       && self.fast_path_state_ok()
   }
 
@@ -1450,7 +1450,7 @@ impl ConvertState {
   /// other tags are overridden. Only valid when `override_fast_ok` holds.
   #[inline(never)]
   fn override_slot_empty(&self, tag_id: Option<u8>) -> bool {
-    self.override_fast_ok
+    self.override_fast_ok()
       && tag_id.is_some_and(|id| {
         self
           .override_idx
@@ -1470,7 +1470,7 @@ impl ConvertState {
   #[inline(always)]
   pub(crate) fn text_element_fast_path_ok(&self, tag_id: Option<u8>) -> bool {
     tag_id.is_some_and(|id| SIMPLE_EMIT_TAG[id as usize])
-      && (!self.has_tag_overrides || self.override_slot_empty(tag_id))
+      && (!self.has_tag_overrides() || self.override_slot_empty(tag_id))
       && self.fast_path_state_ok()
   }
 
@@ -1479,7 +1479,7 @@ impl ConvertState {
   /// by name, so any override keeps the general path.
   #[inline(always)]
   pub(crate) fn custom_element_fast_path_ok(&self) -> bool {
-    !self.has_tag_overrides && self.fast_path_state_ok()
+    !self.has_tag_overrides() && self.fast_path_state_ok()
   }
 
   /// A plain `<li>` takes the simple emitters with the item steps added. Kept
@@ -1494,7 +1494,7 @@ impl ConvertState {
   /// `li_fast_path_ok` without the Markdown test, for Text output.
   #[inline(always)]
   pub(crate) fn li_simple_state_ok(&self) -> bool {
-    self.li_slot_free && self.fast_path_state_ok()
+    self.li_slot_free() && self.fast_path_state_ok()
   }
 
   /// Open the inline marker an enter wrote, or drop the markers its text closes.
@@ -1742,7 +1742,7 @@ impl ConvertState {
   }
 
   fn emphasis_context(&self) -> bool {
-    !self.has_tag_overrides
+    !self.has_tag_overrides()
       && self.is_markdown()
       && self.caption_frames.is_empty()
       && self.depth_map[TAG_PRE as usize] == 0
@@ -1900,7 +1900,8 @@ impl ConvertState {
       return;
     }
     // The same override the exit resolved: none for a skipped node.
-    let (enter_is_overridden, enter_is_heading) = if node.enter_skipped || !self.has_tag_overrides {
+    let (enter_is_overridden, enter_is_heading) = if node.enter_skipped || !self.has_tag_overrides()
+    {
       (false, false)
     } else {
       let ovs = self
@@ -1999,7 +2000,7 @@ impl ConvertState {
 
     // emptyLinks: skip hrefs that cannot represent meaningful navigation.
     if link
-      && self.clean_flags & CLEAN_EMPTY_LINKS != 0
+      && self.clean_flags() & CLEAN_EMPTY_LINKS != 0
       && let Some(href) = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF)
       && is_empty_link_href(href)
     {
@@ -2044,7 +2045,7 @@ impl ConvertState {
       self.begin_link(bracket_pos, false, false);
       self.link.bracket_emitted = emitted_bracket;
       if emitted_bracket
-        && self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS)
+        && self.clean_flags() & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS)
           != 0
       {
         self.link.closer_before = pending;
@@ -2056,14 +2057,14 @@ impl ConvertState {
           self.hard_break_end == bracket_pos - self.link.heading_break_prefix_len;
       }
       self.link.empty_text_pending =
-        emitted_bracket && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+        emitted_bracket && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0;
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
           && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
-              && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
-                || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
+              && ((self.clean_flags() & CLEAN_FRAGMENTS != 0 && href.len() > 1)
+                || (self.clean_flags() & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
           });
         self.link.hold_forever = self.link.pins_output;
         self.link.hold_released = !emitted_bracket;
@@ -2074,10 +2075,10 @@ impl ConvertState {
         // One-shot keeps no link hold, but the guard of the open item has to
         // know that `emptyLinkText` may still drop this link and leave it empty.
         self.link.empty_text_pending =
-          emitted_bracket && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+          emitted_bracket && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0;
       }
 
-      if !(self.open_markers.is_empty() || self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0)
+      if !(self.open_markers.is_empty() || self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0)
         && output.as_deref().is_some_and(|o| has_visible(o.as_bytes()))
       {
         self.open_markers.clear();
@@ -2311,7 +2312,7 @@ impl ConvertState {
       self.link.empty_text_pending = false;
       let attributes = std::mem::take(&mut self.stack.retired_mut().attributes);
       let mut resolved_href = None;
-      if !(self.clean_flags != 0
+      if !(self.clean_flags() != 0
         && self.try_link_clean_rewrite(&attributes, is_inline, false, &mut resolved_href))
       {
         self.write_link_exit(&attributes, is_inline, new_line_config[1], resolved_href);
@@ -2450,7 +2451,7 @@ impl ConvertState {
 
       tag_id = node.tag_id;
 
-      let override_config = if self.has_tag_overrides {
+      let override_config = if self.has_tag_overrides() {
         let ovs = self
           .options
           .plugins
@@ -2638,7 +2639,7 @@ impl ConvertState {
       self.prepend_list_break(&mut output);
     }
 
-    if self.clean_flags & CLEAN_EMPTY_IMAGES != 0
+    if self.clean_flags() & CLEAN_EMPTY_IMAGES != 0
       && tag_id == Some(TAG_IMG)
       && self.stack[stack_len - 1]
         .attributes
@@ -2739,12 +2740,12 @@ impl ConvertState {
     };
 
     // Clean mode — single guard for all clean checks
-    if self.clean_flags != 0
+    if self.clean_flags() != 0
       && let Some(id) = tag_id
       && id == TAG_A
     {
       // emptyLinks: skip hrefs that cannot represent meaningful navigation.
-      if self.clean_flags & CLEAN_EMPTY_LINKS != 0 {
+      if self.clean_flags() & CLEAN_EMPTY_LINKS != 0 {
         let node = &self.stack[self.stack.len() - 1];
         if let Some(href) = node.attributes.get_bit(ATTR_HREF)
           && is_empty_link_href(href)
@@ -3035,7 +3036,7 @@ impl ConvertState {
       self.begin_link(bracket_pos, false, raw_html_link_open);
       self.link.bracket_emitted = emitted_bracket;
       if emitted_bracket
-        && self.clean_flags & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS)
+        && self.clean_flags() & (CLEAN_FRAGMENTS | CLEAN_SELF_LINK_HEADINGS | CLEAN_REDUNDANT_LINKS)
           != 0
       {
         self.link.closer_before = pending;
@@ -3050,7 +3051,7 @@ impl ConvertState {
       // One-shot conversion sets this too: until visible text arrives, the close
       // may drop the link, so the item marker guard must not count its `[`.
       self.link.empty_text_pending =
-        has_rewrite_anchor && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+        has_rewrite_anchor && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0;
       // Avoid the href lookup and hold bookkeeping for one-shot conversion, unless
       // `max_node_bytes` has to charge what the link holds back.
       if self.streaming || self.options.max_node_bytes != 0 {
@@ -3058,8 +3059,8 @@ impl ConvertState {
         self.link.pins_output = has_rewrite_anchor
           && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
-              && ((self.clean_flags & CLEAN_FRAGMENTS != 0 && href.len() > 1)
-                || (self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
+              && ((self.clean_flags() & CLEAN_FRAGMENTS != 0 && href.len() > 1)
+                || (self.clean_flags() & CLEAN_SELF_LINK_HEADINGS != 0 && self.in_heading()))
           });
         if self.streaming {
           self.link.hold_forever = self.link.pins_output;
@@ -3072,13 +3073,13 @@ impl ConvertState {
         // One-shot keeps no link hold, but the guard of the open item has to
         // know that `emptyLinkText` may still drop this link and leave it empty.
         self.link.empty_text_pending =
-          emitted_bracket && !exit_is_overridden && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+          emitted_bracket && !exit_is_overridden && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0;
       }
     }
 
     let code_span_marker = self.code_span_marker_ok();
     let marker_tag = tag_id.filter(|&id| !enter_is_literal && (id != TAG_CODE || code_span_marker));
-    let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0;
+    let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0;
     // An overridden exit is no closer the next opener could take back.
     self.record_enter_marker(
       marker_tag,
@@ -3112,7 +3113,7 @@ impl ConvertState {
     }
 
     // Clean: track heading start for slug collection
-    if self.clean_flags & CLEAN_FRAGMENTS != 0
+    if self.clean_flags() & CLEAN_FRAGMENTS != 0
       && let Some(id) = tag_id
       && id.wrapping_sub(TAG_H1) < 6
       && self.depth_map[TAG_A as usize] == 0
@@ -3138,7 +3139,7 @@ impl ConvertState {
 
     // Rewrites need the `[` this anchor wrote. Without one, only the rewrites are skipped.
     let rewrite_bracket = if !plain_text!(self)
-      && self.clean_flags != 0
+      && self.clean_flags() != 0
       && !raw_html_anchor
       && !self.link.hold_released
       && self.link.bracket_emitted
@@ -3163,13 +3164,13 @@ impl ConvertState {
       let text_len = buf_len.saturating_sub(text_start);
 
       // emptyLinkText: [](url) → drop entirely
-      if self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
+      if self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
         self.drop_empty_link_text(bracket_pos, is_inline);
         return true;
       }
 
       // selfLinkHeadings: ## [Title](#slug) → ## Title
-      if self.clean_flags & CLEAN_SELF_LINK_HEADINGS != 0 {
+      if self.clean_flags() & CLEAN_SELF_LINK_HEADINGS != 0 {
         let in_heading = self.in_heading();
         if in_heading
           && let Some(href) = attributes.get_bit(ATTR_HREF)
@@ -3182,12 +3183,12 @@ impl ConvertState {
       }
 
       // redundantLinks: [url](url) → url
-      if self.clean_flags & CLEAN_REDUNDANT_LINKS != 0
+      if self.clean_flags() & CLEAN_REDUNDANT_LINKS != 0
         && let Some(href) = attributes.get_bit(ATTR_HREF)
         && let resolved = resolved_href.insert(resolve_url(
           href,
           self.options.origin.as_deref(),
-          self.clean_urls,
+          self.clean_urls(),
         ))
         && link_text == resolved.as_ref()
         && text_len > 0
@@ -3334,7 +3335,7 @@ impl ConvertState {
     if let Some(href) = attributes.get_bit(ATTR_HREF) {
       let capped_code_span = self.options.max_node_bytes != 0 && !self.code_spans.is_empty();
       let resolved = resolved_href
-        .unwrap_or_else(|| resolve_url(href, self.options.origin.as_deref(), self.clean_urls));
+        .unwrap_or_else(|| resolve_url(href, self.options.origin.as_deref(), self.clean_urls()));
       let resolved = resolved.as_ref();
       let mut title = attributes.get_bit(ATTR_TITLE).unwrap_or("");
       if !title.is_empty() && self.last_content_cache_len > 0 && !self.cache_follows_separator {
@@ -3351,7 +3352,7 @@ impl ConvertState {
       if title.is_empty() && self.try_autolink_rewrite(resolved, capped_code_span, is_inline) {
         return;
       }
-      if self.clean_flags & CLEAN_FRAGMENTS != 0 {
+      if self.clean_flags() & CLEAN_FRAGMENTS != 0 {
         self.link.closer_after = self.pending_emphasis;
       }
       self.pending_emphasis = 0;
@@ -3370,7 +3371,7 @@ impl ConvertState {
       }
       // A length, not an offset. `bracket_pos` is `buffer.len()` when no `[` was emitted.
       self.last_content_cache_len = self.buffer.len().saturating_sub(self.link.bracket_pos);
-      if self.clean_flags & CLEAN_FRAGMENTS != 0
+      if self.clean_flags() & CLEAN_FRAGMENTS != 0
         && self.depth_map[TAG_CODE as usize] == 0
         // A skipped anchor has no link of its own; `self.link` is an ancestor's.
         && self.link.begin_depth == self.depth
@@ -3441,7 +3442,7 @@ impl ConvertState {
 
     // A skipped node must never emit its own override exit. The only output
     // allowed below is the matching close for a fence opened by its child.
-    let override_config = if self.has_tag_overrides {
+    let override_config = if self.has_tag_overrides() {
       // The caller moved the node out of its slot. The open-void spacing check
       // reads the flag back there, and only overrides reach that check.
       self.stack.retired_mut().is_inline = node.is_inline;
@@ -3565,7 +3566,7 @@ impl ConvertState {
     };
 
     let caption_exit = tag_id == Some(TAG_FIGCAPTION) && self.depth_map[TAG_PRE as usize] == 0;
-    if tag_id == Some(TAG_A) && self.clean_flags & CLEAN_EMPTY_LINK_TEXT == 0 {
+    if tag_id == Some(TAG_A) && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT == 0 {
       self.expand_deferred_caption_breaks(false);
     }
     let caption_active = caption_exit
@@ -3701,7 +3702,7 @@ impl ConvertState {
     // Clean mode exit, one guard. Skipped for overridden anchors,
     // whose custom exit output isn't the default `[…](…)` shape.
     if !plain_text!(self)
-      && self.clean_flags != 0
+      && self.clean_flags() != 0
       && tag_id == Some(TAG_A)
       && !has_override
       && self.try_link_clean_rewrite(
@@ -4522,7 +4523,7 @@ impl ConvertState {
         // Wrapped text writes the separator itself, so it can become the break.
         if generated_prefix.is_none()
           && (!self.pending_leading_blank || plain_text!(self))
-          && self.wrap_width != 0
+          && self.wrap_width() != 0
           && self.can_wrap_here()
         {
           wrap_separator = true;
@@ -4729,7 +4730,7 @@ impl ConvertState {
       owns_leading_space || (plain_text!(self) && self.depth_map[TAG_PRE as usize] > 0);
     // Read before any write, so every path counts the separator the same way.
     self.cache_follows_separator = self.take_follows_separator();
-    if self.wrap_width != 0 && self.can_wrap_here() {
+    if self.wrap_width() != 0 && self.can_wrap_here() {
       self.push_text_wrapped(text, last_char, owns_leading_space, wrap_separator);
     } else if self.options.max_node_bytes == 0 {
       let add_space = !owns_space && self.should_add_spacing_before_text(last_char, text);
@@ -6333,7 +6334,7 @@ impl ConvertState {
     }
 
     if !self.link_caption_break_snapshot_active
-      && self.clean_flags & CLEAN_EMPTY_LINK_TEXT != 0
+      && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0
       && self.depth_map[TAG_A as usize] > 0
     {
       self.link_caption_break_snapshot.clear();
@@ -6859,7 +6860,7 @@ impl ConvertState {
   }
 
   /// Push `text` into the buffer, hard-wrapping on spaces so no output line
-  /// exceeds `self.wrap_width` characters. Words are never split, so a single
+  /// exceeds `self.wrap_width()` characters. Words are never split, so a single
   /// token longer than the width (e.g. a URL) overflows rather than breaking.
   /// A break only ever replaces an inter-word space, so words joined across
   /// inline boundaries (e.g. `foo**bar**`) stay intact. In Markdown a word
@@ -6874,7 +6875,7 @@ impl ConvertState {
     owns_leading_space: bool,
     separator: bool,
   ) {
-    let width = self.wrap_width;
+    let width = self.wrap_width();
     // A leading/trailing space in `text` is significant inter-word separation
     // across an inline boundary (e.g. `… </a> now`); the non-wrap path keeps
     // it by pushing `text` verbatim, so preserve it here too. `split(' ')`
@@ -7271,7 +7272,7 @@ impl ConvertState {
           .get_bit(ATTR_SRC)
           .filter(|src| !is_data_url(src))
           .unwrap_or("");
-        let resolved_src = resolve_url(src, self.options.origin.as_deref(), self.clean_urls);
+        let resolved_src = resolve_url(src, self.options.origin.as_deref(), self.clean_urls());
         {
           let title = node.attributes.get_bit(ATTR_TITLE);
           let mut s = String::with_capacity(
@@ -7577,7 +7578,7 @@ impl ConvertState {
           .get_bit(ATTR_SRC)
           .filter(|src| !src.is_empty() && !is_data_url(src))?;
         Some(Cow::Owned(
-          resolve_url(src, self.options.origin.as_deref(), self.clean_urls).into_owned(),
+          resolve_url(src, self.options.origin.as_deref(), self.clean_urls()).into_owned(),
         ))
       }
       TAG_Q => Some(Cow::Borrowed("\"")),
@@ -8365,7 +8366,7 @@ impl ConvertState {
     if non_span_depth > 0
       && !heading_owns_collapse
       && !heading_exit_in_markerless_collapse
-      && (!self.has_tag_overrides || !self.block_child_of_open_void(tag_id, is_enter))
+      && (!self.has_tag_overrides() || !self.block_child_of_open_void(tag_id, is_enter))
     {
       return NO_SPACING;
     }
@@ -8452,7 +8453,7 @@ impl ConvertState {
   /// its line, or the wrapper's remaining text splits off.
   #[inline]
   fn wrapper_emits_inline_markdown(&self, node: &ElementNode) -> bool {
-    if self.has_tag_overrides {
+    if self.has_tag_overrides() {
       let ovs = self
         .options
         .plugins
@@ -8536,7 +8537,7 @@ impl ConvertState {
         return true;
       }
       block_kept = block_kept
-        || (self.has_tag_overrides
+        || (self.has_tag_overrides()
           && Self::open_voids_keep_block_child(node.tag_id, node, &ancestors[..depth]));
     }
     false
@@ -8545,7 +8546,7 @@ impl ConvertState {
   /// Emphasis, code, strikethrough and quote wrappers, and an override with
   /// output of its own, whose markers are taken as a pair.
   fn wrapper_writes_delimiters(&self, node: &ElementNode) -> bool {
-    if self.has_tag_overrides {
+    if self.has_tag_overrides() {
       let ovs = self
         .options
         .plugins

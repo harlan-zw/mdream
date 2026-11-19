@@ -171,7 +171,7 @@ impl ConvertState {
   /// Assemble frontmatter entries (title, meta, plugin additional fields).
   /// Returns `Some` with collected entries when the frontmatter plugin is active.
   pub fn frontmatter(&self) -> Option<Vec<(String, String)>> {
-    if !self.has_frontmatter {
+    if !self.has_frontmatter() {
       return None;
     }
     let mut entries: Vec<(String, String)> = Vec::new();

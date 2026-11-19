@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, createNitro } from 'nitropack/core'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { unstable_dev } from 'wrangler'
 
 // End-to-end regression for #119: pack the real npm tarball, install it into a
@@ -50,7 +50,12 @@ export default {
   async fetch(request) {
     const url = new URL(request.url)
     if (url.pathname === '/options' && request.method === 'POST') {
-      return new Response(htmlToMarkdown(await request.text(), isolationOptions))
+      try {
+        return new Response(htmlToMarkdown(await request.text(), isolationOptions))
+      }
+      catch (error) {
+        return new Response(String(error), { status: 400 })
+      }
     }
     if (url.pathname === '/stream' && request.method === 'POST') {
       let md = ''
@@ -154,6 +159,33 @@ export default async (event) => {
     }
     finally {
       await worker.stop()
+    }
+  })
+
+  it('opts into streaming Markdown with the same import in a Worker', async () => {
+    vi.stubEnv('WRANGLER_BUILD_CONDITIONS', 'workerd,worker,browser,mdream-markdown')
+    try {
+      const worker = await unstable_dev(join(tmp, 'src/index.mjs'), {
+        config: join(tmp, 'wrangler.toml'),
+        experimental: { disableExperimentalWarning: true },
+      })
+      try {
+        const res = await worker.fetch('/', { signal: AbortSignal.timeout(15000) })
+        expect(await res.text()).toBe('# Hello\n\nWorld')
+
+        const streamRes = await worker.fetch('/stream', { method: 'POST', body: '<p>café 🎉</p>', signal: AbortSignal.timeout(15000) })
+        expect(await streamRes.text()).toBe('café 🎉')
+
+        const optionsRes = await worker.fetch('/options', { method: 'POST', body: '<p>Hello</p>', signal: AbortSignal.timeout(15000) })
+        expect(optionsRes.status).toBe(400)
+        expect(await optionsRes.text()).toContain('Remove the mdream-markdown condition')
+      }
+      finally {
+        await worker.stop()
+      }
+    }
+    finally {
+      vi.unstubAllEnvs()
     }
   })
 })
