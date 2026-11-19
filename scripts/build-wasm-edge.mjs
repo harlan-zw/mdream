@@ -13,8 +13,8 @@
  * x86_64, so a local x86 run reads as noise.
  */
 import { execFileSync } from 'node:child_process'
-import { readFileSync, statSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 
 const args = process.argv.slice(2)
@@ -31,6 +31,11 @@ function argValue(name, fallback) {
 const target = argValue('--target')
 const outDir = resolve(argValue('--out-dir'))
 const outName = argValue('--out-name', 'mdream_edge')
+const sharedDirArg = argValue('--shared-wasm-dir', '')
+const sharedWasmDir = sharedDirArg ? resolve(sharedDirArg) : undefined
+if (sharedWasmDir && (target !== 'bundler' || sharedWasmDir === outDir))
+  throw new Error('--shared-wasm-dir requires a bundler build and a separate web output directory')
+
 // Test-only cargo features (e.g. panic-probe). Released artifacts pass none.
 const features = argValue('--features', '')
 const edgeDir = resolve(import.meta.dirname, '../crates/edge')
@@ -45,7 +50,8 @@ execFileSync('wasm-pack', ['build', '--target', target, '--out-dir', outDir, '--
 
 const OPT_FLAGS = ['-O3', '--converge', '--low-memory-unused']
 
-const wasmFile = resolve(outDir, `${outName}_bg.wasm`)
+const wasmName = `${outName}_bg.wasm`
+const wasmFile = resolve(outDir, wasmName)
 const rawSize = statSync(wasmFile).size
 execFileSync('wasm-opt', [
   ...OPT_FLAGS,
@@ -87,16 +93,37 @@ writeFileSync(glueFile, glue)
 // Keep the bundler sidecar available for Nitro and initialize either form.
 if (target === 'bundler') {
   const entryFile = resolve(outDir, `${outName}.js`)
-  const wasmPath = `./${outName}_bg.wasm`
-  const gluePath = `./${outName}_bg.js`
+  const glueName = `${outName}_bg.js`
+  const importName = `./${glueName}`
+  const assetPath = sharedWasmDir ? `${relative(outDir, sharedWasmDir).split(sep).join('/')}/` : ''
+  const importPath = assetPath.startsWith('../') ? assetPath : `./${assetPath}`
   const source = readFileSync(entryFile, 'utf8')
-  const originalImport = `import * as wasm from "${wasmPath}";`
+  const originalImport = `import * as wasm from "./${wasmName}";`
   if (!source.includes(originalImport))
     throw new Error(`Unexpected wasm-bindgen entry import in ${entryFile}`)
-  const moduleImport = `import wasmModule from "${wasmPath}";
-import * as imports from "${gluePath}";
+
+  if (sharedWasmDir) {
+    const sharedWasm = resolve(sharedWasmDir, wasmName)
+    if (!readFileSync(wasmFile).equals(readFileSync(sharedWasm)))
+      throw new Error(`Web and bundler WASM files differ: ${sharedWasm} and ${wasmFile}`)
+    // Nitro resolves WASM imports relative to the binary. Keep its glue beside it.
+    renameSync(glueFile, resolve(sharedWasmDir, glueName))
+  }
+
+  const moduleImport = `import wasmModule from "${importPath}${wasmName}";
+import * as imports from "${importPath}${glueName}";
 const wasm = wasmModule instanceof WebAssembly.Module
-  ? new WebAssembly.Instance(wasmModule, { "${gluePath}": imports }).exports
+  ? new WebAssembly.Instance(wasmModule, { "${importName}": imports }).exports
   : wasmModule;`
-  writeFileSync(entryFile, source.replace(originalImport, moduleImport))
+  const entry = source
+    .replaceAll(`from "${importName}"`, `from "${importPath}${glueName}"`)
+    .replace(originalImport, moduleImport)
+  writeFileSync(entryFile, entry)
+
+  if (sharedWasmDir) {
+    rmSync(wasmFile)
+    rmSync(`${wasmFile}.d.ts`, { force: true })
+    // The generated manifest only describes a standalone bundler package.
+    rmSync(resolve(outDir, 'package.json'))
+  }
 }

@@ -1,7 +1,7 @@
 import type { OutputChunk, RollupOutput } from 'rollup'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'vite'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -39,7 +39,6 @@ function isMdreamModule(id: string): boolean {
 // it as a compiled WebAssembly.Module. To run the bundle in Node, the import
 // points at a module beside it that compiles the file.
 const WASM_LOADER = './wasm-module.mjs'
-const wasmFile = fileURLToPath(new URL('../../../mdream/wasm-bundler/mdream_edge_bg.wasm', import.meta.url))
 
 describe('mdream in a Vite client build', () => {
   it('drops mdream when shared code never calls it in the browser', async () => {
@@ -54,6 +53,7 @@ describe('mdream in a Vite client build', () => {
 describe('mdream in a Vite workerd build', () => {
   it('keeps the WASM engine initialized', async () => {
     outDir = mkdtempSync(join(tmpdir(), 'mdream-workerd-'))
+    let wasmFile: string | undefined
     await build({
       root,
       logLevel: 'silent',
@@ -65,9 +65,19 @@ describe('mdream in a Vite workerd build', () => {
         ssr: 'edge.js',
         outDir,
         emptyOutDir: true,
-        rollupOptions: { external: id => id.endsWith('.wasm'), output: { paths: id => id.endsWith('.wasm') ? WASM_LOADER : id } },
+        rollupOptions: {
+          external(id, importer) {
+            if (!importer || !id.endsWith('.wasm'))
+              return false
+            wasmFile = resolve(dirname(importer), id)
+            return true
+          },
+          output: { paths: id => id.endsWith('.wasm') ? WASM_LOADER : id },
+        },
       },
     })
+    if (!wasmFile)
+      throw new Error('The workerd bundle did not import a WASM file')
     writeFileSync(join(outDir, WASM_LOADER), `import { readFileSync } from 'node:fs'\nexport default new WebAssembly.Module(readFileSync(${JSON.stringify(wasmFile)}))\n`)
     const { convert } = await import(pathToFileURL(join(outDir, 'edge.js')).href)
     expect(convert('<h1>Hi</h1>')).toBe('# Hi')

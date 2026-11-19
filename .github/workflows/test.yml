@@ -252,8 +252,7 @@ jobs:
           # the test worker's own artifact carries the panic probe (#195); the
           # packaged artifact stays exactly what we release
           node scripts/build-wasm-edge.mjs --target web --out-dir crates/edge/test-worker/wasm --features panic-probe
-          node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
-          node scripts/build-wasm-edge.mjs --target bundler --out-dir packages/mdream/wasm-bundler
+          pnpm --filter mdream build:edge
 
       - run: pnpm install
 
@@ -318,9 +317,7 @@ jobs:
         run: pnpm -r run dev:prepare
 
       - name: Build WASM web & bundler
-        run: |
-          node scripts/build-wasm-edge.mjs --target web --out-dir packages/mdream/wasm
-          node scripts/build-wasm-edge.mjs --target bundler --out-dir packages/mdream/wasm-bundler
+        run: pnpm --filter mdream build:edge
 
       - name: Build
         run: pnpm run build

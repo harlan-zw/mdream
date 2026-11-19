@@ -80,7 +80,7 @@
     "test:wiki-small:file": "cat test/fixtures/wikipedia-small.html | node ./bin/mdream.mjs --origin https://en.wikipedia.org | tee test/wiki-markdown.md",
     "build": "obuild",
     "build:native": "pnpm --dir ../../crates/node run build:platform",
-    "build:edge": "node ../../scripts/build-wasm-edge.mjs --target web --out-dir ../../packages/mdream/wasm --out-name mdream_edge && node ../../scripts/build-wasm-edge.mjs --target bundler --out-dir ../../packages/mdream/wasm-bundler --out-name mdream_edge",
+    "build:edge": "node ../../scripts/build-wasm-edge.mjs --target web --out-dir wasm && node ../../scripts/build-wasm-edge.mjs --target bundler --out-dir wasm-bundler --shared-wasm-dir wasm",
     "typecheck": "tsc --noEmit",
     "dev:prepare": "obuild --stub",
     "test": "vitest test",
