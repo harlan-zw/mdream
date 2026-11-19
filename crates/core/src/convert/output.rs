@@ -155,6 +155,64 @@ fn has_visible(bytes: &[u8]) -> bool {
   bytes.iter().any(|&b| !is_whitespace(b))
 }
 
+/// List marker character opening the last visible line of `output`: a bullet,
+/// or the delimiter of an ordered marker. 0 when that line opens with neither.
+/// A marker ending `output` counts, as the item's text is spaced from it.
+/// The list marker a list's exit output leaves for the next list: that of the
+/// last line opening with a marker or unindented text. Blank lines, and
+/// indented lines with no marker, which continue the item above them, are
+/// passed over. CR, LF and CRLF all end a line. `None` keeps the marker the list
+/// already has: the output shows nothing, or its text stays on the line of the
+/// item it follows (`continues_item`). After an empty list it opens a line.
+fn exit_list_marker(output: &[u8], continues_item: bool) -> Option<u8> {
+  let mut end = output.iter().rposition(|&b| !is_whitespace(b))? + 1;
+  loop {
+    let start = output[..end]
+      .iter()
+      .rposition(|&b| b == b'\n' || b == b'\r')
+      .map_or(0, |i| i + 1);
+    if start == 0 && continues_item {
+      return None;
+    }
+    let marker = written_list_marker(&output[start..end]);
+    if marker != 0 || start == 0 || (start < end && !is_whitespace(output[start])) {
+      return Some(marker);
+    }
+    end = start - 1;
+  }
+}
+
+fn written_list_marker(output: &[u8]) -> u8 {
+  let Some(last) = output.iter().rposition(|&b| !is_whitespace(b)) else {
+    return 0;
+  };
+  let line = output[..last]
+    .iter()
+    .rposition(|&b| b == b'\n')
+    .map_or(0, |i| i + 1);
+  let first = line
+    + output[line..]
+      .iter()
+      .take_while(|&&b| is_whitespace(b))
+      .count();
+  let digits = output[first..]
+    .iter()
+    .take_while(|b| b.is_ascii_digit())
+    .count();
+  let end = first + digits;
+  let marker = output.get(end).copied().unwrap_or(0);
+  let opens = if digits == 0 {
+    matches!(marker, b'-' | b'*' | b'+')
+  } else {
+    digits <= 9 && matches!(marker, b'.' | b')')
+  };
+  if opens && output.get(end + 1).copied().is_none_or(is_whitespace) {
+    marker
+  } else {
+    0
+  }
+}
+
 /// Marks a byte `escape_raw_html_text` may escape in [`RAW_TEXT_CLASS`].
 const RAW_TEXT_ESCAPABLE: u8 = 1;
 /// Markup bytes `](`, `)`, ` "`, `"` that a link close writes around its URL and title.
@@ -354,19 +412,24 @@ pub(crate) fn push_decimal(out: &mut String, mut value: u32) {
   }
 }
 
-/// Spaces then the bullet; an item borrows the suffix after its own indent.
-const INDENTED_BULLET: &str = {
-  const LEN: usize = MAX_BORROWED_INDENT + UNORDERED_MARKER.len();
-  const BYTES: [u8; LEN] = {
-    let mut bytes = [b' '; LEN];
-    bytes[MAX_BORROWED_INDENT] = b'-';
-    bytes
-  };
-  match core::str::from_utf8(&BYTES) {
+/// [`MAX_BORROWED_INDENT`] spaces, then `bullet` and its space.
+const fn indented_bullet(bullet: u8) -> [u8; MAX_BORROWED_INDENT + UNORDERED_MARKER.len()] {
+  let mut bytes = [b' '; MAX_BORROWED_INDENT + UNORDERED_MARKER.len()];
+  bytes[MAX_BORROWED_INDENT] = bullet;
+  bytes
+}
+
+const fn ascii_str(bytes: &'static [u8]) -> &'static str {
+  match core::str::from_utf8(bytes) {
     Ok(bullet) => bullet,
     Err(_) => panic!("ASCII"),
   }
-};
+}
+
+/// Spaces then the bullet; an item borrows the suffix after its own indent.
+const INDENTED_BULLET: &str = ascii_str(&indented_bullet(b'-'));
+/// The same for a list that follows one CommonMark would join it into.
+const INDENTED_STAR_BULLET: &str = ascii_str(&indented_bullet(b'*'));
 
 /// Largest escape scratch kept between text nodes.
 const ESCAPE_SCRATCH_CAPACITY: usize = 4096;
@@ -901,6 +964,15 @@ impl ConvertState {
     if content_end < frame.content_start
       || (content_end == frame.content_start && content_left_buffer)
     {
+      // A hard break is structural even when the quote has no visible text.
+      if frame.item_separator_len > 0
+        && (self.hard_break_end <= frame.content_start || self.hard_break_end == usize::MAX)
+      {
+        self.truncate_buffer(frame.content_start - frame.item_separator_len);
+        self.last_content_cache_len = 0;
+        self.has_last_text_node = false;
+        self.last_text_node_contains_whitespace = false;
+      }
       return;
     }
     let content = &self.buffer[frame.content_start..content_end];
@@ -1029,6 +1101,9 @@ impl ConvertState {
     {
       self.quoted_bytes += quoted.len();
     }
+    // The `>` ends a list run, even inside an inline opener that keeps the gap
+    // from reading it yet.
+    self.sibling_list_marker = 0;
     self.scan_before_requote(content_end);
     self.truncate_buffer(frame.content_start);
     self.buffer.push_str(&quoted);
@@ -1195,15 +1270,18 @@ impl ConvertState {
         self.quoted_bytes += quoted.len();
       }
       self.scan_before_requote(flush_end);
+      let list_gap = self.list_gap_before_requote(flush_end);
       self.note_buffer_rewrite(shared_start);
       replace_buffer_range(&mut self.buffer, shared_start..flush_end, &quoted);
       let quoted_end = shared_start + quoted.len();
+      self.list_gap_after_requote(list_gap, flush_end, quoted_end);
       self.shift_raw_html_scan(flush_end, quoted_end);
       self.requote_stream_positions(flush_end, quoted_end);
       flush_end = quoted_end;
       self.blockquote_scratch = quoted;
       for frame in &mut self.blockquotes {
         frame.content_start = flush_end;
+        frame.item_separator_len = 0;
       }
       self.last_content_cache_len = self.buffer.len() - flush_end;
       self.invalidate_line_start();
@@ -1220,6 +1298,7 @@ impl ConvertState {
     // Taken once for the whole walk: every frame rewrites the same region again,
     // so without this each nesting level allocates its own copy of it per flush.
     let mut quoted = core::mem::take(&mut self.blockquote_scratch);
+    let list_gap = self.list_gap_before_requote(unquoted_end);
     self.note_buffer_rewrite(shared_start);
     for frame in self.blockquotes.iter().rev() {
       let content = &self.buffer[frame.content_start..flush_end];
@@ -1252,10 +1331,12 @@ impl ConvertState {
     }
     self.blockquote_scratch = quoted;
     self.shift_raw_html_scan(unquoted_end, flush_end);
+    self.list_gap_after_requote(list_gap, unquoted_end, flush_end);
     self.requote_stream_positions(unquoted_end, flush_end);
 
     for frame in &mut self.blockquotes {
       frame.content_start = flush_end;
+      frame.item_separator_len = 0;
     }
     self.last_content_cache_len = self.buffer.len() - flush_end;
     self.invalidate_line_start();
@@ -1301,6 +1382,31 @@ impl ConvertState {
       return Self::override_by_id(Some(ovs), idx, id);
     }
     ovs.iter().find(|(k, _)| k == node.name()).map(|(_, v)| v)
+  }
+
+  /// Record the marker the open `<li>` wrote when overrides are in play: its
+  /// list's character from the built-in enter, or whatever an enter override
+  /// wrote instead.
+  #[cold]
+  #[inline(never)]
+  pub(super) fn note_item_with_overrides(&mut self) {
+    let overrides = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|p| p.tag_overrides.as_ref());
+    let enter = self.stack.last().and_then(|li| {
+      Self::override_for_node(overrides, self.override_idx.as_deref(), li)
+        .and_then(|ov| ov.enter.as_deref())
+    });
+    let selected = self.list_markers.last().map_or(0, |m| m.selected);
+    let written = enter.map_or(selected, |enter| written_list_marker(enter.as_bytes()));
+    if written != 0
+      && let Some(marker) = self.list_markers.last_mut()
+    {
+      marker.written = written;
+    }
+    self.last_item_star = written == b'*';
   }
 
   /// Whether a code span marker applies: outside `<pre>` and raw HTML.
@@ -1819,7 +1925,7 @@ impl ConvertState {
 
     // An element that writes nothing, like a dropped `<svg>`, is no boundary.
     if !is_inline && (configured_new_lines > 0 || has_own_output) && !self.open_markers.is_empty() {
-      self.open_markers.clear();
+      self.release_markers_at_block();
     }
   }
 
@@ -2482,6 +2588,10 @@ impl ConvertState {
 
     let raw_html_quote_boundary =
       self.pending_raw_html_boundary && !enter_is_literal && tag_id == Some(TAG_BLOCKQUOTE);
+    let quote_on_item_marker = !plain_text!(self)
+      && !enter_is_literal
+      && tag_id == Some(TAG_BLOCKQUOTE)
+      && self.on_item_marker_line();
     let output_start = self.buffer.len();
     let pending = self.pending_emphasis;
     self.write_output(
@@ -2569,10 +2679,15 @@ impl ConvertState {
         }
       }
       if self.pending_raw_html_boundary {
-        self.finish_raw_html_block(">", false);
+        self.finish_raw_html_block(">", false, 0);
       }
       self.blockquotes.push(BlockquoteFrame {
         content_start: self.buffer.len(),
+        item_separator_len: if quote_on_item_marker {
+          self.buffer.len() - output_start
+        } else {
+          0
+        },
         // A quote in a table cell starts mid-row, past any list indent.
         list_indent: if self.in_table_cell() {
           String::new()
@@ -2705,7 +2820,7 @@ impl ConvertState {
       && !is_inline
       && (configured_new_lines > 0 || has_own_output)
     {
-      self.open_markers.clear();
+      self.release_markers_at_block();
     }
 
     if consumes_caption_boundary && (!is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR))) {
@@ -3021,6 +3136,7 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
+    let mut empty_quote_item_exit = false;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
       if matches!(
@@ -3028,6 +3144,13 @@ impl ConvertState {
         CaptionBoundary::QuoteParent | CaptionBoundary::QuoteTentative(_)
       ) {
         self.restore_quote_parent_boundary();
+        // A discarded quote reopened this marker line. Close the empty item
+        // before any parent continuation can arrive.
+        if self.on_item_marker_line() {
+          self.buffer.push('\n');
+          self.last_content_cache_len = 1;
+          empty_quote_item_exit = true;
+        }
         self.caption_boundary = CaptionBoundary::None;
       }
       self.heading_break_pending = false;
@@ -3453,6 +3576,15 @@ impl ConvertState {
     } else {
       self.write_output(false, is_inline, configured_new_lines, effective, false);
     }
+    if has_override
+      && matches!(tag_id, Some(TAG_UL | TAG_OL))
+      && let Some(exit) = effective
+      && let Some(marker) = self.list_markers.last_mut()
+      && let Some(written) = exit_list_marker(exit.as_bytes(), marker.written != 0)
+    {
+      marker.written = written;
+      self.sibling_list_marker = 0;
+    }
     if consumes_caption_boundary {
       if !is_inline || matches!(tag_id, Some(TAG_IMG | TAG_BR)) {
         self.caption_boundary = CaptionBoundary::None;
@@ -3504,6 +3636,9 @@ impl ConvertState {
 
     if tag_id == Some(TAG_A) {
       self.end_link();
+    }
+    if empty_quote_item_exit {
+      self.caption_boundary = CaptionBoundary::QuoteParent;
     }
   }
 
@@ -3605,11 +3740,29 @@ impl ConvertState {
   /// Release open inline markers when a block closes or visible text ends them.
   #[inline(always)]
   fn release_markers_on_exit(&mut self, closes_block: bool, output: Option<&str>) {
-    if !self.open_markers.is_empty()
-      && (closes_block || output.is_some_and(|o| has_visible(o.as_bytes())))
-    {
-      self.open_markers.clear();
+    if !self.open_markers.is_empty() {
+      if closes_block {
+        self.release_markers_at_block();
+      } else if output.is_some_and(|o| has_visible(o.as_bytes())) {
+        self.open_markers.clear();
+      }
     }
+  }
+
+  /// Make the open inline markers permanent at a block boundary. Their openers
+  /// were written while they could still retract, so as in the JS engine they
+  /// never end a closed list's run; output from the boundary on still can.
+  #[inline(never)]
+  fn release_markers_at_block(&mut self) {
+    if self.sibling_list_marker != 0
+      && let (Some(first), Some(last)) = (self.open_markers.first(), self.open_markers.last())
+    {
+      let content_start = last.content_start;
+      if !self.scan_list_gap(first.output_start) {
+        self.list_gap_from = self.list_gap_from.max(content_start);
+      }
+    }
+    self.open_markers.clear();
   }
 
   /// A block that writes nothing closed inside the open spans. That leaves an
@@ -3960,7 +4113,7 @@ impl ConvertState {
     }
     let pending_raw_boundary = self.pending_raw_html_boundary;
     if pending_raw_boundary {
-      self.finish_raw_html_block(text, true);
+      self.finish_raw_html_block(text, true, 0);
     }
     let text = if pending_raw_boundary && !self.pending_raw_html_boundary {
       text.trim_start_matches([' ', '\t', '\r', '\n'])
@@ -4694,6 +4847,16 @@ impl ConvertState {
     })
   }
 
+  #[cold]
+  fn on_item_marker_line(&self) -> bool {
+    if self.list_indent.is_empty() {
+      return false;
+    }
+    let bytes = self.buffer.as_bytes();
+    let end = bytes.len() - trailing_spaces(bytes);
+    end > 0 && self.list_marker_line_start(bytes, end, self.pending_marker_indent())
+  }
+
   /// Whether `end` sits just past a list marker that is all its line holds: up
   /// to `max_spaces` of indent, `-`/`*`/`+` or `N.`/`N)`, and nothing else.
   fn list_marker_line_start(&self, bytes: &[u8], end: usize, max_spaces: usize) -> bool {
@@ -4728,6 +4891,103 @@ impl ConvertState {
       return !self.has_flushed_tail() || matches!(self.flushed_tail[1], b'\n' | b'\r');
     }
     matches!(bytes[index - 1], b'\n' | b'\r')
+  }
+
+  /// Marker character for a list opening here: the other one of its kind when
+  /// the list before it ended on the default one, sits at the same depth under
+  /// the same quotes and nothing visible came between, since CommonMark would
+  /// join the two. `*` also has to start its line, as anywhere else it joins
+  /// nothing and reads as an emphasis delimiter.
+  pub(crate) fn next_list_marker(&mut self, ordered: bool) -> u8 {
+    let sibling = self.sibling_list_marker;
+    if sibling != 0
+      && self.sibling_list_depth == self.depth_map[TAG_LI as usize]
+      && self.sibling_list_quotes == self.blockquotes.len()
+      && matches!(sibling, b'.' | b')') == ordered
+      && !self.list_gap_visible()
+    {
+      match sibling {
+        b'-' if self.list_items_open_lines() => return b'*',
+        b'.' => return b')',
+        _ => {}
+      }
+    }
+    if ordered { b'.' } else { b'-' }
+  }
+
+  /// Whether the items of a list opening here start their lines. An item keeps
+  /// its newline unless an ancestor collapses whitespace; under one, only a line
+  /// the output already started takes its marker. A caption writes its `*` with
+  /// its first output, which the marker would be.
+  fn list_items_open_lines(&self) -> bool {
+    self.caption_frames.is_empty()
+      && (self.collapse_non_span_depth == 0
+        || matches!(self.last_output_byte(), None | Some(b'\n')))
+  }
+
+  /// Whether output since the closed list ends its run. An empty inline
+  /// wrapper, code span or cleaned link can still retract its opener, so
+  /// nothing from the first one still open on counts yet.
+  fn list_gap_visible(&mut self) -> bool {
+    let mut end = self.buffer.len();
+    if let Some(marker) = self.open_markers.first() {
+      end = end.min(marker.output_start);
+    }
+    if let Some(span) = self.code_spans.first() {
+      end = end.min(span.output_start);
+    }
+    if self.link.empty_text_pending {
+      end = end.min(self.link.bracket_pos);
+    }
+    self.scan_list_gap(end)
+  }
+
+  /// Whether the gap holds visible output before `end`. Moves its start to that
+  /// output, or to `end`, so a gap that keeps growing is never scanned twice.
+  pub(super) fn scan_list_gap(&mut self, end: usize) -> bool {
+    let start = self.list_gap_from.min(end);
+    let visible = self.buffer.as_bytes()[start..end]
+      .iter()
+      .position(|&byte| !is_whitespace(byte));
+    #[cfg(test)]
+    {
+      self.list_gap_scanned += visible.map_or(end - start, |offset| offset + 1);
+    }
+    self.list_gap_from = visible.map_or(self.list_gap_from.max(end), |offset| start + offset);
+    visible.is_some()
+  }
+
+  /// Visible output leaving the buffer before `drain_end` ends the closed
+  /// list's run. The drain stops short of any opener that can still retract.
+  pub(super) fn note_list_gap_drain(&mut self, drain_end: usize) {
+    if self.sibling_list_marker != 0
+      && self.list_gap_from < drain_end
+      && has_visible(&self.buffer.as_bytes()[self.list_gap_from..drain_end])
+    {
+      self.sibling_list_marker = 0;
+    }
+  }
+
+  /// Settle the run before quoting rewrites `..unquoted_end`, whose `>` would
+  /// read as output; returns where the run resumes, before the shift.
+  fn list_gap_before_requote(&mut self, unquoted_end: usize) -> usize {
+    let from = self.list_gap_from;
+    if self.sibling_list_marker != 0
+      && from < unquoted_end
+      && has_visible(&self.buffer.as_bytes()[from..unquoted_end])
+    {
+      self.sibling_list_marker = 0;
+    }
+    from
+  }
+
+  /// Move the run past the quoted lines, or along with the bytes after them.
+  fn list_gap_after_requote(&mut self, from: usize, unquoted_end: usize, quoted_end: usize) {
+    self.list_gap_from = if from >= unquoted_end {
+      from - unquoted_end + quoted_end
+    } else {
+      quoted_end
+    };
   }
 
   /// Arm the empty-item guard for the `<li>` whose marker was just written from
@@ -5602,7 +5862,12 @@ impl ConvertState {
       if matches!(self.caption_boundary, CaptionBoundary::QuoteTentative(_)) {
         self.caption_boundary = CaptionBoundary::None;
       } else if tag_id == Some(TAG_BLOCKQUOTE) && !enter_is_literal {
-        *output = None;
+        if self.on_item_marker_line() {
+          self.caption_boundary = CaptionBoundary::None;
+          *output = Some(Cow::Borrowed("\n"));
+        } else {
+          *output = None;
+        }
       }
     } else if tag_id == Some(TAG_BR) && self.caption_boundary != CaptionBoundary::QuoteParent {
       // The break's whitespace would pass for the spacing at the buffer tail.
@@ -6413,9 +6678,12 @@ impl ConvertState {
           return Some(Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE));
         }
         Some(match self.block_open_prefix(&prefix) {
-          // Sharing the marker's line, where `---` would make the whole line a
-          // thematic break and take the item with it.
-          None if !prefix.is_empty() => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT),
+          // Sharing the marker's line, where a rule of the bullet's own
+          // character would make the whole line a thematic break and take the
+          // item with it.
+          None if !prefix.is_empty() && !self.last_item_star => {
+            Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE_ALT)
+          }
           None => Cow::Borrowed(MARKDOWN_HORIZONTAL_RULE),
           Some(open) => Cow::Owned(format!("{open}{MARKDOWN_HORIZONTAL_RULE}")),
         })
@@ -6593,19 +6861,26 @@ impl ConvertState {
         // contribution is pushed onto list_indent AFTER this output
         // is written to the buffer.
         let ordered = _ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
+        // The innermost list's character; an item outside any list takes `-`.
+        let marker = self.list_markers.last().map_or(0, |m| m.selected);
         if ordered.is_none() && self.list_indent.len() <= MAX_BORROWED_INDENT {
           debug_assert!(self.list_indent.bytes().all(|b| b == b' '));
+          let bullets = if marker == b'*' {
+            INDENTED_STAR_BULLET
+          } else {
+            INDENTED_BULLET
+          };
           return Some(Cow::Borrowed(
-            &INDENTED_BULLET[MAX_BORROWED_INDENT - self.list_indent.len()..],
+            &bullets[MAX_BORROWED_INDENT - self.list_indent.len()..],
           ));
         }
         let mut s = String::with_capacity(self.list_indent.len() + ORDERED_MARKER_CAPACITY);
         s.push_str(&self.list_indent);
         if ordered.is_some() {
           push_decimal(&mut s, self.ordered_item_number(node.index as usize));
-          s.push_str(". ");
+          s.push_str(if marker == b')' { ") " } else { ". " });
         } else {
-          s.push_str("- ");
+          s.push_str(if marker == b'*' { "* " } else { "- " });
         }
         Some(Cow::Owned(s))
       }
@@ -7065,14 +7340,14 @@ impl ConvertState {
 
   /// Separate content following a raw HTML region. A capped code span must
   /// accept the complete separator before this consumes the pending boundary.
-  fn finish_raw_html_block(&mut self, value: &str, indent: bool) {
+  fn finish_raw_html_block(&mut self, value: &str, indent: bool, leading_newlines: usize) {
     if !self.pending_raw_html_boundary
       || self.in_raw_html_block()
       || !value.bytes().any(|byte| !is_whitespace(byte))
     {
       return;
     }
-    let mut newlines = 0;
+    let mut newlines = leading_newlines;
     let mut tail_start = 0;
     for (at, &byte) in self.buffer.as_bytes().iter().enumerate().rev() {
       if byte == b'\n' {
@@ -7094,29 +7369,37 @@ impl ConvertState {
       .take_while(|run| run.output_start >= tail_start)
       .map(|run| (run.count - 1) * run.unit.matches('\n').count())
       .sum::<usize>();
-    if newlines >= 2 {
+    if newlines >= 2 && leading_newlines == 0 {
       self.pending_raw_html_boundary = false;
       return;
     }
-    let indent_len = if indent { self.list_indent.len() } else { 0 };
+    let missing = 2usize.saturating_sub(newlines);
+    // An output that starts its own line brings the indent with it.
+    let indent_len = if indent && leading_newlines == 0 {
+      self.list_indent.len()
+    } else {
+      0
+    };
     // Charge the complete separator to an open code span. A rejected write
     // leaves the boundary pending until content can be emitted again.
-    if self.options.max_node_bytes != 0 && !self.code_spans.is_empty() {
-      let mut separator = String::with_capacity(2 - newlines + indent_len);
-      separator.push_str(&"\n\n"[..2 - newlines]);
+    if missing + indent_len == 0 {
+      // The output's own line breaks are the whole boundary.
+    } else if self.options.max_node_bytes != 0 && !self.code_spans.is_empty() {
+      let mut separator = String::with_capacity(missing + indent_len);
+      separator.push_str(&"\n\n"[..missing]);
       separator.push_str(&self.list_indent[..indent_len]);
       if self.push_code_span_content(&separator, true) == 0 {
         return;
       }
     } else {
       // The separator belongs after the HTML close, even when it had no spacing.
-      for _ in newlines..2 {
+      for _ in 0..missing {
         self.buffer.push('\n');
       }
       self.buffer.push_str(&self.list_indent[..indent_len]);
     }
     self.pending_raw_html_boundary = false;
-    self.last_content_cache_len = 2 - newlines + indent_len;
+    self.last_content_cache_len = missing + indent_len;
     self.has_last_text_node = false;
     self.last_text_node_contains_whitespace = false;
   }
@@ -7211,7 +7494,16 @@ impl ConvertState {
       if configured_new_lines >= 2 {
         self.pending_raw_html_boundary = false;
       } else if self.pending_raw_html_boundary {
-        self.finish_raw_html_block(output_str, true);
+        // Line breaks the output opens with count towards the boundary.
+        let mut leading_newlines = 0;
+        for &byte in output_str.as_bytes() {
+          if byte == b'\n' {
+            leading_newlines += 1;
+          } else if !matches!(byte, b' ' | b'\t' | b'\r') {
+            break;
+          }
+        }
+        self.finish_raw_html_block(output_str, true, leading_newlines);
       }
     }
     let is_line_boundary =
@@ -8201,6 +8493,7 @@ mod tests {
     state.flushed_tail = *b"y\n";
     state.blockquotes.push(BlockquoteFrame {
       content_start: 0,
+      item_separator_len: 0,
       list_indent: "  ".to_string(),
     });
     state.stack.push(entering_node(TAG_H2, false));

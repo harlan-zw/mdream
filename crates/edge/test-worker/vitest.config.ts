@@ -20,6 +20,8 @@ export default defineConfig({
         test: {
           name: 'pack-e2e',
           include: ['test/pack-e2e.test.ts'],
+          // The pack lifecycle rebuilds dist while workerd imports it.
+          sequence: { groupOrder: 1 },
           testTimeout: 240_000,
           hookTimeout: 240_000,
         },
