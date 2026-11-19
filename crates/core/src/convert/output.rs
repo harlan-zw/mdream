@@ -2369,7 +2369,7 @@ impl ConvertState {
             && !self.in_table_cell()
             && self.depth_map[TAG_LI as usize] > 0
           {
-            self.list_rule_pending = true;
+            self.list_pending |= LIST_RULE_PENDING;
           }
           if Self::void_spacing_follows_enter(ov) {
             let after = self.calculate_new_line_config(tag_id, node_spacing, true)[1];
