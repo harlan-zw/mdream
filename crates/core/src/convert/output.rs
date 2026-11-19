@@ -3865,21 +3865,16 @@ impl ConvertState {
   }
 
   /// `clean.fragments` removal for links that cancelled a pending closer.
-  /// `removals` are sorted ranges and `closers` holds `(removal end, closer)`
-  /// sorted by position. The first byte that survives a removal, however many
+  /// Each sorted removal carries the pending closer its wrapper cancelled.
+  /// The first byte that survives a removal, however many
   /// adjacent removals it follows, is written as a numeric reference when it
   /// is ASCII alphanumeric and the closer now precedes it.
   #[cold]
   #[inline(never)]
-  pub(super) fn remove_fragment_wrappers(
-    buffer: &str,
-    removals: &[(usize, usize)],
-    closers: &[(usize, u8)],
-  ) -> String {
-    let mut out = String::with_capacity(buffer.len() + 5 * closers.len());
+  pub(super) fn remove_fragment_wrappers(buffer: &str, removals: &[(usize, usize, u8)]) -> String {
+    let mut out = String::with_capacity(buffer.len());
     let mut read = 0usize;
     let mut closer = 0u8;
-    let mut next = 0usize;
     let push = |out: &mut String, text: &str, closer: u8| {
       let first = text.as_bytes()[0];
       if closer != 0 && first.is_ascii_alphanumeric() && out.as_bytes().last() == Some(&closer) {
@@ -3888,7 +3883,7 @@ impl ConvertState {
         out.push_str(text);
       }
     };
-    for &(remove_start, remove_end) in removals {
+    for &(remove_start, remove_end, removed_closer) in removals {
       if remove_end <= read {
         continue;
       }
@@ -3897,11 +3892,8 @@ impl ConvertState {
         closer = 0;
       }
       read = remove_end;
-      while next < closers.len() && closers[next].0 <= remove_end {
-        if closers[next].0 == remove_end {
-          closer = closers[next].1;
-        }
-        next += 1;
+      if removed_closer != 0 {
+        closer = removed_closer;
       }
     }
     if read < buffer.len() {

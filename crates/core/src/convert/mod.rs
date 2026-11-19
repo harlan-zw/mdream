@@ -2919,7 +2919,7 @@ impl ConvertState {
       };
 
       let mut removals = Vec::with_capacity(self.fragment_links.len());
-      let mut closers: Vec<(usize, u8)> = Vec::new();
+      let mut has_closer = false;
       for link in &self.fragment_links {
         if has_aliased_bracket(link.bracket_start) {
           continue;
@@ -2966,14 +2966,9 @@ impl ConvertState {
         if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
           continue; // resolves to a heading, keep the link whole
         }
-        removals.push((bracket_start, bracket_start + 1));
-        removals.push((text_end, link_end));
-        if link.bracket_closer != 0 {
-          closers.push((bracket_start + 1, link.bracket_closer));
-        }
-        if link.text_closer != 0 {
-          closers.push((link_end, link.text_closer));
-        }
+        removals.push((bracket_start, bracket_start + 1, link.bracket_closer));
+        removals.push((text_end, link_end, link.text_closer));
+        has_closer |= link.bracket_closer != 0 || link.text_closer != 0;
       }
 
       // Links are recorded at their close, so a link lands after the ones
@@ -2991,7 +2986,7 @@ impl ConvertState {
         removals[slot] = entry;
       }
 
-      if closers.is_empty() {
+      if !has_closer {
         // Only deletes, so it compacts in place: `write` trails `read` by bytes
         // dropped so far. A clean document never writes a byte; rebuilding into
         // a second String cost 7.2 MB on the spec page.
@@ -2999,7 +2994,7 @@ impl ConvertState {
         let mut read = 0usize;
         let mut write = 0usize;
         let mut bytes = std::mem::take(&mut self.buffer).into_bytes();
-        for (remove_start, remove_end) in &removals {
+        for (remove_start, remove_end, _) in &removals {
           // A duplicate range (an aliased bracket shared with a nested anchor)
           // is already dropped; skip it without copying.
           if *remove_end <= read {
@@ -3023,16 +3018,7 @@ impl ConvertState {
         self.buffer = String::from_utf8(bytes)
           .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
       } else {
-        for index in 1..closers.len() {
-          let entry = closers[index];
-          let mut slot = index;
-          while slot > 0 && closers[slot - 1].0 > entry.0 {
-            closers[slot] = closers[slot - 1];
-            slot -= 1;
-          }
-          closers[slot] = entry;
-        }
-        self.buffer = Self::remove_fragment_wrappers(&self.buffer, &removals, &closers);
+        self.buffer = Self::remove_fragment_wrappers(&self.buffer, &removals);
       }
     }
     if !self.streaming_break_runs.is_empty() {

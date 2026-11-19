@@ -784,7 +784,8 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   // Each pair drops its markers, and a broken link also drops its `[` and
   // its `](#slug)`. A wrapper that cancelled an emphasis closer hands it to
   // the first character the removal leaves next to it.
-  const dropAt = new Map<number, number>()
+  // Positive lengths drop a run. Negative lengths expand one character.
+  const edits = new Map<number, number>()
   let closerAt: Map<number, number> | undefined
   for (let span = 0; span < count; span++) {
     const open = opens[span]!
@@ -793,8 +794,8 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
     const close = closes[span]!
     const closeEnd = linkCloseEnd(markdown, close + 1)
     const broken = closeEnd !== -1 && !slugs.has(spanFragments[span]!)
-    dropAt.set(open, broken ? 2 : 1)
-    dropAt.set(close, broken ? closeEnd - close : 1)
+    edits.set(open, broken ? 2 : 1)
+    edits.set(close, broken ? closeEnd - close : 1)
     const closers = broken ? spanClosers[span]! : 0
     if (closers) {
       closerAt ??= new Map()
@@ -809,8 +810,6 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   let result = ''
   let copied = 0
   let closer = 0
-  // Raw offset and added length of each character written as a reference.
-  let references: number[] | undefined
   let nextOpen = markdown.indexOf(FRAGMENT_LINK_OPEN)
   let nextClose = markdown.indexOf(FRAGMENT_LINK_CLOSE)
   while (nextOpen !== -1 || nextClose !== -1) {
@@ -825,13 +824,13 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
     }
     // A marker inside a dropped run was never paired: the run already
     // removed it, so it must not move `copied` backwards.
-    const drop = dropAt.get(next)
+    const drop = edits.get(next)
     if (drop === undefined || next < copied)
       continue
     if (closer && next > copied) {
       const reference = closerReference(result, markdown.charCodeAt(copied), closer)
       if (reference) {
-        (references ??= []).push(copied, reference.length - 1)
+        edits.set(copied, 1 - reference.length)
         result += reference
         copied++
       }
@@ -843,7 +842,7 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   }
   const reference = closer && copied < markdown.length ? closerReference(result, markdown.charCodeAt(copied), closer) : ''
   if (reference) {
-    (references ??= []).push(copied, reference.length - 1)
+    edits.set(copied, 1 - reference.length)
     result += reference
     copied++
   }
@@ -852,15 +851,8 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
   return {
     markdown: result,
     mapPosition(position) {
-      positionMap ??= createPositionMap(dropAt)
-      let mapped = positionMap(position)
-      if (references) {
-        for (let index = 0; index < references.length; index += 2) {
-          if (references[index]! < position)
-            mapped += references[index + 1]!
-        }
-      }
-      return mapped
+      positionMap ??= createPositionMap(edits)
+      return positionMap(position)
     },
   }
 }
@@ -878,17 +870,17 @@ function closerReference(result: string, code: number, closer: number): string {
 }
 
 /** Build only when a reader needs offsets; ordinary conversion uses no map. */
-function createPositionMap(drops: ReadonlyMap<number, number>): (position: number) => number {
+function createPositionMap(edits: ReadonlyMap<number, number>): (position: number) => number {
   const starts: number[] = []
   const ends: number[] = []
   const totals: number[] = []
   let removed = 0
   let copied = 0
-  for (const start of [...drops.keys()].sort((a, b) => a - b)) {
+  for (const start of [...edits.keys()].sort((a, b) => a - b)) {
     if (start < copied)
       continue
-    const length = drops.get(start)!
-    copied = start + length
+    const length = edits.get(start)!
+    copied = start + (length < 0 ? 1 : length)
     removed += length
     starts.push(start)
     ends.push(copied)
