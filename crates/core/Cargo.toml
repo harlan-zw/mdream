@@ -63,3 +63,5 @@ default = [
 markdown = []
 text = []
 html = []
+# Internal to the reduced edge binding. Full-format builds retain every option.
+edge-markdown = []

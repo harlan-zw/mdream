@@ -19,9 +19,11 @@ export default defineBuildConfig({
   entries: [
     { type: 'bundle', input: './src/index.ts', rolldown },
     { type: 'bundle', input: './src/browser.ts', rolldown: rolldownWasm },
+    { type: 'bundle', input: './src/browser-markdown.ts', rolldown: rolldownWasm },
     // The root `browser` condition; no export condition reads its types.
     { type: 'bundle', input: './src/browser-stub.ts', dts: false },
     { type: 'bundle', input: './src/edge.ts', rolldown: rolldownWasm },
+    { type: 'bundle', input: './src/edge-markdown.ts', rolldown: rolldownWasm },
     { type: 'bundle', input: './src/wasm.ts', rolldown: rolldownWasm },
   ],
   hooks: {

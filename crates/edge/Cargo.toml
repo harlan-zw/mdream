@@ -16,12 +16,18 @@ wasm-opt = false # wasm-pack's bundled wasm-opt is too old; run wasm-opt manuall
 crate-type = [ "cdylib" ]
 
 [features]
+default = [ "full" ]
+full = [
+  "mdream/text",
+  "mdream/html"
+]
+markdown-only = [ "mdream/edge-markdown" ]
 # Test-only: makes `origin: "__mdream_panic_probe__"` panic so the Workers test
 # can assert panic reporting against a real abort. Never enabled for releases.
 panic-probe = [ ]
 
 [dependencies]
-mdream = { path = "../core" }
+mdream = { path = "../core", default-features = false, features = [ "markdown" ] }
 wasm-bindgen = "0.2.129"
 js-sys = "0.3.106"
 

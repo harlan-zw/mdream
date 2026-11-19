@@ -13,7 +13,7 @@ function typecheck(condition: string): string {
 }
 
 describe('export condition types', () => {
-  it.each(['node', 'edge', 'browser', 'browser-condition'])('%s types match the runtime return', (condition) => {
+  it.each(['node', 'edge', 'browser', 'browser-condition', 'markdown'])('%s types match the runtime return', (condition) => {
     expect(typecheck(condition)).toBe('')
   })
 })

@@ -1,10 +1,11 @@
 import { execSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build, createNitro } from 'nitropack/core'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { unstable_dev } from 'wrangler'
 
 // End-to-end regression for #119: pack the real npm tarball, install it into a
@@ -50,7 +51,12 @@ export default {
   async fetch(request) {
     const url = new URL(request.url)
     if (url.pathname === '/options' && request.method === 'POST') {
-      return new Response(htmlToMarkdown(await request.text(), isolationOptions))
+      try {
+        return new Response(htmlToMarkdown(await request.text(), isolationOptions))
+      }
+      catch (error) {
+        return new Response(String(error), { status: 400 })
+      }
     }
     if (url.pathname === '/stream' && request.method === 'POST') {
       let md = ''
@@ -75,11 +81,33 @@ export default {
     expect(tarballFiles).toContain('package/wasm/mdream_edge_bg.wasm')
   })
 
-  it('converts HTML after Nitro bundles the packaged edge entry', async () => {
+  it('rejects package imports of the internal Markdown WASM files', () => {
+    const resolvePackage = createRequire(join(tmp, 'src/index.mjs')).resolve
+    for (const file of ['mdream_markdown.js', 'mdream_markdown_bg.js', 'mdream_markdown_bg.wasm']) {
+      expect(() => resolvePackage(`mdream/wasm/${file}`))
+        .toThrow()
+      expect(() => resolvePackage(`mdream/wasm-bundler/${file}`))
+        .toThrow(expect.objectContaining({ code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' }))
+    }
+    expect(() => resolvePackage('mdream/wasm-bundler/mdream_markdown_web.js'))
+      .toThrow(expect.objectContaining({ code: 'ERR_PACKAGE_PATH_NOT_EXPORTED' }))
+    expect(resolvePackage('mdream/wasm/mdream_edge_bg.wasm')).toBe(join(tmp, 'node_modules/mdream/wasm/mdream_edge_bg.wasm'))
+  })
+
+  it.each(['full', 'mdream-markdown'])('converts HTML after Nitro bundles the %s edge build', async (profile) => {
+    const markdownOnly = profile === 'mdream-markdown'
     const handler = join(tmp, 'src/nitro-handler.mjs')
     writeFileSync(handler, `
 import { htmlToMarkdown, streamHtmlToMarkdown } from 'mdream'
 export default async (event) => {
+  if (event.path.endsWith('/options')) {
+    try {
+      return htmlToMarkdown('<h1>Hello</h1>', { format: 'text' })
+    }
+    catch (error) {
+      return String(error)
+    }
+  }
   if (event.path.endsWith('/stream')) {
     const html = new ReadableStream({ start(controller) {
       controller.enqueue('<h1>Stream</h1><ul><li>One</li><li>Two</li></ul>')
@@ -98,6 +126,7 @@ export default async (event) => {
       preset: 'cloudflare_module',
       compatibilityDate: '2025-03-14',
       experimental: { wasm: true },
+      exportConditions: markdownOnly ? ['workerd', 'mdream-markdown'] : ['workerd'],
       cloudflare: { nodeCompat: true },
       handlers: [{ route: '/api/**', handler }],
       rollupConfig: { onwarn(warning, handler) {
@@ -121,6 +150,12 @@ export default async (event) => {
       expect(await res.text()).toBe('# Hello\n\nWorld')
       const streamRes = await worker.fetch('/api/stream', { signal: AbortSignal.timeout(15000) })
       expect(await streamRes.text()).toBe('# Stream\n\n- One\n- Two')
+      const optionsRes = await worker.fetch('/api/options', { signal: AbortSignal.timeout(15000) })
+      const options = await optionsRes.text()
+      if (markdownOnly)
+        expect(options).toContain('Remove the mdream-markdown condition')
+      else
+        expect(options).toBe('Hello')
     }
     finally {
       await worker.stop()
@@ -154,6 +189,33 @@ export default async (event) => {
     }
     finally {
       await worker.stop()
+    }
+  })
+
+  it('opts into streaming Markdown with the same import in a Worker', async () => {
+    vi.stubEnv('WRANGLER_BUILD_CONDITIONS', 'workerd,worker,browser,mdream-markdown')
+    try {
+      const worker = await unstable_dev(join(tmp, 'src/index.mjs'), {
+        config: join(tmp, 'wrangler.toml'),
+        experimental: { disableExperimentalWarning: true },
+      })
+      try {
+        const res = await worker.fetch('/', { signal: AbortSignal.timeout(15000) })
+        expect(await res.text()).toBe('# Hello\n\nWorld')
+
+        const streamRes = await worker.fetch('/stream', { method: 'POST', body: '<p>café 🎉</p>', signal: AbortSignal.timeout(15000) })
+        expect(await streamRes.text()).toBe('café 🎉')
+
+        const optionsRes = await worker.fetch('/options', { method: 'POST', body: '<p>Hello</p>', signal: AbortSignal.timeout(15000) })
+        expect(optionsRes.status).toBe(400)
+        expect(await optionsRes.text()).toContain('Remove the mdream-markdown condition')
+      }
+      finally {
+        await worker.stop()
+      }
+    }
+    finally {
+      vi.unstubAllEnvs()
     }
   })
 })

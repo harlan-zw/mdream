@@ -106,7 +106,7 @@ fn convert_with_state(html: &str, mut state: ConvertState) -> MdreamResult {
 }
 
 fn take_extracted(state: &mut ConvertState) -> Option<Vec<types::ExtractedElement>> {
-  if !state.has_extraction {
+  if !state.has_extraction() {
     return None;
   }
   let results = std::mem::take(&mut state.extraction_results);

@@ -1396,7 +1396,46 @@ pub struct ConvertState {
 /// exclusive upper bound on indices the table can hold.
 pub(crate) const NO_OVERRIDE: u8 = u8::MAX;
 
+// Cargo can unify features with another workspace member. Keep the regular
+// behavior whenever the same build also includes the text or HTML renderer.
+const MARKDOWN_ONLY_EDGE: bool = cfg!(all(
+  target_arch = "wasm32",
+  target_os = "unknown",
+  feature = "edge-markdown",
+  not(any(feature = "text", feature = "html"))
+));
+
+macro_rules! optional_state_accessors {
+  ($($field:ident: $ty:ty = $default:expr),+ $(,)?) => {
+    $(
+      #[inline(always)]
+      pub(crate) const fn $field(&self) -> $ty {
+        if MARKDOWN_ONLY_EDGE { $default } else { self.$field }
+      }
+    )+
+  };
+}
+
 impl ConvertState {
+  // Let the linker remove optional paths even when several entry points use
+  // the same converter. The full build still reads the stored runtime values.
+  optional_state_accessors!(
+    clean_flags: u8 = 0,
+    clean_urls: bool = false,
+    wrap_width: usize = 0,
+    has_plugins: bool = false,
+    has_tailwind: bool = false,
+    has_isolate_main: bool = false,
+    has_frontmatter: bool = false,
+    has_filter: bool = false,
+    has_extraction: bool = false,
+    has_tag_overrides: bool = false,
+    close_plugin_work: bool = false,
+    override_fast_ok: bool = false,
+    li_slot_free: bool = true,
+    attrs_force_all: bool = false,
+    attr_extra_mask: u16 = ATTR_NONE,
+  );
   /// Whether this conversion writes Markdown. A build with exactly one format
   /// folds the check to a constant, so the other renderers drop out.
   #[inline(always)]
@@ -1680,7 +1719,7 @@ impl ConvertState {
       column_bytes_read: std::cell::Cell::new(0),
     };
     // Resolve clean config into bitmask
-    if let Some(ref clean) = s.options.clean {
+    if !MARKDOWN_ONLY_EDGE && let Some(ref clean) = s.options.clean {
       s.clean_urls = clean.urls;
       let mut flags = 0u8;
       if clean.empty_links {
@@ -1704,8 +1743,8 @@ impl ConvertState {
       s.clean_flags = flags;
     }
 
-    s.text_static_ok = s.is_markdown() && options_max_node_bytes == 0 && options_wrap_width == 0;
-    if let Some(plugins) = &s.options.plugins {
+    s.text_static_ok = s.is_markdown() && options_max_node_bytes == 0 && s.wrap_width() == 0;
+    if !MARKDOWN_ONLY_EDGE && let Some(plugins) = &s.options.plugins {
       s.has_plugins = true;
       s.has_tailwind = plugins.tailwind.is_some();
       s.has_isolate_main = plugins.isolate_main.is_some();
@@ -1952,7 +1991,7 @@ impl ConvertState {
     if self.disable_text_run_flush {
       return false;
     }
-    if self.in_pre || self.in_non_nesting || self.wrap_width != 0 || self.in_raw_html_block() {
+    if self.in_pre || self.in_non_nesting || self.wrap_width() != 0 || self.in_raw_html_block() {
       return false;
     }
     // Pieces of a run inside a quote or a heading pile up in the output those
@@ -1981,7 +2020,7 @@ impl ConvertState {
     }
     match self.stack.last() {
       Some(parent) => {
-        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind || parent.tailwind().is_none())
+        parent.tag_id != Some(TAG_TITLE) && (!self.has_tailwind() || parent.tailwind().is_none())
       }
       None => true,
     }
@@ -2661,8 +2700,8 @@ impl ConvertState {
         // An aliased tag renders as its target but keeps its source name for
         // its end tag; a built-in one takes the lowercase name from TAG_NAMES.
         // With no alias in any override, the lookup can only return `None`.
-        if self.has_tag_overrides
-          && !self.override_fast_ok
+        if self.has_tag_overrides()
+          && !self.override_fast_ok()
           && let Some(alias_tag_id) = self.alias_tag_id(name, builtin_tag_id)
         {
           if let Some(id) = builtin_tag_id {
@@ -2683,7 +2722,7 @@ impl ConvertState {
         // undercount; an oversized custom name is itself the payload. Both fall
         // back to measuring the raw tag. Uncapped there is nothing to measure,
         // so the pre-scan would only re-read what the parser is about to.
-        let raw_guard = max_node_bytes != 0 && (self.attrs_force_all || oversized_name);
+        let raw_guard = max_node_bytes != 0 && (self.attrs_force_all() || oversized_name);
         // No tag outruns the bytes left in the chunk, so a cap at or above that
         // remainder cannot fire. A parked scan still resumes.
         if raw_guard && (self.pending_tag.is_some() || chunk_length - i > max_node_bytes) {
@@ -2874,7 +2913,7 @@ impl ConvertState {
   /// Whether CDATA sections surface as output through a `#cdata-section`
   /// override, making a dropped one a lost-output truncation.
   fn has_surfaced_cdata(&self) -> bool {
-    self.has_tag_overrides
+    self.has_tag_overrides()
       && self
         .options
         .plugins
@@ -2912,7 +2951,7 @@ impl ConvertState {
     // Apply clean.fragments using recorded positions. Removing only each broken
     // link's wrappers preserves nested link text without repeatedly shifting the
     // whole output buffer.
-    if self.clean_flags & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
+    if self.clean_flags() & CLEAN_FRAGMENTS != 0 && !self.fragment_links.is_empty() {
       let trim_offset = start;
       heap_sort(&mut self.heading_slugs);
 
@@ -3450,7 +3489,7 @@ impl ConvertState {
       self.note_buffer_rewrite(0);
       return std::mem::take(&mut self.buffer);
     }
-    if !plain_text!(self) && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+    if !plain_text!(self) && self.clean_flags() & CLEAN_FRAGMENTS != 0 {
       return String::new();
     }
     self.flush_settled_blockquote_lines();
@@ -3645,7 +3684,7 @@ impl ConvertState {
   pub fn get_final_markdown_chunk(&mut self) -> String {
     // No opener follows the end of the document.
     self.closed_markers.clear();
-    if !plain_text!(self) && !self.is_html() && self.clean_flags & CLEAN_FRAGMENTS != 0 {
+    if !plain_text!(self) && !self.is_html() && self.clean_flags() & CLEAN_FRAGMENTS != 0 {
       self.get_markdown()
     } else {
       self.get_markdown_chunk()
@@ -3763,7 +3802,7 @@ impl ConvertState {
     if drain_end == 0 {
       return;
     }
-    if self.wrap_width != 0 {
+    if self.wrap_width() != 0 {
       let drained = &self.buffer[..drain_end];
       self.buffer_start_column = if let Some(last_newline) = drained.rfind('\n') {
         drained[last_newline + 1..].chars().count()

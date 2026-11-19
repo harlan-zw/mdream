@@ -35,6 +35,20 @@ export default defineConfig({
             screenshotFailures: true,
           },
           include: ['**/*.browser.test.ts'],
+          exclude: ['**/browser-markdown.browser.test.ts'],
+        },
+      }),
+      defineProject({
+        resolve: { conditions: ['mdream-markdown', 'browser', 'module', 'development|production'] },
+        test: {
+          name: 'browser-markdown',
+          browser: {
+            enabled: true,
+            provider: playwright(),
+            instances: [{ browser: 'chromium' }],
+            headless: true,
+          },
+          include: ['**/browser-markdown.browser.test.ts'],
         },
       }),
     ],
