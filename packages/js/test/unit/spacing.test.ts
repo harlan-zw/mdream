@@ -734,8 +734,8 @@ describe('excluded-content review regressions', () => {
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
   })
   it.each([
-    ['<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>', '`[Lima](/f) *[  \nLima](/f)*`'],
-    ['<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>', '[Lima](/f) *<mark></mark>*'],
+    ['<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>', '`[Lima](/f) *[ Lima](/f)*`'],
+    ['<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>', '[Lima](/f)\n\n*<mark></mark>*'],
     ['<figcaption><s>1. Lima </s><figcaption><svg></svg> Lima</figcaption></figcaption>', '*~~1. Lima~~ *Lima**'],
     ['<code><a href="/f" title="Lima "></a></code>', '`[Lima ](/f "Lima ")`'],
     // Text the exit trims repeats the title, as outside a code span.
@@ -820,7 +820,7 @@ describe('excluded-content review regressions', () => {
       '<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite> Lima</figcaption>',
       '**Kilo* Lima*',
     ],
-    ['<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>\n<br></ul> </a></figcaption></kbd>', '```Kilo![](/n)Kilo`" [Lima](/f)"`  \n*Kilo [  \nLima](/f)*`'],
+    ['<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>\n<br></ul> </a></figcaption></kbd>', '```Kilo![](/n)Kilo`" [Lima](/f)"` *Kilo [ Lima](/f)*`'],
   ])('keeps caption emphasis after a leading break: %s', async (html, expected) => {
     const options = { tagOverrides: { code: { enter: '^', exit: '^' } } }
     expect(htmlToMarkdown(html, options)).toBe(expected)

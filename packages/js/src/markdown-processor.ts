@@ -3317,7 +3317,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const pendingCaption = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
-      if (breakOutput && pendingCaption && !hasNonWhitespace(breakOutput)) {
+      if (breakOutput && breakOutput !== ' ' && pendingCaption && !hasNonWhitespace(breakOutput)) {
         for (let index = 0; index < captionFrameCount; index++) {
           const offset = index * CAPTION_FRAME_SIZE + 2
           if ((captionFrames![offset]! & CAPTION_OPEN) === 0) {

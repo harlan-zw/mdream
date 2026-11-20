@@ -194,6 +194,9 @@ export function renderBreak(state: HandlerContext['state']): string {
   if (isInsideTableCell(state) || isInsideRawHtmlBlock(depthMap) || isInsideHeading(depthMap)) {
     return '<br>'
   }
+  // Inline code renders a line ending as a space.
+  if (!depthMap[TAG_PRE] && state.codeTextOwner)
+    return ' '
   // Hard-break markers are literal content inside code.
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
     return '\n'

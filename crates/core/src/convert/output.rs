@@ -2913,6 +2913,7 @@ impl ConvertState {
       && configured_new_lines == 0
       && let Some(fragment) = output.as_deref()
       && !fragment.is_empty()
+      && fragment != " "
       && fragment.bytes().all(is_whitespace)
       && self.defer_caption_break(fragment)
     {
@@ -2942,6 +2943,7 @@ impl ConvertState {
       && configured_new_lines == 0
       && let Some(fragment) = output.as_deref()
       && !fragment.is_empty()
+      && fragment != " "
       && fragment.bytes().all(is_whitespace)
       && self.defer_streaming_break(fragment)
     {
@@ -7144,6 +7146,9 @@ impl ConvertState {
       TAG_BR => {
         if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
           Some(Cow::Borrowed("<br>"))
+        // Inline code renders a line ending as a space.
+        } else if self.depth_map[TAG_PRE as usize] == 0 && self.writes_code_text() {
+          Some(Cow::Borrowed(" "))
         // Hard-break markers are literal content inside code.
         } else if self.depth_map[TAG_PRE as usize] > 0 || self.depth_map[TAG_CODE as usize] > 0 {
           Some(Cow::Borrowed("\n"))

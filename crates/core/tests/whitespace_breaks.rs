@@ -1715,6 +1715,13 @@ fn touching_emphasis_pairs_of_one_delimiter_are_reopened() {
     ("<code><em>a*</em><cite>`b</cite></code>", "``a*`b``"),
     ("<code>a<br><b><br>b</b></code>", "`a  b`"),
     (
+      "<code>x<br><strong># heading</strong></code>",
+      "`x # heading`",
+    ),
+    ("<kbd>a<br><strong><br>b</strong></kbd>", "`a  b`"),
+    ("<samp>a<br><em># b</em></samp>", "`a # b`"),
+    ("<var>a<br><i><br>b</i></var>", "`a  b`"),
+    (
       "<details><code><em>argv</em></code></details>",
       "<details><code>argv</code></details>",
     ),
@@ -2444,7 +2451,7 @@ fn review_caption_lifecycle_ul_code_empty_em() {
 #[test]
 fn review_caption_additional_0() {
   let html = r#"<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>"#;
-  let expected = "`[Lima](/f) *[  \nLima](/f)*`";
+  let expected = "`[Lima](/f) *[ Lima](/f)*`";
   assert_eq!(md(html), expected);
   for width in [1, 2, 3, 11] {
     assert_eq!(md_streamed(html, width), expected);
@@ -2462,7 +2469,7 @@ fn review_caption_additional_0() {
 fn review_caption_additional_1() {
   let html =
     r#"<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>"#;
-  let expected = "[Lima](/f) *<mark></mark>*";
+  let expected = "[Lima](/f)\n\n*<mark></mark>*";
   assert_eq!(md(html), expected);
   for width in [1, 2, 3, 11] {
     assert_eq!(md_streamed(html, width), expected);
@@ -2745,7 +2752,7 @@ fn caption_emphasis_after_leading_break() {
     (
       r#"<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>
 <br></ul> </a></figcaption></kbd>"#,
-      "```Kilo![](/n)Kilo`\" [Lima](/f)\"`  \n*Kilo [  \nLima](/f)*`",
+      "```Kilo![](/n)Kilo`\" [Lima](/f)\"` *Kilo [ Lima](/f)*`",
     ),
     (
       r#"<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite></figcaption>"#,

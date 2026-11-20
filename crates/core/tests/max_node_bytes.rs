@@ -753,12 +753,7 @@ fn an_exact_utf8_inline_code_cap_does_not_report_truncation() {
 
 #[test]
 fn generated_inline_code_content_consumes_the_cap() {
-  assert_capped_inline_code(
-    "<code>a<br>b<br>c<br>d<br>e</code>",
-    8,
-    "`a\nb\nc\nd\n`",
-    true,
-  );
+  assert_capped_inline_code("<code>a<br>b<br>c<br>d<br>e</code>", 8, "`a b c d `", true);
 }
 
 #[test]
@@ -901,19 +896,19 @@ fn raw_html_spacing_respects_code_caps_across_contexts() {
   assert_capped_inline_code(
     "<code><br><details>x</details>y</code>tail",
     10,
-    "`\n<details>`\n\ntail",
+    "` <details>`tail",
     true,
   );
   assert_capped_inline_code(
     "<ul><li><code><br><details>x</details>y</code>tail</li></ul>",
     12,
-    "- `\n<details>x`\n\n  tail",
+    "- ` <details>x`tail",
     true,
   );
   assert_capped_inline_code(
     "<code><br><details>x</details><blockquote>q</blockquote></code>tail",
     10,
-    "`\n<details>`tail",
+    "` <details>`tail",
     true,
   );
 }
