@@ -58,6 +58,9 @@ static SIMPLE_EMIT_TAG: [bool; MAX_TAG_ID] = {
     TAG_LI,
     TAG_PRE,
     TAG_CODE,
+    TAG_KBD,
+    TAG_SAMP,
+    TAG_VAR,
     TAG_TABLE,
     TAG_TR,
     TAG_TH,
@@ -177,37 +180,9 @@ fn has_visible(bytes: &[u8]) -> bool {
   bytes.iter().any(|&b| !is_whitespace(b))
 }
 
-// Blank lines end the paragraph before the inline code delimiter can close.
-fn flatten_code_span_blank_lines(content: &str) -> Option<String> {
-  let bytes = content.as_bytes();
-  let mut flattened = None;
-  let mut offset = 0;
-  while let Some(relative) = crate::scan::find_line_end(&bytes[offset..]) {
-    let start = offset + relative;
-    let end = start
-      + if bytes[start..].starts_with(b"\r\n") {
-        2
-      } else {
-        1
-      };
-    offset = end;
-    let mut next = end;
-    while matches!(bytes.get(next), Some(b' ' | b'\t')) {
-      next += 1;
-    }
-    if matches!(bytes.get(next), Some(b'\r' | b'\n')) {
-      let next_end = next
-        + if bytes[next..].starts_with(b"\r\n") {
-          2
-        } else {
-          1
-        };
-      let output = flattened.get_or_insert_with(|| bytes.to_vec());
-      output[start..end].fill(b' ');
-      output[next..next_end].fill(b' ');
-    }
-  }
-  flattened.map(|value| String::from_utf8(value).expect("replaced only ASCII line endings"))
+#[inline]
+fn inline_code_tag(tag: Option<u8>) -> bool {
+  matches!(tag, Some(TAG_CODE | TAG_KBD | TAG_SAMP | TAG_VAR))
 }
 
 /// List marker character opening the last visible line of `output`: a bullet,
@@ -835,8 +810,11 @@ impl ConvertState {
     {
       self.code_span_closed_bytes += self.buffer.len() - span.output_start;
     }
-    if let Some(content) = flatten_code_span_blank_lines(&self.buffer[span.content_start..]) {
-      self.replace_code_span_content(span.content_start..self.buffer.len(), &content);
+    // A line can begin a Markdown block before the backtick closes.
+    let content = &self.buffer[span.content_start..];
+    if crate::scan::find_line_end(content.as_bytes()).is_some() {
+      let flattened = content.replace("\r\n", " ").replace(['\r', '\n'], " ");
+      self.replace_code_span_content(span.content_start..self.buffer.len(), &flattened);
     }
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
     // honoured there. Its expanded form still has to fit the aggregate budget.
@@ -1481,31 +1459,20 @@ impl ConvertState {
   }
 
   pub(super) fn writes_code_text(&self) -> bool {
-    if !self.code_spans.is_empty() {
-      return true;
-    }
-    let raw_code = self.depth_map[TAG_CODE as usize] != 0 && self.in_raw_html_block();
-    if !raw_code
-      && self.depth_map[TAG_KBD as usize] == 0
-      && self.depth_map[TAG_SAMP as usize] == 0
-      && self.depth_map[TAG_VAR as usize] == 0
-    {
+    !self.code_spans.is_empty() || self.raw_code_owner_depth.is_some()
+  }
+
+  fn transparent_code_caption(&self, node: &ElementNode) -> bool {
+    if node.tag_id != Some(TAG_FIGCAPTION) || !self.writes_code_text() {
       return false;
-    }
-    if !self.has_tag_overrides() {
-      return true;
     }
     let overrides = self
       .options
       .plugins
       .as_ref()
       .and_then(|p| p.tag_overrides.as_ref());
-    self.stack.iter().rev().any(|node| {
-      (matches!(node.tag_id, Some(TAG_KBD | TAG_SAMP | TAG_VAR))
-        || (raw_code && node.tag_id == Some(TAG_CODE)))
-        && Self::override_for_node(overrides, self.override_idx.as_deref(), node)
-          .is_none_or(|value| value.enter.is_none())
-    })
+    Self::override_for_node(overrides, self.override_idx.as_deref(), node)
+      .is_none_or(|value| value.enter.is_none() && value.exit.is_none())
   }
 
   /// State every simple emitter needs in Markdown and in Text: no pending
@@ -2525,6 +2492,9 @@ impl ConvertState {
       self.emit_html_enter();
       return;
     }
+    if self.transparent_code_caption(&self.stack[stack_len - 1]) {
+      return;
+    }
     self.emit_markdown_enter(stack_len);
   }
 
@@ -2960,10 +2930,11 @@ impl ConvertState {
     // trailing whitespace stays unquoted: the next block still rewrites it.
     if !plain_text!(self)
       && !enter_is_literal
-      && tag_id == Some(TAG_CODE)
+      && inline_code_tag(tag_id)
       && output.is_some()
       && ((self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block())
-        || (self.depth_map[TAG_PRE as usize] > 0
+        || (tag_id == Some(TAG_CODE)
+          && self.depth_map[TAG_PRE as usize] > 0
           && self.pre_fence_owner_depth == 0
           && !self.in_table_cell()))
     {
@@ -3092,7 +3063,15 @@ impl ConvertState {
       });
     }
 
-    if !enter_is_literal && tag_id == Some(TAG_CODE) {
+    if !plain_text!(self) && !enter_is_literal && inline_code_tag(tag_id) {
+      let depth = self.stack[stack_len - 1].depth;
+      if self.raw_code_owner_depth.is_none()
+        && self.buffer.len() > output_start
+        && (output.as_deref() == Some("<code>")
+          || (self.in_raw_html_block() && output.as_deref() == Some(MARKDOWN_INLINE_CODE)))
+      {
+        self.raw_code_owner_depth = Some(depth);
+      }
       if self.depth_map[TAG_PRE as usize] == 0 {
         if !self.in_raw_html_block()
           && let Some(emitted) = output.as_deref()
@@ -3100,7 +3079,7 @@ impl ConvertState {
           let opener_emitted = self.buffer.len() > output_start && self.buffer.ends_with(emitted);
           let content_start = self.buffer.len();
           self.code_spans.push(CodeSpanState {
-            depth: self.stack[stack_len - 1].depth,
+            depth,
             output_start: if opener_emitted {
               content_start - emitted.len()
             } else {
@@ -3111,7 +3090,8 @@ impl ConvertState {
             exhausted: false,
           });
         }
-      } else if self.pre_fence_owner_depth == 0
+      } else if tag_id == Some(TAG_CODE)
+        && self.pre_fence_owner_depth == 0
         && !self.in_table_cell()
         && let Some(emitted) = output.as_deref()
         && self.buffer.len() > output_start
@@ -3533,6 +3513,12 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
+    if self.transparent_code_caption(node) {
+      return;
+    }
+    if inline_code_tag(tag_id) && self.raw_code_owner_depth == Some(node.depth) {
+      self.raw_code_owner_depth = None;
+    }
     let mut empty_quote_item_exit = false;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
@@ -3672,13 +3658,10 @@ impl ConvertState {
     if !plain_text!(self) && self.pre_fence_pending && tag_id != Some(TAG_PRE) && has_override {
       self.flush_pre_fence();
     }
-    // Pop at the exit of the inline <code> that pushed: the enter push ignores
+    // Pop at the exit of the inline code element that pushed: the enter ignores
     // exit overrides, so an exit-only override that skipped the pop leaked the
     // span, whose exhausted flag then capped the rest of the document.
-    let closing_code_span = if tag_id == Some(TAG_CODE)
-      && self.depth_map[TAG_PRE as usize] == 0
-      && !self.in_raw_html_block()
-    {
+    let closing_code_span = if inline_code_tag(tag_id) {
       self.code_spans.pop_if(|span| span.depth == node.depth)
     } else {
       None
@@ -4149,6 +4132,7 @@ impl ConvertState {
       && !self.pre_fence_pending
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
+      && self.code_spans.is_empty()
       && self.fast_paths_enabled()
   }
 
@@ -4803,6 +4787,7 @@ impl ConvertState {
     let hazard = !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
+      && self.code_spans.is_empty()
       && (ordered_digits > 0
         || has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
@@ -6012,6 +5997,7 @@ impl ConvertState {
   fn can_wrap_here(&self) -> bool {
     self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
+      && self.code_spans.is_empty()
       && !self.in_table_cell()
       && !self.in_heading()
   }
@@ -7144,11 +7130,10 @@ impl ConvertState {
       // raw <pre> and let the content newlines become <br> (issue #147).
       TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("<pre>")),
       TAG_BR => {
-        if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
-          Some(Cow::Borrowed("<br>"))
-        // Inline code renders a line ending as a space.
-        } else if self.depth_map[TAG_PRE as usize] == 0 && self.writes_code_text() {
+        if self.depth_map[TAG_PRE as usize] == 0 && !self.code_spans.is_empty() {
           Some(Cow::Borrowed(" "))
+        } else if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
+          Some(Cow::Borrowed("<br>"))
         // Hard-break markers are literal content inside code.
         } else if self.depth_map[TAG_PRE as usize] > 0 || self.depth_map[TAG_CODE as usize] > 0 {
           Some(Cow::Borrowed("\n"))
@@ -7504,7 +7489,8 @@ impl ConvertState {
           None
         }
       }
-      TAG_KBD | TAG_SAMP | TAG_VAR => Some(Cow::Borrowed("`")),
+      TAG_KBD | TAG_SAMP | TAG_VAR => (self.in_raw_html_block() || self.code_spans.is_empty())
+        .then_some(Cow::Borrowed(MARKDOWN_INLINE_CODE)),
       TAG_ABBR | TAG_SMALL | TAG_TIME | TAG_BDO | TAG_RUBY | TAG_RT | TAG_RP => {
         Some(Cow::Borrowed(""))
       }
@@ -7679,7 +7665,12 @@ impl ConvertState {
           None
         }
       }
-      TAG_KBD | TAG_SAMP | TAG_VAR => Some(Cow::Borrowed("`")),
+      TAG_KBD | TAG_SAMP | TAG_VAR => (self.in_raw_html_block()
+        || self
+          .code_spans
+          .last()
+          .is_none_or(|span| span.depth == node.depth))
+      .then_some(Cow::Borrowed(MARKDOWN_INLINE_CODE)),
       TAG_ABBR | TAG_SMALL | TAG_TIME | TAG_BDO | TAG_RUBY | TAG_RT | TAG_RP => {
         Some(Cow::Borrowed(""))
       }

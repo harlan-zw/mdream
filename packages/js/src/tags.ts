@@ -191,12 +191,11 @@ export function renderBreak(state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
   const depthMap = state.depthMap!
+  if (!depthMap[TAG_PRE] && state.codeText?.kind === 'span')
+    return ' '
   if (isInsideTableCell(state) || isInsideRawHtmlBlock(depthMap) || isInsideHeading(depthMap)) {
     return '<br>'
   }
-  // Inline code renders a line ending as a space.
-  if (!depthMap[TAG_PRE] && state.codeTextOwner)
-    return ' '
   // Hard-break markers are literal content inside code.
   if (depthMap[TAG_PRE] || depthMap[TAG_CODE])
     return '\n'
@@ -209,6 +208,18 @@ export const breakHandler: TagHandler = {
   isSelfClosing: true,
   spacing: NO_SPACING,
   collapsesInnerWhiteSpace: true,
+  isInline: true,
+}
+
+const codeLikeHandler: TagHandler = {
+  enter: ({ state }) => isInsideRawHtmlBlock(state.depthMap!)
+    ? MARKDOWN_INLINE_CODE
+    : { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE },
+  exit: ({ state }) => isInsideRawHtmlBlock(state.depthMap!)
+    ? MARKDOWN_INLINE_CODE
+    : { _tag: 'CodeSpanExit' },
+  collapsesInnerWhiteSpace: true,
+  spacing: NO_SPACING,
   isInline: true,
 }
 
@@ -841,19 +852,12 @@ export const tagHandlers: Record<number, TagHandler> = {
       // trimmed at this exit keeps the space: the label an empty link takes
       // from its title.
       let preservesCodeWhitespace = false
-      if (state.depthMap?.[TAG_CODE] && !state.depthMap[TAG_PRE] && !state.lastTextNode?.containsWhitespace) {
+      if (state.codeText?.kind === 'span' && !state.depthMap?.[TAG_PRE] && !state.lastTextNode?.containsWhitespace) {
         const buffer = state.buffer!
         let tail = buffer.length - 1
         while (tail >= 0 && !buffer[tail])
           tail--
-        let parent = buffer[tail] === state.lastContentCache ? node.parent : undefined
-        while (parent) {
-          if (parent.tagId === TAG_CODE && parent.tagHandler?.enter === tagHandlers[TAG_CODE]!.enter) {
-            preservesCodeWhitespace = true
-            break
-          }
-          parent = parent.parent
-        }
+        preservesCodeWhitespace = buffer[tail] === state.lastContentCache
       }
       const cachedText = preservesCodeWhitespace
         ? state.lastContentCache
@@ -1130,13 +1134,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: TABLE_ROW_SPACING,
     excludesTextNodes: true,
   },
-  [TAG_KBD]: {
-    enter: () => '`',
-    exit: () => '`',
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_KBD]: codeLikeHandler,
   [TAG_FOOTER]: {
     spacing: NO_SPACING,
   },
@@ -1270,13 +1268,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
     isInline: true,
   },
-  [TAG_SAMP]: {
-    enter: () => '`',
-    exit: () => '`',
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_SAMP]: codeLikeHandler,
   [TAG_SMALL]: {
     enter: () => '',
     exit: () => '',
@@ -1330,13 +1322,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
     isInline: true,
   },
-  [TAG_VAR]: {
-    enter: () => '`',
-    exit: () => '`',
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_VAR]: codeLikeHandler,
   [TAG_TIME]: {
     enter: () => '',
     exit: () => '',

@@ -1355,6 +1355,20 @@ fn tailwind_formats_prose_after_inline_code() {
 }
 
 #[test]
+fn a_filtered_code_wrapper_does_not_suppress_included_emphasis() {
+  let options = HtmlToMarkdownOptions::default().with_plugins(PluginConfig {
+    filter: Some(FilterConfig {
+      include: Some(vec!["strong".into()]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  });
+  let html = "<kbd><strong>x</strong></kbd>";
+  assert_eq!(html_to_markdown(html, options.clone()), "**x**");
+  assert_every_split(html, &options, "**x**");
+}
+
+#[test]
 fn text_inline_separators_survive_every_chunk_width() {
   for (html, expected) in [
     ("a<figcaption> </figcaption>b", "ab"),
@@ -1721,6 +1735,30 @@ fn touching_emphasis_pairs_of_one_delimiter_are_reopened() {
     ("<kbd>a<br><strong><br>b</strong></kbd>", "`a  b`"),
     ("<samp>a<br><em># b</em></samp>", "`a # b`"),
     ("<var>a<br><i><br>b</i></var>", "`a  b`"),
+    ("<h2><code>a<br>b</code></h2>", "## `a b`"),
+    (
+      "<table><tr><td><code>a<br>b</code></td></tr></table>",
+      "| `a b` |\n| --- |",
+    ),
+    (
+      "<code>x&#10;<strong># heading</strong></code>",
+      "`x # heading`",
+    ),
+    ("<kbd><strong>a&#10;&#10;b</strong></kbd>", "`a  b`"),
+    ("<var>a&#13;&#10;b</var>", "`a b`"),
+    ("<samp>a`b</samp>", "``a`b``"),
+    (
+      "<ul><li><h2>Shortcut</h2><kbd><strong>Ctrl</strong></kbd></li></ul>",
+      "- ## Shortcut\n\n  `Ctrl`",
+    ),
+    (
+      "<code>A<br><figcaption><em><br>B</em></figcaption></code>",
+      "`A  B`",
+    ),
+    (
+      "<details><code>a<br>b</code></details>",
+      "<details><code>a<br>b</code></details>",
+    ),
     (
       "<details><code><em>argv</em></code></details>",
       "<details><code>argv</code></details>",
@@ -2451,7 +2489,7 @@ fn review_caption_lifecycle_ul_code_empty_em() {
 #[test]
 fn review_caption_additional_0() {
   let html = r#"<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>"#;
-  let expected = "`[Lima](/f) *[ Lima](/f)*`";
+  let expected = "`[Lima ](/f \"Lima \") [ Lima ](/f \"Lima \")`";
   assert_eq!(md(html), expected);
   for width in [1, 2, 3, 11] {
     assert_eq!(md_streamed(html, width), expected);
@@ -2643,7 +2681,7 @@ fn caption_excluded_wrapper_0() {
 fn caption_excluded_wrapper_1() {
   use mdream::{PluginConfig, TagOverrideConfig};
   let html = r#"<var><a href="/f" title="Lima "></a><figcaption><strong><style></style></strong>1. Lima</figcaption></var>"#;
-  let expected = "`[Lima](/f) *1. Lima*%";
+  let expected = "`[Lima ](/f \"Lima \")1. Lima%";
   let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig::default().with_tag_override(
       "var",
@@ -2680,7 +2718,7 @@ fn caption_excluded_wrapper_2() {
 </figcaption></kbd><figcaption><samp><cite><script>x</script><img src="/n"></cite><button>
  Lima</button></samp><samp>
 <strong><script>x</script> </strong></samp></figcaption></q>"#;
-  let expected = "\"``- `*1. Lima*` *`![](/n) Lima`*\"";
+  let expected = "\"`- 1. Lima` *`![](/n) Lima`*\"";
   let options = HtmlToMarkdownOptions {
     plugins: Some(
       PluginConfig::default().with_tag_override("x-q", TagOverrideConfig::alias("blockquote")),
@@ -2710,7 +2748,7 @@ fn caption_excluded_wrapper_2() {
 fn caption_excluded_wrapper_3() {
   use mdream::{PluginConfig, TagOverrideConfig};
   let html = r#"<var><strong><samp><li><i></i> </li><a href="/f" title="Lima ">  </a></samp><figcaption><strong> <style></style></strong><cite><svg></svg>1. Lima</cite></figcaption></strong><s><var><blockquote><style></style>Kilo</blockquote><div> Lima Lima</div></var><script>x</script></s></var>"#;
-  let expected = "``- [Lima](/f)` *1. Lima*~~`>  Kilo Lima Lima%~~%";
+  let expected = "`- [Lima ](/f \"Lima \") 1. Lima ~~>  Kilo Lima Lima%~~%";
   let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig::default().with_tag_override(
       "var",
@@ -2752,7 +2790,7 @@ fn caption_emphasis_after_leading_break() {
     (
       r#"<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>
 <br></ul> </a></figcaption></kbd>"#,
-      "```Kilo![](/n)Kilo`\" [Lima](/f)\"` *Kilo [ Lima](/f)*`",
+      "`Kilo![](/n)Kilo \" [Lima ](/f \"Lima \")\" Kilo [ Lima ](/f \"Lima \")`",
     ),
     (
       r#"<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite></figcaption>"#,
@@ -2796,11 +2834,11 @@ fn caption_delimiter_context() {
   for (html, expected) in [
     (
       r#"<code>A<br><figcaption><em><br>B</em></figcaption></code>"#,
-      "`A  *B*`",
+      "`A  B`",
     ),
     (
       r#"<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>"#,
-      "`  *B*C`",
+      "`  BC`",
     ),
     (
       r#"<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>"#,
@@ -3008,7 +3046,7 @@ fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
     ("<p>h<code>&#32;<i><svg></svg></i></code>B</p>", "h` `B"),
     (
       "<p>h<kbd>&#32;<samp><svg></svg>&#32;</samp></kbd>B</p>",
-      "h` ` ``B",
+      "h` `B",
     ),
     (
       "<p>h<kbd><samp>&#32;</samp><svg></svg>&#32;</kbd>B</p>",
@@ -3025,7 +3063,7 @@ fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
     ),
     (
       "<p>h<kbd><samp>&#32;<var>&#32;<svg></svg></var></samp></kbd>B</p>",
-      "h`` ` ```B",
+      "h` `B",
     ),
   ] {
     assert_eq!(md(html), expected, "{html}");

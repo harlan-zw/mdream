@@ -193,7 +193,7 @@ export function tailwindPlugin(): TransformPlugin {
       }
 
       // Apply Tailwind prefix/suffix
-      const formatsText = state.outputFormat === 'markdown' && !(state as MdreamRuntimeState).codeTextOwner
+      const formatsText = state.outputFormat === 'markdown' && !(state as MdreamRuntimeState).codeText
       const prefix = formatsText ? (tailwindData?.prefix || '') : ''
       const suffix = formatsText ? (tailwindData?.suffix || '') : ''
 

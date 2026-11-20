@@ -331,7 +331,7 @@ export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, Plug
   /** @internal */
   outputPositions?: OutputPositions
   /** The element whose built-in output opened a code context. */
-  codeTextOwner?: ElementNode
+  codeText?: { owner: ElementNode, kind: 'span' | 'raw' }
   /** Active output format for format-aware plugins. */
   outputFormat: OutputFormat
 

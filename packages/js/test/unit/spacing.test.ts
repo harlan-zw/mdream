@@ -734,7 +734,7 @@ describe('excluded-content review regressions', () => {
       expect(await streamConvert([html.slice(0, split), html.slice(split)]), `split=${split}`).toBe(expected)
   })
   it.each([
-    ['<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>', '`[Lima](/f) *[ Lima](/f)*`'],
+    ['<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>', '`[Lima ](/f "Lima ") [ Lima ](/f "Lima ")`'],
     ['<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>', '[Lima](/f)\n\n*<mark></mark>*'],
     ['<figcaption><s>1. Lima </s><figcaption><svg></svg> Lima</figcaption></figcaption>', '*~~1. Lima~~ *Lima**'],
     ['<code><a href="/f" title="Lima "></a></code>', '`[Lima ](/f "Lima ")`'],
@@ -764,7 +764,7 @@ describe('excluded-content review regressions', () => {
     ],
     [
       '<var><a href="/f" title="Lima "></a><figcaption><strong><style></style></strong>1. Lima</figcaption></var>',
-      '`[Lima](/f) *1. Lima*%',
+      '`[Lima ](/f "Lima ")1. Lima%',
       {
         tagOverrides: {
           var: {
@@ -775,7 +775,7 @@ describe('excluded-content review regressions', () => {
     ],
     [
       '<q><kbd><code><li><script>x</script><script>x</script></li><svg></svg></code><figcaption>1. Lima\n</figcaption></kbd><figcaption><samp><cite><script>x</script><img src="/n"></cite><button>\n Lima</button></samp><samp>\n<strong><script>x</script> </strong></samp></figcaption></q>',
-      '"``- `*1. Lima*` *`![](/n) Lima`*"',
+      '"`- 1. Lima` *`![](/n) Lima`*"',
       {
         tagOverrides: {
           'x-q': 'blockquote',
@@ -784,7 +784,7 @@ describe('excluded-content review regressions', () => {
     ],
     [
       '<var><strong><samp><li><i></i> </li><a href="/f" title="Lima ">  </a></samp><figcaption><strong> <style></style></strong><cite><svg></svg>1. Lima</cite></figcaption></strong><s><var><blockquote><style></style>Kilo</blockquote><div> Lima Lima</div></var><script>x</script></s></var>',
-      '``- [Lima](/f)` *1. Lima*~~`>  Kilo Lima Lima%~~%',
+      '`- [Lima ](/f "Lima ") 1. Lima ~~>  Kilo Lima Lima%~~%',
       {
         tagOverrides: {
           var: {
@@ -820,7 +820,7 @@ describe('excluded-content review regressions', () => {
       '<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite> Lima</figcaption>',
       '**Kilo* Lima*',
     ],
-    ['<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>\n<br></ul> </a></figcaption></kbd>', '```Kilo![](/n)Kilo`" [Lima](/f)"` *Kilo [ Lima](/f)*`'],
+    ['<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>\n<br></ul> </a></figcaption></kbd>', '`Kilo![](/n)Kilo " [Lima ](/f "Lima ")" Kilo [ Lima ](/f "Lima ")`'],
   ])('keeps caption emphasis after a leading break: %s', async (html, expected) => {
     const options = { tagOverrides: { code: { enter: '^', exit: '^' } } }
     expect(htmlToMarkdown(html, options)).toBe(expected)
@@ -1002,11 +1002,11 @@ it('does not count a split empty raw-text closer as body text', async () => {
 it.each([
   [
     '<code>A<br><figcaption><em><br>B</em></figcaption></code>',
-    '`A  *B*`',
+    '`A  B`',
   ],
   [
     '<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>',
-    '`  *B*C`',
+    '`  BC`',
   ],
   [
     '<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>',

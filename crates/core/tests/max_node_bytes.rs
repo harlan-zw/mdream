@@ -2773,7 +2773,7 @@ fn oversized_quote_in_inline_code_drops_unquoted_content() {
   assert_capped_inline_code(
     "<ul><li><code>aaaa<blockquote><blockquote>q</blockquote></blockquote></code></li></ul>",
     12,
-    "- `aaaa\n  > > q    `",
+    "- `aaaa   > > q    `",
     false,
   );
 }
@@ -2789,13 +2789,13 @@ fn exhausted_quote_discards_nested_structure_and_later_span_content() {
   assert_capped_inline_code(
     "<ul><li><code>aaaa<blockquote><blockquote>q</blockquote></blockquote>tail</code></li></ul>",
     8,
-    "- `aaaa\n`",
+    "- `aaaa `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li>lead <code><blockquote><pre>q</pre></blockquote>tail</code></li></ul>",
     16,
-    "- lead `\n`",
+    "- lead ` `",
     true,
   );
 }
