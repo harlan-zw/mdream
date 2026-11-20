@@ -1468,6 +1468,22 @@ function maxLineLeadingRun(value: string, marker: number, indent: string): numbe
 }
 
 function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
+  // Settle source whitespace before choosing padding. A later trim must not
+  // join a content backtick to the closing delimiter. Break output stays literal.
+  if (state.lastTextNode?.containsWhitespace && !state.depthMap[TAG_PRE]) {
+    const index = state.buffer.length - 1
+    const fragment = state.buffer[index]!
+    const trimmed = trimAsciiWhitespaceEnd(fragment)
+    if (trimmed.length < fragment.length && index > span.fragment) {
+      state.outputPositions?.replace(index, index + 1, [trimmed])
+      state.buffer[index] = trimmed
+      state.pendingInlineWhitespace = true
+      state.pendingLeadingBlank = false
+      state.pendingPairSeparator = false
+      state.pendingDecodedBlank = false
+    }
+    state.lastTextNode = undefined
+  }
   const original = state.buffer.slice(span.fragment + 1).join('')
   const escapePipes = !!state.depthMap[TAG_TABLE] && original.includes('|')
   const offsetChanges: { at: number, delta: number }[] | undefined = state.outputPositions ? [] : undefined

@@ -13,6 +13,31 @@ fn convert(html: &str) -> String {
 }
 
 #[test]
+fn inline_code_trailing_backticks() {
+  for tag in ["code", "kbd", "samp", "var"] {
+    for (content, expected) in [
+      ("a` ", "x `` a` `` y"),
+      ("a`\n", "x `` a` `` y"),
+      ("a``  ", "x ``` a`` ``` y"),
+      ("a`\t\r\n", "x `` a` `` y"),
+      ("`a` ", "x `` `a` `` y"),
+      ("a`<br>", "x ``a` `` y"),
+      ("a`&nbsp;", "x ``a`\u{a0}`` y"),
+    ] {
+      let html = format!("<p>x <{tag}>{content}</{tag}> y</p>");
+      assert_eq!(convert(&html), expected, "{html}");
+      for split in 1..html.len() {
+        let mut processor = MarkdownStreamProcessor::new(HtmlToMarkdownOptions::default());
+        let mut actual = processor.process_chunk(&html[..split]);
+        actual.push_str(&processor.process_chunk(&html[split..]));
+        actual.push_str(&processor.finish());
+        assert_eq!(actual.trim(), expected, "{html} at {split}");
+      }
+    }
+  }
+}
+
+#[test]
 fn empty_quotes_keep_following_content_on_the_item_marker_line() {
   for quote in [
     "<blockquote></blockquote>",
