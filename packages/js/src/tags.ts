@@ -1,4 +1,4 @@
-import type { ElementNode, HandlerContext, TagHandler } from './types'
+import type { ElementNode, GfmAction, HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
   isInsideRawHtmlBlock,
@@ -191,6 +191,8 @@ export function renderBreak(state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
   const depthMap = state.depthMap!
+  if (!depthMap[TAG_PRE] && state.codeText?.kind === 'span')
+    return ' '
   if (isInsideTableCell(state) || isInsideRawHtmlBlock(depthMap) || isInsideHeading(depthMap)) {
     return '<br>'
   }
@@ -206,6 +208,32 @@ export const breakHandler: TagHandler = {
   isSelfClosing: true,
   spacing: NO_SPACING,
   collapsesInnerWhiteSpace: true,
+  isInline: true,
+}
+
+export const CODE_SPAN_ENTER = { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE } as const
+const SPACED_CODE_SPAN_ENTER = { _tag: 'CodeSpanEnter', output: ' `' } as const
+const CODE_SPAN_EXIT = { _tag: 'CodeSpanExit' } as const
+
+function inlineCodeEnter(state: HandlerContext['state'], separateFromListText = false): GfmAction {
+  const last = lastOutputChar(state.buffer)
+  // Adjacent delimiters would form a single backtick run. In a list, <code>
+  // also separates from prose while staying next to wrapper openers.
+  const needsSpace = last === 96
+    || (separateFromListText && last !== -1 && last !== 32 && last !== 10 && last !== 9
+      && last !== 42 && last !== 95 && last !== 126 && last !== 91 && last !== 62)
+  return needsSpace ? SPACED_CODE_SPAN_ENTER : CODE_SPAN_ENTER
+}
+
+const codeLikeHandler: TagHandler = {
+  enter: ({ state }) => isInsideRawHtmlBlock(state.depthMap!)
+    ? MARKDOWN_INLINE_CODE
+    : inlineCodeEnter(state),
+  exit: ({ state }) => isInsideRawHtmlBlock(state.depthMap!)
+    ? MARKDOWN_INLINE_CODE
+    : CODE_SPAN_EXIT,
+  collapsesInnerWhiteSpace: true,
+  spacing: NO_SPACING,
   isInline: true,
 }
 
@@ -516,6 +544,8 @@ function handleHeading(depth: number): TagHandler {
 
 const Strong: TagHandler = {
   enter: ({ state }) => {
+    if (state.codeText)
+      return undefined
     // we are already bold
     if ((state.depthMap?.[TAG_B] || 0) > 1) {
       return ''
@@ -523,6 +553,8 @@ const Strong: TagHandler = {
     return MARKDOWN_STRONG
   },
   exit: ({ node, state }) => {
+    if (state.codeText)
+      return undefined
     // we are already bold
     if ((state.depthMap?.[TAG_B] || 0) + (node.tagId === TAG_B ? 1 : 0) > 1) {
       return ''
@@ -536,6 +568,8 @@ const Strong: TagHandler = {
 
 const Emphasis: TagHandler = {
   enter: ({ state }) => {
+    if (state.codeText)
+      return undefined
     // we are already italic
     if ((state.depthMap?.[TAG_I] || 0) > 1) {
       return ''
@@ -543,6 +577,8 @@ const Emphasis: TagHandler = {
     return MARKDOWN_EMPHASIS
   },
   exit: ({ node, state }) => {
+    if (state.codeText)
+      return undefined
     // we are already italic
     if ((state.depthMap?.[TAG_I] || 0) + (node.tagId === TAG_I ? 1 : 0) > 1) {
       return ''
@@ -744,25 +780,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideRawHtmlBlock(state.depthMap!)) {
         return '<code>'
       }
-      // Inline code inside a list item: collapse the paragraph boundary with a
-      // separator space when following text, but not when the buffer just
-      // emitted a wrapper opener where a leading space would break the
-      // pairing or leak into the wrapper content. Covers emphasis (`*`, `_`),
-      // strikethrough (`~`), link text (`[`), HTML passthrough (`>`), and
-      // whitespace. A trailing backtick does NOT suppress: two adjacent
-      // `<code>` elements must be separated with a space so CommonMark parses
-      // them as two code spans rather than merging into one.
-      if ((state.depthMap?.[TAG_LI] || 0) > 0) {
-        // Read past an entry a trim emptied, as the paragraph enter does.
-        const last = lastOutputChar(state.buffer)
-        // Space, newline, tab, `*`, `_`, `~`, `[` and `>`.
-        if (last !== -1 && last !== 32 && last !== 10 && last !== 9
-          && last !== 42 && last !== 95 && last !== 126
-          && last !== 91 && last !== 62) {
-          return { _tag: 'CodeSpanEnter', output: ` ${MARKDOWN_INLINE_CODE}` }
-        }
-      }
-      return { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE }
+      return inlineCodeEnter(state, !!state.depthMap?.[TAG_LI])
     },
     exit: ({ state }) => {
       if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
@@ -777,7 +795,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideRawHtmlBlock(state.depthMap!)) {
         return '</code>'
       }
-      return { _tag: 'CodeSpanExit' }
+      return CODE_SPAN_EXIT
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -838,19 +856,12 @@ export const tagHandlers: Record<number, TagHandler> = {
       // trimmed at this exit keeps the space: the label an empty link takes
       // from its title.
       let preservesCodeWhitespace = false
-      if (state.depthMap?.[TAG_CODE] && !state.depthMap[TAG_PRE] && !state.lastTextNode?.containsWhitespace) {
+      if (state.codeText?.kind === 'span' && !state.depthMap?.[TAG_PRE] && !state.lastTextNode?.containsWhitespace) {
         const buffer = state.buffer!
         let tail = buffer.length - 1
         while (tail >= 0 && !buffer[tail])
           tail--
-        let parent = buffer[tail] === state.lastContentCache ? node.parent : undefined
-        while (parent) {
-          if (parent.tagId === TAG_CODE && parent.tagHandler?.enter === tagHandlers[TAG_CODE]!.enter) {
-            preservesCodeWhitespace = true
-            break
-          }
-          parent = parent.parent
-        }
+        preservesCodeWhitespace = buffer[tail] === state.lastContentCache
       }
       const cachedText = preservesCodeWhitespace
         ? state.lastContentCache
@@ -1127,13 +1138,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: TABLE_ROW_SPACING,
     excludesTextNodes: true,
   },
-  [TAG_KBD]: {
-    enter: () => '`',
-    exit: () => '`',
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_KBD]: codeLikeHandler,
   [TAG_FOOTER]: {
     spacing: NO_SPACING,
   },
@@ -1267,13 +1272,7 @@ export const tagHandlers: Record<number, TagHandler> = {
     spacing: NO_SPACING,
     isInline: true,
   },
-  [TAG_SAMP]: {
-    enter: () => '`',
-    exit: () => '`',
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_SAMP]: codeLikeHandler,
   [TAG_SMALL]: {
     enter: () => '',
     exit: () => '',
@@ -1314,26 +1313,20 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_CITE]: {
-    enter: () => '*',
-    exit: () => '*',
+    enter: ({ state }) => state.codeText ? undefined : '*',
+    exit: ({ state }) => state.codeText ? undefined : '*',
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
     isInline: true,
   },
   [TAG_DFN]: {
-    enter: () => '**',
-    exit: () => '**',
+    enter: ({ state }) => state.codeText ? undefined : '**',
+    exit: ({ state }) => state.codeText ? undefined : '**',
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
     isInline: true,
   },
-  [TAG_VAR]: {
-    enter: () => '`',
-    exit: () => '`',
-    collapsesInnerWhiteSpace: true,
-    spacing: NO_SPACING,
-    isInline: true,
-  },
+  [TAG_VAR]: codeLikeHandler,
   [TAG_TIME]: {
     enter: () => '',
     exit: () => '',

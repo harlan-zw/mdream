@@ -1,5 +1,5 @@
 import type { OutputPositions } from './output-positions'
-import type { Cleaner, CleanView, ElementNode, EngineOptions, GfmAction, MarkerLineMemo, Node, NodeEvent, PluginContext, TagHandler, TextNode } from './types'
+import type { Cleaner, CleanView, ElementNode, EngineOptions, GfmAction, MarkerLineMemo, MdreamRuntimeState, Node, NodeEvent, PluginContext, TagHandler, TextNode } from './types'
 import {
   DEFAULT_BLOCK_SPACING,
   ELEMENT_NODE,
@@ -65,7 +65,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { isOpenVoidTag, parserTagHandlers } from './parser-tags'
-import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
+import { breakHandler, CODE_SPAN_ENTER, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, dropSourceLead, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isBlockChildOfOpenVoid, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, outputLeadLength, pendingMarkerIndent, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -77,6 +77,7 @@ export interface MarkdownState {
   buffer: string[]
   /** @internal */
   outputPositions?: OutputPositions
+  codeText?: MdreamRuntimeState['codeText']
   /** Performance cache for last content to avoid iteration */
   lastContentCache?: string
   /** Buffer length right after an empty marker pair was dropped. */
@@ -193,6 +194,7 @@ export interface MarkdownState {
 }
 
 interface CodeSpan {
+  kind: 'span'
   owner: ElementNode
   fragment: number
   prefix: string
@@ -1466,20 +1468,39 @@ function maxLineLeadingRun(value: string, marker: number, indent: string): numbe
 }
 
 function finalizeCodeSpan(state: MarkdownState, span: CodeSpan): string {
-  let content = state.buffer.slice(span.fragment + 1).join('')
+  const original = state.buffer.slice(span.fragment + 1).join('')
+  const escapePipes = !!state.depthMap[TAG_TABLE] && original.includes('|')
+  const offsetChanges: { at: number, delta: number }[] | undefined = state.outputPositions ? [] : undefined
+  let delta = 0
+  // A line can begin a Markdown block before the backtick closes.
+  const content = original.replace(
+    escapePipes ? /\r\n?|\n|\|/g : /\r\n?|\n/g,
+    (match, offset: number) => {
+      if (offsetChanges && match === '|')
+        offsetChanges.push({ at: offset, delta: ++delta })
+      else if (offsetChanges && match.length === 2)
+        offsetChanges.push({ at: offset + 1, delta: --delta })
+      return match === '|' ? '\\|' : ' '
+    },
+  )
   // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
   // honoured there. The span is the buffer tail, so rewriting it moves nothing.
-  if ((state.depthMap[TAG_TABLE] || 0) > 0 && content.includes('|')) {
-    const original = content
-    content = content.replaceAll('|', '\\|')
-    state.outputPositions?.replace(span.fragment + 1, state.buffer.length, [content], (offset) => {
-      let added = 0
-      for (let index = 0; index < offset; index++) {
-        if (original.charCodeAt(index) === 124)
-          added++
-      }
-      return offset + added
-    })
+  if (content !== original) {
+    const mapOffset = offsetChanges?.length
+      ? (offset: number) => {
+          let low = 0
+          let high = offsetChanges.length
+          while (low < high) {
+            const mid = (low + high) >>> 1
+            if (offsetChanges[mid]!.at < offset)
+              low = mid + 1
+            else
+              high = mid
+          }
+          return offset + (offsetChanges[low - 1]?.delta ?? 0)
+        }
+      : undefined
+    state.outputPositions?.replace(span.fragment + 1, state.buffer.length, [content], mapOffset)
     state.buffer.length = span.fragment + 1
     state.buffer.push(content)
     noteBufferRewrite(state)
@@ -1854,13 +1875,25 @@ function commitGfmAction(
       state.bufferedBlockquoteDepth = state.blockquotes.length
       break
     }
-    case 'CodeSpanEnter':
-      lifecycle.openCodeSpans.push({
-        owner,
-        fragment: outputStart,
-        prefix: action.output.slice(0, -MARKDOWN_INLINE_CODE.length),
-      })
+    case 'CodeSpanEnter': {
+      // A spacing override can write fragments before the delimiter.
+      for (let index = outputStart; index < state.buffer.length; index++) {
+        const output = state.buffer[index]!
+        if (output.endsWith(MARKDOWN_INLINE_CODE)) {
+          const span: CodeSpan = {
+            kind: 'span',
+            owner,
+            fragment: index,
+            prefix: output.slice(0, -MARKDOWN_INLINE_CODE.length),
+          }
+          lifecycle.openCodeSpans.push(span)
+          if (!owner.tagHandler?.literalEnter)
+            state.codeText ??= span
+          break
+        }
+      }
       break
+    }
     case 'CodeFenceEnter': {
       // The opener is in this event's output. Search only that, as the Rust
       // engine does, instead of every fragment written before it.
@@ -1901,6 +1934,7 @@ export interface MarkdownStreamContext {
 interface MarkdownProcessor {
   state: MarkdownState
   processEvent: (event: NodeEvent) => void
+  skipEvent: (event: NodeEvent) => void
   getMarkdown: () => string
   finishOutput?: (markdown: string) => CleanView
   getHeldOutputFragment?: () => number
@@ -1917,6 +1951,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     outputFormat: 'markdown',
     buffer: [],
     outputPositions: undefined,
+    codeText: undefined,
     depthMap: new Uint16Array(MAX_TAG_ID),
     depth: 0,
     listIndent: '',
@@ -2764,6 +2799,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       const outputStart = textNode.generatedMarkdown?.prefix ? -1 : outputStartMarker(textNode.value, state)
       if (!state.depthMap[TAG_PRE]
         && !state.depthMap[TAG_CODE]
+        && state.codeText?.kind !== 'span'
         // Inside a raw-HTML region only text past a blank line is Markdown
         // again. That test is O(1), so it goes before the text scans; the line
         // scan stays last, paid only by text that would be escaped anyway.
@@ -2794,7 +2830,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       // once entries are merged and others written, so it is no evidence.
       state.droppedPairAt = undefined
       const wrapWidth = state.options?.wrapWidth
-      if (wrapWidth && canWrapHere(state.depthMap)) {
+      if (wrapWidth && state.codeText?.kind !== 'span' && canWrapHere(state.depthMap)) {
         // Past both the width and the prefix every word breaks or overflows.
         const column = currentColumn(state.buffer, Math.max(wrapWidth, state.listIndent.length + 1))
         const wrapped = wrapText(textNode.value, column, wrapWidth, state.listIndent)
@@ -3029,6 +3065,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       : node.parent?.excludedFromMarkdown
     if (inTemplate)
       return
+    const codeCaption = state.codeText !== undefined && node.type === ELEMENT_NODE
+      && (node as ElementNode).tagId === TAG_FIGCAPTION
+    if (codeCaption) {
+      const element = node as ElementNode
+      const literalOutput = eventType === NodeEventEnter ? element.tagHandler?.literalEnter : element.tagHandler?.literalExit
+      if (!element.pluginOutput?.length && !literalOutput)
+        return
+    }
     // Output that is no blank or opener, even if taken back later, came
     // between a closer and the next opener.
     if (closedMarkerCount)
@@ -3154,6 +3198,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     const element = node as ElementNode
     const handler = node.tagHandler
     const tagId = element.tagId!
+    if (eventType === NodeEventExit && state.codeText?.owner === element)
+      state.codeText = undefined
     if ((tagId === TAG_UL || tagId === TAG_OL) && eventType === NodeEventEnter) {
       state.listMarkers.push(nextListMarker(element, tagId === TAG_OL))
       listMarkerOwners?.push(element)
@@ -3301,7 +3347,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
       const pendingCaption = captionFrameCount !== 0
         && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0
-      if (breakOutput && pendingCaption && !hasNonWhitespace(breakOutput)) {
+      if (breakOutput && breakOutput !== ' ' && pendingCaption && !hasNonWhitespace(breakOutput)) {
         for (let index = 0; index < captionFrameCount; index++) {
           const offset = index * CAPTION_FRAME_SIZE + 2
           if ((captionFrames![offset]! & CAPTION_OPEN) === 0) {
@@ -3344,8 +3390,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     let keepsQuoteSeparator = false
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
-    const suppressedInPre = (state.depthMap[TAG_PRE] || 0) > 0
-      && suppressesFormattingInPre(tagId)
+    const suppressedInPre = !!state.depthMap[TAG_PRE] && suppressesFormattingInPre(tagId)
       && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
     const emptyTableRow = eventType === NodeEventExit && tagId === TAG_TR
       && state.tableRowOpenerPending && !output && !handler?.literalExit
@@ -3439,9 +3484,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           if (res._tag === 'CodeSpanEnter' && res.output === ' `'
             && (captionBoundary === 3 || (captionFrameCount !== 0
               && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0))) {
-            res.output = MARKDOWN_INLINE_CODE
+            gfmAction = CODE_SPAN_ENTER
           }
-          handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
+          handlerOutput = consumeGfmAction(gfmAction, state, gfmLifecycle)
         }
         if (handlerOutput)
           output = [handlerOutput]
@@ -3474,8 +3519,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       && (hasPluginOutput || handler.literalEnter)) {
       element.hasEnterOutput = output.some(fragment => fragment.length > 0)
     }
+    const captionEvent = tagId === TAG_FIGCAPTION && !codeCaption
     if (captionBreakRun
-      && !(tagId === TAG_FIGCAPTION && eventType === NodeEventExit)
+      && !(captionEvent && eventType === NodeEventExit)
       && output) {
       flushCaptionBreakRun()
       if (gfmAction?._tag !== 'BlockquoteEnter')
@@ -3483,7 +3529,6 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       captionBufferChanged = true
     }
 
-    const captionEvent = tagId === TAG_FIGCAPTION
     let captionTransition = false
     if (captionEvent || captionBoundary !== 0 || captionFrameCount !== 0) {
       // An enter fragment that owns its block separator fulfills this boundary.
@@ -4026,10 +4071,10 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     // engine's `settle_heading_break`.
     let linkHeadingBreak = false
     if (state.headingBreakPending && eventType === NodeEventEnter) {
-      if (tagId === TAG_LI || tagId === TAG_FIGCAPTION || (output?.[0] && trimLeadingSpaces(output[0]).startsWith('\n'))) {
+      if (tagId === TAG_LI || captionEvent || (output?.[0] && trimLeadingSpaces(output[0]).startsWith('\n'))) {
         state.headingBreakPending = false
         // The caption's frame is already pushed; an empty caption hands it back.
-        if (tagId === TAG_FIGCAPTION && !state.depthMap[TAG_PRE] && captionFrameCount !== 0)
+        if (captionEvent && !state.depthMap[TAG_PRE] && captionFrameCount !== 0)
           captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! |= CAPTION_HEADING_BREAK
       }
       else if (output?.some(hasNonWhitespace)) {
@@ -4205,8 +4250,15 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = trailingEmphasisWhitespace
     }
 
-    if (gfmAction)
+    if (gfmAction) {
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, keepsQuoteSeparator, rawHtmlQuoteBoundary)
+    }
+    else if (eventType === NodeEventEnter
+      && ((tagId === TAG_CODE && handlerOutput === '<code>')
+        || ((tagId === TAG_KBD || tagId === TAG_SAMP || tagId === TAG_VAR) && handlerOutput === '`'))
+      && !state.codeText && !handler?.literalEnter) {
+      state.codeText = { owner: element, kind: 'raw' }
+    }
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {
       if (eventType === NodeEventEnter)
@@ -4479,6 +4531,19 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
 
   const processor = {
     processEvent,
+    skipEvent(event: NodeEvent) {
+      if (event.type !== NodeEventExit)
+        return
+      if (state.codeText?.owner === event.node)
+        state.codeText = undefined
+      const span = gfmLifecycle.openCodeSpans.at(-1)
+      if (span?.owner !== event.node)
+        return
+      gfmLifecycle.openCodeSpans.pop()
+      // Keep the output a plugin left open, and release its holds.
+      if (openMarkerCount && openMarkers[openMarkerCount - 1] === (span.fragment << 3 | 5))
+        openMarkerCount--
+    },
     getMarkdown,
     state,
     getHeldOutputFragment: cleanPass ? getHeldOutputFragment : undefined,

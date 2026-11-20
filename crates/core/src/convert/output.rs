@@ -58,6 +58,9 @@ static SIMPLE_EMIT_TAG: [bool; MAX_TAG_ID] = {
     TAG_LI,
     TAG_PRE,
     TAG_CODE,
+    TAG_KBD,
+    TAG_SAMP,
+    TAG_VAR,
     TAG_TABLE,
     TAG_TR,
     TAG_TH,
@@ -175,6 +178,11 @@ const DESTINATION_NEEDS_ANGLE_BIT: u8 = 8;
 #[inline]
 fn has_visible(bytes: &[u8]) -> bool {
   bytes.iter().any(|&b| !is_whitespace(b))
+}
+
+#[inline]
+fn inline_code_tag(tag: Option<u8>) -> bool {
+  matches!(tag, Some(TAG_CODE | TAG_KBD | TAG_SAMP | TAG_VAR))
 }
 
 /// List marker character opening the last visible line of `output`: a bullet,
@@ -801,6 +809,12 @@ impl ConvertState {
     #[cfg(test)]
     {
       self.code_span_closed_bytes += self.buffer.len() - span.output_start;
+    }
+    // A line can begin a Markdown block before the backtick closes.
+    let content = &self.buffer[span.content_start..];
+    if crate::scan::find_line_end(content.as_bytes()).is_some() {
+      let flattened = content.replace("\r\n", " ").replace(['\r', '\n'], " ");
+      self.replace_code_span_content(span.content_start..self.buffer.len(), &flattened);
     }
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
     // honoured there. Its expanded form still has to fit the aggregate budget.
@@ -1442,6 +1456,24 @@ impl ConvertState {
   #[inline(always)]
   fn code_span_marker_ok(&self) -> bool {
     self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block()
+  }
+
+  pub(super) fn writes_code_text(&self) -> bool {
+    !self.code_spans.is_empty() || self.raw_code_owner_depth.is_some()
+  }
+
+  #[cold]
+  fn transparent_code_caption(&self, node: &ElementNode) -> bool {
+    if !self.writes_code_text() {
+      return false;
+    }
+    let overrides = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|p| p.tag_overrides.as_ref());
+    Self::override_for_node(overrides, self.override_idx.as_deref(), node)
+      .is_none_or(|value| value.enter.is_none() && value.exit.is_none())
   }
 
   /// State every simple emitter needs in Markdown and in Text: no pending
@@ -2461,6 +2493,11 @@ impl ConvertState {
       self.emit_html_enter();
       return;
     }
+    if self.stack[stack_len - 1].tag_id == Some(TAG_FIGCAPTION)
+      && self.transparent_code_caption(&self.stack[stack_len - 1])
+    {
+      return;
+    }
     self.emit_markdown_enter(stack_len);
   }
 
@@ -2849,6 +2886,7 @@ impl ConvertState {
       && configured_new_lines == 0
       && let Some(fragment) = output.as_deref()
       && !fragment.is_empty()
+      && fragment != " "
       && fragment.bytes().all(is_whitespace)
       && self.defer_caption_break(fragment)
     {
@@ -2878,6 +2916,7 @@ impl ConvertState {
       && configured_new_lines == 0
       && let Some(fragment) = output.as_deref()
       && !fragment.is_empty()
+      && fragment != " "
       && fragment.bytes().all(is_whitespace)
       && self.defer_streaming_break(fragment)
     {
@@ -2894,10 +2933,11 @@ impl ConvertState {
     // trailing whitespace stays unquoted: the next block still rewrites it.
     if !plain_text!(self)
       && !enter_is_literal
-      && tag_id == Some(TAG_CODE)
+      && inline_code_tag(tag_id)
       && output.is_some()
       && ((self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block())
-        || (self.depth_map[TAG_PRE as usize] > 0
+        || (tag_id == Some(TAG_CODE)
+          && self.depth_map[TAG_PRE as usize] > 0
           && self.pre_fence_owner_depth == 0
           && !self.in_table_cell()))
     {
@@ -3026,7 +3066,15 @@ impl ConvertState {
       });
     }
 
-    if !enter_is_literal && tag_id == Some(TAG_CODE) {
+    if !plain_text!(self) && !enter_is_literal && inline_code_tag(tag_id) {
+      let depth = self.stack[stack_len - 1].depth;
+      if self.raw_code_owner_depth.is_none()
+        && self.buffer.len() > output_start
+        && (output.as_deref() == Some("<code>")
+          || (self.in_raw_html_block() && output.as_deref() == Some(MARKDOWN_INLINE_CODE)))
+      {
+        self.raw_code_owner_depth = Some(depth);
+      }
       if self.depth_map[TAG_PRE as usize] == 0 {
         if !self.in_raw_html_block()
           && let Some(emitted) = output.as_deref()
@@ -3034,7 +3082,7 @@ impl ConvertState {
           let opener_emitted = self.buffer.len() > output_start && self.buffer.ends_with(emitted);
           let content_start = self.buffer.len();
           self.code_spans.push(CodeSpanState {
-            depth: self.stack[stack_len - 1].depth,
+            depth,
             output_start: if opener_emitted {
               content_start - emitted.len()
             } else {
@@ -3045,7 +3093,8 @@ impl ConvertState {
             exhausted: false,
           });
         }
-      } else if self.pre_fence_owner_depth == 0
+      } else if tag_id == Some(TAG_CODE)
+        && self.pre_fence_owner_depth == 0
         && !self.in_table_cell()
         && let Some(emitted) = output.as_deref()
         && self.buffer.len() > output_start
@@ -3467,6 +3516,12 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
+    if tag_id == Some(TAG_FIGCAPTION) && self.transparent_code_caption(node) {
+      return;
+    }
+    if inline_code_tag(tag_id) && self.raw_code_owner_depth == Some(node.depth) {
+      self.raw_code_owner_depth = None;
+    }
     let mut empty_quote_item_exit = false;
     if tag_id == Some(TAG_LI) {
       self.list_rule_pending = false;
@@ -3606,13 +3661,10 @@ impl ConvertState {
     if !plain_text!(self) && self.pre_fence_pending && tag_id != Some(TAG_PRE) && has_override {
       self.flush_pre_fence();
     }
-    // Pop at the exit of the inline <code> that pushed: the enter push ignores
+    // Pop at the exit of the inline code element that pushed: the enter ignores
     // exit overrides, so an exit-only override that skipped the pop leaked the
     // span, whose exhausted flag then capped the rest of the document.
-    let closing_code_span = if tag_id == Some(TAG_CODE)
-      && self.depth_map[TAG_PRE as usize] == 0
-      && !self.in_raw_html_block()
-    {
+    let closing_code_span = if inline_code_tag(tag_id) {
       self.code_spans.pop_if(|span| span.depth == node.depth)
     } else {
       None
@@ -4083,6 +4135,7 @@ impl ConvertState {
       && !self.pre_fence_pending
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
+      && self.code_spans.is_empty()
       && self.fast_paths_enabled()
   }
 
@@ -4737,6 +4790,7 @@ impl ConvertState {
     let hazard = !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
+      && self.code_spans.is_empty()
       && (ordered_digits > 0
         || has_inline_gfm_hazard
         || context_has_gfm_hazard(text)
@@ -5946,6 +6000,7 @@ impl ConvertState {
   fn can_wrap_here(&self) -> bool {
     self.depth_map[TAG_PRE as usize] == 0
       && self.depth_map[TAG_CODE as usize] == 0
+      && self.code_spans.is_empty()
       && !self.in_table_cell()
       && !self.in_heading()
   }
@@ -7055,6 +7110,31 @@ impl ConvertState {
     }
   }
 
+  #[inline]
+  fn inline_code_opener(&self, separate_from_list_text: bool) -> &'static str {
+    let last = self.last_output_byte();
+    // Adjacent delimiters would form one backtick run. In a list, <code>
+    // also separates from prose while staying next to wrapper openers.
+    if (last == Some(b'`')
+      || (separate_from_list_text
+        && last.is_some_and(|byte| {
+          !matches!(
+            byte,
+            b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
+          )
+        })))
+      && self.caption_boundary != CaptionBoundary::QuoteParent
+      && self
+        .caption_frames
+        .last()
+        .is_none_or(|frame| matches!(frame.state, CaptionState::Committed))
+    {
+      " `"
+    } else {
+      MARKDOWN_INLINE_CODE
+    }
+  }
+
   // Inlined on native for the same reason as `get_exit_output`.
   #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
   #[cfg_attr(target_arch = "wasm32", inline)]
@@ -7078,7 +7158,9 @@ impl ConvertState {
       // raw <pre> and let the content newlines become <br> (issue #147).
       TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("<pre>")),
       TAG_BR => {
-        if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
+        if !self.code_spans.is_empty() && self.depth_map[TAG_PRE as usize] == 0 {
+          Some(Cow::Borrowed(" "))
+        } else if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
           Some(Cow::Borrowed("<br>"))
         // Hard-break markers are literal content inside code.
         } else if self.depth_map[TAG_PRE as usize] > 0 || self.depth_map[TAG_CODE as usize] > 0 {
@@ -7151,6 +7233,8 @@ impl ConvertState {
           },
         )
       }
+      // A code span renders delimiters as literal text.
+      TAG_STRONG | TAG_B | TAG_EM | TAG_I | TAG_CITE | TAG_DFN if self.writes_code_text() => None,
       TAG_STRONG | TAG_B => {
         if self.depth_map[TAG_B as usize] > 1 {
           Some(Cow::Borrowed(""))
@@ -7270,36 +7354,10 @@ impl ConvertState {
           // Code inside a code span is part of it. A span of its own would
           // only add a longer delimiter per level, each rescanning the rest.
           None
-        } else if self.depth_map[TAG_LI as usize] > 0 {
-          // Inline code inside a list item: collapse the paragraph
-          // boundary with a separator space when following text, but
-          // not when the buffer just emitted a wrapper opener where
-          // a leading space would break the pairing or leak into the
-          // wrapper content. Covers emphasis (`*`, `_`),
-          // strikethrough (`~`), link text (`[`), HTML passthrough
-          // (`>`), and whitespace. A trailing backtick does NOT
-          // suppress: two adjacent `<code>` elements must be
-          // separated with a space so CommonMark parses them as two
-          // code spans rather than merging into one (` `a``b` ` →
-          // single span with literal content ``a``b``).
-          if self.caption_boundary != CaptionBoundary::QuoteParent
-            && self
-              .caption_frames
-              .last()
-              .is_none_or(|frame| matches!(frame.state, CaptionState::Committed))
-            && self.last_output_byte().is_some_and(|last_char| {
-              !matches!(
-                last_char,
-                b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
-              )
-            })
-          {
-            Some(Cow::Borrowed(" `"))
-          } else {
-            Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
-          }
         } else {
-          Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
+          Some(Cow::Borrowed(
+            self.inline_code_opener(self.depth_map[TAG_LI as usize] > 0),
+          ))
         }
       }
       TAG_UL => {
@@ -7433,7 +7491,15 @@ impl ConvertState {
           None
         }
       }
-      TAG_KBD | TAG_SAMP | TAG_VAR => Some(Cow::Borrowed("`")),
+      TAG_KBD | TAG_SAMP | TAG_VAR => {
+        if self.in_raw_html_block() {
+          Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
+        } else if self.code_spans.is_empty() {
+          Some(Cow::Borrowed(self.inline_code_opener(false)))
+        } else {
+          None
+        }
+      }
       TAG_ABBR | TAG_SMALL | TAG_TIME | TAG_BDO | TAG_RUBY | TAG_RT | TAG_RP => {
         Some(Cow::Borrowed(""))
       }
@@ -7486,6 +7552,7 @@ impl ConvertState {
           None
         }
       }
+      TAG_STRONG | TAG_B | TAG_EM | TAG_I | TAG_CITE | TAG_DFN if self.writes_code_text() => None,
       TAG_STRONG | TAG_B => {
         if self.depth_map[TAG_B as usize] > 1 {
           Some(Cow::Borrowed(""))
@@ -7607,7 +7674,12 @@ impl ConvertState {
           None
         }
       }
-      TAG_KBD | TAG_SAMP | TAG_VAR => Some(Cow::Borrowed("`")),
+      TAG_KBD | TAG_SAMP | TAG_VAR => (self.in_raw_html_block()
+        || self
+          .code_spans
+          .last()
+          .is_none_or(|span| span.depth == node.depth))
+      .then_some(Cow::Borrowed(MARKDOWN_INLINE_CODE)),
       TAG_ABBR | TAG_SMALL | TAG_TIME | TAG_BDO | TAG_RUBY | TAG_RT | TAG_RP => {
         Some(Cow::Borrowed(""))
       }

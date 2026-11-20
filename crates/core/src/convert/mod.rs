@@ -1237,6 +1237,8 @@ pub struct ConvertState {
   /// Open code spans and fenced blocks stay buffered until their closing
   /// delimiter can be chosen from the complete literal content.
   code_spans: Vec<CodeSpanState>,
+  /// Depth of the outermost emitted raw code wrapper, without a Markdown span.
+  raw_code_owner_depth: Option<usize>,
   code_fence: Option<CodeFenceState>,
   /// Open blockquotes stay buffered until all child line boundaries are known.
   blockquotes: Vec<BlockquoteFrame>,
@@ -1661,6 +1663,7 @@ impl ConvertState {
       caption_frames: Vec::new(),
       streaming_break_runs: Vec::new(),
       code_spans: Vec::new(),
+      raw_code_owner_depth: None,
       code_fence: None,
       blockquotes: Vec::with_capacity(4),
       blockquote_scratch: String::new(),

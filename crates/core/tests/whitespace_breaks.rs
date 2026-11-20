@@ -1,7 +1,7 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{
   CleanConfig, ExtractionConfig, FilterConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig,
-  TagOverrideConfig,
+  TagOverrideConfig, TailwindConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
@@ -1092,7 +1092,7 @@ fn blank_that_follows_no_opener_is_owed_to_later_text() {
     ("<p><code>a<del> </del></code>z</p>", "`a `z"),
     (
       "<p><code>a<strong> <svg></svg> b</strong></code></p>",
-      "`a** b**`",
+      "`a b`",
     ),
   ] {
     assert_every_chunking(html, &options, expected);
@@ -1335,10 +1335,37 @@ fn blank_after_a_literal_override_opener_is_dropped() {
 
 #[test]
 fn code_like_content_is_left_as_written() {
-  assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a** x**`");
-  assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a* x*`");
-  assert_eq!(md("<p><var>a<b><svg></svg> x</b></var></p>"), "`a** x**`");
-  assert_eq!(md("<p><code>a<strong> x</strong></code></p>"), "`a** x**`");
+  assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a x`");
+  assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a x`");
+  assert_eq!(md("<p><var>a<b><svg></svg> x</b></var></p>"), "`a x`");
+  assert_eq!(md("<p><code>a** x**</code></p>"), "`a** x**`");
+}
+
+#[test]
+fn tailwind_formats_prose_after_inline_code() {
+  let options = HtmlToMarkdownOptions::default().with_plugins(PluginConfig {
+    tailwind: Some(TailwindConfig),
+    ..Default::default()
+  });
+  let html =
+    r#"<code><span class="italic font-bold">a*b</span></code> <span class="italic">c</span>"#;
+  let expected = "`a*b` *c*";
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  assert_every_split(html, &options, expected);
+}
+
+#[test]
+fn a_filtered_code_wrapper_does_not_suppress_included_emphasis() {
+  let options = HtmlToMarkdownOptions::default().with_plugins(PluginConfig {
+    filter: Some(FilterConfig {
+      include: Some(vec!["strong".into()]),
+      ..Default::default()
+    }),
+    ..Default::default()
+  });
+  let html = "<kbd><strong>x</strong></kbd>";
+  assert_eq!(html_to_markdown(html, options.clone()), "**x**");
+  assert_every_split(html, &options, "**x**");
 }
 
 #[test]
@@ -1697,6 +1724,48 @@ fn touching_emphasis_pairs_of_one_delimiter_are_reopened() {
     ("<b>Aa</b><strong>Bb</strong>", "**AaBb**"),
     ("<em>Aa</em><i>Bb</i>", "*AaBb*"),
     ("<em>Aa</em><cite>Bb</cite>", "*AaBb*"),
+    ("<code><b>a</b><b>b</b></code>", "`ab`"),
+    ("<code><b>a </b><b>b</b></code>", "`a b`"),
+    ("<code><em>a*</em><cite>`b</cite></code>", "``a*`b``"),
+    ("<code>a<br><b><br>b</b></code>", "`a  b`"),
+    (
+      "<code>x<br><strong># heading</strong></code>",
+      "`x # heading`",
+    ),
+    ("<kbd>a<br><strong><br>b</strong></kbd>", "`a  b`"),
+    ("<samp>a<br><em># b</em></samp>", "`a # b`"),
+    ("<var>a<br><i><br>b</i></var>", "`a  b`"),
+    ("<h2><code>a<br>b</code></h2>", "## `a b`"),
+    (
+      "<table><tr><td><code>a<br>b</code></td></tr></table>",
+      "| `a b` |\n| --- |",
+    ),
+    (
+      "<code>x&#10;<strong># heading</strong></code>",
+      "`x # heading`",
+    ),
+    ("<kbd><strong>a&#10;&#10;b</strong></kbd>", "`a  b`"),
+    ("<var>a&#13;&#10;b</var>", "`a b`"),
+    ("<samp>a`b</samp>", "``a`b``"),
+    (
+      "<ul><li><h2>Shortcut</h2><kbd><strong>Ctrl</strong></kbd></li></ul>",
+      "- ## Shortcut\n\n  `Ctrl`",
+    ),
+    (
+      "<code>A<br><figcaption><em><br>B</em></figcaption></code>",
+      "`A  B`",
+    ),
+    (
+      "<details><code>a<br>b</code></details>",
+      "<details><code>a<br>b</code></details>",
+    ),
+    (
+      "<details><code><em>argv</em></code></details>",
+      "<details><code>argv</code></details>",
+    ),
+    ("<kbd><strong>Ctrl</strong>+<em>C</em></kbd>", "`Ctrl+C`"),
+    ("<samp><i>stdout</i></samp>", "`stdout`"),
+    ("<var><b>count</b></var>", "`count`"),
     (
       "<strong>Aa</strong><strong>Bb</strong><strong>Cc</strong>",
       "**AaBbCc**",
@@ -2420,7 +2489,7 @@ fn review_caption_lifecycle_ul_code_empty_em() {
 #[test]
 fn review_caption_additional_0() {
   let html = r#"<kbd><a href="/f" title="Lima "></a><figcaption><a href="/f" title="Lima "><br></a></figcaption></kbd>"#;
-  let expected = "`[Lima](/f) *[  \nLima](/f)*`";
+  let expected = "`[Lima ](/f \"Lima \") [ Lima ](/f \"Lima \")`";
   assert_eq!(md(html), expected);
   for width in [1, 2, 3, 11] {
     assert_eq!(md_streamed(html, width), expected);
@@ -2438,7 +2507,7 @@ fn review_caption_additional_0() {
 fn review_caption_additional_1() {
   let html =
     r#"<a href="/f" title="Lima "></a><figcaption><samp><br></samp><mark></mark></figcaption>"#;
-  let expected = "[Lima](/f) *<mark></mark>*";
+  let expected = "[Lima](/f)\n\n*<mark></mark>*";
   assert_eq!(md(html), expected);
   for width in [1, 2, 3, 11] {
     assert_eq!(md_streamed(html, width), expected);
@@ -2551,36 +2620,13 @@ fn an_emphasis_pair_with_an_overridden_delimiter_is_not_reopened() {
   }
 }
 
-// The delimiters a pair gets back count against a code span's budget, as
-// they did when first written.
 #[test]
-fn an_emphasis_pair_written_out_again_stays_within_the_node_cap() {
-  for (html, cap, expected) in [
-    (
-      "<code><em>abcde</em><em><cite>x</cite></em></code>",
-      8,
-      "`*abcde**`",
-    ),
-    (
-      "<code><em>abcde</em><em><cite>x</cite></em></code>",
-      9,
-      "`*abcde***`",
-    ),
-    (
-      "<code><strong>abc</strong><strong><b>x</b></strong></code>",
-      9,
-      "`**abc****`",
-    ),
-    ("<code><em>abcde</em><em>x</em></code>", 8, "`*abcdex*`"),
-  ] {
-    let options = HtmlToMarkdownOptions::default().with_max_node_bytes(cap);
-    assert_eq!(
-      html_to_markdown(html, options.clone()),
-      expected,
-      "{html} cap={cap}"
-    );
-    assert_every_split(html, &options, expected);
-  }
+fn emphasis_tags_do_not_use_the_code_span_content_budget() {
+  let html = "<code><em>abcde</em><em><cite>wxyz</cite></em></code>";
+  let options = HtmlToMarkdownOptions::default().with_max_node_bytes(8);
+  let expected = "`abcdewxy`";
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  assert_every_split(html, &options, expected);
 }
 
 #[test]
@@ -2635,7 +2681,7 @@ fn caption_excluded_wrapper_0() {
 fn caption_excluded_wrapper_1() {
   use mdream::{PluginConfig, TagOverrideConfig};
   let html = r#"<var><a href="/f" title="Lima "></a><figcaption><strong><style></style></strong>1. Lima</figcaption></var>"#;
-  let expected = "`[Lima](/f) *1. Lima*%";
+  let expected = "`[Lima ](/f \"Lima \")1. Lima%";
   let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig::default().with_tag_override(
       "var",
@@ -2672,7 +2718,7 @@ fn caption_excluded_wrapper_2() {
 </figcaption></kbd><figcaption><samp><cite><script>x</script><img src="/n"></cite><button>
  Lima</button></samp><samp>
 <strong><script>x</script> </strong></samp></figcaption></q>"#;
-  let expected = "\"``- `*1. Lima*` *`*![](/n)* Lima`*\"";
+  let expected = "\"`- 1. Lima` *`![](/n) Lima`*\"";
   let options = HtmlToMarkdownOptions {
     plugins: Some(
       PluginConfig::default().with_tag_override("x-q", TagOverrideConfig::alias("blockquote")),
@@ -2702,7 +2748,7 @@ fn caption_excluded_wrapper_2() {
 fn caption_excluded_wrapper_3() {
   use mdream::{PluginConfig, TagOverrideConfig};
   let html = r#"<var><strong><samp><li><i></i> </li><a href="/f" title="Lima ">  </a></samp><figcaption><strong> <style></style></strong><cite><svg></svg>1. Lima</cite></figcaption></strong><s><var><blockquote><style></style>Kilo</blockquote><div> Lima Lima</div></var><script>x</script></s></var>"#;
-  let expected = "`**`- [Lima](/f)` **1. Lima****~~`>  Kilo Lima Lima%~~%";
+  let expected = "`- [Lima ](/f \"Lima \") 1. Lima ~~>  Kilo Lima Lima%~~%";
   let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig::default().with_tag_override(
       "var",
@@ -2744,7 +2790,7 @@ fn caption_emphasis_after_leading_break() {
     (
       r#"<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>
 <br></ul> </a></figcaption></kbd>"#,
-      "```Kilo![](/n)Kilo`\" [Lima](/f)\"`   \n***Kilo**[  \nLima](/f)*`",
+      "`Kilo![](/n)Kilo \" [Lima ](/f \"Lima \")\" Kilo [ Lima ](/f \"Lima \")`",
     ),
     (
       r#"<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite></figcaption>"#,
@@ -2788,11 +2834,11 @@ fn caption_delimiter_context() {
   for (html, expected) in [
     (
       r#"<code>A<br><figcaption><em><br>B</em></figcaption></code>"#,
-      "`A\n**\nB**`",
+      "`A  B`",
     ),
     (
       r#"<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>"#,
-      "`**\nB**C`",
+      "`  BC`",
     ),
     (
       r#"<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>"#,
@@ -3000,7 +3046,7 @@ fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
     ("<p>h<code>&#32;<i><svg></svg></i></code>B</p>", "h` `B"),
     (
       "<p>h<kbd>&#32;<samp><svg></svg>&#32;</samp></kbd>B</p>",
-      "h` ` ``B",
+      "h` `B",
     ),
     (
       "<p>h<kbd><samp>&#32;</samp><svg></svg>&#32;</kbd>B</p>",
@@ -3017,7 +3063,7 @@ fn decoded_blank_in_nested_code_spans_settles_at_a_block_that_writes_nothing() {
     ),
     (
       "<p>h<kbd><samp>&#32;<var>&#32;<svg></svg></var></samp></kbd>B</p>",
-      "h`` ` ```B",
+      "h` `B",
     ),
   ] {
     assert_eq!(md(html), expected, "{html}");

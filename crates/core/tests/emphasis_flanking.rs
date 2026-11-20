@@ -15,11 +15,11 @@ const CASES: &[(&str, &str)] = &[
   ("<strong>b!</strong><strong>c!</strong>d", "**b!c!**&#100;"),
   (
     r##"<p><strong><a href="/x">b</a> </strong><kbd><b>c</b></kbd></p>"##,
-    "**[b](/x)** `**c**`",
+    "**[b](/x)** `c`",
   ),
   (
     r##"<p><strong><a href="/x">b</a> </strong><code><em>c</em></code></p>"##,
-    "**[b](/x)** `*c*`",
+    "**[b](/x)** `c`",
   ),
   (r##"<li>a<strong>(b)</strong><b>c</b></li>"##, "- a**(b)c**"),
   (
@@ -44,11 +44,11 @@ const CASES: &[(&str, &str)] = &[
   ),
   (
     r##"<p><em><a href="/x">a</a></em><kbd><b>Ctrl</b></kbd></p>"##,
-    "*[a](/x)*`**Ctrl**`",
+    "*[a](/x)*`Ctrl`",
   ),
   (
     r##"<strong>b!</strong><code><em>c</em></code>"##,
-    "**b!**`*c*`",
+    "**b!**`c`",
   ),
   (r##"<p>a<strong>(b)</strong><b>c</b></p>"##, "a**(b)c**"),
   (
@@ -58,35 +58,35 @@ const CASES: &[(&str, &str)] = &[
   (r##"<strong>b! </strong><em>c</em>"##, "**b!** *c*"),
   (
     r##"<p><em><a href="/x">a</a></em><code><em>x</em></code></p>"##,
-    "*[a](/x)*`*x*`",
+    "*[a](/x)*`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em></p><p><code><em>x</em></code></p>"##,
-    "*[a](/x)*\n\n`*x*`",
+    "*[a](/x)*\n\n`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em><samp><em>x</em></samp></p>"##,
-    "*[a](/x)*`*x*`",
+    "*[a](/x)*`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em></p><p><samp><em>x</em></samp></p>"##,
-    "*[a](/x)*\n\n`*x*`",
+    "*[a](/x)*\n\n`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em><var><em>x</em></var></p>"##,
-    "*[a](/x)*`*x*`",
+    "*[a](/x)*`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em></p><p><var><em>x</em></var></p>"##,
-    "*[a](/x)*\n\n`*x*`",
+    "*[a](/x)*\n\n`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em><kbd><em>x</em></kbd></p>"##,
-    "*[a](/x)*`*x*`",
+    "*[a](/x)*`x`",
   ),
   (
     r##"<p><em><a href="/x">a</a></em></p><p><kbd><em>x</em></kbd></p>"##,
-    "*[a](/x)*\n\n`*x*`",
+    "*[a](/x)*\n\n`x`",
   ),
   (r##"<p><strong>b!</strong><br><em>c</em>"##, "**b!**  \n*c*"),
   (
@@ -890,17 +890,17 @@ fn keeps_delimiters_where_a_fix_cannot_help() {
   );
   assert_eq!(
     html_to_markdown(
-      "<p><code>a<strong>[b]</strong>c</code></p>",
+      "<p><code>a**[b]**c</code></p>",
       HtmlToMarkdownOptions::default()
     ),
     "`a**[b]**c`"
   );
   // `<kbd>`, `<samp>` and `<var>` are code spans as well.
   for (html, expected) in [
-    ("<p><kbd><strong>b!</strong>c</kbd></p>", "`**b!**c`"),
-    ("<p><kbd>a<strong>!b</strong></kbd></p>", "`a**!b**`"),
-    ("<p><samp><em>(b)</em>c</samp></p>", "`*(b)*c`"),
-    ("<p><var>a<em>!b</em>c</var></p>", "`a*!b*c`"),
+    ("<p><kbd><strong>b!</strong>c</kbd></p>", "`b!c`"),
+    ("<p><kbd>a<strong>!b</strong></kbd></p>", "`a!b`"),
+    ("<p><samp><em>(b)</em>c</samp></p>", "`(b)c`"),
+    ("<p><var>a<em>!b</em>c</var></p>", "`a!bc`"),
     ("<p>a<strong><kbd>b</kbd></strong>c</p>", "a**`b`**&#99;"),
   ] {
     assert_eq!(

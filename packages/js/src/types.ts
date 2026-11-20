@@ -330,6 +330,8 @@ export interface MdreamProcessingState {
 export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, PluginState {
   /** @internal */
   outputPositions?: OutputPositions
+  /** The element whose built-in output opened a code context. */
+  codeText?: { owner: ElementNode, kind: 'span' | 'raw' }
   /** Active output format for format-aware plugins. */
   outputFormat: OutputFormat
 
@@ -470,7 +472,7 @@ export type GfmAction
     | { _tag: 'BlockquoteExit' }
     | { _tag: 'PreEnter', language: string }
     | { _tag: 'PreExit' }
-    | { _tag: 'CodeSpanEnter', output: string }
+    | { _tag: 'CodeSpanEnter', readonly output: string }
     | { _tag: 'CodeSpanExit' }
     | { _tag: 'CodeFenceEnter', language: string, output: string }
 

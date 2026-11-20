@@ -27,7 +27,7 @@ export function htmlToMarkdown(html: string, options: Partial<MdreamOptions> = {
     urlBaseTarget: processor.state,
   }
   const handleEvent: (event: NodeEvent) => void = plugins.length
-    ? event => processPluginsForEvent(event, plugins, processor.state, processor.processEvent)
+    ? event => processPluginsForEvent(event, plugins, processor.state, processor.processEvent, processor.skipEvent)
     : processor.processEvent
   const leftover = parseHtmlStream(html, parseState, handleEvent)
   finalizeParse(leftover, parseState, handleEvent)

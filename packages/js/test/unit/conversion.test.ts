@@ -1,20 +1,95 @@
 import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
-import { ELEMENT_NODE, NodeEventEnter } from '../../src/const'
+import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
+import { tailwindPlugin } from '../../src/plugins/tailwind'
 import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
 describe('adjacent emphasis and empty list code', () => {
+  it('keeps later emphasis when a plugin replaces the code closer', async () => {
+    const html = '<code title="replaced">a</code><span></span><p><strong>after</strong></p><p><code><em>b</em></code></p>'
+    const expected = '`a`\n\n**after**\n\n`b`'
+    const plugin = createPlugin({
+      beforeNodeProcess(event) {
+        if (event.type === NodeEventExit && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes.title === 'replaced')
+          return { skip: true }
+      },
+      onNodeEnter(node) {
+        if (node.name === 'span')
+          return '`'
+      },
+    })
+    const options = { plugins: [plugin] }
+    expect(htmlToMarkdown(html, options)).toBe(expected)
+
+    const input = new ReadableStream<string>({
+      start(controller) {
+        const split = html.indexOf('<span>')
+        controller.enqueue(html.slice(0, split))
+        controller.enqueue(html.slice(split))
+        controller.close()
+      },
+    })
+    let output = ''
+    for await (const chunk of streamHtmlToMarkdown(input, options))
+      output += chunk
+    expect(output).toBe(expected)
+  })
+
+  it('keeps source asterisks and skips Tailwind emphasis inside code', () => {
+    const html = '<code><span class="italic font-bold">a*b</span></code> <span class="italic">c</span>'
+    expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toBe('`a*b` *c*')
+  })
+
+  it.each(['code', 'kbd', 'samp', 'var'])('keeps spacing overrides outside a %s span', (tag) => {
+    const html = `prefix<${tag}>a</${tag}>`
+    expect(htmlToMarkdown(html, {
+      tagOverrides: { [tag]: { spacing: [2, 0] } },
+    })).toBe('prefix\n\n`a`')
+  })
+
+  it('preserves caption plugin output inside code and the following list heading', () => {
+    const html = '<code>A <figcaption>B </figcaption>C</code><ul><li><h2>Step</h2><kbd>Ctrl</kbd></li></ul>'
+    const plugin = createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'figcaption')
+          return '['
+      },
+    })
+    expect(htmlToMarkdown(html, { plugins: [plugin] })).toBe('`A [B C`\n\n- ## Step\n\n  `Ctrl`')
+  })
+
   it.each([
     ['<strong>Aa</strong><strong>Bb</strong>', '**AaBb**'],
     ['<strong><em>Aa</em></strong><strong><em>Bb</em></strong>', '***AaBb***'],
     ['<strong>Aa</strong><i></i><strong>Bb</strong>', '**AaBb**'],
     ['<b>Aa</b><b> </b>x', '**Aa** x'],
     ['<strong>Aa</strong> <strong>Bb</strong>', '**Aa** **Bb**'],
+    ['<code><b>a</b><b>b</b></code>', '`ab`'],
+    ['<code><b>a </b><b>b</b></code>', '`a b`'],
+    ['<code><em>a*</em><cite>`b</cite></code>', '``a*`b``'],
+    ['<code>a<br><b><br>b</b></code>', '`a  b`'],
+    ['<code>x<br><strong># heading</strong></code>', '`x # heading`'],
+    ['<kbd>a<br><strong><br>b</strong></kbd>', '`a  b`'],
+    ['<samp>a<br><em># b</em></samp>', '`a # b`'],
+    ['<var>a<br><i><br>b</i></var>', '`a  b`'],
+    ['<h2><code>a<br>b</code></h2>', '## `a b`'],
+    ['<table><tr><td><code>a<br>b</code></td></tr></table>', '| `a b` |\n| --- |'],
+    ['<code>x&#10;<strong># heading</strong></code>', '`x # heading`'],
+    ['<kbd><strong>a&#10;&#10;b</strong></kbd>', '`a  b`'],
+    ['<var>a&#13;&#10;b</var>', '`a b`'],
+    ['<samp>a`b</samp>', '``a`b``'],
+    ['<ul><li><h2>Shortcut</h2><kbd><strong>Ctrl</strong></kbd></li></ul>', '- ## Shortcut\n\n  `Ctrl`'],
+    ['<code>A<br><figcaption><em><br>B</em></figcaption></code>', '`A  B`'],
+    ['<details><code>a<br>b</code></details>', '<details><code>a<br>b</code></details>'],
+    ['<details><code><em>argv</em></code></details>', '<details><code>argv</code></details>'],
+    ['<kbd><strong>Ctrl</strong>+<em>C</em></kbd>', '`Ctrl+C`'],
+    ['<samp><i>stdout</i></samp>', '`stdout`'],
+    ['<var><b>count</b></var>', '`count`'],
     ['<ul><li>Aa<span> </span><code></code>Bb</li></ul>', '- Aa Bb'],
     ['<ol><li>Aa<i> </i><code><svg></svg></code><b>Bb</b></li></ol>', '1. Aa **Bb**'],
     ['<ul><li>Aa<code></code>Bb</li></ul>', '- AaBb'],

@@ -753,20 +753,18 @@ fn an_exact_utf8_inline_code_cap_does_not_report_truncation() {
 
 #[test]
 fn generated_inline_code_content_consumes_the_cap() {
-  assert_capped_inline_code(
-    "<code>a<br>b<br>c<br>d<br>e</code>",
-    8,
-    "`a\nb\nc\nd\n`",
-    true,
-  );
+  assert_capped_inline_code("<code>a<br>b<br>c<br>d<br>e</code>", 8, "`a b c d `", true);
 }
 
 #[test]
-fn inline_markers_and_spacing_consume_the_code_span_cap() {
-  assert_capped_inline_code(
+fn literal_tag_override_markers_consume_the_code_span_cap() {
+  let options = options(8).with_plugins(
+    PluginConfig::default().with_tag_override("em", TagOverrideConfig::wrap("[", "]")),
+  );
+  assert_capped_inline_code_with_options(
     "<code><em>abcde</em><span>x</span><span>y</span></code>",
-    8,
-    "`*abcde*x`",
+    options,
+    "`[abcde]x`",
     true,
   );
 }
@@ -774,7 +772,7 @@ fn inline_markers_and_spacing_consume_the_code_span_cap() {
 #[test]
 fn a_rejected_inline_marker_cannot_remove_retained_code_content() {
   assert_capped_inline_code(
-    "<code><span>abcdefgh</span><em>x</em></code>",
+    "<code><span>abcdefgh</span><del>x</del></code>",
     8,
     "`abcdefgh`",
     true,
@@ -888,7 +886,15 @@ fn frontmatter_output_cannot_escape_an_inline_code_span_cap() {
 
 #[test]
 fn generated_spacing_consumes_the_inline_code_span_cap() {
-  assert_capped_inline_code("<code><em>a </em>bcdefgh</code>", 8, "`*a* bcde`", true);
+  let options = options(8).with_plugins(
+    PluginConfig::default().with_tag_override("em", TagOverrideConfig::wrap("[", "]")),
+  );
+  assert_capped_inline_code_with_options(
+    "<code><em>a </em>bcdefgh</code>",
+    options,
+    "`[a] bcde`",
+    true,
+  );
 }
 
 #[test]
@@ -896,19 +902,19 @@ fn raw_html_spacing_respects_code_caps_across_contexts() {
   assert_capped_inline_code(
     "<code><br><details>x</details>y</code>tail",
     10,
-    "`\n<details>`\n\ntail",
+    "` <details>`tail",
     true,
   );
   assert_capped_inline_code(
     "<ul><li><code><br><details>x</details>y</code>tail</li></ul>",
     12,
-    "- `\n<details>x`\n\n  tail",
+    "- ` <details>x`tail",
     true,
   );
   assert_capped_inline_code(
     "<code><br><details>x</details><blockquote>q</blockquote></code>tail",
     10,
-    "`\n<details>`tail",
+    "` <details>`tail",
     true,
   );
 }
@@ -1617,7 +1623,7 @@ fn list_indentation_counts_against_a_code_fence_cap() {
 #[test]
 fn a_caption_in_an_exhausted_code_span_closes() {
   let tail = "<br>&#32;<br><figcaption></span>&nbsp;</figcaption><td><img src=/i alt=a>&#32;</td><figcaption><em><br></figcaption>";
-  for (cap, fill) in [(16, 0), (16, 7), (4096, 4078), (4096, 4087)] {
+  for (cap, fill) in [(16, 0), (16, 7), (4096, 4080), (4096, 4087)] {
     let html = format!("<code>{}{tail}", "a".repeat(fill));
     for chunk in [1, 7, 4096, html.len()] {
       let mut p = MarkdownStreamProcessor::new(options(cap));
@@ -2679,8 +2685,7 @@ fn surviving_code_span_stays_after_nested_item_marker() {
 fn capped_code_in_open_link_preserves_adjacent_item() {
   {
     let html = "<blockquote><ul><li>root<ul><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ul></li></ul></blockquote>";
-    let expected =
-      "> - root\n>   - [`\n>\n>     ---\n>\n>     \n>     > z\n>\n>     end`](/z)\n>   - adj";
+    let expected = "> - root\n>   - [`      ---           > z      end`](/z)\n>   - adj";
     assert_capped_inline_code(html, 38, expected, false);
     for chunk in [1, 2, 3, 11] {
       assert_eq!(
@@ -2691,7 +2696,8 @@ fn capped_code_in_open_link_preserves_adjacent_item() {
   }
   {
     let html = "<blockquote><ol><li>root<ol><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ol></li></ol></blockquote>";
-    let expected = "> 1. root\n>    1. [`\n>\n>       ---\n>\n>       \n>       > z\n>\n>       end`](/z)\n>    2. adj";
+    let expected =
+      "> 1. root\n>    1. [`        ---               > z        end`](/z)\n>    2. adj";
     assert_capped_inline_code(html, 48, expected, false);
     for chunk in [1, 2, 3, 11] {
       assert_eq!(
@@ -2730,37 +2736,37 @@ fn oversized_quote_in_inline_code_drops_unquoted_content() {
   assert_capped_inline_code(
     "<ul><li><code>aaaa<blockquote>q</blockquote></code></li></ul>",
     8,
-    "- `aaaa\n\n  `",
+    "- `aaaa    `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li><code><blockquote><p>q</p><p>r</p></blockquote></code></li></ul>",
     8,
-    "- `\n\n  `",
+    "- `    `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li><code><blockquote><p>q</p><p>r</p></blockquote></code></li></ul>",
     12,
-    "- `\n\n  `",
+    "- `    `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li><code><hr><blockquote>q</blockquote></code></li></ul>",
     16,
-    "- `\n\n  ---\n\n  \n\n  `",
+    "- `    ---        `",
     true,
   );
   assert_capped_inline_code(
     "<ol><li><code>aaaa<blockquote>q</blockquote></code></li></ol>",
     8,
-    "1. `aaaa\n\n   `",
+    "1. `aaaa     `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li>parent<ul><li><code>aaaa<blockquote>q</blockquote></code></li></ul></li></ul>",
     8,
-    "- parent\n  - `aaaa\n\n    `",
+    "- parent\n  - `aaaa      `",
     true,
   );
   // A quote that fits keeps its structure and content.
@@ -2773,7 +2779,7 @@ fn oversized_quote_in_inline_code_drops_unquoted_content() {
   assert_capped_inline_code(
     "<ul><li><code>aaaa<blockquote><blockquote>q</blockquote></blockquote></code></li></ul>",
     12,
-    "- `aaaa\n  > > q\n\n  `",
+    "- `aaaa   > > q    `",
     false,
   );
 }
@@ -2789,13 +2795,13 @@ fn exhausted_quote_discards_nested_structure_and_later_span_content() {
   assert_capped_inline_code(
     "<ul><li><code>aaaa<blockquote><blockquote>q</blockquote></blockquote>tail</code></li></ul>",
     8,
-    "- `aaaa\n`",
+    "- `aaaa `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li>lead <code><blockquote><pre>q</pre></blockquote>tail</code></li></ul>",
     16,
-    "- lead `\n`",
+    "- lead ` `",
     true,
   );
 }

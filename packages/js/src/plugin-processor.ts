@@ -9,6 +9,7 @@ import { ELEMENT_NODE, NodeEventEnter, TEXT_NODE } from './const'
  * @param plugins - Array of plugins to apply
  * @param state - The current runtime state
  * @param processEvent - Callback to process the event after plugin processing
+ * @param onSkipped - Callback to release state for an event the plugin skipped
  * @returns true if the event should be skipped, false to continue processing
  */
 export function processPluginsForEvent(
@@ -16,6 +17,7 @@ export function processPluginsForEvent(
   plugins: TransformPlugin[] | undefined,
   state: MdreamRuntimeState,
   processEvent: (event: NodeEvent) => void,
+  onSkipped?: (event: NodeEvent) => void,
 ): boolean {
   state.depth = event.node.depth
   // Process plugins with full state access
@@ -54,6 +56,7 @@ export function processPluginsForEvent(
       }
     }
     if (shouldSkip) {
+      onSkipped?.(event)
       return true // Skip this event
     }
 

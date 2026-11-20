@@ -40,7 +40,7 @@ describe('gfm hard breaks', () => {
 
   it('does not emit a hard-break marker inside inline code', () => {
     expect(htmlToMarkdown('<code>first<br>second</code>'))
-      .toBe('`first\nsecond`')
+      .toBe('`first second`')
   })
 
   it('separates raw inline HTML after a pipe outside tables', async () => {
