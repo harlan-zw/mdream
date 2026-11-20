@@ -45,6 +45,24 @@ describe('adjacent emphasis and empty list code', () => {
     expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toBe('`a*b` *c*')
   })
 
+  it.each(['code', 'kbd', 'samp', 'var'])('keeps spacing overrides outside a %s span', (tag) => {
+    const html = `prefix<${tag}>a</${tag}>`
+    expect(htmlToMarkdown(html, {
+      tagOverrides: { [tag]: { spacing: [2, 0] } },
+    })).toBe('prefix\n\n`a`')
+  })
+
+  it('preserves caption plugin output inside code and the following list heading', () => {
+    const html = '<code>A <figcaption>B </figcaption>C</code><ul><li><h2>Step</h2><kbd>Ctrl</kbd></li></ul>'
+    const plugin = createPlugin({
+      onNodeEnter(node) {
+        if (node.name === 'figcaption')
+          return '['
+      },
+    })
+    expect(htmlToMarkdown(html, { plugins: [plugin] })).toBe('`A [B C`\n\n- ## Step\n\n  `Ctrl`')
+  })
+
   it.each([
     ['<strong>Aa</strong><strong>Bb</strong>', '**AaBb**'],
     ['<strong><em>Aa</em></strong><strong><em>Bb</em></strong>', '***AaBb***'],
