@@ -38,7 +38,7 @@ export async function* streamHtmlToMarkdown(
     discardExcludedText: resolvedPlugins.length === 0,
   }
   const handleEvent: (event: NodeEvent) => void = resolvedPlugins.length
-    ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent)
+    ? event => processPluginsForEvent(event, resolvedPlugins, processor.state, processor.processEvent, processor.skipEvent)
     : processor.processEvent
 
   const incrementalPlainText = resolvedPlugins.length === 0 && !options.wrapWidth && !tagOverrideHandlers?.size

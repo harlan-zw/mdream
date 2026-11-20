@@ -1,7 +1,7 @@
 //! Block spacing, hard breaks, and inline whitespace at element boundaries.
 use mdream::types::{
   CleanConfig, ExtractionConfig, FilterConfig, HtmlToMarkdownOptions, OutputFormat, PluginConfig,
-  TagOverrideConfig,
+  TagOverrideConfig, TailwindConfig,
 };
 use mdream::{MarkdownStreamProcessor, html_to_markdown, html_to_text};
 
@@ -1335,10 +1335,23 @@ fn blank_after_a_literal_override_opener_is_dropped() {
 
 #[test]
 fn code_like_content_is_left_as_written() {
-  assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a** x**`");
-  assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a* x*`");
-  assert_eq!(md("<p><var>a<b><svg></svg> x</b></var></p>"), "`a** x**`");
+  assert_eq!(md("<p><kbd>a<strong> x</strong></kbd></p>"), "`a x`");
+  assert_eq!(md("<p><samp>a<em> x</em></samp></p>"), "`a x`");
+  assert_eq!(md("<p><var>a<b><svg></svg> x</b></var></p>"), "`a x`");
   assert_eq!(md("<p><code>a** x**</code></p>"), "`a** x**`");
+}
+
+#[test]
+fn tailwind_formats_prose_after_inline_code() {
+  let options = HtmlToMarkdownOptions::default().with_plugins(PluginConfig {
+    tailwind: Some(TailwindConfig),
+    ..Default::default()
+  });
+  let html =
+    r#"<code><span class="italic font-bold">a*b</span></code> <span class="italic">c</span>"#;
+  let expected = "`a*b` *c*";
+  assert_eq!(html_to_markdown(html, options.clone()), expected);
+  assert_every_split(html, &options, expected);
 }
 
 #[test]
@@ -1700,6 +1713,14 @@ fn touching_emphasis_pairs_of_one_delimiter_are_reopened() {
     ("<code><b>a</b><b>b</b></code>", "`ab`"),
     ("<code><b>a </b><b>b</b></code>", "`a b`"),
     ("<code><em>a*</em><cite>`b</cite></code>", "``a*`b``"),
+    ("<code>a<br><b><br>b</b></code>", "`a  b`"),
+    (
+      "<details><code><em>argv</em></code></details>",
+      "<details><code>argv</code></details>",
+    ),
+    ("<kbd><strong>Ctrl</strong>+<em>C</em></kbd>", "`Ctrl+C`"),
+    ("<samp><i>stdout</i></samp>", "`stdout`"),
+    ("<var><b>count</b></var>", "`count`"),
     (
       "<strong>Aa</strong><strong>Bb</strong><strong>Cc</strong>",
       "**AaBbCc**",
@@ -2652,7 +2673,7 @@ fn caption_excluded_wrapper_2() {
 </figcaption></kbd><figcaption><samp><cite><script>x</script><img src="/n"></cite><button>
  Lima</button></samp><samp>
 <strong><script>x</script> </strong></samp></figcaption></q>"#;
-  let expected = "\"``- `*1. Lima*` *`*![](/n)* Lima`*\"";
+  let expected = "\"``- `*1. Lima*` *`![](/n) Lima`*\"";
   let options = HtmlToMarkdownOptions {
     plugins: Some(
       PluginConfig::default().with_tag_override("x-q", TagOverrideConfig::alias("blockquote")),
@@ -2682,7 +2703,7 @@ fn caption_excluded_wrapper_2() {
 fn caption_excluded_wrapper_3() {
   use mdream::{PluginConfig, TagOverrideConfig};
   let html = r#"<var><strong><samp><li><i></i> </li><a href="/f" title="Lima ">  </a></samp><figcaption><strong> <style></style></strong><cite><svg></svg>1. Lima</cite></figcaption></strong><s><var><blockquote><style></style>Kilo</blockquote><div> Lima Lima</div></var><script>x</script></s></var>"#;
-  let expected = "`**`- [Lima](/f)` **1. Lima****~~`>  Kilo Lima Lima%~~%";
+  let expected = "``- [Lima](/f)` *1. Lima*~~`>  Kilo Lima Lima%~~%";
   let options = HtmlToMarkdownOptions {
     plugins: Some(PluginConfig::default().with_tag_override(
       "var",
@@ -2724,7 +2745,7 @@ fn caption_emphasis_after_leading_break() {
     (
       r#"<kbd><samp><var><span><i></i>Kilo</span><ul><img src="/n">Kilo</ul></var><q><a href="/f" title="Lima "><svg></svg><style></style></a><strong><svg></svg><script>x</script></strong></q></samp><figcaption><cite><kbd> <svg></svg></kbd><em><br>Kilo</em></cite><a href="/f" title="Lima "><ul>
 <br></ul> </a></figcaption></kbd>"#,
-      "```Kilo![](/n)Kilo`\" [Lima](/f)\"`   \n***Kilo**[  \nLima](/f)*`",
+      "```Kilo![](/n)Kilo`\" [Lima](/f)\"`  \n*Kilo [  \nLima](/f)*`",
     ),
     (
       r#"<figcaption><cite><kbd><svg></svg></kbd><br>Kilo</cite></figcaption>"#,
@@ -2768,11 +2789,11 @@ fn caption_delimiter_context() {
   for (html, expected) in [
     (
       r#"<code>A<br><figcaption><em><br>B</em></figcaption></code>"#,
-      "`A\n\n*B*`",
+      "`A  *B*`",
     ),
     (
       r#"<code><figcaption><em><br></em><em><br>B</em></figcaption>C</code>"#,
-      "`\n\n*B*C`",
+      "`  *B*C`",
     ),
     (
       r#"<figure><button>A </button><figcaption><em><br></em><em><br>B</em></figcaption></figure>"#,

@@ -177,6 +177,39 @@ fn has_visible(bytes: &[u8]) -> bool {
   bytes.iter().any(|&b| !is_whitespace(b))
 }
 
+// Blank lines end the paragraph before the inline code delimiter can close.
+fn flatten_code_span_blank_lines(content: &str) -> Option<String> {
+  let bytes = content.as_bytes();
+  let mut flattened = None;
+  let mut offset = 0;
+  while let Some(relative) = crate::scan::find_line_end(&bytes[offset..]) {
+    let start = offset + relative;
+    let end = start
+      + if bytes[start..].starts_with(b"\r\n") {
+        2
+      } else {
+        1
+      };
+    offset = end;
+    let mut next = end;
+    while matches!(bytes.get(next), Some(b' ' | b'\t')) {
+      next += 1;
+    }
+    if matches!(bytes.get(next), Some(b'\r' | b'\n')) {
+      let next_end = next
+        + if bytes[next..].starts_with(b"\r\n") {
+          2
+        } else {
+          1
+        };
+      let output = flattened.get_or_insert_with(|| bytes.to_vec());
+      output[start..end].fill(b' ');
+      output[next..next_end].fill(b' ');
+    }
+  }
+  flattened.map(|value| String::from_utf8(value).expect("replaced only ASCII line endings"))
+}
+
 /// List marker character opening the last visible line of `output`: a bullet,
 /// or the delimiter of an ordered marker. 0 when that line opens with neither.
 /// A marker ending `output` counts, as the item's text is spaced from it.
@@ -801,6 +834,9 @@ impl ConvertState {
     #[cfg(test)]
     {
       self.code_span_closed_bytes += self.buffer.len() - span.output_start;
+    }
+    if let Some(content) = flatten_code_span_blank_lines(&self.buffer[span.content_start..]) {
+      self.replace_code_span_content(span.content_start..self.buffer.len(), &content);
     }
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
     // honoured there. Its expanded form still has to fit the aggregate budget.
@@ -1442,6 +1478,34 @@ impl ConvertState {
   #[inline(always)]
   fn code_span_marker_ok(&self) -> bool {
     self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block()
+  }
+
+  pub(super) fn writes_code_text(&self) -> bool {
+    if !self.code_spans.is_empty() {
+      return true;
+    }
+    let raw_code = self.depth_map[TAG_CODE as usize] != 0 && self.in_raw_html_block();
+    if !raw_code
+      && self.depth_map[TAG_KBD as usize] == 0
+      && self.depth_map[TAG_SAMP as usize] == 0
+      && self.depth_map[TAG_VAR as usize] == 0
+    {
+      return false;
+    }
+    if !self.has_tag_overrides() {
+      return true;
+    }
+    let overrides = self
+      .options
+      .plugins
+      .as_ref()
+      .and_then(|p| p.tag_overrides.as_ref());
+    self.stack.iter().rev().any(|node| {
+      (matches!(node.tag_id, Some(TAG_KBD | TAG_SAMP | TAG_VAR))
+        || (raw_code && node.tag_id == Some(TAG_CODE)))
+        && Self::override_for_node(overrides, self.override_idx.as_deref(), node)
+          .is_none_or(|value| value.enter.is_none())
+    })
   }
 
   /// State every simple emitter needs in Markdown and in Text: no pending
@@ -7152,9 +7216,7 @@ impl ConvertState {
         )
       }
       // A code span renders delimiters as literal text.
-      TAG_STRONG | TAG_B | TAG_EM | TAG_I | TAG_CITE | TAG_DFN if !self.code_spans.is_empty() => {
-        None
-      }
+      TAG_STRONG | TAG_B | TAG_EM | TAG_I | TAG_CITE | TAG_DFN if self.writes_code_text() => None,
       TAG_STRONG | TAG_B => {
         if self.depth_map[TAG_B as usize] > 1 {
           Some(Cow::Borrowed(""))
@@ -7490,9 +7552,7 @@ impl ConvertState {
           None
         }
       }
-      TAG_STRONG | TAG_B | TAG_EM | TAG_I | TAG_CITE | TAG_DFN if !self.code_spans.is_empty() => {
-        None
-      }
+      TAG_STRONG | TAG_B | TAG_EM | TAG_I | TAG_CITE | TAG_DFN if self.writes_code_text() => None,
       TAG_STRONG | TAG_B => {
         if self.depth_map[TAG_B as usize] > 1 {
           Some(Cow::Borrowed(""))

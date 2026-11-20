@@ -10,7 +10,7 @@ const cases: [string, string][] = [
   ['<strong>b!</strong><strong></strong>c', '**b!**&#99;'],
   ['<strong>b!</strong><strong><em></em></strong>c', '**b!**&#99;'],
   ['<strong>b!</strong><strong>c!</strong>d', '**b!c!**&#100;'],
-  ['<p><strong><a href="/x">b</a> </strong><kbd><b>c</b></kbd></p>', '**[b](/x)** `**c**`'],
+  ['<p><strong><a href="/x">b</a> </strong><kbd><b>c</b></kbd></p>', '**[b](/x)** `c`'],
   ['<p><strong><a href="/x">b</a> </strong><code><em>c</em></code></p>', '**[b](/x)** `c`'],
   ['<li>a<strong>(b)</strong><b>c</b></li>', '- a**(b)c**'],
   ['<blockquote>a<strong>(b)</strong><b>c</b></blockquote>', '> a**(b)c**'],
@@ -18,19 +18,19 @@ const cases: [string, string][] = [
   ['<table><tr><td>a<strong>(b)</strong><b>c</b></td></tr></table>', '| a**(b)c** |\n| --- |'],
   ['<a href="/y">a<strong>(b)</strong><b>c</b></a>', '[a**(b)c**](/y)'],
   ['<ul><li><i><a href="/r">Sub (v.)</a></i></li><li><a href="/d"><strong>Domain</strong>/Super</a></li></ul>', '- *[Sub (v.)](/r)*\n- [**Domain**/Super](/d)'],
-  ['<p><em><a href="/x">a</a></em><kbd><b>Ctrl</b></kbd></p>', '*[a](/x)*`**Ctrl**`'],
+  ['<p><em><a href="/x">a</a></em><kbd><b>Ctrl</b></kbd></p>', '*[a](/x)*`Ctrl`'],
   ['<strong>b!</strong><code><em>c</em></code>', '**b!**`c`'],
   ['<p>a<strong>(b)</strong><b>c</b></p>', 'a**(b)c**'],
   ['<p><strong><a href="/x">b</a> </strong><b>c</b></p>', '**[b](/x)** **c**'],
   ['<strong>b! </strong><em>c</em>', '**b!** *c*'],
   ['<p><em><a href="/x">a</a></em><code><em>x</em></code></p>', '*[a](/x)*`x`'],
   ['<p><em><a href="/x">a</a></em></p><p><code><em>x</em></code></p>', '*[a](/x)*\n\n`x`'],
-  ['<p><em><a href="/x">a</a></em><samp><em>x</em></samp></p>', '*[a](/x)*`*x*`'],
-  ['<p><em><a href="/x">a</a></em></p><p><samp><em>x</em></samp></p>', '*[a](/x)*\n\n`*x*`'],
-  ['<p><em><a href="/x">a</a></em><var><em>x</em></var></p>', '*[a](/x)*`*x*`'],
-  ['<p><em><a href="/x">a</a></em></p><p><var><em>x</em></var></p>', '*[a](/x)*\n\n`*x*`'],
-  ['<p><em><a href="/x">a</a></em><kbd><em>x</em></kbd></p>', '*[a](/x)*`*x*`'],
-  ['<p><em><a href="/x">a</a></em></p><p><kbd><em>x</em></kbd></p>', '*[a](/x)*\n\n`*x*`'],
+  ['<p><em><a href="/x">a</a></em><samp><em>x</em></samp></p>', '*[a](/x)*`x`'],
+  ['<p><em><a href="/x">a</a></em></p><p><samp><em>x</em></samp></p>', '*[a](/x)*\n\n`x`'],
+  ['<p><em><a href="/x">a</a></em><var><em>x</em></var></p>', '*[a](/x)*`x`'],
+  ['<p><em><a href="/x">a</a></em></p><p><var><em>x</em></var></p>', '*[a](/x)*\n\n`x`'],
+  ['<p><em><a href="/x">a</a></em><kbd><em>x</em></kbd></p>', '*[a](/x)*`x`'],
+  ['<p><em><a href="/x">a</a></em></p><p><kbd><em>x</em></kbd></p>', '*[a](/x)*\n\n`x`'],
   ['<p><strong>b!</strong><br><em>c</em>', '**b!**  \n*c*'],
   ['<p><strong>b!</strong></p><p><em>c</em>', '**b!**\n\n*c*'],
   ['<p><strong>b!</strong></p><h2><em>c</em>', '**b!**\n\n## *c*'],
@@ -415,10 +415,10 @@ describe('emphasis delimiters that cannot flank', () => {
     expect(htmlToMarkdown('<p>a<strong>&nbsp;<a href="/x">b</a></strong>c</p>')).toBe('a**  [b](/x)**&#99;')
     expect(htmlToMarkdown('<p><code>a**[b]**c</code></p>')).toBe('`a**[b]**c`')
     // `<kbd>`, `<samp>` and `<var>` are code spans as well.
-    expect(htmlToMarkdown('<p><kbd><strong>b!</strong>c</kbd></p>')).toBe('`**b!**c`')
-    expect(htmlToMarkdown('<p><kbd>a<strong>!b</strong></kbd></p>')).toBe('`a**!b**`')
-    expect(htmlToMarkdown('<p><samp><em>(b)</em>c</samp></p>')).toBe('`*(b)*c`')
-    expect(htmlToMarkdown('<p><var>a<em>!b</em>c</var></p>')).toBe('`a*!b*c`')
+    expect(htmlToMarkdown('<p><kbd><strong>b!</strong>c</kbd></p>')).toBe('`b!c`')
+    expect(htmlToMarkdown('<p><kbd>a<strong>!b</strong></kbd></p>')).toBe('`a!b`')
+    expect(htmlToMarkdown('<p><samp><em>(b)</em>c</samp></p>')).toBe('`(b)c`')
+    expect(htmlToMarkdown('<p><var>a<em>!b</em>c</var></p>')).toBe('`a!bc`')
     expect(htmlToMarkdown('<p>a<strong><kbd>b</kbd></strong>c</p>')).toBe('a**`b`**&#99;')
   })
 })

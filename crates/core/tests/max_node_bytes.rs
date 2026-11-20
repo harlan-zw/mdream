@@ -2684,8 +2684,7 @@ fn surviving_code_span_stays_after_nested_item_marker() {
 fn capped_code_in_open_link_preserves_adjacent_item() {
   {
     let html = "<blockquote><ul><li>root<ul><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ul></li></ul></blockquote>";
-    let expected =
-      "> - root\n>   - [`\n>\n>     ---\n>\n>     \n>     > z\n>\n>     end`](/z)\n>   - adj";
+    let expected = "> - root\n>   - [`      ---           > z      end`](/z)\n>   - adj";
     assert_capped_inline_code(html, 38, expected, false);
     for chunk in [1, 2, 3, 11] {
       assert_eq!(
@@ -2696,7 +2695,8 @@ fn capped_code_in_open_link_preserves_adjacent_item() {
   }
   {
     let html = "<blockquote><ol><li>root<ol><li><a href=\"/z\"><code><hr><blockquote>z</blockquote>end</code><li>adj</li></ol></li></ol></blockquote>";
-    let expected = "> 1. root\n>    1. [`\n>\n>       ---\n>\n>       \n>       > z\n>\n>       end`](/z)\n>    2. adj";
+    let expected =
+      "> 1. root\n>    1. [`        ---               > z        end`](/z)\n>    2. adj";
     assert_capped_inline_code(html, 48, expected, false);
     for chunk in [1, 2, 3, 11] {
       assert_eq!(
@@ -2735,37 +2735,37 @@ fn oversized_quote_in_inline_code_drops_unquoted_content() {
   assert_capped_inline_code(
     "<ul><li><code>aaaa<blockquote>q</blockquote></code></li></ul>",
     8,
-    "- `aaaa\n\n  `",
+    "- `aaaa    `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li><code><blockquote><p>q</p><p>r</p></blockquote></code></li></ul>",
     8,
-    "- `\n\n  `",
+    "- `    `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li><code><blockquote><p>q</p><p>r</p></blockquote></code></li></ul>",
     12,
-    "- `\n\n  `",
+    "- `    `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li><code><hr><blockquote>q</blockquote></code></li></ul>",
     16,
-    "- `\n\n  ---\n\n  \n\n  `",
+    "- `    ---        `",
     true,
   );
   assert_capped_inline_code(
     "<ol><li><code>aaaa<blockquote>q</blockquote></code></li></ol>",
     8,
-    "1. `aaaa\n\n   `",
+    "1. `aaaa     `",
     true,
   );
   assert_capped_inline_code(
     "<ul><li>parent<ul><li><code>aaaa<blockquote>q</blockquote></code></li></ul></li></ul>",
     8,
-    "- parent\n  - `aaaa\n\n    `",
+    "- parent\n  - `aaaa      `",
     true,
   );
   // A quote that fits keeps its structure and content.
@@ -2778,7 +2778,7 @@ fn oversized_quote_in_inline_code_drops_unquoted_content() {
   assert_capped_inline_code(
     "<ul><li><code>aaaa<blockquote><blockquote>q</blockquote></blockquote></code></li></ul>",
     12,
-    "- `aaaa\n  > > q\n\n  `",
+    "- `aaaa\n  > > q    `",
     false,
   );
 }

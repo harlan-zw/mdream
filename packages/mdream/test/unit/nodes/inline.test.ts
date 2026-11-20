@@ -301,9 +301,9 @@ describe.each(engines)('inline delimiters around removed content $name', (engine
 
   it('leaves code-like content as written', async () => {
     const engine = await resolveEngine(engineConfig.engine)
-    expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>', { engine })).toBe('`a** x**`')
-    expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>', { engine })).toBe('`a* x*`')
-    expect(htmlToMarkdown('<p><var>a<b><svg></svg> x</b></var></p>', { engine })).toBe('`a** x**`')
+    expect(htmlToMarkdown('<p><kbd>a<strong> x</strong></kbd></p>', { engine })).toBe('`a x`')
+    expect(htmlToMarkdown('<p><samp>a<em> x</em></samp></p>', { engine })).toBe('`a x`')
+    expect(htmlToMarkdown('<p><var>a<b><svg></svg> x</b></var></p>', { engine })).toBe('`a x`')
   })
 
   it('keeps the word separator for text that is only spaces', async () => {

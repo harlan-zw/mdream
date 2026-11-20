@@ -257,7 +257,7 @@ export function* htmlToMarkdownSplitChunksStream(
   }
 
   const processResolvedEvent: (event: NodeEvent) => void = opts.resolvedPlugins?.length
-    ? event => processPluginsForEvent(event, opts.resolvedPlugins, processor.state, processor.processEvent)
+    ? event => processPluginsForEvent(event, opts.resolvedPlugins, processor.state, processor.processEvent, processor.skipEvent)
     : processor.processEvent
 
   const handleEvent = (event: NodeEvent) => {

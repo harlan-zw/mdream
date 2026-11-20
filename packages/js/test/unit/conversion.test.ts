@@ -4,17 +4,18 @@ import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/const'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
+import { tailwindPlugin } from '../../src/plugins/tailwind'
 import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
 describe('adjacent emphasis and empty list code', () => {
   it('keeps later emphasis when a plugin replaces the code closer', async () => {
-    const html = '<code>a</code><span></span><p><strong>after</strong></p>'
-    const expected = '`a`\n\n**after**'
+    const html = '<code title="replaced">a</code><span></span><p><strong>after</strong></p><p><code><em>b</em></code></p>'
+    const expected = '`a`\n\n**after**\n\n`b`'
     const plugin = createPlugin({
       beforeNodeProcess(event) {
-        if (event.type === NodeEventExit && event.node.type === ELEMENT_NODE && (event.node as ElementNode).name === 'code')
+        if (event.type === NodeEventExit && event.node.type === ELEMENT_NODE && (event.node as ElementNode).attributes.title === 'replaced')
           return { skip: true }
       },
       onNodeEnter(node) {
@@ -27,8 +28,9 @@ describe('adjacent emphasis and empty list code', () => {
 
     const input = new ReadableStream<string>({
       start(controller) {
-        controller.enqueue('<code>a</code>')
-        controller.enqueue('<span></span><p><strong>after</strong></p>')
+        const split = html.indexOf('<span>')
+        controller.enqueue(html.slice(0, split))
+        controller.enqueue(html.slice(split))
         controller.close()
       },
     })
@@ -36,6 +38,11 @@ describe('adjacent emphasis and empty list code', () => {
     for await (const chunk of streamHtmlToMarkdown(input, options))
       output += chunk
     expect(output).toBe(expected)
+  })
+
+  it('keeps source asterisks and skips Tailwind emphasis inside code', () => {
+    const html = '<code><span class="italic font-bold">a*b</span></code> <span class="italic">c</span>'
+    expect(htmlToMarkdown(html, { plugins: [tailwindPlugin()] })).toBe('`a*b` *c*')
   })
 
   it.each([
@@ -47,6 +54,11 @@ describe('adjacent emphasis and empty list code', () => {
     ['<code><b>a</b><b>b</b></code>', '`ab`'],
     ['<code><b>a </b><b>b</b></code>', '`a b`'],
     ['<code><em>a*</em><cite>`b</cite></code>', '``a*`b``'],
+    ['<code>a<br><b><br>b</b></code>', '`a  b`'],
+    ['<details><code><em>argv</em></code></details>', '<details><code>argv</code></details>'],
+    ['<kbd><strong>Ctrl</strong>+<em>C</em></kbd>', '`Ctrl+C`'],
+    ['<samp><i>stdout</i></samp>', '`stdout`'],
+    ['<var><b>count</b></var>', '`count`'],
     ['<ul><li>Aa<span> </span><code></code>Bb</li></ul>', '- Aa Bb'],
     ['<ol><li>Aa<i> </i><code><svg></svg></code><b>Bb</b></li></ol>', '1. Aa **Bb**'],
     ['<ul><li>Aa<code></code>Bb</li></ul>', '- AaBb'],

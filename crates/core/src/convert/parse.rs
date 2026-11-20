@@ -896,7 +896,7 @@ impl ConvertState {
     {
       if tw.hidden {
         excludes_text_nodes = true;
-      } else if !excludes_text_nodes {
+      } else if !excludes_text_nodes && !self.writes_code_text() {
         tailwind_prefix.clone_from(&tw.prefix);
         tailwind_suffix.clone_from(&tw.suffix);
       }

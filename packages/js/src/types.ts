@@ -330,6 +330,8 @@ export interface MdreamProcessingState {
 export interface MdreamRuntimeState extends Partial<MdreamProcessingState>, PluginState {
   /** @internal */
   outputPositions?: OutputPositions
+  /** The element whose built-in output opened a code context. */
+  codeTextOwner?: ElementNode
   /** Active output format for format-aware plugins. */
   outputFormat: OutputFormat
 

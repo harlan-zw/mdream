@@ -1,4 +1,4 @@
-import type { ElementNode, TextNode, TransformPlugin } from '../types'
+import type { ElementNode, MdreamRuntimeState, TextNode, TransformPlugin } from '../types'
 import { ELEMENT_NODE } from '../const'
 import { createPlugin } from '../pluggable/plugin'
 
@@ -193,8 +193,9 @@ export function tailwindPlugin(): TransformPlugin {
       }
 
       // Apply Tailwind prefix/suffix
-      const prefix = state.outputFormat === 'markdown' ? (tailwindData?.prefix || '') : ''
-      const suffix = state.outputFormat === 'markdown' ? (tailwindData?.suffix || '') : ''
+      const formatsText = state.outputFormat === 'markdown' && !(state as MdreamRuntimeState).codeTextOwner
+      const prefix = formatsText ? (tailwindData?.prefix || '') : ''
+      const suffix = formatsText ? (tailwindData?.suffix || '') : ''
 
       if (prefix || suffix) {
         node.generatedMarkdown = { prefix, suffix }
