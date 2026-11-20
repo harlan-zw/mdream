@@ -7107,6 +7107,31 @@ impl ConvertState {
     }
   }
 
+  #[inline]
+  fn inline_code_opener(&self, separate_from_list_text: bool) -> &'static str {
+    let last = self.last_output_byte();
+    // Adjacent delimiters would form one backtick run. In a list, <code>
+    // also separates from prose while staying next to wrapper openers.
+    if (last == Some(b'`')
+      || (separate_from_list_text
+        && last.is_some_and(|byte| {
+          !matches!(
+            byte,
+            b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
+          )
+        })))
+      && self.caption_boundary != CaptionBoundary::QuoteParent
+      && self
+        .caption_frames
+        .last()
+        .is_none_or(|frame| matches!(frame.state, CaptionState::Committed))
+    {
+      " `"
+    } else {
+      MARKDOWN_INLINE_CODE
+    }
+  }
+
   // Inlined on native for the same reason as `get_exit_output`.
   #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
   #[cfg_attr(target_arch = "wasm32", inline)]
@@ -7326,36 +7351,10 @@ impl ConvertState {
           // Code inside a code span is part of it. A span of its own would
           // only add a longer delimiter per level, each rescanning the rest.
           None
-        } else if self.depth_map[TAG_LI as usize] > 0 {
-          // Inline code inside a list item: collapse the paragraph
-          // boundary with a separator space when following text, but
-          // not when the buffer just emitted a wrapper opener where
-          // a leading space would break the pairing or leak into the
-          // wrapper content. Covers emphasis (`*`, `_`),
-          // strikethrough (`~`), link text (`[`), HTML passthrough
-          // (`>`), and whitespace. A trailing backtick does NOT
-          // suppress: two adjacent `<code>` elements must be
-          // separated with a space so CommonMark parses them as two
-          // code spans rather than merging into one (` `a``b` ` →
-          // single span with literal content ``a``b``).
-          if self.caption_boundary != CaptionBoundary::QuoteParent
-            && self
-              .caption_frames
-              .last()
-              .is_none_or(|frame| matches!(frame.state, CaptionState::Committed))
-            && self.last_output_byte().is_some_and(|last_char| {
-              !matches!(
-                last_char,
-                b' ' | b'\n' | b'\t' | b'*' | b'_' | b'~' | b'[' | b'>'
-              )
-            })
-          {
-            Some(Cow::Borrowed(" `"))
-          } else {
-            Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
-          }
         } else {
-          Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
+          Some(Cow::Borrowed(
+            self.inline_code_opener(self.depth_map[TAG_LI as usize] > 0),
+          ))
         }
       }
       TAG_UL => {
@@ -7489,8 +7488,15 @@ impl ConvertState {
           None
         }
       }
-      TAG_KBD | TAG_SAMP | TAG_VAR => (self.in_raw_html_block() || self.code_spans.is_empty())
-        .then_some(Cow::Borrowed(MARKDOWN_INLINE_CODE)),
+      TAG_KBD | TAG_SAMP | TAG_VAR => {
+        if self.in_raw_html_block() {
+          Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
+        } else if self.code_spans.is_empty() {
+          Some(Cow::Borrowed(self.inline_code_opener(false)))
+        } else {
+          None
+        }
+      }
       TAG_ABBR | TAG_SMALL | TAG_TIME | TAG_BDO | TAG_RUBY | TAG_RT | TAG_RP => {
         Some(Cow::Borrowed(""))
       }

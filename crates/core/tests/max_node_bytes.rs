@@ -757,11 +757,14 @@ fn generated_inline_code_content_consumes_the_cap() {
 }
 
 #[test]
-fn inline_markers_and_spacing_consume_the_code_span_cap() {
-  assert_capped_inline_code(
-    "<code><del>abcde</del><span>x</span><span>y</span></code>",
-    10,
-    "`~~abcde~~x`",
+fn literal_tag_override_markers_consume_the_code_span_cap() {
+  let options = options(8).with_plugins(
+    PluginConfig::default().with_tag_override("em", TagOverrideConfig::wrap("[", "]")),
+  );
+  assert_capped_inline_code_with_options(
+    "<code><em>abcde</em><span>x</span><span>y</span></code>",
+    options,
+    "`[abcde]x`",
     true,
   );
 }
@@ -883,10 +886,13 @@ fn frontmatter_output_cannot_escape_an_inline_code_span_cap() {
 
 #[test]
 fn generated_spacing_consumes_the_inline_code_span_cap() {
-  assert_capped_inline_code(
-    "<code><del>a </del>bcdefgh</code>",
-    10,
-    "`~~a~~ bcde`",
+  let options = options(8).with_plugins(
+    PluginConfig::default().with_tag_override("em", TagOverrideConfig::wrap("[", "]")),
+  );
+  assert_capped_inline_code_with_options(
+    "<code><em>a </em>bcdefgh</code>",
+    options,
+    "`[a] bcde`",
     true,
   );
 }

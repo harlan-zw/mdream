@@ -180,6 +180,28 @@ Text without newline above.
   })
 
   it.each([
+    ['<kbd>Ctrl</kbd><kbd>C</kbd>', '`Ctrl` `C`'],
+    ['<ul><li><kbd>Ctrl</kbd><kbd>C</kbd></li></ul>', '- `Ctrl` `C`'],
+    ['<samp>a`b</samp><var>c</var><code>d</code>', '``a`b`` `c` `d`'],
+    ['<kbd>Ctrl</kbd><span> </span><kbd>C</kbd>', '`Ctrl` `C`'],
+  ])('keeps adjacent inline code spans separate: %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+
+    const input = new ReadableStream<string>({
+      start(controller) {
+        for (const character of html)
+          controller.enqueue(character)
+        controller.close()
+      },
+    })
+    let markdown = ''
+    for await (const chunk of streamHtmlToMarkdown(input, { engine }))
+      markdown += chunk
+    expect(markdown).toBe(expected)
+  })
+
+  it.each([
     ['<p>x <code>&#32;</code> y</p>', 'x  y'],
     ['<p>x<kbd>&#9;</kbd>y</p>', 'xy'],
     ['<h2>T <samp>&#10;</samp></h2>', '## T'],

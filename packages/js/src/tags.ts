@@ -1,4 +1,4 @@
-import type { ElementNode, HandlerContext, TagHandler } from './types'
+import type { ElementNode, GfmAction, HandlerContext, TagHandler } from './types'
 import {
   BLOCKQUOTE_SPACING,
   isInsideRawHtmlBlock,
@@ -211,10 +211,20 @@ export const breakHandler: TagHandler = {
   isInline: true,
 }
 
+function inlineCodeEnter(state: HandlerContext['state'], separateFromListText = false): GfmAction {
+  const last = lastOutputChar(state.buffer)
+  // Adjacent delimiters would form a single backtick run. In a list, <code>
+  // also separates from prose while staying next to wrapper openers.
+  const needsSpace = last === 96
+    || (separateFromListText && last !== -1 && last !== 32 && last !== 10 && last !== 9
+      && last !== 42 && last !== 95 && last !== 126 && last !== 91 && last !== 62)
+  return { _tag: 'CodeSpanEnter', output: needsSpace ? ' `' : MARKDOWN_INLINE_CODE }
+}
+
 const codeLikeHandler: TagHandler = {
   enter: ({ state }) => isInsideRawHtmlBlock(state.depthMap!)
     ? MARKDOWN_INLINE_CODE
-    : { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE },
+    : inlineCodeEnter(state),
   exit: ({ state }) => isInsideRawHtmlBlock(state.depthMap!)
     ? MARKDOWN_INLINE_CODE
     : { _tag: 'CodeSpanExit' },
@@ -758,25 +768,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideRawHtmlBlock(state.depthMap!)) {
         return '<code>'
       }
-      // Inline code inside a list item: collapse the paragraph boundary with a
-      // separator space when following text, but not when the buffer just
-      // emitted a wrapper opener where a leading space would break the
-      // pairing or leak into the wrapper content. Covers emphasis (`*`, `_`),
-      // strikethrough (`~`), link text (`[`), HTML passthrough (`>`), and
-      // whitespace. A trailing backtick does NOT suppress: two adjacent
-      // `<code>` elements must be separated with a space so CommonMark parses
-      // them as two code spans rather than merging into one.
-      if ((state.depthMap?.[TAG_LI] || 0) > 0) {
-        // Read past an entry a trim emptied, as the paragraph enter does.
-        const last = lastOutputChar(state.buffer)
-        // Space, newline, tab, `*`, `_`, `~`, `[` and `>`.
-        if (last !== -1 && last !== 32 && last !== 10 && last !== 9
-          && last !== 42 && last !== 95 && last !== 126
-          && last !== 91 && last !== 62) {
-          return { _tag: 'CodeSpanEnter', output: ` ${MARKDOWN_INLINE_CODE}` }
-        }
-      }
-      return { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE }
+      return inlineCodeEnter(state, !!state.depthMap?.[TAG_LI])
     },
     exit: ({ state }) => {
       if ((state.depthMap?.[TAG_PRE] || 0) > 0) {
