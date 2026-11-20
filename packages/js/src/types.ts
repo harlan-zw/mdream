@@ -472,7 +472,7 @@ export type GfmAction
     | { _tag: 'BlockquoteExit' }
     | { _tag: 'PreEnter', language: string }
     | { _tag: 'PreExit' }
-    | { _tag: 'CodeSpanEnter', output: string }
+    | { _tag: 'CodeSpanEnter', readonly output: string }
     | { _tag: 'CodeSpanExit' }
     | { _tag: 'CodeFenceEnter', language: string, output: string }
 

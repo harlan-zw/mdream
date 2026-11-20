@@ -1462,8 +1462,9 @@ impl ConvertState {
     !self.code_spans.is_empty() || self.raw_code_owner_depth.is_some()
   }
 
+  #[cold]
   fn transparent_code_caption(&self, node: &ElementNode) -> bool {
-    if node.tag_id != Some(TAG_FIGCAPTION) || !self.writes_code_text() {
+    if !self.writes_code_text() {
       return false;
     }
     let overrides = self
@@ -2492,7 +2493,9 @@ impl ConvertState {
       self.emit_html_enter();
       return;
     }
-    if self.transparent_code_caption(&self.stack[stack_len - 1]) {
+    if self.stack[stack_len - 1].tag_id == Some(TAG_FIGCAPTION)
+      && self.transparent_code_caption(&self.stack[stack_len - 1])
+    {
       return;
     }
     self.emit_markdown_enter(stack_len);
@@ -3513,7 +3516,7 @@ impl ConvertState {
     }
 
     let tag_id = node.tag_id;
-    if self.transparent_code_caption(node) {
+    if tag_id == Some(TAG_FIGCAPTION) && self.transparent_code_caption(node) {
       return;
     }
     if inline_code_tag(tag_id) && self.raw_code_owner_depth == Some(node.depth) {
@@ -7155,7 +7158,7 @@ impl ConvertState {
       // raw <pre> and let the content newlines become <br> (issue #147).
       TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("<pre>")),
       TAG_BR => {
-        if self.depth_map[TAG_PRE as usize] == 0 && !self.code_spans.is_empty() {
+        if !self.code_spans.is_empty() && self.depth_map[TAG_PRE as usize] == 0 {
           Some(Cow::Borrowed(" "))
         } else if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
           Some(Cow::Borrowed("<br>"))

@@ -65,7 +65,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { isOpenVoidTag, parserTagHandlers } from './parser-tags'
-import { breakHandler, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
+import { breakHandler, CODE_SPAN_ENTER, escapeTrailingHeadingHashes, opensBlockLine, renderBreak, rowMarker, tagHandlers } from './tags'
 import { blockOpenPrefix, dropSourceLead, endsAtHardBreak, figcaptionOwnsBlockSpacing, getLanguageFromAttributes, hasNonWhitespace, isBlockChildOfOpenVoid, isCharacterReferenceTail, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, needsSpacing, noteBufferRewrite, orderedItemNumber, outputLeadLength, pendingMarkerIndent, suppressesFormattingInPre, traverseUpToFirstBlockNode, trimOutputStart, trimTextAtLineStart } from './utils'
 
 export interface MarkdownState {
@@ -194,6 +194,7 @@ export interface MarkdownState {
 }
 
 interface CodeSpan {
+  kind: 'span'
   owner: ElementNode
   fragment: number
   prefix: string
@@ -1879,11 +1880,15 @@ function commitGfmAction(
       for (let index = outputStart; index < state.buffer.length; index++) {
         const output = state.buffer[index]!
         if (output.endsWith(MARKDOWN_INLINE_CODE)) {
-          lifecycle.openCodeSpans.push({
+          const span: CodeSpan = {
+            kind: 'span',
             owner,
             fragment: index,
             prefix: output.slice(0, -MARKDOWN_INLINE_CODE.length),
-          })
+          }
+          lifecycle.openCodeSpans.push(span)
+          if (!owner.tagHandler?.literalEnter)
+            state.codeText ??= span
           break
         }
       }
@@ -1946,6 +1951,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     outputFormat: 'markdown',
     buffer: [],
     outputPositions: undefined,
+    codeText: undefined,
     depthMap: new Uint16Array(MAX_TAG_ID),
     depth: 0,
     listIndent: '',
@@ -3384,12 +3390,8 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     let keepsQuoteSeparator = false
     let gfmAction: GfmAction | undefined
     let handlerOutput: string | undefined
-    const literalHandler = eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit
-    const suppressedInPre = !literalHandler && !!state.depthMap[TAG_PRE] && suppressesFormattingInPre(tagId)
-    // A code span renders delimiters as literal text.
-    const codeSpanMarker = state.codeText && INLINE_MARKER_TYPE[tagId]
-    const suppressedInCodeSpan = !literalHandler
-      && (codeSpanMarker === 1 || codeSpanMarker === 2 || codeSpanMarker === 4)
+    const suppressedInPre = !!state.depthMap[TAG_PRE] && suppressesFormattingInPre(tagId)
+      && !(eventType === NodeEventEnter ? handler?.literalEnter : handler?.literalExit)
     const emptyTableRow = eventType === NodeEventExit && tagId === TAG_TR
       && state.tableRowOpenerPending && !output && !handler?.literalExit
     if (eventType === NodeEventExit && (handler?.literalExit || output)
@@ -3398,7 +3400,7 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
     }
     if (cleanPass && eventType === NodeEventExit)
       cleanPass.exit(element)
-    if (!output && !suppressedInPre && !suppressedInCodeSpan && handler?.[eventFn]
+    if (!output && !suppressedInPre && handler?.[eventFn]
       && (tagId !== TAG_DIV || state.depthMap[TAG_LI] || handler[eventFn] !== tagHandlers[TAG_DIV]!.enter)) {
       if (openLinkFragment >= 0
         && eventType === NodeEventExit
@@ -3482,9 +3484,9 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
           if (res._tag === 'CodeSpanEnter' && res.output === ' `'
             && (captionBoundary === 3 || (captionFrameCount !== 0
               && (captionFrames![(captionFrameCount - 1) * CAPTION_FRAME_SIZE + 2]! & CAPTION_OPEN) === 0))) {
-            res.output = MARKDOWN_INLINE_CODE
+            gfmAction = CODE_SPAN_ENTER
           }
-          handlerOutput = consumeGfmAction(res, state, gfmLifecycle)
+          handlerOutput = consumeGfmAction(gfmAction, state, gfmLifecycle)
         }
         if (handlerOutput)
           output = [handlerOutput]
@@ -4248,17 +4250,14 @@ export function createMarkdownProcessor<T>(options: EngineOptions = {}, createSt
       state.lastContentCache = trailingEmphasisWhitespace
     }
 
-    if (gfmAction)
+    if (gfmAction) {
       commitGfmAction(gfmAction, state, gfmLifecycle, outputStart, element, keepsQuoteSeparator, rawHtmlQuoteBoundary)
-
-    if (eventType === NodeEventEnter && !state.codeText && !handler?.literalEnter) {
-      if (gfmAction?._tag === 'CodeSpanEnter' && gfmLifecycle.openCodeSpans.at(-1)?.owner === element) {
-        state.codeText = { owner: element, kind: 'span' }
-      }
-      else if (!gfmAction && ((tagId === TAG_CODE && handlerOutput === '<code>')
-        || ((tagId === TAG_KBD || tagId === TAG_SAMP || tagId === TAG_VAR) && handlerOutput === '`'))) {
-        state.codeText = { owner: element, kind: 'raw' }
-      }
+    }
+    else if (eventType === NodeEventEnter
+      && ((tagId === TAG_CODE && handlerOutput === '<code>')
+        || ((tagId === TAG_KBD || tagId === TAG_SAMP || tagId === TAG_VAR) && handlerOutput === '`'))
+      && !state.codeText && !handler?.literalEnter) {
+      state.codeText = { owner: element, kind: 'raw' }
     }
 
     if (tagId === TAG_LI && !isInsideTableCell(state)) {

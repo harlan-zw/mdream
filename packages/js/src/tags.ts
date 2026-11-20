@@ -211,6 +211,10 @@ export const breakHandler: TagHandler = {
   isInline: true,
 }
 
+export const CODE_SPAN_ENTER = { _tag: 'CodeSpanEnter', output: MARKDOWN_INLINE_CODE } as const
+const SPACED_CODE_SPAN_ENTER = { _tag: 'CodeSpanEnter', output: ' `' } as const
+const CODE_SPAN_EXIT = { _tag: 'CodeSpanExit' } as const
+
 function inlineCodeEnter(state: HandlerContext['state'], separateFromListText = false): GfmAction {
   const last = lastOutputChar(state.buffer)
   // Adjacent delimiters would form a single backtick run. In a list, <code>
@@ -218,7 +222,7 @@ function inlineCodeEnter(state: HandlerContext['state'], separateFromListText = 
   const needsSpace = last === 96
     || (separateFromListText && last !== -1 && last !== 32 && last !== 10 && last !== 9
       && last !== 42 && last !== 95 && last !== 126 && last !== 91 && last !== 62)
-  return { _tag: 'CodeSpanEnter', output: needsSpace ? ' `' : MARKDOWN_INLINE_CODE }
+  return needsSpace ? SPACED_CODE_SPAN_ENTER : CODE_SPAN_ENTER
 }
 
 const codeLikeHandler: TagHandler = {
@@ -227,7 +231,7 @@ const codeLikeHandler: TagHandler = {
     : inlineCodeEnter(state),
   exit: ({ state }) => isInsideRawHtmlBlock(state.depthMap!)
     ? MARKDOWN_INLINE_CODE
-    : { _tag: 'CodeSpanExit' },
+    : CODE_SPAN_EXIT,
   collapsesInnerWhiteSpace: true,
   spacing: NO_SPACING,
   isInline: true,
@@ -540,6 +544,8 @@ function handleHeading(depth: number): TagHandler {
 
 const Strong: TagHandler = {
   enter: ({ state }) => {
+    if (state.codeText)
+      return undefined
     // we are already bold
     if ((state.depthMap?.[TAG_B] || 0) > 1) {
       return ''
@@ -547,6 +553,8 @@ const Strong: TagHandler = {
     return MARKDOWN_STRONG
   },
   exit: ({ node, state }) => {
+    if (state.codeText)
+      return undefined
     // we are already bold
     if ((state.depthMap?.[TAG_B] || 0) + (node.tagId === TAG_B ? 1 : 0) > 1) {
       return ''
@@ -560,6 +568,8 @@ const Strong: TagHandler = {
 
 const Emphasis: TagHandler = {
   enter: ({ state }) => {
+    if (state.codeText)
+      return undefined
     // we are already italic
     if ((state.depthMap?.[TAG_I] || 0) > 1) {
       return ''
@@ -567,6 +577,8 @@ const Emphasis: TagHandler = {
     return MARKDOWN_EMPHASIS
   },
   exit: ({ node, state }) => {
+    if (state.codeText)
+      return undefined
     // we are already italic
     if ((state.depthMap?.[TAG_I] || 0) + (node.tagId === TAG_I ? 1 : 0) > 1) {
       return ''
@@ -783,7 +795,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideRawHtmlBlock(state.depthMap!)) {
         return '</code>'
       }
-      return { _tag: 'CodeSpanExit' }
+      return CODE_SPAN_EXIT
     },
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
@@ -1301,15 +1313,15 @@ export const tagHandlers: Record<number, TagHandler> = {
     isInline: true,
   },
   [TAG_CITE]: {
-    enter: () => '*',
-    exit: () => '*',
+    enter: ({ state }) => state.codeText ? undefined : '*',
+    exit: ({ state }) => state.codeText ? undefined : '*',
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
     isInline: true,
   },
   [TAG_DFN]: {
-    enter: () => '**',
-    exit: () => '**',
+    enter: ({ state }) => state.codeText ? undefined : '**',
+    exit: ({ state }) => state.codeText ? undefined : '**',
     collapsesInnerWhiteSpace: true,
     spacing: NO_SPACING,
     isInline: true,
