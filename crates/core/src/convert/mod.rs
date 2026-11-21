@@ -989,6 +989,8 @@ pub struct ConvertState {
   /// Only the first `<base href>` counts, even when it is not usable. A usable
   /// one replaces `options.origin` for every later URL.
   base_href_seen: bool,
+  /// Adopted document base without its fragment, retaining its query.
+  fragment_base: Option<String>,
   discard: Discard,
   script_text_buffer: String,
   pub(crate) stack: crate::types::NodeStack,
@@ -1539,6 +1541,7 @@ impl ConvertState {
       pending_start: None,
       pending_tag: None,
       base_href_seen: false,
+      fragment_base: None,
       discard: Discard::No,
       script_text_buffer: String::new(),
       stack: crate::types::NodeStack::with_capacity(TYPICAL_NESTING_DEPTH),

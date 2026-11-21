@@ -67,7 +67,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { parserTagHandlers } from './parser-tags'
-import { resolveUrl } from './url'
+import { resolveUrl, trimUrl } from './url'
 import { decodeHTMLEntities, hasNonWhitespace, leadingWhitespaceLength, traverseUpToFirstBlockNode } from './utils'
 
 // The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
@@ -106,6 +106,7 @@ function captureBaseHref(state: ParseState, href: string | undefined): void {
     && new TextEncoder().encode(base).length <= MAX_BASE_HREF_LENGTH
   ) {
     target.options = { ...target.options, origin: base }
+    state.fragmentBase = base.split('#', 1)[0]
   }
 }
 
@@ -692,6 +693,8 @@ export interface ParseState {
   urlBaseTarget?: { options: EngineOptions }
   /** Only the first `<base href>` counts, even when it is not usable. */
   baseHrefSeen?: boolean
+  /** Adopted document base without its fragment, retaining its query. */
+  fragmentBase?: string
   /**
    * Parsed (whitespace-collapsed) form of the raw run the last parse returned.
    * At end of input it is committed instead of the raw run, so trailing text
@@ -2257,6 +2260,18 @@ function processOpeningTag(
   // After the opaque-overflow return, so a base inside a flattened subtree is ignored.
   if (isBase && !state.baseHrefSeen)
     captureBaseHref(state, result.attributes.href)
+
+  // Resolve at the boundary so every output keeps the document base destination.
+  if (!isBase && state.fragmentBase !== undefined) {
+    for (const name of ['href', 'src']) {
+      const value = result.attributes[name]
+      if (value !== undefined) {
+        const reference = trimUrl(value)
+        if (reference.charCodeAt(0) === 35)
+          result.attributes[name] = state.fragmentBase + reference
+      }
+    }
+  }
 
   if (!result.selfClosing && state.depth >= MAX_ELEMENT_DEPTH) {
     state.flattenedTagName = tagName
