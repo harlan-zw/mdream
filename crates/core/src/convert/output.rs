@@ -810,6 +810,27 @@ impl ConvertState {
     {
       self.code_span_closed_bytes += self.buffer.len() - span.output_start;
     }
+    // Settle source whitespace before choosing padding. Break output stays literal.
+    if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
+      let end = self.buffer.len();
+      let start = end
+        .saturating_sub(self.last_content_cache_len)
+        .max(span.content_start);
+      if self.last_content_cache_len <= end && self.buffer.is_char_boundary(start) {
+        let trimmed_len = trim_ascii_whitespace_end(&self.buffer[start..]);
+        if start + trimmed_len < end {
+          self.clamp_item_marker_end(start + trimmed_len);
+          self.truncate_buffer(start + trimmed_len);
+          self.last_content_cache_len = trimmed_len;
+          self.pending_inline_whitespace = true;
+          self.pending_leading_blank = false;
+          self.pending_pair_separator = false;
+          self.pending_decoded_blank = false;
+        }
+      }
+      self.last_text_node_contains_whitespace = false;
+      self.has_last_text_node = false;
+    }
     // A line can begin a Markdown block before the backtick closes.
     let content = &self.buffer[span.content_start..];
     if crate::scan::find_line_end(content.as_bytes()).is_some() {

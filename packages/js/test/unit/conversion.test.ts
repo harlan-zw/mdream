@@ -9,6 +9,36 @@ import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
+describe('inline code trailing backticks', () => {
+  it.each(['code', 'kbd', 'samp', 'var'])('pads %s after trimming source whitespace', async (tag) => {
+    for (const [content, expected] of [
+      ['a` ', 'x `` a` `` y'],
+      ['a`\n', 'x `` a` `` y'],
+      ['a``  ', 'x ``` a`` ``` y'],
+      ['a`\t\r\n', 'x `` a` `` y'],
+      ['`a` ', 'x `` `a` `` y'],
+      ['a`<br>', 'x ``a` `` y'],
+      ['a`&nbsp;', 'x ``a`\u00A0`` y'],
+    ]) {
+      const html = `<p>x <${tag}>${content}</${tag}> y</p>`
+      expect(htmlToMarkdown(html), html).toBe(expected)
+      for (let split = 1; split < html.length; split++) {
+        const stream = new ReadableStream<string>({
+          start(controller) {
+            controller.enqueue(html.slice(0, split))
+            controller.enqueue(html.slice(split))
+            controller.close()
+          },
+        })
+        let actual = ''
+        for await (const chunk of streamHtmlToMarkdown(stream))
+          actual += chunk
+        expect(actual.trim(), `${html} at ${split}`).toBe(expected)
+      }
+    }
+  })
+})
+
 describe('adjacent emphasis and empty list code', () => {
   it('keeps later emphasis when a plugin replaces the code closer', async () => {
     const html = '<code title="replaced">a</code><span></span><p><strong>after</strong></p><p><code><em>b</em></code></p>'
