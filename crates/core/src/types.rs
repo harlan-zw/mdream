@@ -73,6 +73,11 @@ impl Attributes {
       .map(|index| &*self.inner[index].value)
   }
 
+  pub(crate) fn get_bit_mut(&mut self, bit: u16) -> Option<&mut String> {
+    let index = self.locate_bit(bit).ok()?;
+    Some(&mut self.inner[index].value)
+  }
+
   /// Lookup by name, for names with no bit of their own (`style`, `hidden`,
   /// `id`) and for selector matching against arbitrary attributes.
   #[inline]

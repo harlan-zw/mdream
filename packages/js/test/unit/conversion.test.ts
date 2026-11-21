@@ -1,6 +1,7 @@
 import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
 import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/const'
+import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
 import { filterPlugin } from '../../src/plugins/filter'
@@ -8,6 +9,44 @@ import { tailwindPlugin } from '../../src/plugins/tailwind'
 import { withMinimalPreset } from '../../src/preset/minimal'
 import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
+
+describe('base fragment links', () => {
+  it('resolves fragment links and images without a configured origin', () => {
+    const html = '<base href="https://cdn.example/docs/?q=1#old"><a href="#">Top</a><img src="#logo">'
+    expect(htmlToMarkdown(html)).toBe('[Top](https://cdn.example/docs/?q=1#)![](https://cdn.example/docs/?q=1#logo)')
+    expect(htmlToSafeHtml(html)).toBe('<a href="https://cdn.example/docs/?q=1#">Top</a><img src="https://cdn.example/docs/?q=1#logo" alt="">')
+    expect(htmlToText(html)).toBe('Top https://cdn.example/docs/?q=1#logo')
+  })
+
+  it.each([
+    ['https://cdn.example/docs/', 'https://cdn.example/docs/#install'],
+    ['https://cdn.example/docs/page?q=1#old', 'https://cdn.example/docs/page?q=1#install'],
+    ['/docs/', 'https://example.com/docs/#install'],
+    ['javascript:alert(1)', '#install'],
+    ['', '#install'],
+  ])('resolves fragments only against an adopted base %s', async (base, href) => {
+    const html = `<base href="${base}"><a href=" &#35;install ">Install</a>`
+    const options = { origin: 'https://example.com/article' }
+    const markdown = `[Install](${href})`
+    const safeHtml = `<a href="${href}">Install</a>`
+    expect(htmlToMarkdown(html, options)).toBe(markdown)
+    expect(htmlToSafeHtml(html, options)).toBe(safeHtml)
+    for (const [convert, expected] of [[streamHtmlToMarkdown, markdown], [streamHtmlToSafeHtml, safeHtml]] as const) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (const character of html)
+            controller.enqueue(character)
+          controller.close()
+        },
+      })
+      let actual = ''
+      for await (const chunk of convert(input, options))
+        actual += chunk
+      expect(actual).toBe(expected)
+    }
+    expect(htmlToMarkdown('<a href="#install">Install</a>', options)).toBe('[Install](#install)')
+  })
+})
 
 describe('inline code trailing backticks', () => {
   it.each(['code', 'kbd', 'samp', 'var'])('pads %s after trimming source whitespace', async (tag) => {

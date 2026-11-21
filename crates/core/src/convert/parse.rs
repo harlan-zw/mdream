@@ -1221,6 +1221,7 @@ impl ConvertState {
     };
     self.base_href_seen = true;
     if let Some(base) = resolve_base_href(href, self.options.origin.as_deref()) {
+      self.fragment_base = Some(base.split('#').next().unwrap_or(&base).to_string());
       self.options.origin = Some(base);
     }
   }
@@ -1488,6 +1489,20 @@ impl ConvertState {
       }
     }
     self.depth += 1;
+
+    // Resolve at the boundary so every output keeps the document base destination.
+    if tag_id != Some(TAG_BASE)
+      && let Some(base) = &self.fragment_base
+    {
+      for bit in [ATTR_HREF, ATTR_SRC] {
+        if let Some(value) = self.attr_scratch.get_bit_mut(bit) {
+          let reference = trim_url(value);
+          if reference.starts_with('#') {
+            *value = format!("{base}{reference}");
+          }
+        }
+      }
+    }
 
     // The parent is the top node, so its walk index is the one `stack.last()` gave.
     let parent = self.stack.len().checked_sub(1);
