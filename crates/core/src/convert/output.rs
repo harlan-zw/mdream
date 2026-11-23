@@ -2014,15 +2014,15 @@ impl ConvertState {
   }
 
   /// Simple-tag enter; `link` selects the `<a>` variant and `LI` the list item
-  /// variant, which adds the item marker step. Other tags compile that step out.
+  /// variant, which adds the item marker step.
   #[inline(never)]
   pub(crate) fn emit_enter_simple<const LI: bool>(&mut self, link: bool) {
     self.emit_enter_body(link, LI);
   }
 
-  /// Body of `emit_enter_simple`. Native inlines it into each const instance.
+  /// Let native builds share the enter body instead of forcing a copy per variant.
   /// On wasm32 both instances share this one copy and `li` is a runtime flag.
-  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+  #[cfg_attr(not(target_arch = "wasm32"), inline)]
   #[cfg_attr(target_arch = "wasm32", inline(never))]
   fn emit_enter_body(&mut self, link: bool, li: bool) {
     let stack_len = self.stack.len();
