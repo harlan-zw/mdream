@@ -58,6 +58,13 @@ describe('base fragment links', () => {
     expect(htmlToMarkdown(raw)).toBe('<details><a href="https://example.com/docs/#install">Install</a></details>')
   })
 
+  it('cleans local fragments when the base points to the same document', () => {
+    const origin = 'https://example.com/docs/?page=1#old'
+    const html = '<h2><a href="#install">Install</a></h2><a href="#">Top</a> <a href="#missing">Missing</a> <a href="#install">Jump</a>'
+    const options = { origin, clean: clean() }
+    expect(htmlToMarkdown(`<base href="?page=1#other">${html}`, options)).toBe('## Install\n\nTop Missing [Jump](#install)')
+  })
+
   it('resolves fragment links and images without a configured origin', () => {
     const html = '<base href="https://cdn.example/docs/?q=1#old"><a href="#">Top</a><img src="#logo">'
     expect(htmlToMarkdown(html)).toBe('[Top](https://cdn.example/docs/?q=1#)![](https://cdn.example/docs/?q=1#logo)')
@@ -65,10 +72,20 @@ describe('base fragment links', () => {
     expect(htmlToText(html)).toBe('Top https://cdn.example/docs/?q=1#logo')
   })
 
+  it('cleans tracking parameters from the base query only', () => {
+    const html = '<base href="https://cdn.example/docs/?utm_source=x&amp;q=1#old"><a href="#part?utm_source=y">Jump</a>'
+    expect(htmlToMarkdown(html, { clean: clean() })).toBe('[Jump](https://cdn.example/docs/?q=1#part?utm_source=y)')
+  })
+
   it.each([
     ['https://cdn.example/docs/', 'https://cdn.example/docs/#install'],
     ['https://cdn.example/docs/page?q=1#old', 'https://cdn.example/docs/page?q=1#install'],
     ['/docs/', 'https://example.com/docs/#install'],
+    ['https://cdn.example:8443/docs/', 'https://cdn.example:8443/docs/#install'],
+    ['https://[::1]:8443/docs/', 'https://[::1]:8443/docs/#install'],
+    ['https://[::1]/docs/', 'https://[::1]/docs/#install'],
+    ['https://cdn.example:invalid/docs/', '#install'],
+    ['https://cdn.example:65536/docs/', '#install'],
     ['javascript:alert(1)', '#install'],
     ['', '#install'],
   ])('resolves fragments only against an adopted base %s', async (base, href) => {

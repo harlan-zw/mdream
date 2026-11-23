@@ -138,17 +138,18 @@ fn html_tag_name(tag_id: u8) -> Option<&'static str> {
   canonical_name(tag_id)
 }
 
+#[inline(never)]
 fn resolve_html_url<'a>(
   url: &'a str,
   image: bool,
   origin: Option<&str>,
   clean_urls: bool,
-  fragment_base: Option<&str>,
+  resolve_fragments: bool,
 ) -> Option<Cow<'a, str>> {
   if !is_safe_html_url(url, image) {
     return None;
   }
-  let resolved = resolve_output_url(url, origin, clean_urls, fragment_base);
+  let resolved = resolve_output_url(url, origin, clean_urls, resolve_fragments);
   is_safe_html_url(resolved.as_ref(), image).then_some(resolved)
 }
 
@@ -172,7 +173,7 @@ fn write_html_element(
   protect_markdown: bool,
   origin: Option<&str>,
   clean_urls: bool,
-  fragment_base: Option<&str>,
+  resolve_fragments: bool,
 ) -> bool {
   let Some((tag_id, name)) = node
     .tag_id
@@ -186,7 +187,7 @@ fn write_html_element(
     let resolved = node
       .attributes
       .get_bit(ATTR_HREF)
-      .and_then(|href| resolve_html_url(href, false, origin, clean_urls, fragment_base));
+      .and_then(|href| resolve_html_url(href, false, origin, clean_urls, resolve_fragments));
     if resolved.is_none() {
       return false;
     }
@@ -315,12 +316,13 @@ impl ConvertState {
   /// under the same href check as the opening tag.
   pub(super) fn html_anchor_close(&self, node: &ElementNode) -> Option<&'static str> {
     let href = node.attributes.get_bit(ATTR_HREF)?;
+    // Both a bare fragment and its adopted HTTP(S) destination pass the href check.
     resolve_html_url(
       href,
       false,
       self.options.origin.as_deref(),
       self.clean_urls,
-      self.fragment_base.as_deref(),
+      false,
     )
     .map(|_| "</a>")
   }
@@ -346,7 +348,7 @@ impl ConvertState {
       protect_markdown,
       self.options.origin.as_deref(),
       self.clean_urls,
-      self.fragment_base.as_deref(),
+      self.resolve_fragments,
     )
     .then_some(output)
   }
@@ -414,13 +416,7 @@ impl ConvertState {
     let output = html_sink(&mut self.html_frames, &mut self.buffer);
     if tag_id == Some(TAG_IMG) {
       let resolved = node.attributes.get_bit(ATTR_SRC).and_then(|src| {
-        resolve_html_url(
-          src,
-          true,
-          origin,
-          self.clean_urls,
-          self.fragment_base.as_deref(),
-        )
+        resolve_html_url(src, true, origin, self.clean_urls, self.resolve_fragments)
       });
       if let Some(resolved) = resolved {
         output.push_str("<img src=\"");
@@ -449,7 +445,7 @@ impl ConvertState {
       false,
       origin,
       self.clean_urls,
-      self.fragment_base.as_deref(),
+      self.resolve_fragments,
     );
   }
 
@@ -514,15 +510,7 @@ impl ConvertState {
     }
     let origin = self.options.origin.as_deref();
     let output = html_sink(&mut self.html_frames, &mut self.buffer);
-    write_html_element(
-      output,
-      node,
-      false,
-      false,
-      origin,
-      self.clean_urls,
-      self.fragment_base.as_deref(),
-    );
+    write_html_element(output, node, false, false, origin, self.clean_urls, false);
   }
 
   #[cfg(feature = "html")]

@@ -1,5 +1,5 @@
 import type { Cleaner, ElementNode, EngineOptions } from './types'
-import { escapeHtml, isSafeHtmlUrl } from './utils'
+import { escapeHtml, isSafeHtmlUrl, trimUrl } from './utils'
 
 const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
 const SLASH_CHAR = 47
@@ -7,17 +7,12 @@ const documentBase = Symbol('documentBase')
 type OutputOptions = EngineOptions & { [documentBase]?: string }
 
 export function withDocumentBase(options: EngineOptions, base: string): EngineOptions {
-  return { ...options, origin: base, [documentBase]: base.split('#', 1)[0] } as OutputOptions
+  const fragmentBase = base.split('#', 1)[0]!
+  const sameDocument = fragmentBase === options.origin?.split('#', 1)[0]
+  return { ...options, origin: base, [documentBase]: sameDocument ? undefined : fragmentBase } as OutputOptions
 }
 
-export function resolveOutputUrl(url: string, options?: EngineOptions): string {
-  const base = (options as OutputOptions | undefined)?.[documentBase]
-  const reference = trimUrl(url)
-  if (base !== undefined && reference.charCodeAt(0) === 35)
-    return resolveUrl(base + reference, options?.origin, options?.clean)
-  return resolveUrl(reference, options?.origin, options?.clean)
-}
-
+/** Whether the adopted base points fragments at a different document. */
 export function hasDocumentBase(options?: EngineOptions): boolean {
   return (options as OutputOptions | undefined)?.[documentBase] !== undefined
 }
@@ -98,37 +93,32 @@ function resolveAgainstBase(origin: string, url: string): string {
   return `${baseRoot}${dot ? mergeDotSegments(baseDirectory, path) : baseDirectory + path}${suffix}`
 }
 
-/** `url` without the leading and trailing C0 controls and spaces the URL parser strips. */
-export function trimUrl(url: string): string {
-  let start = 0
-  let end = url.length
-  while (start < end && url.charCodeAt(start) <= 32)
-    start++
-  while (end > start && url.charCodeAt(end - 1) <= 32)
-    end--
-  return start === 0 && end === url.length ? url : url.slice(start, end)
-}
-
-export function resolveUrl(url: string, origin?: string, clean?: EngineOptions['clean']): string {
+export function resolveOutputUrl(url: string, options?: EngineOptions, origin = options?.origin): string {
   // Read it as the URL parser and `isSafeHtmlUrl` do: padding never makes it relative.
   url = trimUrl(url)
-  if (!url || url[0] === '#')
+  if (!url)
     return url
 
-  const isSlash = url.charCodeAt(0) === SLASH_CHAR
+  const first = url.charCodeAt(0)
   let resolved = url
-  if (isSlash && url.charCodeAt(1) === SLASH_CHAR) {
+  if (first === 35 /* # */) {
+    const base = (options as OutputOptions | undefined)?.[documentBase]
+    if (base === undefined)
+      return url
+    resolved = base + url
+  }
+  else if (first === SLASH_CHAR && url.charCodeAt(1) === SLASH_CHAR) {
     let scheme = 'https'
     if (origin && loadBase(origin))
       scheme = baseRoot.slice(0, baseRoot.indexOf(':'))
     resolved = `${scheme}:${url}`
   }
-  else if (origin && (isSlash || !URL_SCHEME_RE.test(url))) {
+  else if (origin && (first === SLASH_CHAR || !URL_SCHEME_RE.test(url))) {
     resolved = resolveAgainstBase(origin, url)
   }
 
   // `clean()` sets `url` when `urls` is on, so its rule stays out of other bundles.
-  const rewrite = (clean as Cleaner | undefined)?.url
+  const rewrite = (options?.clean as Cleaner | undefined)?.url
   return rewrite ? rewrite(resolved) : resolved
 }
 

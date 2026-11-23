@@ -16,27 +16,10 @@ use crate::types::{
 #[cfg(feature = "html")]
 use crate::url::slugify_heading;
 use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, slugify_markdown_heading,
-  trim_url,
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_output_url,
+  slugify_markdown_heading, trim_url,
 };
 use std::borrow::Cow;
-
-fn resolve_output_url<'a>(
-  url: &'a str,
-  origin: Option<&str>,
-  clean: bool,
-  fragment_base: Option<&str>,
-) -> Cow<'a, str> {
-  let reference = trim_url(url);
-  if let Some(base) = fragment_base
-    && reference.starts_with('#')
-  {
-    return Cow::Owned(
-      crate::url::resolve_url(&format!("{base}{reference}"), origin, clean).into_owned(),
-    );
-  }
-  crate::url::resolve_url(reference, origin, clean)
-}
 
 /// Whether the conversion writes plain text. A macro rather than a method: a
 /// method call changes MIR shape and grew the all-format WASM build by 50 B.
@@ -1006,8 +989,8 @@ pub struct ConvertState {
   /// Only the first `<base href>` counts, even when it is not usable. A usable
   /// one replaces `options.origin` for every later URL.
   base_href_seen: bool,
-  /// Adopted document base without its fragment, retaining its query.
-  fragment_base: Option<String>,
+  /// The adopted base points at a different document.
+  resolve_fragments: bool,
   discard: Discard,
   script_text_buffer: String,
   pub(crate) stack: crate::types::NodeStack,
@@ -1558,7 +1541,7 @@ impl ConvertState {
       pending_start: None,
       pending_tag: None,
       base_href_seen: false,
-      fragment_base: None,
+      resolve_fragments: false,
       discard: Discard::No,
       script_text_buffer: String::new(),
       stack: crate::types::NodeStack::with_capacity(TYPICAL_NESTING_DEPTH),

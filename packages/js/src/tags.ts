@@ -124,7 +124,7 @@ import {
   TAG_WBR,
   TAG_XMP,
 } from './const'
-import { hasDocumentBase, resolveOutputUrl, safeAnchorOutput, trimUrl } from './url'
+import { hasDocumentBase, resolveOutputUrl, safeAnchorOutput } from './url'
 import { blockOpenPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, noteBufferRewrite, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
@@ -141,8 +141,7 @@ function stripsEmptyLink(state: HandlerContext['state'], href: string): boolean 
   const clean = state.options?.clean
   if (!(clean === true || (typeof clean === 'object' && clean.emptyLinks)))
     return false
-  return !(hasDocumentBase(state.options) && trimUrl(href).charCodeAt(0) === 35)
-    && isEmptyLinkHref(href)
+  return isEmptyLinkHref(href, !hasDocumentBase(state.options))
 }
 
 /**

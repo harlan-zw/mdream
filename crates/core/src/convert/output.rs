@@ -2091,8 +2091,7 @@ impl ConvertState {
     if link
       && self.clean_flags() & CLEAN_EMPTY_LINKS != 0
       && let Some(href) = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF)
-      && (self.fragment_base.is_none() || !trim_url(href).starts_with('#'))
-      && is_empty_link_href(href)
+      && is_empty_link_href(href, !self.resolve_fragments)
     {
       self.begin_link(self.buffer.len(), true, false);
       self.reset_empty_tentative_caption_frames();
@@ -2151,6 +2150,7 @@ impl ConvertState {
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
+          && !self.resolve_fragments
           && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags() & CLEAN_FRAGMENTS != 0 && href.len() > 1)
@@ -2860,8 +2860,7 @@ impl ConvertState {
       if self.clean_flags() & CLEAN_EMPTY_LINKS != 0 {
         let node = &self.stack[self.stack.len() - 1];
         if let Some(href) = node.attributes.get_bit(ATTR_HREF)
-          && (self.fragment_base.is_none() || !trim_url(href).starts_with('#'))
-          && is_empty_link_href(href)
+          && is_empty_link_href(href, !self.resolve_fragments)
         {
           self.begin_link(self.buffer.len(), true, false);
           self.reset_empty_tentative_caption_frames();
@@ -3182,6 +3181,7 @@ impl ConvertState {
       if self.streaming || self.options.node_byte_limit() != 0 {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = has_rewrite_anchor
+          && !self.resolve_fragments
           && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags() & CLEAN_FRAGMENTS != 0 && href.len() > 1)
@@ -3298,7 +3298,7 @@ impl ConvertState {
       if self.clean_flags() & CLEAN_SELF_LINK_HEADINGS != 0 {
         let in_heading = self.in_heading();
         if in_heading
-          && self.fragment_base.is_none()
+          && !self.resolve_fragments
           && let Some(href) = attributes.get_bit(ATTR_HREF)
           && trim_url(href).starts_with('#')
           && text_len > 0
@@ -3315,7 +3315,7 @@ impl ConvertState {
           href,
           self.options.origin.as_deref(),
           self.clean_urls(),
-          self.fragment_base.as_deref(),
+          self.resolve_fragments,
         ))
         && link_text == resolved.as_ref()
         && text_len > 0
@@ -3466,7 +3466,7 @@ impl ConvertState {
           href,
           self.options.origin.as_deref(),
           self.clean_urls(),
-          self.fragment_base.as_deref(),
+          self.resolve_fragments,
         )
       });
       let resolved = resolved.as_ref();
@@ -7459,7 +7459,7 @@ impl ConvertState {
           src,
           self.options.origin.as_deref(),
           self.clean_urls(),
-          self.fragment_base.as_deref(),
+          self.resolve_fragments,
         );
         {
           let title = node.attributes.get_bit(ATTR_TITLE);
@@ -7784,7 +7784,7 @@ impl ConvertState {
             src,
             self.options.origin.as_deref(),
             self.clean_urls(),
-            self.fragment_base.as_deref(),
+            self.resolve_fragments,
           )
           .into_owned(),
         ))

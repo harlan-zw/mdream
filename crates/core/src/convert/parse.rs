@@ -1220,8 +1220,13 @@ impl ConvertState {
       return;
     };
     self.base_href_seen = true;
-    if let Some(base) = resolve_base_href(href, self.options.origin.as_deref()) {
-      self.fragment_base = Some(base.split('#').next().unwrap_or(&base).to_string());
+    let origin = self.options.origin.as_deref();
+    if let Some(mut base) = resolve_base_href(href, origin) {
+      if let Some(fragment) = base.find('#') {
+        base.truncate(fragment);
+      }
+      self.resolve_fragments =
+        origin.and_then(|origin| origin.split('#').next()) != Some(base.as_str());
       self.options.origin = Some(base);
     }
   }

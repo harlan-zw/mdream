@@ -61,13 +61,13 @@ export function isInsideTableCell(state: { depthMap?: Uint16Array }): boolean {
 }
 
 /**
- * Whether the significant characters of `href` in `[start, end)` begin with
+ * Whether the significant characters of `href` begin with
  * `scheme`, ignoring case. Tab, LF and CR are skipped: the URL parser removes
  * them before the scheme, so `java\tscript:` is `javascript:`.
  */
-function schemeMatches(href: string, start: number, end: number, scheme: string): boolean {
+function schemeMatches(href: string, scheme: string): boolean {
   let matched = 0
-  for (let index = start; index < end; index++) {
+  for (let index = 0; index < href.length; index++) {
     const code = href.charCodeAt(index)
     if (code === 9 || code === 10 || code === 13)
       continue
@@ -83,14 +83,7 @@ function schemeMatches(href: string, start: number, end: number, scheme: string)
  * Whether `src` is a `data:` URL, with the same preprocessing as {@link isEmptyLinkHref}.
  */
 export function isDataUrl(src: string): boolean {
-  let start = 0
-  while (start < src.length && src.charCodeAt(start) <= 32)
-    start++
-  let end = src.length
-  while (end > start && src.charCodeAt(end - 1) <= 32)
-    end--
-
-  return schemeMatches(src, start, end, 'data:')
+  return schemeMatches(trimUrl(src), 'data:')
 }
 
 /**
@@ -101,24 +94,17 @@ export function isDataUrl(src: string): boolean {
  * form of `java&#9;script:` are recognised. An interior space is *not* removed
  * by the URL parser, so `java script:x` stays an ordinary relative URL.
  */
-export function isEmptyLinkHref(href: string): boolean {
-  // Leading and trailing C0 controls and spaces are stripped.
-  let start = 0
-  while (start < href.length && href.charCodeAt(start) <= 32)
-    start++
-  let end = href.length
-  while (end > start && href.charCodeAt(end - 1) <= 32)
-    end--
-
-  switch (lowerAscii(href.charCodeAt(start))) {
+export function isEmptyLinkHref(href: string, localFragments = true): boolean {
+  href = trimUrl(href)
+  switch (lowerAscii(href.charCodeAt(0))) {
     case 35 /* # */:
-      return end - start === 1
+      return localFragments && href.length === 1
     case 106 /* j */:
-      return schemeMatches(href, start, end, 'javascript:')
+      return schemeMatches(href, 'javascript:')
     case 100 /* d */:
-      return schemeMatches(href, start, end, 'data:')
+      return schemeMatches(href, 'data:')
     case 118 /* v */:
-      return schemeMatches(href, start, end, 'vbscript:')
+      return schemeMatches(href, 'vbscript:')
     default:
       return false
   }
@@ -126,25 +112,20 @@ export function isEmptyLinkHref(href: string): boolean {
 
 /** Whether a URL is safe to emit into an HTML href or src attribute. */
 export function isSafeHtmlUrl(href: string, image = false): boolean {
-  let start = 0
-  while (start < href.length && href.charCodeAt(start) <= 32)
-    start++
-  let end = href.length
-  while (end > start && href.charCodeAt(end - 1) <= 32)
-    end--
-  if (start === end)
+  href = trimUrl(href)
+  if (!href)
     return false
 
-  for (let index = start; index < end; index++) {
+  for (let index = 0; index < href.length; index++) {
     const code = href.charCodeAt(index)
     if (code === 9 || code === 10 || code === 13)
       continue
     if (code === 58) {
-      switch (lowerAscii(href.charCodeAt(start))) {
-        case 104: return schemeMatches(href, start, end, 'http:') || schemeMatches(href, start, end, 'https:')
-        case 109: return !image && schemeMatches(href, start, end, 'mailto:')
-        case 116: return !image && schemeMatches(href, start, end, 'tel:')
-        case 102: return !image && schemeMatches(href, start, end, 'ftp:')
+      switch (lowerAscii(href.charCodeAt(0))) {
+        case 104: return schemeMatches(href, 'http:') || schemeMatches(href, 'https:')
+        case 109: return !image && schemeMatches(href, 'mailto:')
+        case 116: return !image && schemeMatches(href, 'tel:')
+        case 102: return !image && schemeMatches(href, 'ftp:')
         default: return false
       }
     }
@@ -766,4 +747,14 @@ export function markRenderedChildContent(node: Node): void {
     if (!isInlineNode(parent))
       return
   }
+}
+/** `url` without the leading and trailing C0 controls and spaces the URL parser strips. */
+export function trimUrl(url: string): string {
+  let start = 0
+  let end = url.length
+  while (start < end && url.charCodeAt(start) <= 32)
+    start++
+  while (end > start && url.charCodeAt(end - 1) <= 32)
+    end--
+  return start === 0 && end === url.length ? url : url.slice(start, end)
 }

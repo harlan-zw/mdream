@@ -13,8 +13,8 @@
 
 import type { Cleaner, CleanOptions, CleanPass, CleanTarget, CleanView, ElementNode } from './types'
 import { FRAGMENT_LINK_CLOSE, FRAGMENT_LINK_OPEN, TAG_A, TAG_CODE, TAG_H1, TAG_H6 } from './const'
-import { hasDocumentBase, resolveOutputUrl, trimUrl } from './url'
-import { isInsideHeading } from './utils'
+import { hasDocumentBase, resolveOutputUrl } from './url'
+import { isInsideHeading, trimUrl } from './utils'
 
 const ALL_RULES: CleanOptions = {
   urls: true,

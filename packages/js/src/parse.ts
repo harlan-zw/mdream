@@ -67,11 +67,11 @@ import {
   TEXT_NODE,
 } from './const'
 import { parserTagHandlers } from './parser-tags'
-import { resolveUrl, withDocumentBase } from './url'
+import { resolveOutputUrl, withDocumentBase } from './url'
 import { decodeHTMLEntities, hasNonWhitespace, leadingWhitespaceLength, traverseUpToFirstBlockNode } from './utils'
 
-// The host must be nonempty: an optional userinfo, then a host that is not ':', '/', '?', '#', '@'.
-const HTTP_BASE_RE = /^https?:\/\/(?:[^/?#]*@)?(?![^/?#]*@)[^:/?#]/i
+// Require the authority marker before handing the URL to the platform parser.
+const HTTP_BASE_RE = /^https?:\/\/[^\s/\\?#]/i
 
 // Longest `<base href>` adopted, in UTF-8 bytes after resolution, as in the Rust
 // engine. Every relative URL repeats the base, so an unbounded one multiplies the output.
@@ -98,11 +98,12 @@ function captureBaseHref(state: ParseState, href: string | undefined): void {
     return
   }
   state.baseHrefSeen = true
-  const base = resolveUrl(href, target.options.origin)
+  const base = resolveOutputUrl(href, undefined, target.options.origin)
   // A UTF-16 unit is at least one UTF-8 byte, so the length check bounds the encode.
   if (
     HTTP_BASE_RE.test(base)
     && base.length <= MAX_BASE_HREF_LENGTH
+    && URL.canParse(base)
     && new TextEncoder().encode(base).length <= MAX_BASE_HREF_LENGTH
   ) {
     target.options = withDocumentBase(target.options, base)
