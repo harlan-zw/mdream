@@ -3,12 +3,29 @@ import { escapeHtml, isSafeHtmlUrl, trimUrl } from './utils'
 
 const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
 const SLASH_CHAR = 47
-const documentBase = Symbol('documentBase')
+const documentBase = Symbol('base')
+const renderedFragment = Symbol('open fragment')
 type OutputOptions = EngineOptions & { [documentBase]?: string }
+type FragmentAnchor = ElementNode & { [renderedFragment]?: true }
+
+function documentUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value)
+    url.hash = ''
+    return url.href
+  }
+  catch {
+    // Invalid bases leave the previous origin in place.
+    return undefined
+  }
+}
 
 export function withDocumentBase(options: EngineOptions, base: string): EngineOptions {
+  const parsedBase = documentUrl(base)
+  if (parsedBase === undefined)
+    return options
   const fragmentBase = base.split('#', 1)[0]!
-  const sameDocument = fragmentBase === options.origin?.split('#', 1)[0]
+  const sameDocument = options.origin !== undefined && parsedBase === documentUrl(options.origin)
   return { ...options, origin: base, [documentBase]: sameDocument ? undefined : fragmentBase } as OutputOptions
 }
 
@@ -20,9 +37,7 @@ export function hasDocumentBase(options?: EngineOptions): boolean {
 function pathEnd(value: string, from: number): number {
   const query = value.indexOf('?', from)
   const fragment = value.indexOf('#', from)
-  if (query === -1)
-    return fragment === -1 ? value.length : fragment
-  return fragment === -1 ? query : Math.min(query, fragment)
+  return Math.min(query < 0 ? value.length : query, fragment < 0 ? value.length : fragment)
 }
 
 function hasDotSegment(path: string): boolean {
@@ -122,15 +137,24 @@ export function resolveOutputUrl(url: string, options?: EngineOptions, origin = 
   return rewrite ? rewrite(resolved) : resolved
 }
 
-export function safeAnchorOutput(node: ElementNode, options: EngineOptions | undefined, entering: boolean, protectMarkdown = false): string | undefined {
-  const href = node.attributes?.href
-  if (!href || !isSafeHtmlUrl(href))
+export function resolveSafeOutputUrl(url: string, options?: EngineOptions, image = false): string | undefined {
+  if (!isSafeHtmlUrl(url, image))
     return
-  const resolved = resolveOutputUrl(href, options)
-  if (!isSafeHtmlUrl(resolved))
+  const resolved = resolveOutputUrl(url, options)
+  return isSafeHtmlUrl(resolved, image) ? resolved : undefined
+}
+
+export function safeAnchorOutput(node: ElementNode, options: EngineOptions | undefined, entering: boolean, protectMarkdown = false): string | undefined {
+  if (!entering && (node as FragmentAnchor)[renderedFragment])
+    return '</a>'
+  const href = node.attributes?.href || ''
+  const resolved = resolveSafeOutputUrl(href, options)
+  if (resolved === undefined)
     return
   if (!entering)
     return '</a>'
+  if (hasDocumentBase(options) && trimUrl(href).charCodeAt(0) === 35 /* # */)
+    (node as FragmentAnchor)[renderedFragment] = true
   const escapedHref = escapeHtml(resolved, true, protectMarkdown)
   const title = node.attributes?.title === undefined
     ? ''

@@ -96,21 +96,28 @@ fn base_fragment_clean_and_raw_anchors() {
 
 #[test]
 fn base_fragment_cleanup_in_the_same_document() {
-  let html = r##"<base href="?page=1#other"><h2><a href="#install">Install</a></h2><a href="#">Top</a> <a href="#missing">Missing</a> <a href="#install">Jump</a>"##;
-  let options = HtmlToMarkdownOptions {
-    origin: Some("https://example.com/docs/?page=1#old".into()),
-    clean: Some(CleanConfig::all()),
-    ..Default::default()
-  };
   let expected = "## Install\n\nTop Missing [Jump](#install)";
-  assert_eq!(html_to_markdown(html, options.clone()), expected);
-  let mut processor = MarkdownStreamProcessor::new(options);
-  let mut output = String::new();
-  for character in html.chars() {
-    output.push_str(&processor.process_chunk(&character.to_string()));
+  for base in [
+    "?page=1#other",
+    "https://EXAMPLE.com:443/docs/?page=1#other",
+  ] {
+    let html = format!(
+      r##"<base href="{base}"><h2><a href="#install">Install</a></h2><a href="#">Top</a> <a href="#missing">Missing</a> <a href="#install">Jump</a>"##
+    );
+    let options = HtmlToMarkdownOptions {
+      origin: Some("https://example.com/docs/?page=1#old".into()),
+      clean: Some(CleanConfig::all()),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(&html, options.clone()), expected);
+    let mut processor = MarkdownStreamProcessor::new(options);
+    let mut output = String::new();
+    for character in html.chars() {
+      output.push_str(&processor.process_chunk(&character.to_string()));
+    }
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected);
   }
-  output.push_str(&processor.finish());
-  assert_eq!(output, expected);
 }
 
 #[test]
@@ -163,6 +170,16 @@ fn base_fragment_links() {
       "https://[::1]:8443/docs/#install",
     ),
     ("https://[::1]/docs/", "https://[::1]/docs/#install"),
+    (
+      "https://[::ffff:192.0.2.1]/docs/",
+      "https://[::ffff:192.0.2.1]/docs/#install",
+    ),
+    ("https://[bad:host]/docs/", "#install"),
+    ("https://[1::2::3]/docs/", "#install"),
+    (
+      "https://cdn.example/do&#10;cs/",
+      "https://cdn.example/docs/#install",
+    ),
     ("https://cdn.example:invalid/docs/", "#install"),
     ("https://cdn.example:65536/docs/", "#install"),
     ("javascript:alert(1)", "#install"),

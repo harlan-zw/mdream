@@ -1,5 +1,5 @@
 import type { ElementNode } from '../../src/types'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { clean } from '../../src/clean'
 import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/const'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
@@ -58,11 +58,31 @@ describe('base fragment links', () => {
     expect(htmlToMarkdown(raw)).toBe('<details><a href="https://example.com/docs/#install">Install</a></details>')
   })
 
-  it('cleans local fragments when the base points to the same document', () => {
+  it.each(['?page=1#other', 'https://EXAMPLE.com:443/docs/?page=1#other'])('cleans local fragments with base %s', (base) => {
     const origin = 'https://example.com/docs/?page=1#old'
     const html = '<h2><a href="#install">Install</a></h2><a href="#">Top</a> <a href="#missing">Missing</a> <a href="#install">Jump</a>'
     const options = { origin, clean: clean() }
-    expect(htmlToMarkdown(`<base href="?page=1#other">${html}`, options)).toBe('## Install\n\nTop Missing [Jump](#install)')
+    expect(htmlToMarkdown(`<base href="${base}">${html}`, options)).toBe('## Install\n\nTop Missing [Jump](#install)')
+  })
+
+  it('resolves fragments with only the URL constructor available', () => {
+    const canParse = vi.spyOn(URL, 'canParse').mockImplementation(() => {
+      throw new TypeError('URL.canParse is unavailable')
+    })
+    try {
+      const html = '<base href="https://example.com/docs/"><a href="#install">Install</a>'
+      expect(htmlToMarkdown(html)).toBe('[Install](https://example.com/docs/#install)')
+    }
+    finally {
+      canParse.mockRestore()
+    }
+  })
+
+  it('rewrites a safe HTML fragment destination once', () => {
+    const url = vi.fn((value: string) => value.replace('?utm_source=x', ''))
+    const html = '<base href="https://example.com/docs/?utm_source=x"><a href="#install">Install</a>'
+    expect(htmlToSafeHtml(html, { clean: { ...clean({ urls: true }), url } })).toBe('<a href="https://example.com/docs/#install">Install</a>')
+    expect(url).toHaveBeenCalledTimes(1)
   })
 
   it('resolves fragment links and images without a configured origin', () => {
@@ -84,6 +104,10 @@ describe('base fragment links', () => {
     ['https://cdn.example:8443/docs/', 'https://cdn.example:8443/docs/#install'],
     ['https://[::1]:8443/docs/', 'https://[::1]:8443/docs/#install'],
     ['https://[::1]/docs/', 'https://[::1]/docs/#install'],
+    ['https://[::ffff:192.0.2.1]/docs/', 'https://[::ffff:192.0.2.1]/docs/#install'],
+    ['https://[bad:host]/docs/', '#install'],
+    ['https://[1::2::3]/docs/', '#install'],
+    ['https://cdn.example/do&#10;cs/', 'https://cdn.example/docs/#install'],
     ['https://cdn.example:invalid/docs/', '#install'],
     ['https://cdn.example:65536/docs/', '#install'],
     ['javascript:alert(1)', '#install'],

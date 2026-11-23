@@ -98,12 +98,11 @@ function captureBaseHref(state: ParseState, href: string | undefined): void {
     return
   }
   state.baseHrefSeen = true
-  const base = resolveOutputUrl(href, undefined, target.options.origin)
+  const base = resolveOutputUrl(href, undefined, target.options.origin).replace(/[\t\n\r]/g, '')
   // A UTF-16 unit is at least one UTF-8 byte, so the length check bounds the encode.
   if (
     HTTP_BASE_RE.test(base)
     && base.length <= MAX_BASE_HREF_LENGTH
-    && URL.canParse(base)
     && new TextEncoder().encode(base).length <= MAX_BASE_HREF_LENGTH
   ) {
     target.options = withDocumentBase(target.options, base)

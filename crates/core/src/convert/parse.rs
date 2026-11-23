@@ -1209,7 +1209,7 @@ impl ConvertState {
   #[inline(never)]
   fn capture_base_href(&mut self) {
     // At MAX_ELEMENT_DEPTH the element is flattened, and so is everything below it.
-    if self.base_href_seen
+    if self.base_href != BaseHref::Unseen
       || self.depth_map[TAG_A as usize] != 0
       || self.depth_map[TAG_TEMPLATE as usize] != 0
       || self.stack.len() >= MAX_ELEMENT_DEPTH
@@ -1219,14 +1219,13 @@ impl ConvertState {
     let Some(href) = self.attr_scratch.get_bit(ATTR_HREF) else {
       return;
     };
-    self.base_href_seen = true;
-    let origin = self.options.origin.as_deref();
-    if let Some(mut base) = resolve_base_href(href, origin) {
-      if let Some(fragment) = base.find('#') {
-        base.truncate(fragment);
+    self.base_href = BaseHref::Seen;
+    if let Some((base, resolve_fragments)) =
+      resolve_base_href(href, self.options.origin.as_deref(), self.clean_urls)
+    {
+      if resolve_fragments {
+        self.base_href = BaseHref::RedirectsFragments;
       }
-      self.resolve_fragments =
-        origin.and_then(|origin| origin.split('#').next()) != Some(base.as_str());
       self.options.origin = Some(base);
     }
   }

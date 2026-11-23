@@ -348,7 +348,7 @@ impl ConvertState {
       protect_markdown,
       self.options.origin.as_deref(),
       self.clean_urls,
-      self.resolve_fragments,
+      self.redirects_fragments(),
     )
     .then_some(output)
   }
@@ -413,11 +413,13 @@ impl ConvertState {
       return;
     }
     let origin = self.options.origin.as_deref();
+    let redirects_fragments = self.redirects_fragments();
     let output = html_sink(&mut self.html_frames, &mut self.buffer);
     if tag_id == Some(TAG_IMG) {
-      let resolved = node.attributes.get_bit(ATTR_SRC).and_then(|src| {
-        resolve_html_url(src, true, origin, self.clean_urls, self.resolve_fragments)
-      });
+      let resolved = node
+        .attributes
+        .get_bit(ATTR_SRC)
+        .and_then(|src| resolve_html_url(src, true, origin, self.clean_urls, redirects_fragments));
       if let Some(resolved) = resolved {
         output.push_str("<img src=\"");
         push_escaped(output, resolved.as_ref(), true);
@@ -445,7 +447,7 @@ impl ConvertState {
       false,
       origin,
       self.clean_urls,
-      self.resolve_fragments,
+      redirects_fragments,
     );
   }
 

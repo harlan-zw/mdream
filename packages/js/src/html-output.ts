@@ -42,8 +42,8 @@ import {
   TagIdMap,
   TEXT_NODE,
 } from './const'
-import { resolveOutputUrl, safeAnchorOutput } from './url'
-import { escapeHtml, getLanguageFromAttributes, hasNonWhitespace, isSafeHtmlUrl, markRenderedChildContent, parseUnsignedInteger, suppressesFormattingInPre } from './utils'
+import { resolveSafeOutputUrl, safeAnchorOutput } from './url'
+import { escapeHtml, getLanguageFromAttributes, hasNonWhitespace, markRenderedChildContent, parseUnsignedInteger, suppressesFormattingInPre } from './utils'
 
 interface HeadingFrame {
   _tag: 0
@@ -113,13 +113,6 @@ function tagName(node: ElementNode, tagId: number): string | undefined {
 
 function resolveTagId(node: ElementNode): number | undefined {
   return node.tagHandler?.aliasTagId ?? node.tagId
-}
-
-function resolveSafeUrl(url: string, options: EngineOptions, image = false): string | undefined {
-  if (!isSafeHtmlUrl(url, image))
-    return
-  const resolved = resolveOutputUrl(url, options)
-  return isSafeHtmlUrl(resolved, image) ? resolved : undefined
 }
 
 function safeAttributes(node: ElementNode, tagId: number): string | undefined {
@@ -273,7 +266,7 @@ export function processHtmlOutputEvent(
   }
   if (tagId === TAG_IMG) {
     if (type === NodeEventEnter) {
-      const src = element.attributes.src && resolveSafeUrl(element.attributes.src, options, true)
+      const src = element.attributes.src && resolveSafeOutputUrl(element.attributes.src, options, true)
       if (src) {
         const resolved = escapeHtml(src, true)
         const alt = escapeHtml(element.attributes.alt || '', true)
