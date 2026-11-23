@@ -3,6 +3,24 @@ import { escapeHtml, isSafeHtmlUrl } from './utils'
 
 const URL_SCHEME_RE = /^[A-Z][\dA-Z+.-]*:/i
 const SLASH_CHAR = 47
+const documentBase = Symbol('documentBase')
+type OutputOptions = EngineOptions & { [documentBase]?: string }
+
+export function withDocumentBase(options: EngineOptions, base: string): EngineOptions {
+  return { ...options, origin: base, [documentBase]: base.split('#', 1)[0] } as OutputOptions
+}
+
+export function resolveOutputUrl(url: string, options?: EngineOptions): string {
+  const base = (options as OutputOptions | undefined)?.[documentBase]
+  const reference = trimUrl(url)
+  if (base !== undefined && reference.charCodeAt(0) === 35)
+    return resolveUrl(base + reference, options?.origin, options?.clean)
+  return resolveUrl(reference, options?.origin, options?.clean)
+}
+
+export function hasDocumentBase(options?: EngineOptions): boolean {
+  return (options as OutputOptions | undefined)?.[documentBase] !== undefined
+}
 
 function pathEnd(value: string, from: number): number {
   const query = value.indexOf('?', from)
@@ -118,7 +136,7 @@ export function safeAnchorOutput(node: ElementNode, options: EngineOptions | und
   const href = node.attributes?.href
   if (!href || !isSafeHtmlUrl(href))
     return
-  const resolved = resolveUrl(href, options?.origin, options?.clean)
+  const resolved = resolveOutputUrl(href, options)
   if (!isSafeHtmlUrl(resolved))
     return
   if (!entering)

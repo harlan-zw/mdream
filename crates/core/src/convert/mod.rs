@@ -16,10 +16,27 @@ use crate::types::{
 #[cfg(feature = "html")]
 use crate::url::slugify_heading;
 use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url,
-  slugify_markdown_heading, trim_url,
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, slugify_markdown_heading,
+  trim_url,
 };
 use std::borrow::Cow;
+
+fn resolve_output_url<'a>(
+  url: &'a str,
+  origin: Option<&str>,
+  clean: bool,
+  fragment_base: Option<&str>,
+) -> Cow<'a, str> {
+  let reference = trim_url(url);
+  if let Some(base) = fragment_base
+    && reference.starts_with('#')
+  {
+    return Cow::Owned(
+      crate::url::resolve_url(&format!("{base}{reference}"), origin, clean).into_owned(),
+    );
+  }
+  crate::url::resolve_url(reference, origin, clean)
+}
 
 /// Whether the conversion writes plain text. A macro rather than a method: a
 /// method call changes MIR shape and grew the all-format WASM build by 50 B.

@@ -5,11 +5,93 @@ use mdream::types::{
   IsolateMainConfig, OutputFormat, PluginConfig, TagOverrideConfig,
 };
 use mdream::{
-  MarkdownStreamProcessor, html_to_html, html_to_markdown, html_to_markdown_result, html_to_text,
+  MarkdownStreamProcessor, html_to_format_result, html_to_html, html_to_markdown,
+  html_to_markdown_result, html_to_text,
 };
 
 fn convert(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
+}
+
+#[test]
+fn base_fragment_source_attributes() {
+  let html = r##"<base href="https://example.com/docs/"><a href="#install">Install</a><img src="#logo"><p>Keep</p>"##;
+  for format in [
+    OutputFormat::Markdown,
+    OutputFormat::Text,
+    OutputFormat::Html,
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        filter: Some(FilterConfig::exclude(&[
+          "a[href^=\"#\"]",
+          "img[src^=\"#\"]",
+        ])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let expected = if format == OutputFormat::Html {
+      "<p>Keep</p>"
+    } else {
+      "Keep"
+    };
+    assert_eq!(
+      html_to_format_result(html, options.clone(), format).markdown,
+      expected
+    );
+    let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+    let mut actual = String::new();
+    for character in html.chars() {
+      actual.push_str(&processor.process_chunk(&character.to_string()));
+    }
+    actual.push_str(&processor.finish());
+    assert_eq!(actual, expected);
+  }
+  for selector in ["a[href^=\"#\"]", "a", "img[src^=\"#\"]"] {
+    let result = html_to_markdown_result(
+      html,
+      HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          extraction: Some(ExtractionConfig::new(&[selector])),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    );
+    assert_eq!(
+      result.markdown,
+      "[Install](https://example.com/docs/#install)![](https://example.com/docs/#logo)\n\nKeep"
+    );
+    let extracted = result.extracted.unwrap();
+    let (name, value) = if selector.starts_with("img") {
+      ("src", "#logo")
+    } else {
+      ("href", "#install")
+    };
+    assert_eq!(extracted[0].attributes, vec![(name.into(), value.into())]);
+  }
+}
+
+#[test]
+fn base_fragment_clean_and_raw_anchors() {
+  let html = r##"<base href="https://example.com/docs/"><h2><a href="#install">Install</a></h2><a href="#">Top</a><a href="#install">https://example.com/docs/#install</a>"##;
+  assert_eq!(
+    html_to_markdown(
+      html,
+      HtmlToMarkdownOptions {
+        clean: Some(CleanConfig::all()),
+        ..Default::default()
+      }
+    ),
+    "## [Install](https://example.com/docs/#install)\n\n[Top](https://example.com/docs/#) https://example.com/docs/#install"
+  );
+  assert_eq!(
+    convert(
+      r##"<base href="https://example.com/docs/"><details><a href="#install">Install</a></details>"##
+    ),
+    r#"<details><a href="https://example.com/docs/#install">Install</a></details>"#
+  );
 }
 
 #[test]

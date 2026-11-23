@@ -143,11 +143,12 @@ fn resolve_html_url<'a>(
   image: bool,
   origin: Option<&str>,
   clean_urls: bool,
+  fragment_base: Option<&str>,
 ) -> Option<Cow<'a, str>> {
   if !is_safe_html_url(url, image) {
     return None;
   }
-  let resolved = resolve_url(url, origin, clean_urls);
+  let resolved = resolve_output_url(url, origin, clean_urls, fragment_base);
   is_safe_html_url(resolved.as_ref(), image).then_some(resolved)
 }
 
@@ -171,6 +172,7 @@ fn write_html_element(
   protect_markdown: bool,
   origin: Option<&str>,
   clean_urls: bool,
+  fragment_base: Option<&str>,
 ) -> bool {
   let Some((tag_id, name)) = node
     .tag_id
@@ -184,7 +186,7 @@ fn write_html_element(
     let resolved = node
       .attributes
       .get_bit(ATTR_HREF)
-      .and_then(|href| resolve_html_url(href, false, origin, clean_urls));
+      .and_then(|href| resolve_html_url(href, false, origin, clean_urls, fragment_base));
     if resolved.is_none() {
       return false;
     }
@@ -313,7 +315,14 @@ impl ConvertState {
   /// under the same href check as the opening tag.
   pub(super) fn html_anchor_close(&self, node: &ElementNode) -> Option<&'static str> {
     let href = node.attributes.get_bit(ATTR_HREF)?;
-    resolve_html_url(href, false, self.options.origin.as_deref(), self.clean_urls).map(|_| "</a>")
+    resolve_html_url(
+      href,
+      false,
+      self.options.origin.as_deref(),
+      self.clean_urls,
+      self.fragment_base.as_deref(),
+    )
+    .map(|_| "</a>")
   }
 
   /// The tag as an owned string, for the Markdown path's raw-HTML anchors.
@@ -337,6 +346,7 @@ impl ConvertState {
       protect_markdown,
       self.options.origin.as_deref(),
       self.clean_urls,
+      self.fragment_base.as_deref(),
     )
     .then_some(output)
   }
@@ -403,10 +413,15 @@ impl ConvertState {
     let origin = self.options.origin.as_deref();
     let output = html_sink(&mut self.html_frames, &mut self.buffer);
     if tag_id == Some(TAG_IMG) {
-      let resolved = node
-        .attributes
-        .get_bit(ATTR_SRC)
-        .and_then(|src| resolve_html_url(src, true, origin, self.clean_urls));
+      let resolved = node.attributes.get_bit(ATTR_SRC).and_then(|src| {
+        resolve_html_url(
+          src,
+          true,
+          origin,
+          self.clean_urls,
+          self.fragment_base.as_deref(),
+        )
+      });
       if let Some(resolved) = resolved {
         output.push_str("<img src=\"");
         push_escaped(output, resolved.as_ref(), true);
@@ -427,7 +442,15 @@ impl ConvertState {
       }
       return;
     }
-    write_html_element(output, node, true, false, origin, self.clean_urls);
+    write_html_element(
+      output,
+      node,
+      true,
+      false,
+      origin,
+      self.clean_urls,
+      self.fragment_base.as_deref(),
+    );
   }
 
   // Out of line: the Markdown path shares the caller and must not grow with it.
@@ -491,7 +514,15 @@ impl ConvertState {
     }
     let origin = self.options.origin.as_deref();
     let output = html_sink(&mut self.html_frames, &mut self.buffer);
-    write_html_element(output, node, false, false, origin, self.clean_urls);
+    write_html_element(
+      output,
+      node,
+      false,
+      false,
+      origin,
+      self.clean_urls,
+      self.fragment_base.as_deref(),
+    );
   }
 
   #[cfg(feature = "html")]

@@ -2091,6 +2091,7 @@ impl ConvertState {
     if link
       && self.clean_flags() & CLEAN_EMPTY_LINKS != 0
       && let Some(href) = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF)
+      && (self.fragment_base.is_none() || !trim_url(href).starts_with('#'))
       && is_empty_link_href(href)
     {
       self.begin_link(self.buffer.len(), true, false);
@@ -2859,6 +2860,7 @@ impl ConvertState {
       if self.clean_flags() & CLEAN_EMPTY_LINKS != 0 {
         let node = &self.stack[self.stack.len() - 1];
         if let Some(href) = node.attributes.get_bit(ATTR_HREF)
+          && (self.fragment_base.is_none() || !trim_url(href).starts_with('#'))
           && is_empty_link_href(href)
         {
           self.begin_link(self.buffer.len(), true, false);
@@ -3296,6 +3298,7 @@ impl ConvertState {
       if self.clean_flags() & CLEAN_SELF_LINK_HEADINGS != 0 {
         let in_heading = self.in_heading();
         if in_heading
+          && self.fragment_base.is_none()
           && let Some(href) = attributes.get_bit(ATTR_HREF)
           && trim_url(href).starts_with('#')
           && text_len > 0
@@ -3308,10 +3311,11 @@ impl ConvertState {
       // redundantLinks: [url](url) → url
       if self.clean_flags() & CLEAN_REDUNDANT_LINKS != 0
         && let Some(href) = attributes.get_bit(ATTR_HREF)
-        && let resolved = resolved_href.insert(resolve_url(
+        && let resolved = resolved_href.insert(resolve_output_url(
           href,
           self.options.origin.as_deref(),
           self.clean_urls(),
+          self.fragment_base.as_deref(),
         ))
         && link_text == resolved.as_ref()
         && text_len > 0
@@ -3457,8 +3461,14 @@ impl ConvertState {
     let link_text_end = self.buffer.len();
     if let Some(href) = attributes.get_bit(ATTR_HREF) {
       let capped_code_span = self.options.node_byte_limit() != 0 && !self.code_spans.is_empty();
-      let resolved = resolved_href
-        .unwrap_or_else(|| resolve_url(href, self.options.origin.as_deref(), self.clean_urls()));
+      let resolved = resolved_href.unwrap_or_else(|| {
+        resolve_output_url(
+          href,
+          self.options.origin.as_deref(),
+          self.clean_urls(),
+          self.fragment_base.as_deref(),
+        )
+      });
       let resolved = resolved.as_ref();
       let mut title = attributes.get_bit(ATTR_TITLE).unwrap_or("");
       if !title.is_empty() && self.last_content_cache_len > 0 && !self.cache_follows_separator {
@@ -7445,7 +7455,12 @@ impl ConvertState {
           .get_bit(ATTR_SRC)
           .filter(|src| !is_data_url(src))
           .unwrap_or("");
-        let resolved_src = resolve_url(src, self.options.origin.as_deref(), self.clean_urls());
+        let resolved_src = resolve_output_url(
+          src,
+          self.options.origin.as_deref(),
+          self.clean_urls(),
+          self.fragment_base.as_deref(),
+        );
         {
           let title = node.attributes.get_bit(ATTR_TITLE);
           let mut s = String::with_capacity(
@@ -7765,7 +7780,13 @@ impl ConvertState {
           .get_bit(ATTR_SRC)
           .filter(|src| !src.is_empty() && !is_data_url(src))?;
         Some(Cow::Owned(
-          resolve_url(src, self.options.origin.as_deref(), self.clean_urls()).into_owned(),
+          resolve_output_url(
+            src,
+            self.options.origin.as_deref(),
+            self.clean_urls(),
+            self.fragment_base.as_deref(),
+          )
+          .into_owned(),
         ))
       }
       TAG_Q => Some(Cow::Borrowed("\"")),

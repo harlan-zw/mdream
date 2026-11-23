@@ -42,7 +42,7 @@ import {
   TagIdMap,
   TEXT_NODE,
 } from './const'
-import { resolveUrl, safeAnchorOutput } from './url'
+import { resolveOutputUrl, safeAnchorOutput } from './url'
 import { escapeHtml, getLanguageFromAttributes, hasNonWhitespace, isSafeHtmlUrl, markRenderedChildContent, parseUnsignedInteger, suppressesFormattingInPre } from './utils'
 
 interface HeadingFrame {
@@ -118,7 +118,7 @@ function resolveTagId(node: ElementNode): number | undefined {
 function resolveSafeUrl(url: string, options: EngineOptions, image = false): string | undefined {
   if (!isSafeHtmlUrl(url, image))
     return
-  const resolved = resolveUrl(url, options.origin, options.clean)
+  const resolved = resolveOutputUrl(url, options)
   return isSafeHtmlUrl(resolved, image) ? resolved : undefined
 }
 

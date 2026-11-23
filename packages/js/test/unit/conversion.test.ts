@@ -1,9 +1,11 @@
 import type { ElementNode } from '../../src/types'
 import { describe, expect, it } from 'vitest'
+import { clean } from '../../src/clean'
 import { ELEMENT_NODE, NodeEventEnter, NodeEventExit } from '../../src/const'
 import { htmlToSafeHtml, streamHtmlToSafeHtml } from '../../src/html'
 import { htmlToMarkdown, streamHtmlToMarkdown } from '../../src/index'
 import { createPlugin } from '../../src/pluggable/plugin'
+import { extractionPlugin } from '../../src/plugins/extraction'
 import { filterPlugin } from '../../src/plugins/filter'
 import { tailwindPlugin } from '../../src/plugins/tailwind'
 import { withMinimalPreset } from '../../src/preset/minimal'
@@ -11,6 +13,51 @@ import { htmlToMarkdownSplitChunks } from '../../src/splitter'
 import { htmlToText, streamHtmlToText } from '../../src/text'
 
 describe('base fragment links', () => {
+  it('preserves source attributes for filtering and extraction with a base', async () => {
+    const html = '<base href="https://example.com/docs/"><a href="#install">Install</a><img src="#logo"><p>Keep</p>'
+    for (const convert of [htmlToMarkdown, htmlToText, htmlToSafeHtml]) {
+      const expected = convert === htmlToSafeHtml ? '<p>Keep</p>' : 'Keep'
+      expect(convert(html, { plugins: [filterPlugin({ exclude: ['a[href^="#"]', 'img[src^="#"]'] })] })).toBe(expected)
+    }
+    const extracted: string[] = []
+    expect(htmlToMarkdown(html, {
+      plugins: [extractionPlugin({
+        'a[href^="#"]': element => extracted.push(`selected:${element.attributes.href}`),
+        'a': element => extracted.push(element.attributes.href!),
+        'img[src^="#"]': element => extracted.push(element.attributes.src!),
+      })],
+    })).toBe('[Install](https://example.com/docs/#install)![](https://example.com/docs/#logo)\n\nKeep')
+    expect(extracted).toEqual(['selected:#install', '#install', '#logo'])
+    for (const convert of [streamHtmlToMarkdown, streamHtmlToText, streamHtmlToSafeHtml]) {
+      const input = new ReadableStream<string>({
+        start(controller) {
+          for (const character of html)
+            controller.enqueue(character)
+          controller.close()
+        },
+      })
+      let output = ''
+      const hrefs: string[] = []
+      for await (const chunk of convert(input, { plugins: [
+        extractionPlugin({ 'a[href^="#"]': element => hrefs.push(element.attributes.href!) }),
+        filterPlugin({ exclude: ['img[src^="#"]'] }),
+      ] })) {
+        output += chunk
+      }
+      expect(hrefs).toEqual(['#install'])
+      expect(output).toBe(convert === streamHtmlToMarkdown
+        ? '[Install](https://example.com/docs/#install)\n\nKeep'
+        : convert === streamHtmlToSafeHtml ? '<a href="https://example.com/docs/#install">Install</a><p>Keep</p>' : 'Install\n\nKeep')
+    }
+  })
+
+  it('keeps base destinations when cleaning links and rendering raw anchors', () => {
+    const html = '<base href="https://example.com/docs/"><h2><a href="#install">Install</a></h2><a href="#">Top</a><a href="#install">https://example.com/docs/#install</a>'
+    expect(htmlToMarkdown(html, { clean: clean() })).toBe('## [Install](https://example.com/docs/#install)\n\n[Top](https://example.com/docs/#) https://example.com/docs/#install')
+    const raw = '<base href="https://example.com/docs/"><details><a href="#install">Install</a></details>'
+    expect(htmlToMarkdown(raw)).toBe('<details><a href="https://example.com/docs/#install">Install</a></details>')
+  })
+
   it('resolves fragment links and images without a configured origin', () => {
     const html = '<base href="https://cdn.example/docs/?q=1#old"><a href="#">Top</a><img src="#logo">'
     expect(htmlToMarkdown(html)).toBe('[Top](https://cdn.example/docs/?q=1#)![](https://cdn.example/docs/?q=1#logo)')
