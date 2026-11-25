@@ -2,16 +2,16 @@ import type { ModuleOptions, ModuleRuntimeConfig } from './types.js'
 import { fileURLToPath } from 'node:url'
 import { addImportsDir, addPlugin, addServerHandler, addServerImportsDir, createResolver, defineNuxtModule } from '@nuxt/kit'
 import { defu } from 'defu'
-import { name, version } from '../package.json'
-import { setupPrerenderHandler } from './prerender.js'
-import { registerTypeTemplates } from './templates.js'
+import pkg from '../package.json' with { type: 'json' }
+import { setupPrerenderHandler } from './prerender.ts'
+import { registerTypeTemplates } from './templates.ts'
 
 const mdreamRe = /^(?:mdream(?:\/|$)|@mdream\/rust-)/
 
 export default defineNuxtModule<ModuleOptions>({
   meta: {
-    name,
-    version,
+    name: pkg.name,
+    version: pkg.version,
     configKey: 'mdream',
     compatibility: {
       nuxt: '^4.6.1 || ^5.0.0-0',
