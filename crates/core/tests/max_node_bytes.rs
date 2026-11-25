@@ -949,6 +949,12 @@ fn table_pipe_escaping_respects_the_inline_code_span_cap() {
     "| `a\\|b\\|c` |\n| --- |",
     true,
   );
+  assert_capped_inline_code(
+    "<table><tr><td><code>a||``</code></td></tr></table>",
+    5,
+    "| `a\\|\\|` |\n| --- |",
+    true,
+  );
 }
 
 #[test]

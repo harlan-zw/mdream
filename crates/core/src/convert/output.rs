@@ -704,6 +704,27 @@ impl ConvertState {
     max
   }
 
+  #[cold]
+  #[inline(never)]
+  fn flatten_code_span(mut content: &str, mut line_end: usize) -> String {
+    let mut flattened = String::with_capacity(content.len());
+    loop {
+      flattened.push_str(&content[..line_end]);
+      flattened.push(' ');
+      let separator = if content.as_bytes()[line_end..].starts_with(b"\r\n") {
+        2
+      } else {
+        1
+      };
+      content = &content[line_end + separator..];
+      let Some(next) = crate::scan::find_line_end(content.as_bytes()) else {
+        flattened.push_str(content);
+        return flattened;
+      };
+      line_end = next;
+    }
+  }
+
   /// Append content retained behind the outermost inline-code delimiter. Tag
   /// output is atomic so a cap cannot leave half a Markdown marker; text may be
   /// cut at a UTF-8 boundary. Once an append cannot fit, later content is never
@@ -833,8 +854,8 @@ impl ConvertState {
     }
     // A line can begin a Markdown block before the backtick closes.
     let content = &self.buffer[span.content_start..];
-    if crate::scan::find_line_end(content.as_bytes()).is_some() {
-      let flattened = content.replace("\r\n", " ").replace(['\r', '\n'], " ");
+    if let Some(at) = crate::scan::find_line_end(content.as_bytes()) {
+      let flattened = Self::flatten_code_span(content, at);
       self.replace_code_span_content(span.content_start..self.buffer.len(), &flattened);
     }
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
@@ -870,9 +891,16 @@ impl ConvertState {
     if max_run == 0 && self.buffer.as_bytes()[span.content_start - 1] == b'`' {
       return Cow::Borrowed("`");
     }
-    let delimiter = "`".repeat((max_run + 1).max(1));
     let content = &self.buffer[span.content_start..];
     let padded = content.starts_with('`') || content.ends_with('`');
+    // One literal backtick needs a two-tick delimiter. When no prefix was
+    // reserved with the opener, both delimiters can come from static strings.
+    if max_run == 1 && span.content_start == span.output_start + 1 {
+      let (open, close) = if padded { ("`` ", " ``") } else { ("``", "``") };
+      self.replace_code_span_content(span.output_start..span.content_start, open);
+      return Cow::Borrowed(close);
+    }
+    let delimiter = "`".repeat(max_run + 1);
     let mut opening = String::with_capacity(
       span.content_start - span.output_start + delimiter.len() + usize::from(padded),
     );
@@ -972,6 +1000,21 @@ impl ConvertState {
       );
     }
     Some(delimiter)
+  }
+
+  #[cold]
+  #[inline(never)]
+  fn replace_code_fence_marker(exit: &str, delimiter: &str) -> Option<String> {
+    if delimiter == MARKDOWN_CODE_BLOCK {
+      return None;
+    }
+    let marker = MARKDOWN_CODE_BLOCK.as_bytes();
+    let at = crate::scan::find_bytes(exit.as_bytes(), marker)?;
+    let mut replaced = String::with_capacity(exit.len() - marker.len() + delimiter.len());
+    replaced.push_str(&exit[..at]);
+    replaced.push_str(delimiter);
+    replaced.push_str(&exit[at + marker.len()..]);
+    Some(replaced)
   }
 
   fn shift_fragment_links_after(&mut self, offset: usize, amount: isize) {
@@ -3940,12 +3983,9 @@ impl ConvertState {
       && closes_own_pre_fence
       && let Some(delimiter) = self.finalize_code_fence()
       && let Some(exit) = output.as_deref()
+      && let Some(replaced) = Self::replace_code_fence_marker(exit, &delimiter)
     {
-      output = Some(Cow::Owned(exit.replacen(
-        MARKDOWN_CODE_BLOCK,
-        &delimiter,
-        1,
-      )));
+      output = Some(Cow::Owned(replaced));
     }
 
     if !plain_text!(self)

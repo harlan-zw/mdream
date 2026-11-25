@@ -97,15 +97,22 @@ fn base_fragment_clean_and_raw_anchors() {
 #[test]
 fn base_fragment_cleanup_in_the_same_document() {
   let expected = "## Install\n\nTop Missing [Jump](#install)";
-  for base in [
-    "?page=1#other",
-    "https://EXAMPLE.com:443/docs/?page=1#other",
+  for (base, origin) in [
+    ("?page=1#other", "https://example.com/docs/?page=1#old"),
+    (
+      "https://EXAMPLE.com:443/docs/?page=1#other",
+      "https://example.com/docs/?page=1#old",
+    ),
+    (
+      "https://example.com?page=1#other",
+      "https://example.com/?page=1#old",
+    ),
   ] {
     let html = format!(
       r##"<base href="{base}"><h2><a href="#install">Install</a></h2><a href="#">Top</a> <a href="#missing">Missing</a> <a href="#install">Jump</a>"##
     );
     let options = HtmlToMarkdownOptions {
-      origin: Some("https://example.com/docs/?page=1#old".into()),
+      origin: Some(origin.into()),
       clean: Some(CleanConfig::all()),
       ..Default::default()
     };
@@ -218,6 +225,7 @@ fn inline_code_trailing_backticks() {
       ("a`\n", "x `` a` `` y"),
       ("a``  ", "x ``` a`` ``` y"),
       ("a`\t\r\n", "x `` a` `` y"),
+      ("a`\r\n`b", "x ``a` `b`` y"),
       ("`a` ", "x `` `a` `` y"),
       ("a`<br>", "x ``a` `` y"),
       ("a`&nbsp;", "x ``a`\u{a0}`` y"),

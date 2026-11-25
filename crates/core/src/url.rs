@@ -797,7 +797,8 @@ fn ipv6_groups(address: &str, groups: &mut [u16], allow_ipv4: bool) -> Option<us
 
 fn ipv6_address(address: &str) -> Option<[u16; 8]> {
   let mut groups = [0; 8];
-  if let Some((head, tail)) = address.split_once("::") {
+  if let Some(at) = crate::scan::find_bytes(address.as_bytes(), b"::") {
+    let (head, tail) = (&address[..at], &address[at + 2..]);
     let head_len = ipv6_groups(head, &mut groups, false)?;
     let tail_len = ipv6_groups(tail, groups.get_mut(head_len..)?, true)?;
     if head_len + tail_len >= groups.len() {
@@ -817,13 +818,13 @@ struct HttpDocument<'a> {
   port: u16,
   userinfo: &'a str,
   host: HttpHost<'a>,
-  path: &'a str,
-  query: Option<&'a str>,
+  path_query: &'a str,
 }
 
 impl<'a> HttpDocument<'a> {
   fn parse(url: &'a str) -> Option<Self> {
-    let (scheme, rest) = url.split_once("://")?;
+    let at = crate::scan::find_bytes(url.as_bytes(), b"://")?;
+    let (scheme, rest) = (&url[..at], &url[at + 3..]);
     let default_port = if scheme.eq_ignore_ascii_case("https") {
       443
     } else if scheme.eq_ignore_ascii_case("http") {
@@ -859,16 +860,13 @@ impl<'a> HttpDocument<'a> {
     } else {
       return None;
     };
-    let (path, query) = path_query
-      .split_once('?')
-      .map_or((path_query, None), |(path, query)| (path, Some(query)));
     Some(Self {
       default_port,
       port,
       userinfo,
       host,
-      path: if path.is_empty() { "/" } else { path },
-      query,
+      // The authority ends at a slash or query. An absent path is the root.
+      path_query: path_query.strip_prefix('/').unwrap_or(path_query),
     })
   }
 
@@ -876,8 +874,7 @@ impl<'a> HttpDocument<'a> {
     self.default_port == other.default_port
       && self.port == other.port
       && self.userinfo == other.userinfo
-      && self.path == other.path
-      && self.query == other.query
+      && self.path_query == other.path_query
       && match (&self.host, &other.host) {
         (HttpHost::Name(left), HttpHost::Name(right)) => left.eq_ignore_ascii_case(right),
         (HttpHost::Ip(left), HttpHost::Ip(right)) => left == right,
