@@ -1503,13 +1503,10 @@ fn heading_closes_its_block_under_any_markerless_wrappers() {
 fn heading_inside_an_hrefless_anchor_keeps_its_trailing_blank_line() {
   // An anchor without href emits no markup at all, so it counts as a
   // marker-less wrapper: the heading must close its block instead of gluing
-  // the following text into its raw-HTML line. A literal `*` stays escaped.
+  // the following text into its heading line. A literal `*` stays escaped.
   for (html, expected) in [
-    (
-      "<a><h4>t</h4></a>see *this*",
-      "<h4>t</h4>\n\nsee \\*this\\*",
-    ),
-    ("<a><h4>t</h4>x</a>", "<h4>t</h4>\n\nx"),
+    ("<a><h4>t</h4></a>see *this*", "#### t\n\nsee \\*this\\*"),
+    ("<a><h4>t</h4>x</a>", "#### t\n\nx"),
   ] {
     assert_eq!(convert(html), expected, "{html}");
   }
@@ -2187,10 +2184,7 @@ fn figcaption_starts_a_separate_block() {
   );
   assert_eq!(convert("a <figcaption><br>x</figcaption>"), "a  \n*x*");
   assert_eq!(convert("a<figcaption><br></figcaption> b"), "a  \nb");
-  assert_eq!(
-    convert("<figcaption><pre>x</pre></figcaption>"),
-    "*```\nx\n```*"
-  );
+  assert_eq!(convert("<figcaption><pre>x</pre></figcaption>"), "*`x`*");
   assert_eq!(convert("<pre><figcaption><em></em></figcaption></pre>"), "");
   assert_eq!(
     convert_with_clean(
@@ -2860,25 +2854,20 @@ fn blockquote_parent_continuation_settles_after_an_empty_wrapper() {
 }
 
 #[test]
-fn empty_quotes_before_wrapped_fences_keep_the_item_marker_line() {
-  // A fence opened inside the wrapper took the separator. Restoring it later
-  // would cut the fence's own bytes.
+fn empty_quotes_before_wrapped_code_keep_the_item_marker_line() {
   for (html, expected) in [
-    (
-      "<li><blockquote/><em><pre><blockquote>",
-      "- *\n\n  ```\n  \n\n  ```\n\n  *",
-    ),
+    ("<li><blockquote/><em><pre><blockquote>", "-"),
     (
       "<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>",
-      "- *\n\n  ```\n  \n\n  ```\n\n  *",
+      "-",
     ),
     (
       "<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>",
-      "- *\n\n  ```\n  \n\n  ### h\n  ```\n\n  *",
+      "- *`h`*",
     ),
     (
       "<ul><li><blockquote></blockquote><b><pre><code>x</code></pre></b></li></ul>",
-      "- **\n\n  ```\n  x\n  ```\n\n  **",
+      "- **`x`**",
     ),
   ] {
     assert_eq!(convert(html), expected, "{html}");
@@ -3824,31 +3813,28 @@ fn a_rule_around_a_deferred_fence_resumes_the_item() {
   for (html, expected) in [
     (
       "<ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul>",
-      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+      "- [W](/w)",
     ),
-    (
-      "<li><a href=\"/w\" title=\"W\"><pre><hr>",
-      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
-    ),
+    ("<li><a href=\"/w\" title=\"W\"><pre><hr>", "- [W](/w)"),
     (
       "<ul><li><a href=\"/w\" aria-label=\"W\"><pre><hr></pre></a></li></ul>",
-      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)",
+      "- [W](/w)",
     ),
     (
       "<ol><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ol>",
-      "1. [\n\n   ```\n   \n\n   ---\n   ```\n\n   \n\n   W](/w)",
+      "1. [W](/w)",
     ),
     (
       "<ul><li><blockquote><a href=\"/w\" title=\"W\"><pre><hr></pre></a></blockquote></li></ul>",
-      "- \n  > [\n  >\n  > ```\n  >\n  >\n  > ---\n  > ```\n  >\n  >\n  >\n  > W](/w)",
+      "- \n  > [W](/w)",
     ),
     (
       "<blockquote><ul><li><a href=\"/w\" title=\"W\"><pre><hr></pre></a></li></ul></blockquote>",
-      "> - [\n>\n>   ```\n>   \n>\n>   ---\n>   ```\n>\n>   \n>\n>   W](/w)",
+      "> - [W](/w)",
     ),
     (
       "<ul><li><a href=\"/w\"><pre><hr></pre></a></li></ul>",
-      "- [\n\n  ```\n  \n\n  ---\n  ```\n\n  ](/w)",
+      "- [](/w)",
     ),
     (
       "<ul><li><pre><hr></pre>t</li></ul>",
@@ -5441,9 +5427,9 @@ fn named_entities_accented() {
 
 #[test]
 fn named_entities_xml_defaults() {
-  assert_eq!(convert("<p>&lt;</p>"), "<");
+  assert_eq!(convert("<p>&lt;</p>"), r"\<");
   assert_eq!(convert("<p>&gt;</p>"), r"\>");
-  assert_eq!(convert("<p>&amp;</p>"), "&");
+  assert_eq!(convert("<p>&amp;</p>"), r"\&");
   assert_eq!(convert("<p>&quot;</p>"), "\"");
   assert_eq!(convert("<p>&apos;</p>"), "'");
 }
@@ -6462,7 +6448,7 @@ fn lt_before_a_non_letter_is_text_not_a_tag() {
     ("<p>5 <10 and 10> 5</p>", "5 <10 and 10> 5"),
     ("<p>a <1b>c</p>", "a <1b>c"),
     ("<p>a <-b>c</p>", "a <-b>c"),
-    ("<p>a <<em>b</em>c</p>", "a <*b*c"),
+    ("<p>a <<em>b</em>c</p>", r"a \<*b*c"),
     ("<3", "<3"),
     ("<3<div", "<3"),
     ("<>", "<>"),
@@ -6886,7 +6872,7 @@ fn a_block_that_opens_a_code_block_in_a_list_item_stays_out_of_the_code() {
     ),
     (
       "<ul><li><a href=\"/w\" title=\"W\"><pre><p>x</p></pre></a></li></ul>",
-      "- [\n\n  ```\n  x\n  ```\n\n  W](/w)",
+      "- [`x`](/w \"W\")",
     ),
     (
       "<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>",
@@ -6937,21 +6923,19 @@ fn a_heading_in_a_code_block_keeps_its_hash_unescaped() {
 }
 
 #[test]
-fn a_heading_after_a_misread_fence_keeps_its_escape() {
-  // A `<pre>` in inline content writes fences glued to that content, which a
-  // parser can read with the opposite parity, leaving the heading a heading.
+fn escaping_closing_hashes_respects_fences() {
   for (html, expected) in [
     (
       "<span>a<pre><h2>x #</h2></pre></span>",
-      "a```\n\n## x \\#\n\n\n```",
+      "a\n\n```\n\n## x #\n\n\n```",
     ),
     (
       "<span><pre>x</pre>b</span><pre><h2>x #</h2></pre>",
-      "```\nx\n``` b\n\n```\n\n## x \\#\n\n\n```",
+      "```\nx\n```\n\nb\n\n```\n\n## x #\n\n\n```",
     ),
     (
       "<em>a<pre>x</pre></em><pre><h2>x #</h2></pre>",
-      "*a```\nx\n```*\n\n```\n\n## x \\#\n\n\n```",
+      "*a`x`*\n\n```\n\n## x #\n\n\n```",
     ),
   ] {
     assert_eq!(convert(html), expected, "html={html:?}");
@@ -7015,7 +6999,7 @@ fn whitespace_before_a_nested_pre_stays_in_the_code() {
     assert_eq!(convert(html), expected, "html={html:?}");
   }
   // Outside the code, the space before a `<pre>` still goes.
-  assert_eq!(convert("<span>a <pre>x</pre></span>"), "a```\nx\n```");
+  assert_eq!(convert("<span>a <pre>x</pre></span>"), "a\n\n```\nx\n```");
 }
 
 #[test]
@@ -7941,7 +7925,7 @@ fn text_runs_keep_unicode_entities_and_gfm_context_across_chunks() {
       }
     }
   }
-  assert_eq!(convert("<p>é*東京_🙂&amp;x</p>"), "é\\*東京\\_🙂&x");
+  assert_eq!(convert("<p>é*東京_🙂&amp;x</p>"), r"é\*東京\_🙂\&x");
   assert_eq!(
     convert("<pre><code>é*東京_🙂&amp;x\n\t  y</code></pre>"),
     "```\né*東京_🙂&x\n\t  y\n```"
@@ -8070,7 +8054,7 @@ fn bogus_comments_end_at_the_first_gt_without_opening_elements() {
     ("<p>a</ x", "a"),
     ("<p>a <?x?>b</p>", "a b"),
     ("<p>a<?x?> b</p>", "a b"),
-    ("<p>a&amp;<?x?>b</p>", "a&b"),
+    ("<p>a&amp;<?x?>b</p>", r"a\&b"),
     ("<code>a<?x?>b</code>", "`ab`"),
     ("<pre>a<!x>b</pre>", "```\nab\n```"),
     ("<textarea>a</ x>b</textarea>", "a\\</ x>b"),
@@ -8259,7 +8243,7 @@ fn blockquote_parent_continuation_respects_overrides() {
 #[test]
 fn node_cap_counts_source_text_across_discarded_tokens() {
   for (html, cap, expected) in [
-    ("<p>a&<?x?>amp;b</p>", 2, "a&"),
+    ("<p>a&<?x?>amp;b</p>", 2, r"a\&"),
     ("<p>a&<?x?>amp;b</p>", 6, "a\\&amp;"),
     ("<p>a&<?x?>amp;b</p>", 7, "a\\&amp;b"),
     ("<p>a&#65<?x?>66;b</p>", 4, "a\u{6}"),
@@ -10771,12 +10755,7 @@ fn text_after_a_closed_nested_item_stays_escaped() {
 fn empty_inline_pre_does_not_taint_later_fences() {
   for body in ["", " ", "\n", "<code></code>"] {
     let html = format!("<span><pre>{body}</pre></span><pre><h2>x #</h2></pre>");
-    let expected = if body.contains("code") {
-      "## x \\#"
-    } else {
-      "## x #"
-    };
-    assert!(convert(&html).contains(expected), "{html:?}");
+    assert!(convert(&html).contains("## x #"), "{html:?}");
   }
 }
 

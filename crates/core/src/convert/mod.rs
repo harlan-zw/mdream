@@ -67,7 +67,7 @@ const HAZARD_MASK_SPLIT: u8 = 64;
 
 /// Bytes readable as GFM inline markup if emitted unescaped. [`BATCHABLE_TEXT`]
 /// derives from these, so a hazard added here cannot be left batchable.
-const GFM_HAZARD_LOW: u64 = (1 << b'*') | (1 << b'<');
+const GFM_HAZARD_LOW: u64 = (1 << b'*') | (1 << b'<') | (1 << b'&');
 const GFM_HAZARD_HIGH: u64 = (1 << (b'[' - HAZARD_MASK_SPLIT))
   | (1 << (b'\\' - HAZARD_MASK_SPLIT))
   | (1 << (b'_' - HAZARD_MASK_SPLIT))
@@ -202,7 +202,7 @@ const GFM_BYTE_FLAGS: [u8; 256] = {
   }
   t[b'\n' as usize] |= GFM_NEWLINE_BIT;
   t[b'\r' as usize] |= GFM_NEWLINE_BIT;
-  let active = b"\\*_~`[]|><\n\r#-+=.) 0123456789";
+  let active = b"\\*_~`[]|><&\n\r#-+=.) 0123456789";
   let mut i = 0usize;
   while i < active.len() {
     t[active[i] as usize] |= GFM_TEXT_ACTIVE_BIT;
@@ -3039,6 +3039,9 @@ impl ConvertState {
         }
         if contains_sorted_heading_slug(&self.heading_slugs, fragment) {
           continue; // resolves to a heading, keep the link whole
+        }
+        if !output::can_unwrap_link_label(&self.buffer[bracket_start + 1..text_end]) {
+          continue;
         }
         removals.push((bracket_start, bracket_start + 1, link.bracket_closer));
         removals.push((text_end, link_end, link.text_closer));

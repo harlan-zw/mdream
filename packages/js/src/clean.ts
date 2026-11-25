@@ -26,6 +26,22 @@ const ALL_RULES: CleanOptions = {
   emptyLinkText: true,
 }
 
+/** Keep wrappers that separate code delimiters or keep HTML inline. */
+function canUnwrapLinkLabel(text: string, start = 0, end = text.length): boolean {
+  if (text.charCodeAt(end - 1) === 96)
+    return false
+  let index = start
+  const lead = /[ \t\r\n]+|>|(?:[-+*]|\d{1,9}[.)])(?=[ \t])/y
+  for (;;) {
+    lead.lastIndex = index
+    if (!lead.test(text)) {
+      const first = text.charCodeAt(index)
+      return index >= end || (first !== 60 && first !== 96)
+    }
+    index = lead.lastIndex
+  }
+}
+
 /**
  * Create cleanup rules for the `clean` option. Omit `rules` to enable all of them.
  * Import this only when you use it, so other bundles do not include the cleanup pass.
@@ -160,6 +176,8 @@ function startPass(rules: Cleaner, target: CleanTarget): CleanPass {
       // it into one entry moves no index another open element holds.
       const prefix = opener.slice(0, -1)
       const text = buffer.slice(bracket + 1).join('')
+      if (!canUnwrapLinkLabel(text))
+        return false
       const reference = closingCloser
         ? closerReference(prefix || buffer[bracket - 1] || '', text.charCodeAt(0), closingCloser)
         : ''
@@ -794,6 +812,7 @@ function applyFragments(markdown: string, headings: readonly string[], spans: re
     const close = closes[span]!
     const closeEnd = linkCloseEnd(markdown, close + 1)
     const broken = closeEnd !== -1 && !slugs.has(spanFragments[span]!)
+      && canUnwrapLinkLabel(markdown, open + 2, close)
     edits.set(open, broken ? 2 : 1)
     edits.set(close, broken ? closeEnd - close : 1)
     const closers = broken ? spanClosers[span]! : 0

@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.2.1
+
+Both Markdown engines preserve literal text and code across more formatting boundaries.
+Update the packages you use to 2.2.1 and refresh your lockfile.
+
+> [Codex](https://openai.com/codex/) drafted these release notes.
+
 ## 2.2.0
 
 mdream 2.2.0 adds an opt-in Markdown-only WASM build and fixes Markdown output in both engines.

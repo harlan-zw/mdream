@@ -33,11 +33,11 @@ describe('empty quotes opening list items', () => {
     ['<blockquote><ul><li><hr><blockquote></blockquote><blockquote></blockquote>tail</li></ul></blockquote>', '> - ***\n>\n>   \n>\n>   tail'],
     ['<ul><li><hr><blockquote><blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></blockquote></li></ul>', '- ***\n\n  \n  > > > q'],
     ['<ul><li><blockquote>x<hr></blockquote><blockquote><blockquote></blockquote><blockquote></blockquote><blockquote>q</blockquote></blockquote></li></ul>', '- \n  > x\n  >\n  > ---\n  > > q'],
-    ['<li><blockquote/><em><pre><blockquote>', '- *\n\n  ```\n  \n\n  ```\n\n  *'],
+    ['<li><blockquote/><em><pre><blockquote>', '-'],
     ['<ul><li>x<ul><li><blockquote><br></blockquote></li></ul><p>y</p></li></ul>', '- x\n\n  - \n  \n\n  y'],
-    ['<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>', '- *\n\n  ```\n  \n\n  ```\n\n  *'],
-    ['<ul><li><blockquote></blockquote><b><pre><code>x</code></pre></b></li></ul>', '- **\n\n  ```\n  x\n  ```\n\n  **'],
-    ['<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>', '- *\n\n  ```\n  \n\n  ### h\n  ```\n\n  *'],
+    ['<ul><li><blockquote></blockquote><em><pre><blockquote></blockquote></pre></em></li></ul>', '-'],
+    ['<ul><li><blockquote></blockquote><b><pre><code>x</code></pre></b></li></ul>', '- **`x`**'],
+    ['<ul><li><blockquote></blockquote><em><pre><i><code>&#10;</code></i><h3>h</h3></pre></em></li></ul>', '- *`h`*'],
     ['<ul><li>x<ul><li><blockquote></blockquote></li></ul><p>y</p></li></ul>', '- x\n\n  - \n\n  y'],
   ])('preserves parent boundaries and fence content: %s', async (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)

@@ -8,7 +8,7 @@ const cases = [
   ['<p>a</ x', 'a'],
   ['<p>a <?x?>b</p>', 'a b'],
   ['<p>a<?x?> b</p>', 'a b'],
-  ['<p>a&amp;<?x?>b</p>', 'a&b'],
+  ['<p>a&amp;<?x?>b</p>', 'a\\&b'],
   ['<code>a<?x?>b</code>', '`ab`'],
   ['<pre>a<!x>b</pre>', '```\nab\n```'],
   ['<textarea>a</ x>b</textarea>', 'a\\</ x>b'],

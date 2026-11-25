@@ -36,7 +36,7 @@ describe.each(engines)('malformed html %s', ({ name: _name, engine }) => {
       ['<p>5 <10 and 10> 5</p>', '5 <10 and 10> 5'],
       ['<p>a <1b>c</p>', 'a <1b>c'],
       ['<p>a <-b>c</p>', 'a <-b>c'],
-      ['<p>a <<em>b</em>c</p>', 'a <*b*c'],
+      ['<p>a <<em>b</em>c</p>', 'a \\<*b*c'],
       ['<3', '<3'],
       ['<3<div', '<3'],
       ['<>', '<>'],

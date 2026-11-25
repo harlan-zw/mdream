@@ -7,31 +7,31 @@ import { engines, htmlToMarkdown, resolveEngine, streamHtmlToMarkdown } from '..
 const RULES_AROUND_DEFERRED_FENCE: [string, string][] = [
   [
     '<ul><li><a href="/w" title="W"><pre><hr></pre></a></li></ul>',
-    '- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)',
+    '- [W](/w)',
   ],
   [
     '<li><a href="/w" title="W"><pre><hr>',
-    '- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)',
+    '- [W](/w)',
   ],
   [
     '<ul><li><a href="/w" aria-label="W"><pre><hr></pre></a></li></ul>',
-    '- [\n\n  ```\n  \n\n  ---\n  ```\n\n  \n\n  W](/w)',
+    '- [W](/w)',
   ],
   [
     '<ol><li><a href="/w" title="W"><pre><hr></pre></a></li></ol>',
-    '1. [\n\n   ```\n   \n\n   ---\n   ```\n\n   \n\n   W](/w)',
+    '1. [W](/w)',
   ],
   [
     '<ul><li><blockquote><a href="/w" title="W"><pre><hr></pre></a></blockquote></li></ul>',
-    '- \n  > [\n  >\n  > ```\n  >\n  >\n  > ---\n  > ```\n  >\n  >\n  >\n  > W](/w)',
+    '- \n  > [W](/w)',
   ],
   [
     '<blockquote><ul><li><a href="/w" title="W"><pre><hr></pre></a></li></ul></blockquote>',
-    '> - [\n>\n>   ```\n>   \n>\n>   ---\n>   ```\n>\n>   \n>\n>   W](/w)',
+    '> - [W](/w)',
   ],
   [
     '<ul><li><a href="/w"><pre><hr></pre></a></li></ul>',
-    '- [\n\n  ```\n  \n\n  ---\n  ```\n\n  ](/w)',
+    '- [](/w)',
   ],
   [
     '<ul><li><pre><hr></pre>t</li></ul>',

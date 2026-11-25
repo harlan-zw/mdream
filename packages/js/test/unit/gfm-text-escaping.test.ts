@@ -80,7 +80,7 @@ describe('gfm text escaping', () => {
 
   it('handles terminal trigger characters safely', () => {
     expect(htmlToMarkdown('<p>&lt;</p><p>[</p><p>1</p>'))
-      .toBe('<\n\n\\[\n\n1')
+      .toBe('\\<\n\n\\[\n\n1')
   })
 
   it('keeps generated markers and code content verbatim', () => {
@@ -119,13 +119,12 @@ describe('gfm text escaping', () => {
   })
 
   it.each<[string, string, string, Partial<MdreamOptions>]>([
-    ['a <pre> glued to inline text', '<span>a<pre><h2>x #</h2></pre></span>', 'a```\n\n## x \\#\n\n\n```', {}],
-    ['a fence closed onto inline text', '<span><pre>x</pre>b</span><pre><h2>x #</h2></pre>', '```\nx\n``` b\n\n```\n\n## x \\#\n\n\n```', {}],
-    ['a fence opened after emphasis', '<em>a<pre>x</pre></em><pre><h2>x #</h2></pre>', '*a```\nx\n```*\n\n```\n\n## x \\#\n\n\n```', {}],
+    ['a fence after inline text', '<span>a<pre><h2>x #</h2></pre></span>', 'a\n\n```\n\n## x #\n\n\n```', {}],
+    ['inline text between fences', '<span><pre>x</pre>b</span><pre><h2>x #</h2></pre>', '```\nx\n```\n\nb\n\n```\n\n## x #\n\n\n```', {}],
+    ['preformatted text inside emphasis', '<em>a<pre>x</pre></em><pre><h2>x #</h2></pre>', '*a`x`*\n\n```\n\n## x #\n\n\n```', {}],
     ['a literal tag override', '<pre><h2>x #</h2></pre>', '```\n\n## x \\#\n\n\n```', { tagOverrides: { sup: { enter: '^', exit: '^' } } }],
     ['a literal <pre> override', '<pre><h2>x #</h2></pre>', '## x \\#', { tagOverrides: { pre: { enter: '', exit: '' } } }],
-  ])('keeps the closing-hash escape after %s', async (_, html, expected, options) => {
-    // A parser may not read these fences as written, which can leave the heading a heading.
+  ])('escapes closing hashes only when they can be read as Markdown after %s', async (_, html, expected, options) => {
     expect(htmlToMarkdown(html, options)).toBe(expected)
     for (let chunkSize = 1; chunkSize <= html.length; chunkSize++)
       expect(await streamConvert(html, chunkSize, options), `chunk size ${chunkSize}`).toBe(expected)
@@ -141,7 +140,7 @@ describe('gfm text escaping', () => {
     ['<pre><code><ul><li><h4>x # </h4><pre><b>z</b></pre></li></ul></code></pre>', '```\n- #### x # z\n```'],
     ['<pre><code><h4>&nbsp;x y&nbsp; </h4><pre><span>z</span></pre></code></pre>', '```\n####  x y  z\n```'],
     ['<pre><code>x y <pre><code>z</code></pre></code></pre>', '```\nx y z\n```'],
-    ['<span>a <pre>x</pre></span>', 'a```\nx\n```'],
+    ['<span>a <pre>x</pre></span>', 'a\n\n```\nx\n```'],
   ])('keeps the whitespace before a nested <pre> in the code for %s', async (html, expected) => {
     // A <pre> in another one enters inside that one's code block; outside the
     // code, the space before a <pre> still goes.
@@ -251,10 +250,10 @@ describe('gfm text escaping', () => {
 })
 
 describe('heading fence reliability', () => {
-  it.each(['', ' ', '\n', '<code></code>'])('marks inline pre only when emitting a fence: %j', async (body) => {
+  it.each(['', ' ', '\n', '<code></code>'])('keeps later fences valid after an empty pre: %j', async (body) => {
     const html = `<span><pre>${body}</pre></span><pre><h2>x #</h2></pre>`
     const expected = htmlToMarkdown(html)
-    expect(expected).toContain(body.includes('code') ? '## x \\#' : '## x #')
+    expect(expected).toContain('## x #')
     for (let size = 1; size <= html.length; size++)
       expect(await streamConvert(html, size)).toBe(expected)
   })
