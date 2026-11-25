@@ -1,5 +1,5 @@
 import { playwright } from '@vitest/browser-playwright'
-import { defineConfig, defineProject } from 'vitest/config'
+import { configDefaults, defineConfig, defineProject } from 'vitest/config'
 
 export default defineConfig({
   test: {
@@ -35,7 +35,7 @@ export default defineConfig({
             screenshotFailures: true,
           },
           include: ['**/*.browser.test.ts'],
-          exclude: ['**/browser-markdown.browser.test.ts'],
+          exclude: [...configDefaults.exclude, '**/browser-markdown.browser.test.ts'],
         },
       }),
       defineProject({
