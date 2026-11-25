@@ -5,11 +5,216 @@ use mdream::types::{
   IsolateMainConfig, OutputFormat, PluginConfig, TagOverrideConfig,
 };
 use mdream::{
-  MarkdownStreamProcessor, html_to_html, html_to_markdown, html_to_markdown_result, html_to_text,
+  MarkdownStreamProcessor, html_to_format_result, html_to_html, html_to_markdown,
+  html_to_markdown_result, html_to_text,
 };
 
 fn convert(html: &str) -> String {
   html_to_markdown(html, HtmlToMarkdownOptions::default())
+}
+
+#[test]
+fn base_fragment_source_attributes() {
+  let html = r##"<base href="https://example.com/docs/"><a href="#install">Install</a><img src="#logo"><p>Keep</p>"##;
+  for format in [
+    OutputFormat::Markdown,
+    OutputFormat::Text,
+    OutputFormat::Html,
+  ] {
+    let options = HtmlToMarkdownOptions {
+      plugins: Some(PluginConfig {
+        filter: Some(FilterConfig::exclude(&[
+          "a[href^=\"#\"]",
+          "img[src^=\"#\"]",
+        ])),
+        ..Default::default()
+      }),
+      ..Default::default()
+    };
+    let expected = if format == OutputFormat::Html {
+      "<p>Keep</p>"
+    } else {
+      "Keep"
+    };
+    assert_eq!(
+      html_to_format_result(html, options.clone(), format).markdown,
+      expected
+    );
+    let mut processor = MarkdownStreamProcessor::new_with_format(options, format);
+    let mut actual = String::new();
+    for character in html.chars() {
+      actual.push_str(&processor.process_chunk(&character.to_string()));
+    }
+    actual.push_str(&processor.finish());
+    assert_eq!(actual, expected);
+  }
+  for selector in ["a[href^=\"#\"]", "a", "img[src^=\"#\"]"] {
+    let result = html_to_markdown_result(
+      html,
+      HtmlToMarkdownOptions {
+        plugins: Some(PluginConfig {
+          extraction: Some(ExtractionConfig::new(&[selector])),
+          ..Default::default()
+        }),
+        ..Default::default()
+      },
+    );
+    assert_eq!(
+      result.markdown,
+      "[Install](https://example.com/docs/#install)![](https://example.com/docs/#logo)\n\nKeep"
+    );
+    let extracted = result.extracted.unwrap();
+    let (name, value) = if selector.starts_with("img") {
+      ("src", "#logo")
+    } else {
+      ("href", "#install")
+    };
+    assert_eq!(extracted[0].attributes, vec![(name.into(), value.into())]);
+  }
+}
+
+#[test]
+fn base_fragment_clean_and_raw_anchors() {
+  let html = r##"<base href="https://example.com/docs/"><h2><a href="#install">Install</a></h2><a href="#">Top</a><a href="#install">https://example.com/docs/#install</a>"##;
+  assert_eq!(
+    html_to_markdown(
+      html,
+      HtmlToMarkdownOptions {
+        clean: Some(CleanConfig::all()),
+        ..Default::default()
+      }
+    ),
+    "## [Install](https://example.com/docs/#install)\n\n[Top](https://example.com/docs/#) https://example.com/docs/#install"
+  );
+  assert_eq!(
+    convert(
+      r##"<base href="https://example.com/docs/"><details><a href="#install">Install</a></details>"##
+    ),
+    r#"<details><a href="https://example.com/docs/#install">Install</a></details>"#
+  );
+}
+
+#[test]
+fn base_fragment_cleanup_in_the_same_document() {
+  let expected = "## Install\n\nTop Missing [Jump](#install)";
+  for (base, origin) in [
+    ("?page=1#other", "https://example.com/docs/?page=1#old"),
+    (
+      "https://EXAMPLE.com:443/docs/?page=1#other",
+      "https://example.com/docs/?page=1#old",
+    ),
+    (
+      "https://example.com?page=1#other",
+      "https://example.com/?page=1#old",
+    ),
+  ] {
+    let html = format!(
+      r##"<base href="{base}"><h2><a href="#install">Install</a></h2><a href="#">Top</a> <a href="#missing">Missing</a> <a href="#install">Jump</a>"##
+    );
+    let options = HtmlToMarkdownOptions {
+      origin: Some(origin.into()),
+      clean: Some(CleanConfig::all()),
+      ..Default::default()
+    };
+    assert_eq!(html_to_markdown(&html, options.clone()), expected);
+    let mut processor = MarkdownStreamProcessor::new(options);
+    let mut output = String::new();
+    for character in html.chars() {
+      output.push_str(&processor.process_chunk(&character.to_string()));
+    }
+    output.push_str(&processor.finish());
+    assert_eq!(output, expected);
+  }
+}
+
+#[test]
+fn base_fragment_cleans_tracking_parameters_from_the_base_query_only() {
+  let html = r##"<base href="https://cdn.example/docs/?utm_source=x&amp;q=1#old"><a href="#part?utm_source=y">Jump</a>"##;
+  assert_eq!(
+    html_to_markdown(
+      html,
+      HtmlToMarkdownOptions {
+        clean: Some(CleanConfig::all()),
+        ..Default::default()
+      }
+    ),
+    "[Jump](https://cdn.example/docs/?q=1#part?utm_source=y)"
+  );
+}
+
+#[test]
+fn base_fragment_links() {
+  let html =
+    r##"<base href="https://cdn.example/docs/?q=1#old"><a href="#">Top</a><img src="#logo">"##;
+  assert_eq!(
+    convert(html),
+    "[Top](https://cdn.example/docs/?q=1#)![](https://cdn.example/docs/?q=1#logo)"
+  );
+  assert_eq!(
+    html_to_html(html, HtmlToMarkdownOptions::default()),
+    r#"<a href="https://cdn.example/docs/?q=1#">Top</a><img src="https://cdn.example/docs/?q=1#logo" alt="">"#
+  );
+  assert_eq!(
+    html_to_text(html, HtmlToMarkdownOptions::default()),
+    "Top https://cdn.example/docs/?q=1#logo"
+  );
+  for (base, href) in [
+    (
+      "https://cdn.example/docs/",
+      "https://cdn.example/docs/#install",
+    ),
+    (
+      "https://cdn.example/docs/page?q=1#old",
+      "https://cdn.example/docs/page?q=1#install",
+    ),
+    ("/docs/", "https://example.com/docs/#install"),
+    (
+      "https://cdn.example:8443/docs/",
+      "https://cdn.example:8443/docs/#install",
+    ),
+    (
+      "https://[::1]:8443/docs/",
+      "https://[::1]:8443/docs/#install",
+    ),
+    ("https://[::1]/docs/", "https://[::1]/docs/#install"),
+    (
+      "https://[::ffff:192.0.2.1]/docs/",
+      "https://[::ffff:192.0.2.1]/docs/#install",
+    ),
+    ("https://[bad:host]/docs/", "#install"),
+    ("https://[1::2::3]/docs/", "#install"),
+    (
+      "https://cdn.example/do&#10;cs/",
+      "https://cdn.example/docs/#install",
+    ),
+    ("https://cdn.example:invalid/docs/", "#install"),
+    ("https://cdn.example:65536/docs/", "#install"),
+    ("javascript:alert(1)", "#install"),
+    ("", "#install"),
+  ] {
+    let html = format!(r#"<base href="{base}"><a href=" &#35;install ">Install</a>"#);
+    let options = HtmlToMarkdownOptions {
+      origin: Some("https://example.com/article".into()),
+      ..Default::default()
+    };
+    let expected = format!("[Install]({href})");
+    assert_eq!(html_to_markdown(&html, options.clone()), expected);
+    assert_eq!(
+      html_to_html(&html, options.clone()),
+      format!(r#"<a href="{href}">Install</a>"#)
+    );
+    let mut processor = MarkdownStreamProcessor::new(options.clone());
+    let mut actual = String::new();
+    for character in html.chars() {
+      actual.push_str(&processor.process_chunk(&character.to_string()));
+    }
+    actual.push_str(&processor.finish());
+    assert_eq!(actual, expected);
+    assert_eq!(
+      html_to_markdown(r##"<a href="#install">Install</a>"##, options),
+      "[Install](#install)"
+    );
+  }
 }
 
 #[test]
@@ -20,6 +225,7 @@ fn inline_code_trailing_backticks() {
       ("a`\n", "x `` a` `` y"),
       ("a``  ", "x ``` a`` ``` y"),
       ("a`\t\r\n", "x `` a` `` y"),
+      ("a`\r\n`b", "x ``a` `b`` y"),
       ("`a` ", "x `` `a` `` y"),
       ("a`<br>", "x ``a` `` y"),
       ("a`&nbsp;", "x ``a`\u{a0}`` y"),

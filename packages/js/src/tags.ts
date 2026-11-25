@@ -124,7 +124,7 @@ import {
   TAG_WBR,
   TAG_XMP,
 } from './const'
-import { resolveUrl, safeAnchorOutput } from './url'
+import { hasDocumentBase, resolveOutputUrl, safeAnchorOutput } from './url'
 import { blockOpenPrefix, getLanguageFromAttributes, isDataUrl, isEmptyLinkHref, isInsideHeading, isInsideTableCell, lastOutputChar, listMarkerLineStart, markRenderedChildContent, noteBufferRewrite, orderedItemNumber, parseUnsignedInteger, pendingMarkerIndent } from './utils'
 
 function serializeMarkdownDestination(destination: string): string {
@@ -141,7 +141,7 @@ function stripsEmptyLink(state: HandlerContext['state'], href: string): boolean 
   const clean = state.options?.clean
   if (!(clean === true || (typeof clean === 'object' && clean.emptyLinks)))
     return false
-  return isEmptyLinkHref(href)
+  return isEmptyLinkHref(href, !hasDocumentBase(state.options))
 }
 
 /**
@@ -886,7 +886,7 @@ export const tagHandlers: Record<number, TagHandler> = {
         return ''
       if (isInsideRawHtmlBlock(state.depthMap!) && !node.tagHandler?.literalEnter)
         return safeAnchorOutput(node, state.options, false, true)
-      const href = resolveUrl(node.attributes.href, state.options?.origin, state.options?.clean)
+      const href = resolveOutputUrl(node.attributes.href, state.options)
       let title = node.attributes?.title
       // A real code span preserves the cached trailing space, and Rust
       // compares what its buffer holds. Only a run still whole there and not
@@ -959,7 +959,7 @@ export const tagHandlers: Record<number, TagHandler> = {
       const alt = node.attributes?.alt || ''
       const rawSrc = node.attributes?.src || ''
       // A data URL is unreadable and can be megabytes of base64; keep only the alt.
-      const src = isDataUrl(rawSrc) ? '' : resolveUrl(rawSrc, state.options?.origin, state.options?.clean)
+      const src = isDataUrl(rawSrc) ? '' : resolveOutputUrl(rawSrc, state.options)
       const clean = state.options?.clean
       const stripsEmptyImage = clean === true
         || (clean !== undefined && clean !== false && clean.emptyImages === true)

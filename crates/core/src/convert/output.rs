@@ -754,6 +754,27 @@ impl ConvertState {
     max
   }
 
+  #[cold]
+  #[inline(never)]
+  fn flatten_code_span(mut content: &str, mut line_end: usize) -> String {
+    let mut flattened = String::with_capacity(content.len());
+    loop {
+      flattened.push_str(&content[..line_end]);
+      flattened.push(' ');
+      let separator = if content.as_bytes()[line_end..].starts_with(b"\r\n") {
+        2
+      } else {
+        1
+      };
+      content = &content[line_end + separator..];
+      let Some(next) = crate::scan::find_line_end(content.as_bytes()) else {
+        flattened.push_str(content);
+        return flattened;
+      };
+      line_end = next;
+    }
+  }
+
   /// Append content retained behind the outermost inline-code delimiter. Tag
   /// output is atomic so a cap cannot leave half a Markdown marker; text may be
   /// cut at a UTF-8 boundary. Once an append cannot fit, later content is never
@@ -890,8 +911,8 @@ impl ConvertState {
     }
     // A line can begin a Markdown block before the backtick closes.
     let content = &self.buffer[span.content_start..];
-    if crate::scan::find_line_end(content.as_bytes()).is_some() {
-      let flattened = content.replace("\r\n", " ").replace(['\r', '\n'], " ");
+    if let Some(at) = crate::scan::find_line_end(content.as_bytes()) {
+      let flattened = Self::flatten_code_span(content, at);
       self.replace_code_span_content(span.content_start..self.buffer.len(), &flattened);
     }
     // A pipe splits the row even inside a code span; `\|` is GFM's escape and is
@@ -931,7 +952,14 @@ impl ConvertState {
     if max_run == 0 && !padded && self.buffer.as_bytes()[span.content_start - 1] == b'`' {
       return Cow::Borrowed("`");
     }
-    let delimiter = "`".repeat((max_run + 1).max(1));
+    // One literal backtick needs a two-tick delimiter. When no prefix was
+    // reserved with the opener, both delimiters can come from static strings.
+    if max_run == 1 && span.content_start == span.output_start + 1 {
+      let (open, close) = if padded { ("`` ", " ``") } else { ("``", "``") };
+      self.replace_code_span_content(span.output_start..span.content_start, open);
+      return Cow::Borrowed(close);
+    }
+    let delimiter = "`".repeat(max_run + 1);
     let mut opening = String::with_capacity(
       span.content_start - span.output_start + delimiter.len() + usize::from(padded),
     );
@@ -1026,6 +1054,21 @@ impl ConvertState {
       );
     }
     Some(delimiter)
+  }
+
+  #[cold]
+  #[inline(never)]
+  fn replace_code_fence_marker(exit: &str, delimiter: &str) -> Option<String> {
+    if delimiter == MARKDOWN_CODE_BLOCK {
+      return None;
+    }
+    let marker = MARKDOWN_CODE_BLOCK.as_bytes();
+    let at = crate::scan::find_bytes(exit.as_bytes(), marker)?;
+    let mut replaced = String::with_capacity(exit.len() - marker.len() + delimiter.len());
+    replaced.push_str(&exit[..at]);
+    replaced.push_str(delimiter);
+    replaced.push_str(&exit[at + marker.len()..]);
+    Some(replaced)
   }
 
   fn shift_fragment_links_after(&mut self, offset: usize, amount: isize) {
@@ -2075,9 +2118,9 @@ impl ConvertState {
     self.emit_enter_body(link, LI);
   }
 
-  /// Let native builds share the enter body instead of forcing a copy per variant.
-  /// On wasm32 both instances share this one copy and `li` is a runtime flag.
-  #[cfg_attr(not(target_arch = "wasm32"), inline)]
+  /// Inline native callers so list items specialize this body for `LI`.
+  /// Wasm shares a body with `li` as a runtime flag.
+  #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
   #[cfg_attr(target_arch = "wasm32", inline(never))]
   fn emit_enter_body(&mut self, link: bool, li: bool) {
     let stack_len = self.stack.len();
@@ -2146,7 +2189,7 @@ impl ConvertState {
     if link
       && self.clean_flags() & CLEAN_EMPTY_LINKS != 0
       && let Some(href) = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF)
-      && is_empty_link_href(href)
+      && is_empty_link_href(href, !self.redirects_fragments())
     {
       self.begin_link(self.buffer.len(), true, false);
       self.reset_empty_tentative_caption_frames();
@@ -2205,6 +2248,7 @@ impl ConvertState {
       if self.streaming {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = emitted_bracket
+          && !self.redirects_fragments()
           && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags() & CLEAN_FRAGMENTS != 0 && href.len() > 1)
@@ -2920,7 +2964,7 @@ impl ConvertState {
       if self.clean_flags() & CLEAN_EMPTY_LINKS != 0 {
         let node = &self.stack[self.stack.len() - 1];
         if let Some(href) = node.attributes.get_bit(ATTR_HREF)
-          && is_empty_link_href(href)
+          && is_empty_link_href(href, !self.redirects_fragments())
         {
           self.begin_link(self.buffer.len(), true, false);
           self.reset_empty_tentative_caption_frames();
@@ -3247,6 +3291,7 @@ impl ConvertState {
       if self.streaming || self.options.node_byte_limit() != 0 {
         let href = self.stack[stack_len - 1].attributes.get_bit(ATTR_HREF);
         self.link.pins_output = has_rewrite_anchor
+          && !self.redirects_fragments()
           && href.map(trim_url).is_some_and(|href| {
             href.starts_with('#')
               && ((self.clean_flags() & CLEAN_FRAGMENTS != 0 && href.len() > 1)
@@ -3368,6 +3413,7 @@ impl ConvertState {
       if self.clean_flags() & CLEAN_SELF_LINK_HEADINGS != 0 {
         let in_heading = self.in_heading();
         if in_heading
+          && !self.redirects_fragments()
           && let Some(href) = attributes.get_bit(ATTR_HREF)
           && trim_url(href).starts_with('#')
           && text_len > 0
@@ -3380,10 +3426,11 @@ impl ConvertState {
       // redundantLinks: [url](url) → url
       if self.clean_flags() & CLEAN_REDUNDANT_LINKS != 0
         && let Some(href) = attributes.get_bit(ATTR_HREF)
-        && let resolved = resolved_href.insert(resolve_url(
+        && let resolved = resolved_href.insert(resolve_output_url(
           href,
           self.options.origin.as_deref(),
           self.clean_urls(),
+          self.redirects_fragments(),
         ))
         && link_text == resolved.as_ref()
         && text_len > 0
@@ -3529,8 +3576,14 @@ impl ConvertState {
     let link_text_end = self.buffer.len();
     if let Some(href) = attributes.get_bit(ATTR_HREF) {
       let capped_code_span = self.options.node_byte_limit() != 0 && !self.code_spans.is_empty();
-      let resolved = resolved_href
-        .unwrap_or_else(|| resolve_url(href, self.options.origin.as_deref(), self.clean_urls()));
+      let resolved = resolved_href.unwrap_or_else(|| {
+        resolve_output_url(
+          href,
+          self.options.origin.as_deref(),
+          self.clean_urls(),
+          self.redirects_fragments(),
+        )
+      });
       let resolved = resolved.as_ref();
       let mut title = attributes.get_bit(ATTR_TITLE).unwrap_or("");
       if !title.is_empty() && self.last_content_cache_len > 0 && !self.cache_follows_separator {
@@ -4028,12 +4081,9 @@ impl ConvertState {
       && closes_own_pre_fence
       && let Some(delimiter) = self.finalize_code_fence()
       && let Some(exit) = output.as_deref()
+      && let Some(replaced) = Self::replace_code_fence_marker(exit, &delimiter)
     {
-      output = Some(Cow::Owned(exit.replacen(
-        MARKDOWN_CODE_BLOCK,
-        &delimiter,
-        1,
-      )));
+      output = Some(Cow::Owned(replaced));
     }
 
     if !plain_text!(self)
@@ -7280,7 +7330,10 @@ impl ConvertState {
             node.tag_id == Some(TAG_A)
               && node.attributes.get_bit(ATTR_HREF).map_or_else(
                 || self.wrapper_emits_inline_markdown(node),
-                |href| self.clean_flags() & CLEAN_EMPTY_LINKS == 0 || !is_empty_link_href(href),
+                |href| {
+                  self.clean_flags() & CLEAN_EMPTY_LINKS == 0
+                    || !is_empty_link_href(href, !self.redirects_fragments())
+                },
               )
           })))
   }
@@ -7647,7 +7700,12 @@ impl ConvertState {
           .get_bit(ATTR_SRC)
           .filter(|src| !is_data_url(src))
           .unwrap_or("");
-        let resolved_src = resolve_url(src, self.options.origin.as_deref(), self.clean_urls());
+        let resolved_src = resolve_output_url(
+          src,
+          self.options.origin.as_deref(),
+          self.clean_urls(),
+          self.redirects_fragments(),
+        );
         {
           let title = node.attributes.get_bit(ATTR_TITLE);
           let mut s = String::with_capacity(
@@ -7975,7 +8033,13 @@ impl ConvertState {
           .get_bit(ATTR_SRC)
           .filter(|src| !src.is_empty() && !is_data_url(src))?;
         Some(Cow::Owned(
-          resolve_url(src, self.options.origin.as_deref(), self.clean_urls()).into_owned(),
+          resolve_output_url(
+            src,
+            self.options.origin.as_deref(),
+            self.clean_urls(),
+            self.redirects_fragments(),
+          )
+          .into_owned(),
         ))
       }
       TAG_Q => Some(Cow::Borrowed("\"")),

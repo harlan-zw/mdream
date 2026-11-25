@@ -45,7 +45,7 @@ import {
   TEXT_NODE,
 } from './const'
 import { isOpenVoidTag } from './parser-tags'
-import { resolveUrl } from './url'
+import { resolveOutputUrl } from './url'
 import { figcaptionOwnsBlockSpacing, isBlockChildOfOpenVoid, isDataUrl, isInsideHeading, isInsideTableCell, lastOutputChar, markRenderedChildContent, needsSpacing, trimOutputStart, trimTextAtLineStart } from './utils'
 
 interface TextState extends MdreamRuntimeState {
@@ -302,7 +302,7 @@ function elementOutput(node: ElementNode, eventType: number, state: TextState): 
       const output = alt !== undefined
         ? alt || undefined
         : node.attributes.title
-          || resolveUrl(isDataUrl(src) ? '' : src, state.options.origin, state.options.clean)
+          || resolveOutputUrl(isDataUrl(src) ? '' : src, state.options)
           || undefined
       if (output && hasVisibleContent(output)) {
         markRenderedChildContent(node)

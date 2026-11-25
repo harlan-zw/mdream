@@ -16,7 +16,7 @@ use crate::types::{
 #[cfg(feature = "html")]
 use crate::url::slugify_heading;
 use crate::url::{
-  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_url,
+  is_autolink_uri, is_data_url, is_empty_link_href, resolve_base_href, resolve_output_url,
   slugify_markdown_heading, trim_url,
 };
 use std::borrow::Cow;
@@ -921,6 +921,13 @@ fn exclude_tag_table(selectors: &[(String, ParsedSelectorList)]) -> Option<u128>
   Some(table)
 }
 
+#[derive(PartialEq)]
+enum BaseHref {
+  Unseen,
+  Seen,
+  RedirectsFragments,
+}
+
 /// Unified single-pass HTML-to-Markdown converter.
 /// Merges parser state and markdown output state to eliminate callback overhead,
 /// duplicate state tracking, and enable full inlining of tag handler logic.
@@ -988,7 +995,7 @@ pub struct ConvertState {
   pending_tag: Option<PendingTagScan>,
   /// Only the first `<base href>` counts, even when it is not usable. A usable
   /// one replaces `options.origin` for every later URL.
-  base_href_seen: bool,
+  base_href: BaseHref,
   discard: Discard,
   script_text_buffer: String,
   pub(crate) stack: crate::types::NodeStack,
@@ -1428,6 +1435,11 @@ macro_rules! optional_state_accessors {
 }
 
 impl ConvertState {
+  #[inline]
+  fn redirects_fragments(&self) -> bool {
+    self.base_href == BaseHref::RedirectsFragments
+  }
+
   // Let the linker remove optional paths even when several entry points use
   // the same converter. The full build still reads the stored runtime values.
   optional_state_accessors!(
@@ -1538,7 +1550,7 @@ impl ConvertState {
       entity_buffer: String::new(),
       pending_start: None,
       pending_tag: None,
-      base_href_seen: false,
+      base_href: BaseHref::Unseen,
       discard: Discard::No,
       script_text_buffer: String::new(),
       stack: crate::types::NodeStack::with_capacity(TYPICAL_NESTING_DEPTH),

@@ -97,11 +97,11 @@ fn trim_url_ends(href: &str) -> &str {
 /// Mirrors the URL parser's preprocessing, so `" javascript:"` and the decoded
 /// form of `java&#9;script:` are recognised. An interior space is *not* removed
 /// by the URL parser, so `java script:x` stays an ordinary relative URL.
-pub(crate) fn is_empty_link_href(href: &str) -> bool {
+pub(crate) fn is_empty_link_href(href: &str, local_fragments: bool) -> bool {
   let rest = trim_url(href).as_bytes();
 
   match rest.first().map(u8::to_ascii_lowercase) {
-    Some(b'#') => rest.len() == 1,
+    Some(b'#') => local_fragments && rest.len() == 1,
     Some(b'j') => scheme_matches(rest, b"javascript:"),
     Some(b'd') => scheme_matches(rest, b"data:"),
     Some(b'v') => scheme_matches(rest, b"vbscript:"),
@@ -750,25 +750,167 @@ fn join_origin_prefix(origin: &str, url: &str) -> String {
   resolved
 }
 
-/// Resolve a `<base href>` against `origin`. Only an `http(s)://host` result of at
-/// most [`MAX_BASE_HREF_LEN`] bytes is usable as a base; anything else is `None`,
-/// so resolution stays on `origin`.
-pub(crate) fn resolve_base_href(href: &str, origin: Option<&str>) -> Option<String> {
-  let resolved = resolve_url(href, origin, false);
+enum HttpHost<'a> {
+  Name(&'a str),
+  Ip([u16; 8]),
+}
+
+fn ipv6_groups(address: &str, groups: &mut [u16], allow_ipv4: bool) -> Option<usize> {
+  let mut used = 0;
+  if address.is_empty() {
+    return Some(used);
+  }
+  let mut parts = address.split(':').peekable();
+  while let Some(group) = parts.next() {
+    if group.contains('.') {
+      if !allow_ipv4 || parts.peek().is_some() {
+        return None;
+      }
+      let mut octets = group.split('.');
+      for pair in groups.get_mut(used..used + 2)? {
+        let mut value = 0;
+        for _ in 0..2 {
+          let digits = octets.next()?;
+          if !digits.as_bytes().first()?.is_ascii_digit()
+            || (digits.len() > 1 && digits.starts_with('0'))
+          {
+            return None;
+          }
+          value = (value << 8) | u16::from(digits.parse::<u8>().ok()?);
+        }
+        *pair = value;
+      }
+      if octets.next().is_some() {
+        return None;
+      }
+      used += 2;
+    } else {
+      if group.len() > 4 || !group.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+      }
+      *groups.get_mut(used)? = u16::from_str_radix(group, 16).ok()?;
+      used += 1;
+    }
+  }
+  Some(used)
+}
+
+fn ipv6_address(address: &str) -> Option<[u16; 8]> {
+  let mut groups = [0; 8];
+  if let Some(at) = crate::scan::find_bytes(address.as_bytes(), b"::") {
+    let (head, tail) = (&address[..at], &address[at + 2..]);
+    let head_len = ipv6_groups(head, &mut groups, false)?;
+    let tail_len = ipv6_groups(tail, groups.get_mut(head_len..)?, true)?;
+    if head_len + tail_len >= groups.len() {
+      return None;
+    }
+    let tail_start = 8 - tail_len;
+    groups.copy_within(head_len..head_len + tail_len, tail_start);
+    groups[head_len..tail_start].fill(0);
+  } else if ipv6_groups(address, &mut groups, true)? != groups.len() {
+    return None;
+  }
+  Some(groups)
+}
+
+struct HttpDocument<'a> {
+  default_port: u16,
+  port: u16,
+  userinfo: &'a str,
+  host: HttpHost<'a>,
+  path_query: &'a str,
+}
+
+impl<'a> HttpDocument<'a> {
+  fn parse(url: &'a str) -> Option<Self> {
+    let at = crate::scan::find_bytes(url.as_bytes(), b"://")?;
+    let (scheme, rest) = (&url[..at], &url[at + 3..]);
+    let default_port = if scheme.eq_ignore_ascii_case("https") {
+      443
+    } else if scheme.eq_ignore_ascii_case("http") {
+      80
+    } else {
+      return None;
+    };
+    let (authority, path_query) = rest.split_at(rest.find(['/', '?']).unwrap_or(rest.len()));
+    let (userinfo, host_port) = authority.rsplit_once('@').unwrap_or(("", authority));
+    let (host, digits) = if let Some(address) = host_port.strip_prefix('[') {
+      let (address, suffix) = address.split_once(']')?;
+      let digits = if suffix.is_empty() {
+        ""
+      } else {
+        suffix.strip_prefix(':')?
+      };
+      (HttpHost::Ip(ipv6_address(address)?), digits)
+    } else {
+      let (host, digits) = host_port.split_once(':').unwrap_or((host_port, ""));
+      if host.is_empty()
+        || host
+          .bytes()
+          .any(|byte| byte <= b' ' || matches!(byte, b'\\' | b'[' | b']'))
+      {
+        return None;
+      }
+      (HttpHost::Name(host), digits)
+    };
+    let port = if digits.is_empty() {
+      default_port
+    } else if digits.as_bytes()[0].is_ascii_digit() {
+      digits.parse().ok()?
+    } else {
+      return None;
+    };
+    Some(Self {
+      default_port,
+      port,
+      userinfo,
+      host,
+      // The authority ends at a slash or query. An absent path is the root.
+      path_query: path_query.strip_prefix('/').unwrap_or(path_query),
+    })
+  }
+
+  fn matches(&self, other: &Self) -> bool {
+    self.default_port == other.default_port
+      && self.port == other.port
+      && self.userinfo == other.userinfo
+      && self.path_query == other.path_query
+      && match (&self.host, &other.host) {
+        (HttpHost::Name(left), HttpHost::Name(right)) => left.eq_ignore_ascii_case(right),
+        (HttpHost::Ip(left), HttpHost::Ip(right)) => left == right,
+        _ => false,
+      }
+  }
+}
+
+fn without_fragment(url: &str) -> &str {
+  url.split_once('#').map_or(url, |(document, _)| document)
+}
+
+/// Return the adopted HTTP(S) document URL and whether it redirects fragments.
+pub(crate) fn resolve_base_href(
+  href: &str,
+  origin: Option<&str>,
+  clean: bool,
+) -> Option<(String, bool)> {
+  let resolved = resolve_output_url(href, origin, false, false);
   if resolved.len() > MAX_BASE_HREF_LEN {
     return None;
   }
-  let root = BaseUrl::split(&resolved)?.root;
-  let separator = crate::scan::find_bytes(root.as_bytes(), b"://")?;
-  let (scheme, authority) = (&root[..separator], &root[separator + 3..]);
-  // The host follows any userinfo and precedes any port; an empty host is no origin.
-  let host = authority
-    .rsplit_once('@')
-    .map_or(authority, |(_, host)| host);
-  let host = host.split_once(':').map_or(host, |(host, _)| host);
-  let usable = (scheme.eq_ignore_ascii_case("http") || scheme.eq_ignore_ascii_case("https"))
-    && !host.is_empty();
-  usable.then(|| resolved.into_owned())
+  let mut base = resolved.into_owned();
+  base.truncate(without_fragment(&base).len());
+  base.retain(|character| !matches!(character, '\t' | '\n' | '\r'));
+  let document = HttpDocument::parse(&base)?;
+  let same_document = origin.map(without_fragment).is_some_and(|origin| {
+    base == origin || HttpDocument::parse(origin).is_some_and(|origin| document.matches(&origin))
+  });
+  if clean
+    && !same_document
+    && let Cow::Owned(cleaned) = strip_tracking_params(&base)
+  {
+    base = cleaned;
+  }
+  Some((base, !same_document))
 }
 
 #[inline]
@@ -780,11 +922,22 @@ fn cleaned(resolved: String, needs_clean: bool) -> Cow<'static, str> {
   })
 }
 
-#[inline]
-pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -> Cow<'a, str> {
+#[inline(never)]
+pub(crate) fn resolve_output_url<'a>(
+  url: &'a str,
+  origin: Option<&str>,
+  clean: bool,
+  resolve_fragments: bool,
+) -> Cow<'a, str> {
   // Read it as the URL parser and `is_safe_html_url` do: padding never makes it relative.
   let url = trim_url(url);
-  if url.is_empty() || url.starts_with('#') {
+  if url.starts_with('#') {
+    if resolve_fragments && let Some(base) = origin {
+      return resolve_document_fragment(base, url);
+    }
+    return Cow::Borrowed(url);
+  }
+  if url.is_empty() {
     return Cow::Borrowed(url);
   }
 
@@ -819,9 +972,25 @@ pub(crate) fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -
   }
 }
 
+#[cold]
+fn resolve_document_fragment(base: &str, fragment: &str) -> Cow<'static, str> {
+  let mut url = String::with_capacity(base.len() + fragment.len());
+  url.push_str(base);
+  url.push_str(fragment);
+  Cow::Owned(url)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  fn resolve_url<'a>(url: &'a str, origin: Option<&str>, clean: bool) -> Cow<'a, str> {
+    resolve_output_url(url, origin, clean, false)
+  }
+
+  fn is_empty_link_href(href: &str) -> bool {
+    super::is_empty_link_href(href, true)
+  }
 
   #[test]
   fn empty_link_href_applies_url_preprocessing() {
