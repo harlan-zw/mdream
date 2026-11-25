@@ -14,7 +14,7 @@ it('discovers workspace browser tests without dependency copies', async () => {
     [markdownTest, markdownTest],
     [browserTest, dependencyTest],
     [browserTest, '.git/attribute-tokenization.browser.test.ts'],
-  ]
+  ] as const
 
   try {
     for (const [source, destination] of fixtures) {
