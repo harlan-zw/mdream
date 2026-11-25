@@ -153,9 +153,14 @@ function enterOutputEnd(node: ElementNode, state: HandlerContext['state']): numb
 }
 
 function serializeMarkdownTitle(title: string): string {
-  return /[\\"]/.test(title)
-    ? title.replace(/[\\"]/g, '\\$&')
-    : title
+  return title.replace(/[\r\n<\\"]/g, (character) => {
+    switch (character) {
+      case '\r': return '&#13;'
+      case '\n': return '&#10;'
+      case '<': return '&lt;'
+      default: return `\\${character}`
+    }
+  })
 }
 
 function serializeMarkdownResource(destination: string, title?: string): string {
@@ -191,7 +196,7 @@ export function renderBreak(state: HandlerContext['state']): string {
   // A literal newline would terminate a table row/ATX heading or collapse
   // inside a raw HTML block, so preserve the inline HTML there.
   const depthMap = state.depthMap!
-  if (!depthMap[TAG_PRE] && state.codeText?.kind === 'span')
+  if (state.codeText?.kind === 'span')
     return ' '
   if (isInsideTableCell(state) || isInsideRawHtmlBlock(depthMap) || isInsideHeading(depthMap)) {
     return '<br>'
@@ -403,10 +408,20 @@ function inPreCodeFence(state: HandlerContext['state']): boolean {
   return !!state.codeFence && !state.fencesUnreliable && !!state.depthMap?.[TAG_PRE]
 }
 
-function hasInlineAncestor(node: ElementNode): boolean {
+function preKeepsInlineDelimiters(node: ElementNode, state: HandlerContext['state']): boolean {
+  if (isInsideRawHtmlBlock(state.depthMap!))
+    return false
   for (let parent = node.parent; parent; parent = parent.parent) {
-    if (parent.tagHandler ? parent.tagHandler.isInline === true : parent.tagId === -1)
+    if (parent.tagId === TAG_A && !parent.tagHandler?.literalEnter
+      && parent.attributes?.href !== undefined && !stripsEmptyLink(state, parent.attributes.href)) {
       return true
+    }
+    const id = parent.tagId
+    if (!parent.tagHandler?.literalEnter
+      && (id === TAG_STRONG || id === TAG_B || id === TAG_DFN || id === TAG_EM || id === TAG_I
+        || id === TAG_DEL || id === TAG_S || id === TAG_STRIKE || id === TAG_CITE || id === TAG_FIGCAPTION)) {
+      return true
+    }
   }
   return false
 }
@@ -510,11 +525,27 @@ function cellExit(node: HandlerContext['node'], state: HandlerContext['state']):
   return span > 1 ? ' |'.repeat(span - 1) : undefined
 }
 
+function headingNeedsRawTags(node: ElementNode, state: HandlerContext['state']): boolean {
+  if (isInsideTableCell(state))
+    return true
+  if (!state.depthMap?.[TAG_A])
+    return false
+  if (isInsideRawHtmlBlock(state.depthMap))
+    return true
+  for (let parent = node.parent; parent; parent = parent.parent) {
+    if (parent.tagId === TAG_A && (parent.hasEnterOutput
+      || (parent.attributes?.href !== undefined && !stripsEmptyLink(state, parent.attributes.href)))) {
+      return true
+    }
+  }
+  return false
+}
+
 function handleHeading(depth: number): TagHandler {
   return {
     // A `#` prefix needs its own line, which a GFM row cannot give it.
     enter: ({ node, state }) => {
-      if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
+      if (headingNeedsRawTags(node, state)) {
         return `<h${depth}>`
       }
       const heading = `${'#'.repeat(depth)} `
@@ -532,8 +563,8 @@ function handleHeading(depth: number): TagHandler {
       }
       return heading
     },
-    exit: ({ state }) => {
-      if ((state.depthMap?.[TAG_A] || 0) > 0 || isInsideTableCell(state)) {
+    exit: ({ node, state }) => {
+      if (headingNeedsRawTags(node, state)) {
         return `</h${depth}>`
       }
       escapeTrailingHeadingHashes(state)
@@ -729,19 +760,22 @@ export const tagHandlers: Record<number, TagHandler> = {
       if (isInsideTableCell(state)) {
         return '<pre>'
       }
-      // Inside inline content the fences share lines with that content.
-      if (!state.preFenceOwnerDepth && !state.preFencePending)
-        state.preFenceInline = hasInlineAncestor(node)
+      if (state.codeText?.kind === 'span')
+        return undefined
+      if (!state.preFenceOwnerDepth && !state.preFencePending && preKeepsInlineDelimiters(node, state))
+        return inlineCodeEnter(state)
       return {
         _tag: 'PreEnter',
         language: getLanguageFromAttributes(node.attributes),
       }
     },
-    exit: ({ state }) => {
+    exit: ({ node, state }) => {
       if (isInsideTableCell(state)) {
         return '</pre>'
       }
-      return { _tag: 'PreExit' }
+      return preKeepsInlineDelimiters(node, state) && !state.preFenceOwnerDepth
+        ? CODE_SPAN_EXIT
+        : { _tag: 'PreExit' }
     },
   },
   [TAG_CODE]: {
@@ -752,6 +786,8 @@ export const tagHandlers: Record<number, TagHandler> = {
         if (isInsideTableCell(state)) {
           return '<code>'
         }
+        if (state.codeText?.kind === 'span')
+          return undefined
         // A fence is already open for this <pre>: the <pre> opened it (mixed text
         // + <code> children) or an earlier <code> sibling did.
         if (state.preFenceOwnerDepth) {
@@ -771,10 +807,11 @@ export const tagHandlers: Record<number, TagHandler> = {
             output: `${open}${MARKDOWN_CODE_BLOCK}${language}\n`,
           }
         }
+        const open = blockOpenPrefix(state, '') ?? ''
         return {
           _tag: 'CodeFenceEnter',
           language,
-          output: `${MARKDOWN_CODE_BLOCK}${language}\n`,
+          output: `${open}${MARKDOWN_CODE_BLOCK}${language}\n`,
         }
       }
       if (isInsideRawHtmlBlock(state.depthMap!)) {

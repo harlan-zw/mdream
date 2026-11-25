@@ -641,7 +641,7 @@ describe.each(engines)('block markers after a decoded bare CR $name', (engineCon
     ['<b>a&#13;<ul><li>===</li></ul></b>', '**a\r - \\===**'],
     ['<b>a&#13;<ul><li>&gt; x</li></ul></b>', '**a\r - \\> x**'],
     ['<b>a&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></b>', '**a\r - | x |\n  | --- |\n  | 1 |**'],
-    ['<b>a&#13;<ul><li><pre>x</pre></li></ul></b>', '**a\r - ```\n  x\n  ```\n\n  **'],
+    ['<b>a&#13;<ul><li><pre>x</pre></li></ul></b>', '**a\r - `x`**'],
     ['<small>a&#13;<ul><li># heading</li></ul></small>', 'a\r - \\# heading'],
     ['<small>a&#13;<ol><li># heading</li></ol></small>', 'a\r 1. \\# heading'],
     ['<small>aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&#13;<ul><li><table><tr><th>x</th></tr><tr><td>1</td></tr></table></li></ul></small>', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r - | x |\n  | --- |\n  | 1 |'],

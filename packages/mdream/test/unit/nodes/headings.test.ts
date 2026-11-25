@@ -257,6 +257,12 @@ describe.each(engines)('headings $name', (engineConfig) => {
     expect(markdown).toBe('[<h1>Heading 1</h1>](/test)\n\n- ## Heading 2')
   })
 
+  it.each(['const value = 1', '<code>const value = 1</code>'])('opens preformatted content on a new line for %s', async (code) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(`<h2>Example<pre>${code}</pre></h2>`, { engine }))
+      .toBe('## Example\n\n```\nconst value = 1\n```')
+  })
+
   // In a list item the heading's own `#` marker follows the item marker or the
   // continuation indent: it is no closing sequence to escape, and the next block
   // still opens its own line, as it does at the root.
@@ -407,7 +413,7 @@ describe.each(engines)('headings $name', (engineConfig) => {
     ['<ul><li><h1></h1><pre><div>x</div></pre></li></ul>', '- #\n\n  ```\n  x\n  ```'],
     ['<ul><li><h1></h1><pre> <p>x</p></pre></li></ul>', '- #\n\n  ```\n  x\n  ```'],
     ['<ul><li>p<pre><p>x</p></pre></li></ul>', '- p\n\n  ```\n  x\n  ```'],
-    ['<ul><li><a href="/w" title="W"><pre><p>x</p></pre></a></li></ul>', '- [\n\n  ```\n  x\n  ```\n\n  W](/w)'],
+    ['<ul><li><a href="/w" title="W"><pre><p>x</p></pre></a></li></ul>', '- [`x`](/w "W")'],
     ['<ul><li>a<pre><p>x</p><p>y</p></pre></li></ul>', '- a\n\n  ```\n  x\n\n  y\n  ```'],
   ])('keeps a block that opens a code block in a list item out of the code: %s', async (html, expected) => {
     const engine = await resolveEngine(engineConfig.engine)

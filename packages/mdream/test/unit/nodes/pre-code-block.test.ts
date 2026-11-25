@@ -20,6 +20,26 @@ async function collect(stream: AsyncIterable<string>): Promise<string> {
 
 // A bare <pre> (no <code> child) becomes a fenced code block (issue #97).
 describe.each(engines)('pre as fenced code block $name', (engineConfig) => {
+  it.each([
+    ['<span>Before<pre>line one\nline two</pre>After</span>', 'Before\n\n```\nline one\nline two\n```\n\nAfter'],
+    ['<span>Before<pre><code>line one\nline two</code></pre>After</span>', 'Before\n\n```\nline one\nline two\n```\n\nAfter'],
+    ['<a href="/guide">Before <pre>line one\nline two</pre> after</a>', '[Before `line one line two` after](/guide)'],
+    ['<a href="/guide">Before <pre><code>line one\nline two</code></pre> after</a>', '[Before `line one line two` after](/guide)'],
+    ['<a href="/guide">Before<pre>echo `ready`</pre>after</a>', '[Before`` echo `ready` ``after](/guide)'],
+    ['<a href="/guide"><pre>  line  </pre></a>', '[`   line   `](/guide)'],
+    ['<em>Before <pre>line one\nline two</pre> after</em>', '*Before `line one line two` after*'],
+  ])('keeps preformatted content in code for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    for (let split = 1; split < html.length; split++) {
+      const streamed = await collect(streamHtmlToMarkdown(
+        chunkedStream([html.slice(0, split), html.slice(split)]),
+        { engine },
+      ))
+      expect(streamed, `split at ${split}`).toBe(expected)
+    }
+  })
+
   it('fences a bare <pre>', async () => {
     const engine = await resolveEngine(engineConfig.engine)
     expect(htmlToMarkdown('<pre>const x = 1</pre>', { engine })).toBe('```\nconst x = 1\n```')

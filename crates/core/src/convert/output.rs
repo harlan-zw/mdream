@@ -11,6 +11,34 @@ fn starts_with_heading_prefix(value: &str) -> bool {
   hashes > 0 && hashes <= 6 && matches!(bytes.get(hashes), Some(b' ' | b'\t'))
 }
 
+/// Keep wrappers that separate code delimiters or keep HTML inline.
+pub(super) fn can_unwrap_link_label(value: &str) -> bool {
+  if value.ends_with('`') {
+    return false;
+  }
+  let mut value = value.trim_ascii_start();
+  loop {
+    if let Some(rest) = value.strip_prefix('>') {
+      value = rest.trim_ascii_start();
+      continue;
+    }
+    let bytes = value.as_bytes();
+    let digits = bytes
+      .iter()
+      .take(10)
+      .take_while(|byte| byte.is_ascii_digit())
+      .count();
+    let marker_len = match (digits, bytes.get(digits)) {
+      (0, Some(b'-' | b'+' | b'*')) | (1..=9, Some(b'.' | b')')) => digits + 1,
+      _ => return !value.starts_with(['<', '`']),
+    };
+    if !matches!(bytes.get(marker_len), Some(b' ' | b'\t')) {
+      return true;
+    }
+    value = value[marker_len..].trim_ascii_start();
+  }
+}
+
 /// Bytes rejected from a fenced-code info string.
 ///
 /// Two classes, for two different reasons:
@@ -47,7 +75,7 @@ fn get_language_from_data_attribute(value: Option<&str>) -> Option<&str> {
 const STREAMING_FLUSH_THRESHOLD: usize = 8 * 1024;
 
 const DESTINATION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 80, 0, 0, 0, 16, 0, 0, 0, 0];
-const TITLE_ESCAPES: [u8; 16] = [0, 0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0];
+const TITLE_ESCAPES: [u8; 16] = [0, 36, 0, 0, 4, 0, 0, 16, 0, 0, 0, 16, 0, 0, 0, 0];
 const IMAGE_DESCRIPTION_ESCAPES: [u8; 16] = [0, 0, 0, 0, 64, 4, 0, 16, 0, 0, 0, 184, 1, 0, 0, 64];
 
 /// Tags the simple element emitters handle, indexed by tag id.
@@ -162,6 +190,7 @@ static INLINE_MARKER_TYPE: [u8; 256] = {
   table[TAG_CITE as usize] = 4;
   table[TAG_KBD as usize] = 5;
   table[TAG_CODE as usize] = 5;
+  table[TAG_PRE as usize] = 5;
   table[TAG_SAMP as usize] = 5;
   table[TAG_VAR as usize] = 5;
   table[TAG_Q as usize] = 6;
@@ -361,12 +390,33 @@ fn write_markdown_resource(output: &mut String, destination: &str, title: Option
         write_markdown_destination(output, destination);
       }
       output.push_str(" \"");
-      write_ascii_escaped(output, title, TITLE_ESCAPE_BIT);
+      write_markdown_title(output, title);
       output.push('"');
     }
     _ => write_markdown_destination(output, destination),
   }
   output.push(')');
+}
+
+fn write_markdown_title(output: &mut String, title: &str) {
+  let mut copied = 0;
+  for (index, byte) in title.bytes().enumerate() {
+    if ESCAPE_CLASS[byte as usize] & TITLE_ESCAPE_BIT == 0 {
+      continue;
+    }
+    output.push_str(&title[copied..index]);
+    match byte {
+      b'\r' => output.push_str("&#13;"),
+      b'\n' => output.push_str("&#10;"),
+      b'<' => output.push_str("&lt;"),
+      _ => {
+        output.push('\\');
+        output.push(byte as char);
+      }
+    }
+    copied = index + 1;
+  }
+  output.push_str(&title[copied..]);
 }
 
 fn write_image_description(output: &mut String, alt: &str) {
@@ -826,13 +876,20 @@ impl ConvertState {
 
   #[cold]
   #[inline(never)]
-  fn finalize_code_span(&mut self, span: &CodeSpanState) -> Cow<'static, str> {
+  fn finalize_code_span(
+    &mut self,
+    span: &CodeSpanState,
+    preserves_edge_spaces: bool,
+  ) -> Cow<'static, str> {
     #[cfg(test)]
     {
       self.code_span_closed_bytes += self.buffer.len() - span.output_start;
     }
     // Settle source whitespace before choosing padding. Break output stays literal.
-    if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
+    if preserves_edge_spaces {
+      self.last_text_node_contains_whitespace = false;
+      self.has_last_text_node = false;
+    } else if self.last_text_node_contains_whitespace && self.depth_map[TAG_PRE as usize] == 0 {
       let end = self.buffer.len();
       let start = end
         .saturating_sub(self.last_content_cache_len)
@@ -885,14 +942,16 @@ impl ConvertState {
       let content_end = self.buffer.len();
       self.replace_code_span_content(span.content_start..content_end, &escaped);
     }
-    let max_run = Self::max_backtick_run(&self.buffer[span.content_start..]);
+    let content = &self.buffer[span.content_start..];
+    let max_run = Self::max_backtick_run(content);
+    let padded = content.starts_with('`')
+      || content.ends_with('`')
+      || (preserves_edge_spaces && content.starts_with(' ') && content.ends_with(' '));
     // Blockquote rewriting can move the original opener. Only skip its
     // replacement when the recorded delimiter still occupies this position.
-    if max_run == 0 && self.buffer.as_bytes()[span.content_start - 1] == b'`' {
+    if max_run == 0 && !padded && self.buffer.as_bytes()[span.content_start - 1] == b'`' {
       return Cow::Borrowed("`");
     }
-    let content = &self.buffer[span.content_start..];
-    let padded = content.starts_with('`') || content.ends_with('`');
     // One literal backtick needs a two-tick delimiter. When no prefix was
     // reserved with the opener, both delimiters can come from static strings.
     if max_run == 1 && span.content_start == span.output_start + 1 {
@@ -935,12 +994,7 @@ impl ConvertState {
     )
     .expect("code fence opener missing from output");
     if !self.fences_unreliable
-      && (self
-        .stack
-        .iter()
-        .position(|node| node.tag_id == Some(TAG_PRE))
-        .is_some_and(|index| self.stack[..index].iter().any(|node| node.is_inline))
-        || !self.opens_block_line(self.buffer.as_bytes(), output_start + marker_offset))
+      && !self.opens_block_line(self.buffer.as_bytes(), output_start + marker_offset)
     {
       self.fences_unreliable = true;
     }
@@ -1545,6 +1599,7 @@ impl ConvertState {
   #[inline(always)]
   fn fast_path_state_ok(&self) -> bool {
     !self.pre_fence_pending
+      && (self.depth_map[TAG_PRE as usize] == 0 || self.code_spans.is_empty())
       && self.caption_boundary == CaptionBoundary::None
       && self.caption_frames.is_empty()
       && self.fast_paths_enabled()
@@ -2552,6 +2607,9 @@ impl ConvertState {
       self.last_node_is_inline = self.stack[stack_len - 1].is_inline;
       return;
     }
+    if self.is_inline_pre_child(&self.stack[stack_len - 1], true) {
+      return;
+    }
 
     #[cfg(feature = "html")]
     if self.is_html() {
@@ -2582,6 +2640,8 @@ impl ConvertState {
       && self.pre_fence_owner_depth == 0
       && !self.pre_fence_pending
       && !self.in_table_cell()
+      && self.code_spans.is_empty()
+      && !self.pre_keeps_inline_delimiters()
     {
       let lang = Self::get_language_from_attributes(&self.stack[stack_len - 1]).to_string();
       self.pre_fence_pending = true;
@@ -2616,7 +2676,8 @@ impl ConvertState {
       } else {
         None
       };
-      is_inline = node.is_inline;
+      is_inline = node.is_inline
+        || (tag_id == Some(TAG_PRE) && !plain_text!(self) && self.pre_keeps_inline_delimiters());
       node_spacing = override_config.and_then(|ov| ov.spacing).or(node.spacing);
       caption_spacing = if tag_id == Some(TAG_FIGCAPTION) {
         override_config
@@ -2998,9 +3059,10 @@ impl ConvertState {
     // trailing whitespace stays unquoted: the next block still rewrites it.
     if !plain_text!(self)
       && !enter_is_literal
-      && inline_code_tag(tag_id)
+      && (inline_code_tag(tag_id) || tag_id == Some(TAG_PRE))
       && output.is_some()
       && ((self.depth_map[TAG_PRE as usize] == 0 && !self.in_raw_html_block())
+        || (tag_id == Some(TAG_PRE) && self.pre_keeps_inline_delimiters())
         || (tag_id == Some(TAG_CODE)
           && self.depth_map[TAG_PRE as usize] > 0
           && self.pre_fence_owner_depth == 0
@@ -3131,7 +3193,10 @@ impl ConvertState {
       });
     }
 
-    if !plain_text!(self) && !enter_is_literal && inline_code_tag(tag_id) {
+    if !plain_text!(self)
+      && !enter_is_literal
+      && (inline_code_tag(tag_id) || tag_id == Some(TAG_PRE))
+    {
       let depth = self.stack[stack_len - 1].depth;
       if self.raw_code_owner_depth.is_none()
         && self.buffer.len() > output_start
@@ -3140,7 +3205,9 @@ impl ConvertState {
       {
         self.raw_code_owner_depth = Some(depth);
       }
-      if self.depth_map[TAG_PRE as usize] == 0 {
+      if self.depth_map[TAG_PRE as usize] == 0
+        || (tag_id == Some(TAG_PRE) && self.pre_keeps_inline_delimiters())
+      {
         if !self.in_raw_html_block()
           && let Some(emitted) = output.as_deref()
         {
@@ -3246,7 +3313,9 @@ impl ConvertState {
     }
 
     let code_span_marker = self.code_span_marker_ok();
-    let marker_tag = tag_id.filter(|&id| !enter_is_literal && (id != TAG_CODE || code_span_marker));
+    let marker_tag = tag_id.filter(|&id| {
+      !enter_is_literal && (id != TAG_CODE || code_span_marker) && (id != TAG_PRE || is_inline)
+    });
     let keeps_markers = tag_id == Some(TAG_A) && self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0;
     // An overridden exit is no closer the next opener could take back.
     self.record_enter_marker(
@@ -3335,6 +3404,9 @@ impl ConvertState {
       if self.clean_flags() & CLEAN_EMPTY_LINK_TEXT != 0 && link_text.trim().is_empty() {
         self.drop_empty_link_text(bracket_pos, is_inline);
         return true;
+      }
+      if !can_unwrap_link_label(link_text) {
+        return false;
       }
 
       // selfLinkHeadings: ## [Title](#slug) → ## Title
@@ -3565,6 +3637,9 @@ impl ConvertState {
   /// Emit markdown for exiting an element (node already popped from stack).
   #[inline]
   pub(crate) fn emit_exit_element(&mut self, node: &ElementNode) {
+    if self.is_inline_pre_child(node, false) {
+      return;
+    }
     // A skipped <pre> can still own the fence opened by an eligible <code> child.
     if node.excluded_from_markdown
       || (node.enter_skipped
@@ -3649,7 +3724,12 @@ impl ConvertState {
       None
     };
 
-    let is_inline = node.is_inline;
+    let is_inline = node.is_inline
+      || (owns_pre_fence
+        && self
+          .code_spans
+          .last()
+          .is_some_and(|span| span.depth == node.depth));
     let enter_is_overridden = override_config.is_some_and(|ov| ov.enter.is_some());
     let raw_html_anchor = tag_id == Some(TAG_A)
       && self.in_raw_html_block()
@@ -3738,7 +3818,7 @@ impl ConvertState {
     // Pop at the exit of the inline code element that pushed: the enter ignores
     // exit overrides, so an exit-only override that skipped the pop leaked the
     // span, whose exhausted flag then capped the rest of the document.
-    let closing_code_span = if inline_code_tag(tag_id) {
+    let closing_code_span = if inline_code_tag(tag_id) || owns_pre_fence {
       self.code_spans.pop_if(|span| span.depth == node.depth)
     } else {
       None
@@ -3866,13 +3946,16 @@ impl ConvertState {
     } else {
       self.calculate_new_line_config(tag_id, node_spacing, false)
     };
-    let configured_new_lines = if consumes_caption_boundary || void_spacing_at_enter {
-      0
-    } else if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
-      new_line_config[1].min(1)
-    } else {
-      new_line_config[1]
-    };
+    let configured_new_lines =
+      if closes_own_pre_fence && !has_override && self.depth_map[TAG_LI as usize] == 0 {
+        new_line_config[1].max(2)
+      } else if consumes_caption_boundary || void_spacing_at_enter {
+        0
+      } else if tag_id == Some(TAG_HR) && !self.blockquotes.is_empty() {
+        new_line_config[1].min(1)
+      } else {
+        new_line_config[1]
+      };
     if tag_id == Some(TAG_A) {
       self.link.empty_text_pending = false;
     }
@@ -3948,7 +4031,11 @@ impl ConvertState {
 
     // Empty pair: only the enter marker was written, so drop it instead of emitting a close.
     let code_span_marker = self.code_span_marker_ok();
-    let marker_tag = tag_id.filter(|&id| !has_override && (id != TAG_CODE || code_span_marker));
+    let marker_tag = tag_id.filter(|&id| {
+      !has_override
+        && (id != TAG_CODE || code_span_marker)
+        && (id != TAG_PRE || closing_code_span.is_some())
+    });
     if self.drop_empty_marker_pair(marker_tag, output.as_deref(), is_inline) {
       return;
     }
@@ -3969,11 +4056,22 @@ impl ConvertState {
       // An explicit exit override replaces the default closing delimiter, but
       // the span state is still popped and discarded above.
       if !has_override {
-        if span.opener_emitted && span.exhausted && self.buffer.len() == span.content_start {
+        if span.opener_emitted
+          && ((span.exhausted && self.buffer.len() == span.content_start)
+            || (owns_pre_fence && self.buffer[span.content_start..].trim_ascii().is_empty()))
+        {
           self.truncate_buffer(span.output_start);
           output = None;
         } else if span.opener_emitted {
-          output = Some(self.finalize_code_span(&span));
+          if owns_pre_fence && self.link.open && self.link.bracket_emitted {
+            for ancestor in self.stack.iter_mut().rev() {
+              if ancestor.tag_id == Some(TAG_A) {
+                ancestor.child_text_node_index = ancestor.child_text_node_index.max(1);
+                break;
+              }
+            }
+          }
+          output = Some(self.finalize_code_span(&span, owns_pre_fence));
         } else {
           output = None;
         }
@@ -4142,7 +4240,8 @@ impl ConvertState {
         .unwrap_or(Cow::Borrowed(""));
       format!("{open}```{1}\n{0}", indent, self.pre_fence_lang)
     } else {
-      format!("```{}\n", self.pre_fence_lang)
+      let open = self.code_fence_line_prefix();
+      format!("{open}```{}\n", self.pre_fence_lang)
     };
     let output_start = self.buffer.len();
     self.last_content_cache_len = self.push_code_span_content(&fence, true);
@@ -4750,6 +4849,7 @@ impl ConvertState {
     let indented_storage;
     let text = if !plain_text!(self)
       && self.depth_map[TAG_PRE as usize] > 0
+      && self.code_spans.is_empty()
       && li_depth > 0
       && (text.contains('\n') || last_char == Some(b'\n'))
     {
@@ -5096,10 +5196,11 @@ impl ConvertState {
         || (byte == b']' && in_link)
         || (byte == b'|' && in_table)
         || (byte == b'>' && in_blockquote)
+        || (byte == b'&' && Self::can_extend_entity_reference(&bytes[index + 1..]))
         || (byte == b'<'
           && bytes
             .get(index + 1)
-            .is_some_and(|next| next.is_ascii_alphabetic() || matches!(next, b'!' | b'/' | b'?')));
+            .is_none_or(|next| next.is_ascii_alphabetic() || matches!(next, b'!' | b'/' | b'?')));
 
       if !should_escape && line_indent.is_some() {
         if byte == b'#' {
@@ -6032,6 +6133,21 @@ impl ConvertState {
       index += 1;
     }
     index > start && value.get(index) == Some(&b';')
+  }
+
+  /// A following text node can complete a reference when a wrapper emits nothing.
+  #[inline]
+  fn can_extend_entity_reference(tail: &[u8]) -> bool {
+    match tail {
+      [] => true,
+      [b'#', b'x' | b'X', digits @ ..] => {
+        digits.len() <= 6 && digits.iter().all(u8::is_ascii_hexdigit)
+      }
+      [b'#', digits @ ..] => digits.len() <= 7 && digits.iter().all(u8::is_ascii_digit),
+      [first, rest @ ..] => {
+        first.is_ascii_alphabetic() && rest.len() < 32 && rest.iter().all(u8::is_ascii_alphanumeric)
+      }
+    }
   }
 
   /// Current leading-space count when a GFM block marker may start here.
@@ -7206,13 +7322,92 @@ impl ConvertState {
     }
   }
 
+  fn heading_needs_raw_tags(&self, ancestors: &[ElementNode]) -> bool {
+    self.in_table_cell()
+      || (self.depth_map[TAG_A as usize] > 0
+        && (self.in_raw_html_block()
+          || ancestors.iter().any(|node| {
+            node.tag_id == Some(TAG_A)
+              && node.attributes.get_bit(ATTR_HREF).map_or_else(
+                || self.wrapper_emits_inline_markdown(node),
+                |href| {
+                  self.clean_flags() & CLEAN_EMPTY_LINKS == 0
+                    || !is_empty_link_href(href, !self.redirects_fragments())
+                },
+              )
+          })))
+  }
+
+  fn pre_keeps_inline_delimiters(&self) -> bool {
+    if self.in_raw_html_block() || self.in_table_cell() {
+      return false;
+    }
+    (self.link.open && self.link.bracket_emitted)
+      || self.stack.iter().rev().skip(1).any(|node| {
+        !node.excluded_from_markdown
+          && matches!(
+            node.tag_id,
+            Some(
+              TAG_STRONG
+                | TAG_B
+                | TAG_DFN
+                | TAG_EM
+                | TAG_I
+                | TAG_DEL
+                | TAG_S
+                | TAG_STRIKE
+                | TAG_CITE
+                | TAG_FIGCAPTION
+            )
+          )
+          && (node.tag_id == Some(TAG_FIGCAPTION) || self.wrapper_emits_inline_markdown(node))
+      })
+  }
+
+  fn is_inline_pre_child(&self, node: &ElementNode, enter: bool) -> bool {
+    if self.depth_map[TAG_PRE as usize] == 0
+      || node.tag_id == Some(TAG_BR)
+      || self
+        .code_spans
+        .last()
+        .is_none_or(|span| span.depth >= node.depth)
+    {
+      return false;
+    }
+    !self.has_tag_overrides()
+      || Self::override_for_node(
+        self
+          .options
+          .plugins
+          .as_ref()
+          .and_then(|plugins| plugins.tag_overrides.as_ref()),
+        self.override_idx.as_deref(),
+        node,
+      )
+      .is_none_or(|config| {
+        if enter {
+          config.enter.is_none()
+        } else {
+          config.exit.is_none()
+        }
+      })
+  }
+
+  fn code_fence_line_prefix(&self) -> &'static str {
+    if self.block_open_needs_break() {
+      "\n\n"
+    } else {
+      ""
+    }
+  }
+
   // Inlined on native for the same reason as `get_exit_output`.
   #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
   #[cfg_attr(target_arch = "wasm32", inline)]
   pub(crate) fn get_enter_output(
     &self,
     node: &ElementNode,
-    _ancestors: &[ElementNode],
+    ancestors: &[ElementNode],
   ) -> Option<Cow<'static, str>> {
     if plain_text!(self) {
       return self.get_text_enter_output(node);
@@ -7228,8 +7423,16 @@ impl ConvertState {
       // Inside a table cell a fenced code block would split the GFM row; emit
       // raw <pre> and let the content newlines become <br> (issue #147).
       TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("<pre>")),
+      TAG_PRE
+        if self.pre_keeps_inline_delimiters()
+          && self.pre_fence_owner_depth == 0
+          && !self.pre_fence_pending
+          && self.code_spans.is_empty() =>
+      {
+        Some(Cow::Borrowed(self.inline_code_opener(false)))
+      }
       TAG_BR => {
-        if !self.code_spans.is_empty() && self.depth_map[TAG_PRE as usize] == 0 {
+        if !self.code_spans.is_empty() {
           Some(Cow::Borrowed(" "))
         } else if self.in_table_cell() || self.in_heading() || self.in_raw_html_block() {
           Some(Cow::Borrowed("<br>"))
@@ -7248,7 +7451,7 @@ impl ConvertState {
       TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 => {
         let depth = (tag_id - TAG_H1) as usize;
         // A `#` prefix needs its own line, which a GFM row cannot give it.
-        if self.depth_map[TAG_A as usize] > 0 || self.in_table_cell() {
+        if self.heading_needs_raw_tags(ancestors) {
           {
             static H_OPEN: [&str; 6] = ["<h1>", "<h2>", "<h3>", "<h4>", "<h5>", "<h6>"];
             Some(Cow::Borrowed(H_OPEN[depth]))
@@ -7265,7 +7468,7 @@ impl ConvertState {
           )))
         } else if !self.list_indent.is_empty()
           && !self.heading_kept_inline_in_item(true)
-          && _ancestors
+          && ancestors
             .last()
             .is_some_and(|parent| parent.tag_id == Some(TAG_LI))
         {
@@ -7386,7 +7589,7 @@ impl ConvertState {
           }
           // A fence is already open for this <pre> — the <pre> opened it (mixed
           // text + <code> children) or an earlier <code> sibling did.
-          if self.pre_fence_owner_depth != 0 {
+          if self.pre_fence_owner_depth != 0 || !self.code_spans.is_empty() {
             return None;
           }
           let code_language = Self::get_language_from_attributes(node);
@@ -7410,10 +7613,12 @@ impl ConvertState {
             s.push('\n');
             s.push_str(indent);
             Some(Cow::Owned(s))
-          } else if lang.is_empty() {
+          } else if lang.is_empty() && self.code_fence_line_prefix().is_empty() {
             Some(Cow::Borrowed("```\n"))
           } else {
-            let mut s = String::with_capacity(4 + lang.len());
+            let open = self.code_fence_line_prefix();
+            let mut s = String::with_capacity(open.len() + 4 + lang.len());
+            s.push_str(open);
             s.push_str("```");
             s.push_str(lang);
             s.push('\n');
@@ -7454,7 +7659,7 @@ impl ConvertState {
         // the parent's accumulated list_indent — this LI's own marker
         // contribution is pushed onto list_indent AFTER this output
         // is written to the buffer.
-        let ordered = _ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
+        let ordered = ancestors.last().filter(|p| p.tag_id == Some(TAG_OL));
         // The innermost list's character; an item outside any list takes `-`.
         let marker = self.list_frames.last().map_or(0, |frame| frame.selected);
         if ordered.is_none() && self.list_indent.len() <= MAX_BORROWED_INDENT {
@@ -7619,7 +7824,7 @@ impl ConvertState {
       TAG_SUMMARY => Some(Cow::Borrowed("</summary>\n\n")),
       TAG_H1 | TAG_H2 | TAG_H3 | TAG_H4 | TAG_H5 | TAG_H6 => {
         let depth = (tag_id - TAG_H1 + 1) as usize;
-        if self.depth_map[TAG_A as usize] > 0 || self.in_table_cell() {
+        if self.heading_needs_raw_tags(&self.stack) {
           {
             static H_CLOSE: [&str; 6] = ["</h1>", "</h2>", "</h3>", "</h4>", "</h5>", "</h6>"];
             Some(Cow::Borrowed(H_CLOSE[depth - 1]))
@@ -7671,6 +7876,14 @@ impl ConvertState {
       }
       // Raw <pre> close inside a table cell (issue #147).
       TAG_PRE if self.in_table_cell() => Some(Cow::Borrowed("</pre>")),
+      TAG_PRE
+        if self
+          .code_spans
+          .last()
+          .is_some_and(|span| span.depth == node.depth) =>
+      {
+        Some(Cow::Borrowed(MARKDOWN_INLINE_CODE))
+      }
       // Only the `<pre>` owning the open fence emits the closer; a nested
       // `<pre>` cannot close its ancestor's fence.
       TAG_PRE => {

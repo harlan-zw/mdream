@@ -336,6 +336,44 @@ describe.each(engines)('links $name', (engineConfig) => {
   })
 
   it.each([
+    ['<h2><a href="/guide" title="First&#13;&#10;Second">Guide</a></h2>', '## [Guide](/guide "First&#13;&#10;Second")'],
+    ['<h2><img src="/cover" alt="Cover" title="First&#10;Second"></h2>', '## ![Cover](/cover "First&#10;Second")'],
+    ['<a href="/guide" title="Before &lt; after">Guide</a>', '[Guide](/guide "Before &lt; after")'],
+  ])('keeps resource titles on the heading line for %s', async (html, expected) => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown(html, { engine })).toBe(expected)
+    const source = new ReadableStream<string>({
+      start(controller) {
+        for (const character of html)
+          controller.enqueue(character)
+        controller.close()
+      },
+    })
+    let actual = ''
+    for await (const chunk of streamHtmlToMarkdown(source, { engine }))
+      actual += chunk
+    expect(actual.trim()).toBe(expected)
+  })
+
+  it('preserves a heading inside an anchor without a destination', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<a id="guide"><h2>Guide <code>npm</code></h2></a>', { engine }))
+      .toBe('## Guide `npm`')
+  })
+
+  it('preserves inline HTML in a link with an unresolved fragment', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<a href="#missing"><h2>Guide</h2></a>', { engine, clean: { fragments: true } }))
+      .toBe('[<h2>Guide</h2>](#missing)')
+  })
+
+  it('keeps code delimiters separate during fragment cleanup', async () => {
+    const engine = await resolveEngine(engineConfig.engine)
+    expect(htmlToMarkdown('<code>first</code><a href="#missing"><code>second</code></a>', { engine, clean: { fragments: true } }))
+      .toBe('`first`[`second`](#missing)')
+  })
+
+  it.each([
     [
       '<a href="/edit" title="Edit"><img src="/edit.svg" alt="Edit"></a>',
       '[![Edit](/edit.svg)](/edit "Edit")',

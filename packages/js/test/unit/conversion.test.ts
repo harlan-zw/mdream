@@ -460,7 +460,7 @@ describe('root conversion', () => {
     ['<p>alpha&amp;beta&#32;gamma</p>', 'alpha&beta gamma'],
     ['<p>alpha\t\n\r\f beta 🦊終</p>', 'alpha beta 🦊終'],
     ['<pre>alpha\t\n\r\f beta</pre>', '```\nalpha\t\n\r\f beta\n```'],
-    ['<p>alpha&lt;3 <strong>beta&amp;gamma</strong>end</p>', 'alpha<3 **beta&gamma**end'],
+    ['<p>alpha&lt;3 <strong>beta&amp;gamma</strong>end</p>', 'alpha<3 **beta\\&gamma**end'],
   ])('preserves text runs and entity boundaries for %s', (html, expected) => {
     expect(htmlToMarkdown(html)).toBe(expected)
   })
@@ -662,7 +662,7 @@ describe('writer ownership', () => {
     ['<address>A<h3>y</h3>B</address>', '<address>A ### y\n\nB</address>'],
     ['<h2>A<span><h1>y</h1></span>B</h2>', '## A # y\n\nB'],
     ['<ul><li><address>x<ol start="3"><li>a</li></ol></address></li></ul>', '- <address>x\n\n  3. a</address>'],
-    ['<a><h4>t</h4>x</a>', '<h4>t</h4>\n\nx'],
+    ['<a><h4>t</h4>x</a>', '#### t\n\nx'],
     ['<a href="/x"><h2>Title</h2></a><p>next</p>', '[<h2>Title</h2>](/x)\n\nnext'],
     ['<b><h4>t</h4></b>x', '**#### t**x'],
   ]

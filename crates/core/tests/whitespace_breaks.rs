@@ -1901,7 +1901,10 @@ fn redundant_link_title_ignores_a_standalone_separator() {
       "<a href=\"/x\" title=\"Q\"><div>x</div> ",
       "[x Q](/x \"Q\")",
     ),
-    ("<i><<a title=e href=/\"><p>U</p> ", "*< [U e](/\" \"e\")*"),
+    (
+      "<i><<a title=e href=/\"><p>U</p> ",
+      "*\\< [U e](/\" \"e\")*",
+    ),
     ("<a href=\"/x\" title=\"Q\">Q</a>", "[Q](/x)"),
     ("<a title=\"T\" href=\"/x\">T </a>", "[T](/x)"),
     // A drain between the separator and the text must not change the answer.
@@ -3308,7 +3311,7 @@ fn decoded_blank_after_a_leading_blank_survives_an_element_that_starts_no_line()
     ),
     (
       "<h2><span>Aa </span><i></i><pre>Bb</pre></h2>",
-      "## Aa```\nBb\n```",
+      "## Aa\n\n```\nBb\n```",
     ),
   ] {
     assert_eq!(md(html), expected, "{html}");

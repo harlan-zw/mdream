@@ -163,7 +163,7 @@ describe.each(engines)('figure $name', (engineConfig) => {
     expect(htmlToMarkdown('a <figcaption><br>x</figcaption>', { engine })).toBe('a  \n*x*')
     expect(htmlToMarkdown('a<figcaption><br></figcaption> b', { engine })).toBe('a  \nb')
     expect(htmlToMarkdown('<figcaption><pre>x</pre></figcaption>', { engine }))
-      .toBe('*```\nx\n```*')
+      .toBe('*`x`*')
     expect(htmlToMarkdown('<pre><figcaption><em></em></figcaption></pre>', { engine })).toBe('')
   })
 

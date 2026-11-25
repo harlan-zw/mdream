@@ -752,7 +752,7 @@ describe('streaming parity with the Rust core', () => {
 
   it('defers pre fences through captions and suppressed wrappers', async () => {
     for (const [html, expected] of [
-      ['<figcaption><pre>x</pre></figcaption>', '*```\nx\n```*'],
+      ['<figcaption><pre>x</pre></figcaption>', '*`x`*'],
       ['<pre><figcaption><em></em></figcaption></pre>', ''],
     ] as const) {
       expect(convertOnce(html)).toBe(expected)
@@ -1210,7 +1210,7 @@ describe('raw-text end tags cut between chunks', () => {
     for (const [html, expected] of [
       ['<p>a <textarea></texta', 'a \\</texta'],
       ['<p>a <textarea>x </texta', 'a x \\</texta'],
-      ['<p>a <textarea><', 'a <'],
+      ['<p>a <textarea><', 'a \\<'],
     ] as [string, string][]) {
       expect(convertOnce(html), html).toBe(expected)
       for (let split = 0; split <= html.length; split++)

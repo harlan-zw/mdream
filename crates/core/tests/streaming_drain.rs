@@ -439,7 +439,7 @@ fn figcaption_streaming_matches_one_shot() {
     ),
     ("a <figcaption><br>x</figcaption>", "a  \n*x*"),
     ("a<figcaption><br></figcaption> b", "a  \nb"),
-    ("<figcaption><pre>x</pre></figcaption>", "*```\nx\n```*"),
+    ("<figcaption><pre>x</pre></figcaption>", "*`x`*"),
     ("<pre><figcaption><em></em></figcaption></pre>", ""),
     (
       "<img alt=\"x\"><menu><li><figcaption><em></em></figcaption></li></menu>",
@@ -2321,7 +2321,7 @@ fn streaming_whitespace_before_a_block_break_in_code_stays() {
 }
 
 // In a code block the closing hashes are code and stay unescaped wherever a
-// chunk boundary lands. After a fence a parser may misread, the escape stays.
+// chunk boundary lands.
 #[test]
 fn streaming_heading_in_code_block_keeps_its_hashes() {
   for (html, expected) in [
@@ -2336,7 +2336,7 @@ fn streaming_heading_in_code_block_keeps_its_hashes() {
     ),
     (
       "<span><pre>x</pre>b</span><pre><h2>foo #</h2></pre>",
-      "```\nx\n``` b\n\n```\n\n## foo \\#\n\n\n```",
+      "```\nx\n```\n\nb\n\n```\n\n## foo #\n\n\n```",
     ),
   ] {
     for chunk in 1..=html.len() {
@@ -6033,7 +6033,7 @@ fn streaming_escapes_block_markers_after_a_decoded_bare_cr() {
     ),
     (
       "<b>a&#13;<ul><li><pre>x</pre></li></ul></b>",
-      "**a\r - ```\n  x\n  ```\n\n  **",
+      "**a\r - `x`**",
     ),
     (
       "<small>a&#13;<ul><li># heading</li></ul></small>",

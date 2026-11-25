@@ -293,7 +293,7 @@ fn an_exact_utf8_prefix_does_not_report_truncation() {
 
 #[test]
 fn a_literal_lt_respects_the_text_cap() {
-  for (html, expected) in [("<p>aaaa<3z</p>", "aaaa"), ("<p>aaa<3z</p>", "aaa<")] {
+  for (html, expected) in [("<p>aaaa<3z</p>", "aaaa"), ("<p>aaa<3z</p>", r"aaa\<")] {
     assert_capped_text(html, 4, expected, true);
   }
   assert_capped_text(
@@ -308,7 +308,12 @@ fn a_literal_lt_respects_the_text_cap() {
 
 #[test]
 fn a_rawtext_eof_residual_respects_the_text_cap() {
-  assert_capped_text("<textarea>aaaaaaaaaaaaaaa</x", 16, "aaaaaaaaaaaaaaa<", true);
+  assert_capped_text(
+    "<textarea>aaaaaaaaaaaaaaa</x",
+    16,
+    r"aaaaaaaaaaaaaaa\<",
+    true,
+  );
   // `<title>` text never reaches the output, but the cap still counts it.
   assert_capped_text("<title>aaaaaaaaaaaaaaa</x", 16, "", true);
 }
@@ -2804,10 +2809,8 @@ fn exhausted_quote_discards_nested_structure_and_later_span_content() {
     "- `aaaa `",
     true,
   );
-  assert_capped_inline_code(
-    "<ul><li>lead <code><blockquote><pre>q</pre></blockquote>tail</code></li></ul>",
-    16,
-    "- lead ` `",
-    true,
-  );
+  // The nested pre shares the existing code span.
+  let html = "<ul><li>lead <code><blockquote><pre>q</pre></blockquote>tail</code></li></ul>";
+  assert_capped_inline_code(html, 5, "- lead ` `", true);
+  assert_capped_inline_code(html, 16, "- lead `   > q    tail`", false);
 }
