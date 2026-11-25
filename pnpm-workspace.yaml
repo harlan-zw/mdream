@@ -62,7 +62,7 @@ catalog:
   '@napi-rs/wasm-runtime': 1.2.5
   '@nuxt/devtools': 4.0.0-beta.7
   '@nuxt/kit': ^4.6.4
-  '@nuxt/module-builder': ^1.0.4
+  '@nuxt/module-builder': 2.0.0-alpha.1
   '@nuxt/schema': ^4.6.4
   '@nuxt/test-utils': ^4.4.0
   '@tybys/wasm-util': ^0.10.5
@@ -101,6 +101,7 @@ catalog:
   sirv: ^3.0.2
   tinyglobby: ^0.2.17
   tldts: ^7.5.5
+  tsdown: ^0.23.7
   tslib: ^2.9.1
   # ESLint and Vue tooling need the v6 API. @typescript/native supplies tsc v7.
   typescript: npm:@typescript/typescript6@^6.0.2
